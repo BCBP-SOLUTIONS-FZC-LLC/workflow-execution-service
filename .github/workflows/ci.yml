@@ -1,0 +1,39 @@
+# CI for https://github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service
+#
+# Tier-0 shape, modeled on iam-user-profile's CI (no dedicated "generate" job —
+# buf/sqlc codegen runs as an inline step duplicated in each job that needs it,
+# same as iam duplicates its private-module-auth step). Docker image
+# build/lint/trivy scan, smoke tests, and GHCR push are deferred to Tier-1's
+# T1.12 — the Dockerfile is a placeholder with nothing real to smoke-test yet.
+#
+name: CI
+
+"on":
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**']
+  pull_request:
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  validate-quality:
+    name: Validate / Quality
+    uses: ./.github/workflows/validate-quality.yml
+    secrets: inherit
+
+  validate-test:
+    name: Validate / Test
+    uses: ./.github/workflows/validate-test.yml
+    secrets: inherit
