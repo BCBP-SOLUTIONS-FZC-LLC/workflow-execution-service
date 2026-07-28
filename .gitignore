@@ -30,3 +30,30 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Generated code — produced by `make generate` (buf + sqlc), never committed.
+/gen/
+/internal/adapter/outbound/postgres/db/
+/internal/core/port/mocks/
+
+vendor/
+
+/bin/
+/.tools/
+/.coverage/
+
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.AppleDouble
+
+# Claude Code project config: everything in .claude/ is ignored except the
+# committed markdown docs — and CLAUDE.local.md, which is deliberately local-only
+# (references to this developer's machine-specific paths) despite matching *.md.
+!.claude/
+.claude/*
+!.claude/*.md
+.claude/CLAUDE.local.md

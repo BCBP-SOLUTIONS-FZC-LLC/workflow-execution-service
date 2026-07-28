@@ -1,0 +1,56 @@
+version: "2"
+
+run:
+  go: '1.26'
+  concurrency: 1
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - exhaustive
+    - wrapcheck
+    - revive
+    - misspell
+    - unconvert
+    - unparam
+  settings:
+    revive:
+      rules:
+        - name: var-naming
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: if-return
+    wrapcheck:
+      ignore-package-globs:
+        - github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/*
+
+  exclusions:
+    paths:
+      - gen/
+      - platform-libs/
+      - internal/adapter/outbound/postgres/db/
+      - internal/core/port/mocks/
+      - test/integration/
+    rules:
+      - path: _test\.go
+        linters:
+          - wrapcheck
+          - unparam
+      - path: internal/
+        text: "exported: "
+        linters:
+          - revive
+
+formatters:
+  enable:
+    - goimports
+  exclusions:
+    paths:
+      - gen/
+      - platform-libs/
+      - internal/adapter/outbound/postgres/db/
+      - internal/core/port/mocks/

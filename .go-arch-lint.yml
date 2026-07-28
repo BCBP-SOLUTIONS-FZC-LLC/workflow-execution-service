@@ -1,0 +1,76 @@
+# go-arch-lint configuration — enforces Clean Architecture import direction.
+#   domain ← port ← service ← adapter (dependency arrows point inward)
+#   workflow is a peer of adapter, not a dependent — see the `workflow`
+#   component's deps below and its absence from `adapter`'s mayDependOn.
+#
+# Run: go-arch-lint check --project-path .
+version: 2
+workdir: .
+
+exclude:
+  - ".claude"
+  - "vendor"
+  - "test"
+
+allow:
+  # Only check inter-component project imports; vendor packages are unrestricted.
+  depOnAnyVendor: true
+
+components:
+  domain:
+    in: "internal/core/domain/**"
+  port:
+    in: "internal/core/port/**"
+  service:
+    in: "internal/core/service/**"
+  # The Temporal workflow function + Activities — a peer of adapter, wired to
+  # cmd/worker only via runtime registration (worker.RegisterWorkflow/RegisterActivity),
+  # never a Go import in either direction against adapter/outbound/temporal.
+  workflow:
+    in: "internal/workflow/**"
+  config:
+    in: "internal/config/**"
+  # postgres/db is sqlc-generated code; declared separately so adapter can import it
+  db:
+    in: "internal/adapter/outbound/postgres/db/**"
+  adapter:
+    in: "internal/adapter/**"
+  # proto-generated code used by both adapter and cmd
+  gen:
+    in: "gen/**"
+  db_migrations:
+    in: "db/**"
+  cmd:
+    in: "cmd/**"
+
+deps:
+  port:
+    # port/mocks sub-package imports the port package itself (self-reference)
+    mayDependOn:
+      - domain
+      - port
+  service:
+    mayDependOn:
+      - domain
+      - port
+  workflow:
+    mayDependOn:
+      - domain
+      - port
+  adapter:
+    mayDependOn:
+      - domain
+      - port
+      - service   # handlers reference service request/response types
+      - db        # sqlc-generated types
+      - gen       # proto-generated types (grpc server + definition client)
+  cmd:
+    mayDependOn:
+      - domain
+      - port
+      - service
+      - workflow  # cmd/worker registers the workflow function + Activities
+      - adapter
+      - config
+      - gen
+      - db_migrations

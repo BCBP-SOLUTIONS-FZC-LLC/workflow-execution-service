@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Local commit gates: tidy, formatting, lint, and Clean Architecture import rules.
+set -euo pipefail
+
+echo "[pre-commit] running tidy..."
+make tidy
+
+echo "[pre-commit] running fmt-check..."
+make fmt-check
+
+echo "[pre-commit] running lint..."
+make lint
+
+echo "[pre-commit] running arch-lint..."
+make arch-lint

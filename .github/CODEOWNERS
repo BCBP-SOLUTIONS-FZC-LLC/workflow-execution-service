@@ -1,0 +1,23 @@
+# Default: platform-engineers own the whole repo (same team as the sibling
+# definition_service, since execution_service is part of the same Workflow
+# Engine platform).
+* @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
+
+# Workflow and repo configuration changes require explicit sign-off.
+.github/workflows/ @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
+.github/dependabot.yml @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
+Makefile @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
+Dockerfile @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
+docker-compose.yml @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
+
+# Database migrations — irreversible in production once applied, and affect
+# both cmd/server and cmd/worker (they share the workflow_execution schema).
+db/migrations/ @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
+
+# Proto contracts — gRPC contract changes affect Definition Service, our only
+# current cross-service consumer.
+api/proto/ @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
+
+# The Temporal workflow function + Activities — the core execution logic,
+# a peer layer to adapter/ with its own arch-lint isolation rules.
+internal/workflow/ @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
