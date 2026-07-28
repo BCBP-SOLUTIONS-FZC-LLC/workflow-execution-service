@@ -84,7 +84,8 @@ tools:
 	@OS=$$(uname -s); ARCH=$$(uname -m); \
 	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then TRIVY_OS_ARCH="macOS-ARM64"; \
 	elif [ "$$OS" = "Darwin" ]; then TRIVY_OS_ARCH="macOS-64bit"; \
-	else TRIVY_OS_ARCH="Linux-$$ARCH"; fi; \
+	elif [ "$$ARCH" = "aarch64" ] || [ "$$ARCH" = "arm64" ]; then TRIVY_OS_ARCH="Linux-ARM64"; \
+	else TRIVY_OS_ARCH="Linux-64bit"; fi; \
 	curl -sLo /tmp/trivy.tar.gz \
 	  "https://github.com/aquasecurity/trivy/releases/download/v$(TRIVY_VERSION)/trivy_$(TRIVY_VERSION)_$$TRIVY_OS_ARCH.tar.gz" && \
 	tar -xzf /tmp/trivy.tar.gz -C $(TOOLS_DIR) trivy && rm /tmp/trivy.tar.gz

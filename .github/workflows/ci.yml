@@ -37,3 +37,48 @@ jobs:
     name: Validate / Test
     uses: ./.github/workflows/validate-test.yml
     secrets: inherit
+
+  # skipped (if: false)
+  # Kept in the DAG (rather than omitted) so the shape matches definition_service
+  # and can be filled in incrementally without restructuring the graph later.
+
+  build-image-cache:
+    name: Build image (cache)
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "skipped — Docker build lands in Tier-1's T1.12"
+
+  trivy-cve-scan:
+    name: Trivy CVE scan
+    if: false
+    needs: [build-image-cache]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "skipped — Docker build lands in Tier-1's T1.12"
+
+  smoke-tests:
+    name: Smoke tests
+    if: false
+    needs: [validate-test, build-image-cache]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "skipped — no real server/worker behavior to smoke-test yet"
+
+  push-image-ghcr:
+    name: Push image → GHCR
+    if: false
+    needs: [validate-test, validate-quality, trivy-cve-scan, smoke-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "skipped — image publish lands in Tier-1's T1.12"
+
+  pr-summary:
+    name: PR summary
+    if: always() && github.event_name == 'pull_request'
+    needs: [validate-quality, validate-test, build-image-cache, trivy-cve-scan, smoke-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - run: >
+          echo "Tier-0 status: validate-quality/validate-test are the real gates;
+          the rest are stubbed until Tier-1 T1.12."
