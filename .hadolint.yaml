@@ -1,0 +1,5 @@
+failure-threshold: error
+ignored:
+  - DL3008  # apt-get: pin package versions — not applicable (distroless base)
+  - DL3018  # apk: pin package versions — not applicable (distroless base)
+  - DL3059  # multiple RUN instructions — accepted for layer clarity in multi-stage builds

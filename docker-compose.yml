@@ -1,0 +1,98 @@
+# Host ports are deliberately offset from definition_service's docker-compose.yml
+# (which uses the canonical 5432/6379/4566/6432) so both stacks can run
+# simultaneously on one machine — required for any local cross-service testing
+# (e.g. execution_service calling DefinitionService.GetCompiledWorkflow, or
+# vice versa for CheckActiveInstances/PauseUserTasks). Container-internal ports
+# are unchanged; only the host-side mapping shifts, so DB_HOST/etc. below (which
+# resolve via the compose network, not localhost) are unaffected.
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: wf-execution-postgres
+    environment:
+      POSTGRES_USER: wfexec
+      POSTGRES_PASSWORD: wfexec
+      POSTGRES_DB: workflow_execution
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wfexec -d workflow_execution"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:8
+    container_name: wf-execution-valkey
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:3
+    container_name: wf-execution-localstack
+    ports:
+      - "4567:4566"
+    environment:
+      SERVICES: sns,sqs
+      DEFAULT_REGION: us-east-1
+      LOCALSTACK_HOST: localhost
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgbouncer:
+    image: edoburu/pgbouncer:1.17.0
+    container_name: wf-execution-pgbouncer
+    environment:
+      # Local dev values — single service only.
+      # Production: MAX_CLIENT_CONN >= sum(PG_MAX_CONNS * pod_count) across all services;
+      # DEFAULT_POOL_SIZE = total Postgres backend connections budget for this (user, db) pair.
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: workflow_execution
+      DB_USER: wfexec
+      DB_PASSWORD: wfexec
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "20"
+      DEFAULT_POOL_SIZE: "10"
+      MIN_POOL_SIZE: "1"
+      LISTEN_PORT: "6432"
+      AUTH_TYPE: trust
+    ports:
+      - "6433:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Temporal dev server: `temporal server start-dev` — single-container, in-memory
+  # persistence, the modern CLI replacement for the deprecated `temporalite` binary.
+  # gRPC frontend on :7233 (workflow client + worker connect here), Web UI on :8233.
+  # NOTE: the CLI (`temporal` binary) lives in the `temporalio/temporal` image,
+  # not `temporalio/server` (which only ships the `temporal-server` binary and
+  # has no start-dev mode) — verified locally after the former failed to start.
+  temporal:
+    image: temporalio/temporal:latest
+    container_name: wf-execution-temporal
+    # Entrypoint is already `temporal` — command supplies only the subcommand args.
+    command: ["server", "start-dev", "--ip", "0.0.0.0"]
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    healthcheck:
+      test: ["CMD", "temporal", "workflow", "list", "--address", "localhost:7233"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
