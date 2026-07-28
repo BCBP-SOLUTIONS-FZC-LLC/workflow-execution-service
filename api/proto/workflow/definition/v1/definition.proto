@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package workflow.definition.v1;
+
+option go_package = "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/gen/proto/workflow/definition/v1;definitionv1";
+
+service DefinitionService {
+  rpc GetCompiledWorkflow(GetCompiledWorkflowRequest) returns (GetCompiledWorkflowResponse);
+}
+
+message GetCompiledWorkflowRequest {
+  string tenant_id = 1;
+  string workflow_version_id = 2;
+}
+
+message GetCompiledWorkflowResponse {
+  string workflow_id = 1;
+  string version_id = 2;
+  int32  version_number = 3;
+  string status = 4;
+  bool   is_valid = 5;
+  string compiled_plan_json = 6;
+}

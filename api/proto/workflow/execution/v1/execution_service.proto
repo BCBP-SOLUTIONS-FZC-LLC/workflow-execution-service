@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package workflow.execution.v1;
+
+option go_package = "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/gen/proto/workflow/execution/v1;executionv1";
+
+service ExecutionService {
+  rpc CheckActiveInstances(CheckActiveInstancesRequest) returns (CheckActiveInstancesResponse);
+  rpc PauseUserTasks(PauseUserTasksRequest) returns (PauseUserTasksResponse);
+}
+
+message CheckActiveInstancesRequest {
+  string tenant_id   = 1;
+  string workflow_id = 2;
+}
+
+message CheckActiveInstancesResponse {
+  bool  has_active = 1;
+  int32 count      = 2;
+}
+
+message PauseUserTasksRequest {
+  string tenant_id = 1;
+  string user_id   = 2;
+}
+
+message PauseUserTasksResponse {}

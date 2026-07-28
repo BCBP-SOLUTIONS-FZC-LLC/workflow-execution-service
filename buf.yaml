@@ -1,0 +1,14 @@
+version: v2
+
+modules:
+  - path: api/proto
+
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX   # proto package names use v1 suffix — intentional
+
+breaking:
+  use:
+    - FILE
