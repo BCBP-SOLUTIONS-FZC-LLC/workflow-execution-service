@@ -1,0 +1,146 @@
+// Package workflow_test exercises internal/workflow's exported Execute
+// function end-to-end via testsuite.WorkflowTestSuite — the LLD §7.1 tier
+// for genuinely Temporal-shaped behavior (dispatch, boundary Selectors,
+// force-back, DEGRADED, SLA timers). Every Activity is mocked/faked here;
+// none of the real DB-writing Activity bodies exist yet (a separate sibling
+// task's job).
+package workflow_test
+
+import (
+	"context"
+
+	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/testsuite"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
+)
+
+// singleStageCollaboration is the smallest valid fixture: one pool, one
+// department, one prep/review/approve-shaped stage, dispatched Sequential.
+func singleStageCollaboration(stage dsl.StageDef) *dsl.CompiledCollaboration {
+	return &dsl.CompiledCollaboration{
+		MainPlan: "main",
+		Plans: []*dsl.CompiledPlan{
+			{
+				Name: "main",
+				Departments: []dsl.DepartmentDef{
+					{ID: "sales", Stages: []dsl.StageDef{stage}},
+				},
+				Execution: dsl.ExecutionPlan{
+					Steps: []dsl.ExecutionStep{
+						{Sequential: []string{"sales"}},
+					},
+				},
+			},
+		},
+	}
+}
+
+// activityHooks lets individual tests observe or override specific fake
+// activity bodies without every test needing to know every activity's
+// signature. Nil fields fall back to a harmless default.
+type activityHooks struct {
+	createTask       func(port.CreateTaskInput) (port.CreateTaskOutput, error)
+	recordSLAWarn    func(port.RecordSLAWarningInput)
+	recordSLABreach  func(port.RecordSLABreachInput)
+	recordForceRoute func(port.RecordForceRouteInput)
+}
+
+// registerFakeActivities registers minimal, real (not testify-mocked)
+// activity function bodies under every port.ActivityXxx name this package
+// calls, so testsuite.WorkflowTestSuite can dispatch workflow.ExecuteActivity
+// calls without any real persistence layer existing yet. hooks may be nil.
+func registerFakeActivities(env *testsuite.TestWorkflowEnvironment, collab *dsl.CompiledCollaboration, hooks *activityHooks) {
+	if hooks == nil {
+		hooks = &activityHooks{}
+	}
+	createTaskFn := hooks.createTask
+	if createTaskFn == nil {
+		createTaskFn = func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		}
+	}
+
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.GetCompiledPlanInput) (port.GetCompiledPlanOutput, error) {
+			return port.GetCompiledPlanOutput{Collaboration: *collab}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityGetCompiledPlan},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			return createTaskFn(in)
+		},
+		activity.RegisterOptions{Name: port.ActivityCreateTask},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.UpdateInstanceNodesInput) error { return nil },
+		activity.RegisterOptions{Name: port.ActivityUpdateInstanceNodes},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
+			return port.CompleteAssignmentOutput{AllDone: true}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.UpdateInstanceStatusInput) error { return nil },
+		activity.RegisterOptions{Name: port.ActivityUpdateInstanceStatus},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.RecordForceRouteInput) error {
+			if hooks.recordForceRoute != nil {
+				hooks.recordForceRoute(in)
+			}
+			return nil
+		},
+		activity.RegisterOptions{Name: port.ActivityRecordForceRoute},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.RecordSLAWarningInput) error {
+			if hooks.recordSLAWarn != nil {
+				hooks.recordSLAWarn(in)
+			}
+			return nil
+		},
+		activity.RegisterOptions{Name: port.ActivityRecordSLAWarning},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.RecordSLABreachInput) error {
+			if hooks.recordSLABreach != nil {
+				hooks.recordSLABreach(in)
+			}
+			return nil
+		},
+		activity.RegisterOptions{Name: port.ActivityRecordSLABreach},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.DeferTaskInput) (port.DeferTaskOutput, error) {
+			return port.DeferTaskOutput{}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityDeferTask},
+	)
+}
+
+// stageTransitionWire mirrors internal/workflow's unexported
+// stageTransitionSignal payload shape by field name — JSON matching is by
+// name, so this package doesn't need access to the unexported type to send
+// a signal the workflow correctly decodes.
+type stageTransitionWire struct {
+	DeptID        string
+	ToStage       string
+	NodeID        string
+	UserID        string
+	ResultJSON    string
+	RecordVersion int64
+}
+
+// adminSignalWire mirrors internal/workflow's unexported adminSignal payload.
+type adminSignalWire struct {
+	AdminUserID   string
+	Reason        string
+	TargetDeptID  string
+	TargetNodeKey string
+	RecordVersion int64
+}
