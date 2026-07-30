@@ -75,6 +75,25 @@ jobs:
             exit 1
           fi
 
+      # Warn-and-require-acknowledgment, not a static analyzer: a PR that
+      # changes internal/workflow's interpreter semantics without touching
+      # version.go must say so explicitly. See test/workflow/replay/README.md.
+      - name: Interpreter semantics changeID check
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          CHANGED=$(git diff --name-only "$BASE"...HEAD -- internal/workflow \
+            | grep -v '_test\.go$' | grep -v '/version\.go$' || true)
+          TOUCHED_VERSION=$(git diff --name-only "$BASE"...HEAD -- internal/workflow/version.go)
+          if [ -n "$CHANGED" ] && [ -z "$TOUCHED_VERSION" ]; then
+            if ! grep -qi 'no semantic change' <<<"$PR_BODY"; then
+              echo "::error title=Missing changeID::internal/workflow/*.go changed without touching version.go. If this changes interpretation of already-recorded DSL data, add a new changeID (see test/workflow/replay/README.md). Otherwise state \"no semantic change\" in the PR description."
+              exit 1
+            fi
+          fi
+
       - name: Vet
         run: go vet ./cmd/... ./internal/...
 
