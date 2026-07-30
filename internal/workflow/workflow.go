@@ -15,6 +15,16 @@
 // naturally. That's a cmd/worker/deploy-layer concern (sibling tasks); this
 // package only needs to stay deterministic and GetVersion-guarded
 // (version.go).
+//
+// Not implemented here, but only addable from inside this package: the four
+// custom Search Attributes (TenantId, InstanceStatus, WorkflowVersionId,
+// BusinessKey — LLD §3.6), set via workflow.UpsertSearchAttributes on
+// workflow start and on every status transition. That's a separate sibling
+// task's (Observability) scope, not this one's, but workflow.UpsertSearchAttributes
+// can only be called from inside the workflow function itself — that task
+// will need to add call sites here (Execute's start, its terminal status
+// update, and enterDegraded's DEGRADED/RUNNING transitions in degraded.go),
+// not just in its own files.
 package workflow
 
 import (
@@ -48,6 +58,10 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 		_ = updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
 			InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusFailed,
 		})
+		return ExecuteOutput{Status: domain.InstanceStatusFailed}, err
+	}
+
+	if err := in.registerStatusQuery(ctx); err != nil {
 		return ExecuteOutput{Status: domain.InstanceStatusFailed}, err
 	}
 
