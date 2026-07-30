@@ -3,10 +3,11 @@
 The Temporal-backed execution control plane for the BPMN Workflow Engine platform. Starts, tracks, and drives workflow instances to completion; dispatches tasks to human assignees and other services. Execution-time counterpart to `definition_service` (design-time authoring/compilation of workflow templates).
 
 Two independently deployed binaries, one Go module:
+
 - `cmd/server` — HTTP API (`:8080`) + gRPC (`:9090`) + the outbox relay + the Temporal client (`StartWorkflow`/`SignalWorkflow`/`QueryWorkflow`).
 - `cmd/worker` — the Temporal Worker process: polls task queues, hosts the workflow function and Activities. Minimal `:8081` health/metrics surface, no business HTTP/gRPC surface of its own.
 
-Status: Tier-0 (bootstrapped skeleton — build/lint/test tooling, DB schema, proto contracts). No business logic yet.
+Status: Tier-0 (bootstrap: build/lint/test tooling, DB schema, proto contracts) is done. Tier-1 is landing in parallel branches; `internal/workflow` (the Temporal workflow-function interpreter) is the first piece in.
 
 ## Private Module Access
 
@@ -71,7 +72,7 @@ Temporal's Web UI is available at <http://localhost:8233> once `make docker-up` 
 
 Clean Architecture, dependency direction `domain ← port ← service ← adapter`, plus a new peer layer `internal/workflow` for the Temporal workflow function and Activities (never imported by `adapter/`, never imports it back — the two connect only via runtime registration in `cmd/worker/main.go`). See `.go-arch-lint.yml` for the enforced import graph.
 
-```
+```sh
 cmd/server/, cmd/worker/       — composition roots (two independently deployed binaries)
 internal/core/{domain,port,service}/
 internal/workflow/             — Temporal workflow function + Activities
@@ -84,4 +85,19 @@ test/{fixtures,unit,integration,e2e,workflow}/
 
 ## Common commands
 
-Run `make help` for the full target list. Most used: `make tools`, `make setup`, `make docker-up`, `make migrate`, `make generate`, `make build`, `make test`, `make test-integration`, `make check`.
+Run `make help` for the full target list.
+
+| Command | What it does |
+| --- | --- |
+| `make tools` | Install pinned dev tooling (sqlc, buf, mockgen, golangci-lint, go-arch-lint) |
+| `make setup` | Copy `.env.example` → `.env`, install the pre-commit hook |
+| `make docker-up` / `make docker-down` | Start/stop local infra (Postgres, Valkey, LocalStack, PgBouncer, Temporal dev server) |
+| `make migrate` | Apply schema migrations (outbox + domain) |
+| `make generate` | Regenerate proto (buf) + sqlc code |
+| `make build` | Compile `cmd/server` and `cmd/worker` |
+| `make test` | Unit tests — `internal/...`, `test/unit/...`, `test/workflow/...` — race detector, coverage |
+| `make test-integration` | Integration tests (testcontainers, real Postgres) |
+| `make test-ci` | Unit + integration, merged coverage — what CI runs |
+| `make lint` / `make fix` | golangci-lint (read-only / with `--fix`) |
+| `make arch-lint` | Enforce Clean Architecture import direction (`.go-arch-lint.yml`) |
+| `make check` | Full local CI: gofmt + lint + vet + arch-lint + test + coverage gate |
