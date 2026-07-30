@@ -17,6 +17,7 @@ Run `make help` for all available targets, or see [README.md](../README.md) for 
 ## Coding Conventions
 
 - Prefer self-documenting code (clear naming, small functions, obvious control flow) over comments. Add a comment only when the WHY is genuinely non-obvious from reading the code — a hidden constraint, a deliberate scope limit, a workaround. Don't restate what the next line already says.
+- When a comment needs to cite rationale that's written down elsewhere, reference the design doc by name and section (e.g. "execution LLD §2.5") rather than restating it — design docs may only exist as shareable documents outside this repo, so name them, don't path them.
 - keep functions and files small, readable and as little complex as makes sense.
 - At the end of a task, update README.md and this file if the change affects what they document — a new package, a new Makefile target, a changed convention. Don't leave docs describing a state that no longer exists.
 

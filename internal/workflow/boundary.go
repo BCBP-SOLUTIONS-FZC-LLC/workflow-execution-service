@@ -25,11 +25,11 @@ type boundaryFire struct {
 // fires first, any pending timer is cancelled").
 func addTimerCase(ctx wf.Context, sel wf.Selector, duration string, interrupting bool, targetDept string, onFire func(boundaryFire)) (cancel func()) {
 	if duration == "" {
-		return func() {}
+		return func() { /* no boundary was registered, nothing to cancel */ }
 	}
 	dur, err := time.ParseDuration(duration)
 	if err != nil {
-		return func() {}
+		return func() { /* no boundary was registered, nothing to cancel */ }
 	}
 	timerCtx, cancelTimer := wf.WithCancel(ctx)
 	future := wf.NewTimer(timerCtx, dur)

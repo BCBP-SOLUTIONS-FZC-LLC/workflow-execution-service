@@ -22,16 +22,9 @@ const (
 	SignalInstanceForceBack = "instance-force-back"
 )
 
-// signalPreconditions is LLD §3.1's signal table, reduced to the
-// instance-status precondition each signal requires. This is deliberately
-// the ONLY gate a signal passes through before it may reach any Selector —
-// an instance-pause signal delivered while DEGRADED is rejected here, before
-// the DEGRADED park loop's Selector (which registers no case for it at all)
-// ever sees it (LLD §7.2 test #5).
-// SignalStageTransition/SignalStageDefer allow DEGRADED too: DEGRADED parks
-// only the failed branches (LLD §3.3) — a respawned branch's own task, or
-// any branch that never failed, still resolves via ordinary stage-transition
-// signals during that window.
+// signalPreconditions is the instance-status precondition each signal
+// requires, and the ONLY gate a signal passes through before reaching any
+// Selector (execution LLD §3.1, §7.2 test #5).
 var signalPreconditions = map[string][]domain.InstanceStatus{
 	SignalStageTransition:   {domain.InstanceStatusRunning, domain.InstanceStatusDegraded},
 	SignalStageDefer:        {domain.InstanceStatusRunning, domain.InstanceStatusDegraded},
@@ -80,14 +73,10 @@ type stageDeferSignal struct {
 // adminSignal is the shared payload shape for every instance-level admin
 // signal (pause/resume/cancel/force-forward/force-back).
 //
-// TargetDeptID is not part of the LLD's literal §3.1 payload table — it is
-// added here to disambiguate which failed branch a force-forward/force-back
-// applies to when DEGRADED has more than one failed branch at once. The LLD
-// excerpt available to this task doesn't specify how that disambiguation is
-// carried on the wire (point 8 only says "each signal addresses exactly one
-// failed branch"), so this is a documented, smallest-reasonable-assumption
-// extension pending confirmation from whichever task owns the real signal
-// payload contract.
+// TargetDeptID isn't in the LLD's literal §3.1 payload table — added to
+// disambiguate which failed branch a signal applies to when DEGRADED has
+// more than one; a documented, smallest-reasonable assumption pending
+// confirmation from whichever task owns the real signal payload contract.
 type adminSignal struct {
 	AdminUserID   string
 	Reason        string
@@ -97,13 +86,8 @@ type adminSignal struct {
 }
 
 // runSignalRouter is the always-on background goroutine (started once, in
-// Execute) draining every raw signal channel for this instance: it validates
-// each against validateSignal before anything else can react to it — a
-// signal invalid for the current status is logged and dropped here, never
-// reaching a downstream Selector (LLD §7.2 test #5) — then dispatches valid
-// ones. stage-transition forwards to whichever runTaskStage call is waiting
-// on the addressed node; admin signals route to admin or baseAdmin per
-// in.parallelDepth (see its doc comment in types.go).
+// Execute) draining every raw signal channel for this instance, validating
+// each before anything else can react to it (execution LLD §7.2 test #5).
 func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Channel) {
 	logger := wf.GetLogger(ctx)
 	sel := wf.NewSelector(ctx)
@@ -142,12 +126,9 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 		fromNode := domain.NodeKey(sig.DeptID + "/" + sig.FromStage)
 		popped := in.history.PopTo(fromNode)
 		in.msgBuf.ResetSpan(popped)
-		// Simplification: DeferTaskInput's TaskID/AssignmentID are not
-		// carried on this signal's payload (LLD §3.1 doesn't specify them
-		// here either) — this interpreter uses the from-node key as a
-		// stand-in identifier, same simplification runTaskStage makes for
-		// CompleteAssignmentActivity. Reconcile with the real convention
-		// once the persistence-layer sibling task defines it.
+		// Simplification: uses the from-node key as a stand-in Task/AssignmentID
+		// (same as runTaskStage's CompleteAssignmentActivity call) until the
+		// persistence-layer sibling task defines the real convention.
 		_, _ = deferTask(ctx, port.DeferTaskInput{
 			TaskID: string(fromNode), TenantID: in.tenantID, UserID: sig.UserID,
 			AssignmentID: string(fromNode), Reason: sig.Reason, RecordVersion: sig.RecordVersion,

@@ -46,43 +46,31 @@ type interpreter struct {
 	history *nodeHistory
 	msgBuf  *messageBuffer
 
-	// Instance-wide shared state rather than per-branch scoped — the DSL
-	// doesn't specify per-branch variable scoping (LLD §2.4, same philosophy
-	// as messageBuffer). contextJSON feeds CreateTaskActivity; lastResultJSON
-	// is the just-completed stage's result, read by the exclusive-gateway
-	// evaluator.
+	// Instance-wide, not per-branch scoped (LLD §2.4).
 	contextJSON    string
 	lastResultJSON string
 
-	// pending: node key -> the channel a runTaskStage call is blocked on,
-	// so signals.go's router can forward a stage-transition signal to it.
+	// pending: node key -> the channel a runTaskStage call is blocked on.
 	pending map[domain.NodeKey]wf.Channel
 
 	// pendingSignals buffers a stage-transition signal that arrives before
-	// its runTaskStage call has registered in pending, so it isn't silently
-	// dropped — same "buffer if no receiver yet" shape as messageBuffer.
+	// its runTaskStage call has registered in pending.
 	pendingSignals map[domain.NodeKey]stageTransitionSignal
 
-	// pauseGates: department -> one-shot resume channel while that
-	// department's branch is paused (not cancelled) during a force-back
-	// that arrived while a parallel gateway was active (LLD §2.7).
+	// pauseGates: department -> one-shot resume channel for a branch paused
+	// by an active-parallel-gateway force-back (LLD §2.7).
 	pauseGates map[string]wf.Channel
 
 	status domain.InstanceStatus
 
-	// parallelDepth >0 while a Parallel gateway is aggregating. signals.go
-	// uses it to route each cancel/force-forward/force-back signal to
-	// exactly one of admin (runParallel/enterDegraded) or baseAdmin
-	// (runTopLevel) — never both, which would race for delivery.
+	// parallelDepth >0 while a Parallel gateway is aggregating; routes each
+	// admin signal to admin (runParallel/enterDegraded) or baseAdmin
+	// (runTopLevel), never both.
 	//
-	// Known gap: this is a flat counter, not a per-nesting-level lock. If a
-	// ParallelBranch's own steps (or a SubWorkflow/CallPool inlined beneath
-	// one) contain ANOTHER Parallel gateway, both levels' runParallel/
-	// enterDegraded loops register concurrent Selector cases on the same
-	// admin channel while both are active, and a single signal is delivered
-	// to only one of them — not necessarily the level it was addressed to.
-	// Nested Parallel gateways are not exercised by any fixture today; this
-	// would need per-nesting-level channel scoping to close properly.
+	// Known gap: a flat counter, not per-nesting-level — a Parallel gateway
+	// nested inside another's branch delivers a signal to only one level,
+	// not necessarily the addressed one. Not exercised by any fixture today
+	// (execution LLD §2.5).
 	parallelDepth int
 }
 
@@ -101,14 +89,8 @@ func newInterpreter(tenantID, instanceID, initialContextJSON string, collab *dsl
 	}
 }
 
-// checkPaused blocks if deptID is currently paused by an in-flight
-// force-back (LLD §2.7 point 2's "checked between steps" mechanism) —
-// checked only at stage boundaries, between one stage finishing and the
-// next starting, rather than via cancellation, so a paused branch's
-// goroutine state stays valid for a later resume. This means pausing has no
-// effect on a branch already inside a stage's own wait (the common case —
-// most of a stage's lifetime) until that stage resolves naturally; it only
-// stops the branch from *starting its next* stage.
+// checkPaused blocks if deptID is paused by an in-flight force-back,
+// checked only between stages, never via cancellation (LLD §2.7 point 2).
 func (in *interpreter) checkPaused(ctx wf.Context, deptID string) {
 	if ch, ok := in.pauseGates[deptID]; ok {
 		ch.Receive(ctx, nil)

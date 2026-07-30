@@ -11,10 +11,8 @@ import (
 )
 
 // runSteps is the recursive interpreter over a compiled ExecutionPlan's step
-// list (LLD §2.5). Steps are dispatched in array order; each ExecutionStep
-// carries exactly one populated variant field (Sequential, Parallel,
-// Exclusive, SubWorkflow, CallPool), and runSteps dispatches purely on which
-// one is set.
+// list (execution LLD §2.5): dispatched in array order, purely on which
+// ExecutionStep variant field is populated.
 func (in *interpreter) runSteps(ctx wf.Context, plan *dsl.CompiledPlan, steps []dsl.ExecutionStep, admin wf.Channel) (stepOutcome, error) {
 	var last domain.NodeKey
 	for i := range steps {
@@ -104,11 +102,9 @@ func (in *interpreter) runDepartmentFrom(ctx wf.Context, plan *dsl.CompiledPlan,
 		in.checkPaused(ctx, deptID)
 		node, err := in.runStage(ctx, plan, deptID, &dept.Stages[i])
 		if err != nil {
-			// last stays whatever it was before this stage — the stage that
-			// errored never actually completed, so it must not be reported
-			// as the resume point (stageIndexAfter resumes AFTER whatever
-			// key is returned here; reporting the failed stage itself would
-			// skip retrying it entirely on respawn).
+			// last stays the prior stage — stageIndexAfter resumes AFTER
+			// whatever key is returned here; reporting the failed stage
+			// itself would skip retrying it on respawn.
 			return last, err
 		}
 		last = node
@@ -170,12 +166,9 @@ func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, bran
 		return stepOutcome{Terminated: true}, nil
 	}
 
-	// Structurally the same transfer mechanism whether this is a forward
-	// Target or a condition-triggered RevertTo — LLD §2.6 point 4. A revert
-	// additionally pops history back to the target and resets the message
-	// buffer's unconsumed span, matching admin-driven force-back's
-	// semantics (LLD §2.7) even though this one is condition-, not
-	// signal-, triggered.
+	// Forward Target and condition-triggered RevertTo share the same
+	// transfer mechanism (execution LLD §2.6 point 4); a revert additionally
+	// pops history and resets the message buffer, matching force-back (§2.7).
 	deptID := winner.Target
 	if winner.RevertToDept != "" {
 		deptID = winner.RevertToDept

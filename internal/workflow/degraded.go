@@ -8,11 +8,9 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// failedBranch is a Parallel branch whose activity exhausted retries
-// non-retryably. Distinct from a paused sibling (history.go's doc comment):
-// a failed branch's goroutine has already returned an error and cannot be
-// resumed — only respawned as a brand-new goroutine (LLD Appendix A.2
-// #8/#9/#11).
+// failedBranch is a Parallel branch whose goroutine already returned a
+// non-retryable error — only respawnable, never resumed (execution LLD
+// Appendix A.2 #8/#9/#11).
 type failedBranch struct {
 	DeptID            string
 	LastCompletedNode domain.NodeKey
@@ -26,13 +24,10 @@ type completedBranch struct {
 	LastNode domain.NodeKey
 }
 
-// runParallel dispatches ParallelBranch entries (LLD §2.5 point 2.ii): spawns
-// one workflow.Go per branch and waits for every branch to settle.
-// force-back arriving while branches are still active (none failed yet)
-// pauses the siblings in place, regresses to the pre-fork entry inline, and
-// resumes them once that regression completes (LLD §2.7's active-parallel-
-// gateway extension). Only once at least one branch actually fails does the
-// instance transition to DEGRADED and park for admin resolution (LLD §3.3).
+// runParallel dispatches ParallelBranch entries, one workflow.Go per branch
+// (execution LLD §2.5 point 2.ii). A force-back while all branches are still
+// active pauses and regresses in place (§2.7); DEGRADED (§3.3) only once a
+// branch actually fails.
 func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branches []dsl.ParallelBranch, admin wf.Channel) (stepOutcome, error) {
 	preFork := in.history.PreForkEntry()
 
@@ -80,17 +75,11 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 			return stepOutcome{Terminated: true}, nil
 
 		case SignalInstanceForceFwd:
-			// Known gap, deliberately not silently dropped: force-forward
-			// while a Parallel gateway is active with no failed branch yet
-			// would need to abandon every still-running branch and redirect
-			// past the whole gateway — that requires propagating a
-			// redirect target back through every nesting level (SubWorkflow/
-			// CallPool/Parallel) up to runTopLevel, which stepOutcome
-			// doesn't carry today. validateSignal still allows this signal
-			// here (RUNNING permits it), so log and drop rather than fail
-			// the instance; a targeted force-back or waiting for a branch
-			// to fail into DEGRADED (where force-forward IS implemented)
-			// are the current workarounds.
+			// Known gap: not implemented for an active Parallel gateway with
+			// no failed branch yet — would need a redirect target threaded
+			// back through every nesting level, which stepOutcome doesn't
+			// carry today. Log and drop rather than fail the instance;
+			// force-back or waiting for DEGRADED are the workarounds.
 			wf.GetLogger(ctx).Warn("instance-force-forward while a Parallel gateway is active with no failed branch is not implemented; dropping",
 				"target_node_key", string(envelope.Signal.TargetNodeKey))
 
@@ -100,10 +89,8 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 			}
 			popped := in.history.PopTo(preFork)
 			in.msgBuf.ResetSpan(popped)
-			// preFork is empty when this Parallel step is itself the first
-			// thing the plan ever ran — there is no earlier department to
-			// regress to, so treat force-back as a no-op rather than
-			// looking up a nonexistent "" department.
+			// preFork empty means this Parallel step ran first; no-op rather
+			// than looking up a nonexistent "" department.
 			var err error
 			if preFork != "" {
 				_, err = in.runDepartment(ctx, plan, deptFromNodeKey(preFork))
@@ -123,14 +110,10 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 	return in.enterDegraded(ctx, plan, preFork, completed, failed, admin)
 }
 
-// enterDegraded implements LLD §3.3's 9-step DEGRADED park/resume/respawn
-// procedure. It parks the workflow function on a Selector with exactly 3
-// admin-signal cases (instance-force-forward, instance-force-back,
-// instance-cancel) until every failed branch resolves — respawning on
-// force-back (a brand-new workflow.Go goroutine, fresh SLA timers, fresh
-// message-buffer reset — never a resume), superseding on force-forward, or
-// exiting the whole instance on cancel regardless of unresolved branches.
-// There is no cap on repeated respawn-then-DEGRADED-again cycles.
+// enterDegraded implements the DEGRADED park/resume/respawn procedure
+// (execution LLD §3.3): parks on a Selector with 3 admin-signal cases until
+// every failed branch resolves, respawning on force-back, superseding on
+// force-forward, or exiting on cancel. No cap on repeated respawn cycles.
 func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, preFork domain.NodeKey, completed []completedBranch, failed []failedBranch, admin wf.Channel) (stepOutcome, error) {
 	in.status = domain.InstanceStatusDegraded
 	if err := updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{

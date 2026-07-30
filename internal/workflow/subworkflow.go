@@ -7,11 +7,9 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// runSubWorkflow interprets a subProcess: sw.Plan.Steps run inline,
-// recursively, inside the SAME Temporal workflow execution — never a child
-// workflow (LLD §2.3) — racing the recursive call's own completion against
-// the subprocess's boundary events (LLD §2.2's 5-step algorithm), active
-// only while the recursion is in flight.
+// runSubWorkflow interprets a subProcess inline, recursively, in the same
+// Temporal execution — never a child workflow (execution LLD §2.3) — racing
+// its own completion against the subprocess's boundary events (§2.2).
 func (in *interpreter) runSubWorkflow(ctx wf.Context, plan *dsl.CompiledPlan, sw *dsl.SubWorkflowStep, admin wf.Channel) (domain.NodeKey, error) {
 	doneCh := wf.NewChannel(ctx)
 	// errCh: pushed to on a matching ErrorCode. Nothing pushes to it yet —
