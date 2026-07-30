@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events v1.3.0
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon v1.1.1
-	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models v1.0.0
+	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models v1.1.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/joho/godotenv v1.5.1
@@ -103,7 +103,7 @@ require (
 	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478 // indirect

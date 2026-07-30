@@ -4,17 +4,8 @@
 // imported by adapter/, never imports it back, wired into cmd/worker only
 // via Temporal's runtime registration.
 //
-// No dsl_schema_version fail-closed check is implemented here (LLD
-// §2.5/§3.1/§3.3): the field doesn't exist in workflow-models v1.0.0, and
-// even once it does, a same-workflow version check is only ever a
-// last-resort trip-wire, not a fix — a long-running instance would already
-// be stuck interpreting a shape it can't handle by the time it fires. The
-// actual compatibility strategy is Temporal's Worker Deployment Versions +
-// Workflow Pinning: in-flight instances stay pinned to the Deployment
-// Version they started on, new instances get the new one, old fleets drain
-// naturally. That's a cmd/worker/deploy-layer concern (sibling tasks); this
-// package only needs to stay deterministic and GetVersion-guarded
-// (version.go).
+// DSL schema compatibility (fail-closed check + Factory/Strategy layer):
+// see "execution LLD" §2.5 and compat.go.
 //
 // Not implemented here, but only addable from inside this package: the four
 // custom Search Attributes (TenantId, InstanceStatus, WorkflowVersionId,
@@ -50,7 +41,16 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 		return ExecuteOutput{Status: domain.InstanceStatusFailed}, err
 	}
 
-	in := newInterpreter(input.TenantID, input.InstanceID, input.ContextJSON, &planOut.Collaboration)
+	strategy, ok := resolveSchemaStrategy(planOut.Collaboration.SchemaVersion)
+	if !ok {
+		_ = updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
+			InstanceID: input.InstanceID, TenantID: input.TenantID, Status: domain.InstanceStatusFailed,
+		})
+		return ExecuteOutput{Status: domain.InstanceStatusFailed}, fmt.Errorf("workflow: unsupported dsl schema version %d", planOut.Collaboration.SchemaVersion)
+	}
+	collab := strategy.normalize(&planOut.Collaboration)
+
+	in := newInterpreter(input.TenantID, input.InstanceID, input.ContextJSON, collab)
 
 	mainPlan := findPlan(in.collab, in.collab.MainPlan)
 	if mainPlan == nil {

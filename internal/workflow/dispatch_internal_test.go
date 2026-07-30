@@ -310,7 +310,7 @@ func TestExecuteFailsWhenMainPlanMissing(t *testing.T) {
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterActivityWithOptions(
 		func(_ context.Context, _ port.GetCompiledPlanInput) (port.GetCompiledPlanOutput, error) {
-			return port.GetCompiledPlanOutput{Collaboration: dsl.CompiledCollaboration{MainPlan: "missing"}}, nil
+			return port.GetCompiledPlanOutput{Collaboration: dsl.CompiledCollaboration{MainPlan: "missing", SchemaVersion: dsl.CurrentSchemaVersion}}, nil
 		},
 		activity.RegisterOptions{Name: port.ActivityGetCompiledPlan},
 	)

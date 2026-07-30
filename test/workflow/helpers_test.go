@@ -64,7 +64,16 @@ func registerFakeActivities(env *testsuite.TestWorkflowEnvironment, collab *dsl.
 
 	env.RegisterActivityWithOptions(
 		func(_ context.Context, _ port.GetCompiledPlanInput) (port.GetCompiledPlanOutput, error) {
-			return port.GetCompiledPlanOutput{Collaboration: *collab}, nil
+			out := *collab
+			// Fixtures that don't care about schema versioning leave this
+			// zero; default it to the current version so they don't need to
+			// set it explicitly. A fixture testing the compat check sets its
+			// own (possibly unsupported) SchemaVersion, which this never
+			// overrides.
+			if out.SchemaVersion == 0 {
+				out.SchemaVersion = dsl.CurrentSchemaVersion
+			}
+			return port.GetCompiledPlanOutput{Collaboration: out}, nil
 		},
 		activity.RegisterOptions{Name: port.ActivityGetCompiledPlan},
 	)
