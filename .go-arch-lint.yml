@@ -61,6 +61,7 @@ deps:
     mayDependOn:
       - domain
       - port
+      - adapter   # inbound handlers reference outbound clients' sentinel errors (e.g. eligibility_client.go)
       - service   # handlers reference service request/response types
       - db        # sqlc-generated types
       - gen       # proto-generated types (grpc server + definition client)
