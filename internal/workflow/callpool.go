@@ -15,15 +15,9 @@ import (
 // DepartmentDef.ID lookup.
 const callerDeptForCallPool = "call_pool"
 
-// runCallPool dispatches a CallPool step (LLD §2.3): resolves the target
-// CompiledPlan by name and branches on its Ignored field. Ignored:true — the
-// only real pattern today — creates an ordinary admin-completed task via the
-// same task-dispatch machinery prep/review/approve use, gated to a
-// tenant-admin-equivalent role; completing it lets the calling pool proceed.
-// Ignored:false recurses inline like subProcess. The theoretical
+// runCallPool dispatches a CallPool step (LLD §2.3). The theoretical
 // workflow.ExecuteChildWorkflow mode (an independent-lifecycle CallPool) is
-// intentionally not built here — no concrete fixture forces it today (LLD's
-// own words: "currently theoretical").
+// intentionally not built here — no concrete fixture forces it today.
 func (in *interpreter) runCallPool(ctx wf.Context, callerPlan *dsl.CompiledPlan, cp *dsl.CallPoolStep, admin wf.Channel) (domain.NodeKey, error) {
 	target := findPlan(in.collab, cp.Pool)
 	if target == nil {

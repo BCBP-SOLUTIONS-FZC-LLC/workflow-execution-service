@@ -7,10 +7,7 @@ import (
 )
 
 // messageBuffer implements the intra-pool message buffer (LLD §2.4's 5-point
-// algorithm): an instance-wide, FIFO, node-keyed record of unconsumed
-// send_task fires, shared across every Parallel branch and inline SubWorkflow
-// recursion so a sibling's receive_task is never blocked forever on a
-// message a different branch already sent.
+// algorithm).
 //
 // No mutex is needed: Temporal workflow code runs on a single-threaded
 // cooperative scheduler, so this is replay-safe by construction.
@@ -35,10 +32,7 @@ func newMessageBuffer() *messageBuffer {
 	}
 }
 
-// Send fires a send_task from node. If a waiter is currently blocked on this
-// message name, the oldest one is delivered to directly (skipping the
-// buffer); otherwise node is appended to the buffer and Send returns
-// immediately (fire-and-forget) — LLD §2.4 point 2.
+// Send fires a send_task from node (LLD §2.4 point 2).
 func (b *messageBuffer) Send(ctx wf.Context, messageName string, node domain.NodeKey) {
 	if queue := b.blocked[messageName]; len(queue) > 0 {
 		queue[0].Send(ctx, node)
@@ -86,10 +80,8 @@ func (b *messageBuffer) Receive(ctx wf.Context, messageName string) domain.NodeK
 }
 
 // ResetSpan removes, from every message name's buffer, only the unconsumed
-// entries whose firing node key appears in span — the reset a force-back or
-// DEGRADED respawn applies when it rewinds a branch past a send_task's node.
-// Consumed entries are already gone and a sibling's entries are never
-// touched (LLD §2.4 point 5).
+// entries whose firing node key appears in span (LLD §2.4 point 5) — a
+// sibling's entries are never touched.
 func (b *messageBuffer) ResetSpan(span []domain.NodeKey) {
 	if len(span) == 0 {
 		return

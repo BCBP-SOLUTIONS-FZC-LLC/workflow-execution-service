@@ -7,15 +7,9 @@
 // DSL schema compatibility (fail-closed check + Factory/Strategy layer):
 // see "execution LLD" §2.5 and compat.go.
 //
-// Not implemented here, but only addable from inside this package: the four
-// custom Search Attributes (TenantId, InstanceStatus, WorkflowVersionId,
-// BusinessKey — LLD §3.6), set via workflow.UpsertSearchAttributes on
-// workflow start and on every status transition. That's a separate sibling
-// task's (Observability) scope, not this one's, but workflow.UpsertSearchAttributes
-// can only be called from inside the workflow function itself — that task
-// will need to add call sites here (Execute's start, its terminal status
-// update, and enterDegraded's DEGRADED/RUNNING transitions in degraded.go),
-// not just in its own files.
+// The four custom Search Attributes (LLD §3.6) aren't implemented here yet,
+// but can only be set via workflow.UpsertSearchAttributes from inside the
+// workflow function itself, so any future addition must live in this package.
 package workflow
 
 import (
@@ -90,14 +84,12 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 }
 
 // runTopLevel is the base (non-DEGRADED, no active Parallel gateway)
-// force-back/force-forward/cancel handler: it races the plan's dispatch
-// against baseAdmin and, on a redirect signal, cancels the in-flight
-// dispatch and restarts at the target department (LLD §2.7's base
-// mechanism). It listens on baseAdmin rather than admin — the channel
-// runParallel/enterDegraded use — because signals.go's router sends each
-// signal to exactly one of the two based on whether a Parallel gateway is
-// currently active; two Selectors racing the same channel would make
-// delivery ambiguous.
+// force-back/force-forward/cancel handler (LLD §2.7's base mechanism). It
+// listens on baseAdmin rather than admin — the channel runParallel/
+// enterDegraded use — because signals.go's router sends each signal to
+// exactly one of the two based on whether a Parallel gateway is currently
+// active; two Selectors racing the same channel would make delivery
+// ambiguous.
 func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin, baseAdmin wf.Channel) (stepOutcome, error) {
 	original := plan.Execution.Steps
 	steps := original
@@ -169,11 +161,9 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 	}
 }
 
-// redirectSteps resumes at deptID by finding it within original (the
-// plan's own top-level steps — never an already-redirected list, so
-// repeated redirects don't compound) and keeping every sibling department
-// and step after it, so the rest of the plan still runs once deptID
-// completes again. deptID not found here (e.g. nested inside a
+// redirectSteps resumes at deptID by finding it within original — the
+// plan's own top-level steps, never an already-redirected list, so repeated
+// redirects don't compound. deptID not found here (e.g. nested inside a
 // SubWorkflow/Parallel) falls back to running it in isolation — the DSL has
 // no finer-grained continuation pointer than dept+stage+nodeID.
 func redirectSteps(original []dsl.ExecutionStep, deptID string) []dsl.ExecutionStep {

@@ -24,11 +24,11 @@ var (
 	}
 
 	// externalCallActivityOptions backs GetCompiledPlanActivity. A DSL
-	// schema-version major mismatch would also belong in
-	// NonRetryableErrorTypes once that field exists upstream — see
-	// workflow.go's package doc comment for why an in-workflow version
-	// check is not this repo's actual compatibility strategy (Worker
-	// Deployment Versions + Workflow Pinning fill that role instead).
+	// schema-version major mismatch could also belong in
+	// NonRetryableErrorTypes once the Activity's real implementation
+	// exists (cmd/worker, not yet built) — see "execution LLD" §2.5 and
+	// compat.go for the actual compatibility strategy (a Factory/Strategy
+	// layer in Execute), which this would only optimize, not replace.
 	externalCallActivityOptions = wf.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Second,
 		RetryPolicy: &temporal.RetryPolicy{

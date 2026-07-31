@@ -8,14 +8,10 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 )
 
-// QueryGetWorkflowStatus is the LLD §3.1 Query name — the one Temporal
-// Query this service defines. It is never exposed via an HTTP endpoint
-// (execution_service.md line 972: the dashboard reads the Postgres
-// projection instead, to avoid a second, Temporal-latency-bound read path);
-// it exists for internal reconciliation and test tooling only. A Query
-// handler can only be registered from inside the workflow function itself
-// (workflow.SetQueryHandler), so this must live in this package — no
-// sibling task can add it later without editing internal/workflow again.
+// QueryGetWorkflowStatus is the LLD §3.1 Query name — internal
+// reconciliation/test tooling only, never HTTP-exposed. A Query handler can
+// only be registered from inside the workflow function itself
+// (workflow.SetQueryHandler), so this must live in this package.
 const QueryGetWorkflowStatus = "get-workflow-status"
 
 // WorkflowStatusQuery mirrors LLD §3.1's {status, current_node_keys,

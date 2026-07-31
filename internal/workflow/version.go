@@ -15,6 +15,5 @@ func getVersion(ctx wf.Context, changeID string) wf.Version {
 // call site's before/after reasoning is relative to. No alternate branch
 // exists yet — this call never branches, so replaying its fixture
 // (test/workflow/replay/initial_interpreter_test.go) only proves the
-// plumbing works, not that the pattern protects a real divergence. That only
-// gets proven the first time a real fork ships behind a new changeID here.
+// plumbing works, not that the pattern protects a real divergence.
 const initialInterpreterChangeID = "initial-interpreter"

@@ -12,12 +12,10 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/enums"
 )
 
-// stageNodeKey builds this interpreter's NodeKey using the LLD's own
-// `{deptID}/{stageType}` addressing scheme (execution_service.md §4.2's
-// `node_key` column, `text NOT NULL`): dept+NodeID when NodeID is populated
-// (only when dept+stage-type alone would be ambiguous, LLD §2.6), falling
-// back to dept+Type otherwise — matching the once-stage-of-a-type-per-
-// department shape real compiled plans exhibit today.
+// stageNodeKey builds this interpreter's NodeKey (execution LLD §4.2):
+// dept+NodeID when NodeID is populated (LLD §2.6), else dept+Type — matching
+// the once-stage-of-a-type-per-department shape real compiled plans exhibit
+// today.
 func stageNodeKey(deptID string, stage *dsl.StageDef) domain.NodeKey {
 	if stage.NodeID != "" {
 		return domain.NodeKey(deptID + "/" + stage.NodeID)
@@ -47,11 +45,6 @@ func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID s
 		return nodeKey, nil
 
 	default:
-		// prep/review/approve, and any unrecognized Type, dispatch
-		// identically (LLD §2.4) — unrecognized is forward-compat
-		// passthrough for IAM role levels the compiler doesn't know about
-		// yet; EngineNote is logged for audit only, never treated as an
-		// error.
 		if stage.EngineNote != "" {
 			wf.GetLogger(ctx).Warn("dispatching stage with engine note", "node_key", string(nodeKey), "engine_note", stage.EngineNote)
 		}
@@ -59,10 +52,8 @@ func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID s
 	}
 }
 
-// runTaskStage handles prep/review/approve/unrecognized-Type dispatch:
-// CreateTaskActivity, then a Selector race between the stage's own
-// resolution (a stage-transition signal addressed to this node), its
-// boundary events (LLD §2.2), and its SLA timers (LLD §3.4).
+// runTaskStage handles prep/review/approve/unrecognized-Type dispatch (LLD
+// §2.2/§3.4).
 func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, stage *dsl.StageDef, nodeKey domain.NodeKey) (domain.NodeKey, error) {
 	compiledNode, err := json.Marshal(stage)
 	if err != nil {

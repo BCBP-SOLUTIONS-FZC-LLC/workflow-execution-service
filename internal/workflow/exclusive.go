@@ -9,13 +9,9 @@ import (
 )
 
 // evaluateCondition evaluates a single binary equality/inequality expression
-// of the form `<field> == "<literal>"` or `<field> != "<literal>"` against
-// the just-completed stage's result_json.
-//
-// This is the interpreter's permanent scope limit for exclusive-gateway
-// conditions (LLD §2.6, Appendix A.1 #6): no expression engine, no
-// third-party dependency. Richer boolean/arithmetic expressions are a
-// deliberately rejected design, not an oversight — do not extend this.
+// (`<field> == "<literal>"` or `!=`) against the just-completed stage's
+// result_json — the interpreter's permanent scope limit for exclusive-gateway
+// conditions (LLD §2.6, Appendix A.1 #6). No expression engine: do not extend this.
 func evaluateCondition(expr, resultJSON string) (bool, error) {
 	op := "=="
 	parts := strings.SplitN(expr, "==", 2)
@@ -45,12 +41,9 @@ func evaluateCondition(expr, resultJSON string) (bool, error) {
 	}
 }
 
-// selectBranch picks the winning ExclusiveBranch per LLD §2.6: the first
-// branch (in array order) whose non-empty ConditionExpression evaluates
-// true, or — if none match — the single branch with an empty
-// ConditionExpression (the implicit else, backed by BPMN's own default-flow
-// marker; the compiler enforces exactly one conditionless flow per
-// gateway). Returns nil if no branch matches and no implicit else exists.
+// selectBranch picks the winning ExclusiveBranch per LLD §2.6 — the compiler
+// enforces exactly one conditionless flow per gateway (the implicit else).
+// Returns nil if no branch matches and no implicit else exists.
 func selectBranch(branches []dsl.ExclusiveBranch, resultJSON string) (*dsl.ExclusiveBranch, error) {
 	var implicitElse *dsl.ExclusiveBranch
 	for i := range branches {
