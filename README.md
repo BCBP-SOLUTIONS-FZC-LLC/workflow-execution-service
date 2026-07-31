@@ -7,8 +7,6 @@ Two independently deployed binaries, one Go module:
 - `cmd/server` — HTTP API (`:8080`) + gRPC (`:9090`) + the outbox relay + the Temporal client (`StartWorkflow`/`SignalWorkflow`/`QueryWorkflow`).
 - `cmd/worker` — the Temporal Worker process: polls task queues, hosts the workflow function and Activities. Minimal `:8081` health/metrics surface, no business HTTP/gRPC surface of its own.
 
-Status: Tier-0 (bootstrap: build/lint/test tooling, DB schema, proto contracts) is done. Tier-1 is landing in parallel branches; `internal/workflow` (the Temporal workflow-function interpreter) is the first piece in.
-
 ## Private Module Access
 
 This service consumes private Go modules from the `github.com/BCBP-SOLUTIONS-FZC-LLC/*` organization (`platform-events`, `platform-pgcommon`, `platform-gincommon`, `workflow-models`).

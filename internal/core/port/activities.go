@@ -30,6 +30,10 @@ const (
 	ActivityRecordForceRoute     = "RecordForceRouteActivity"
 	ActivityRecordSLAWarning     = "RecordSLAWarningActivity"
 	ActivityRecordSLABreach      = "RecordSLABreachActivity"
+	ActivityPauseInstance        = "PauseInstanceActivity"
+	ActivityResumeInstance       = "ResumeInstanceActivity"
+	ActivityCancelInstance       = "CancelInstanceActivity"
+	ActivityReassignAssignment   = "ReassignAssignmentActivity"
 )
 
 type GetCompiledPlanInput struct {
@@ -130,4 +134,42 @@ type RecordSLABreachInput struct {
 	TenantID   string
 	TaskID     string
 	NodeKey    domain.NodeKey
+}
+
+// PauseInstanceInput/ResumeInstanceInput share the same shape (LLD §3.1's
+// admin lifecycle signals): a version-checked status update, writing the
+// matching event on success.
+type PauseInstanceInput struct {
+	InstanceID    string
+	TenantID      string
+	AdminUserID   string
+	RecordVersion int64
+}
+
+type ResumeInstanceInput struct {
+	InstanceID    string
+	TenantID      string
+	AdminUserID   string
+	RecordVersion int64
+}
+
+// CancelInstanceInput drives instance-cancel (LLD §3.1): marks active tasks
+// FAILED and vacates their assignments, then updates status to TERMINATED,
+// writing both event classes.
+type CancelInstanceInput struct {
+	InstanceID    string
+	TenantID      string
+	AdminUserID   string
+	RecordVersion int64
+}
+
+// ReassignAssignmentInput drives instance-reassign (LLD §3.1): vacates the
+// old assignment and inserts a new one.
+type ReassignAssignmentInput struct {
+	TaskID        string
+	TenantID      string
+	OldUserID     string
+	NewUserID     string
+	AdminUserID   string
+	RecordVersion int64
 }
