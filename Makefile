@@ -46,12 +46,12 @@ COVER_EXCLUDE_PKG  := /postgres/db$$\|/mocks$$
 COVER_EXCLUDE_FILE := /postgres/db/\|/mocks/
 COVER_THRESHOLD    := 95
 # Per-package floors: packages not listed must meet COVER_THRESHOLD.
-# internal/workflow doesn't exist on this branch's own tree (it lands via the
-# sibling feat/workflow-engine-core branch) but is pre-positioned here for the
-# merged state: its own isolated unit-test coverage measures 91.3% as of
-# 2026-07-31, floored a few points under that rather than at it. Add an entry
-# here only for a package that's genuinely hard to exercise at the global bar,
-# never to paper over a gap in new code.
+# internal/workflow (the Temporal interpreter) sits at ~91.3% isolated
+# unit-test coverage — SLA-timer/replay-only paths make the last few points
+# expensive to close without a live Temporal test environment. Floored a few
+# points under the measured level, not at it. Add an entry here only for a
+# package that's genuinely hard to exercise at the global bar, never to
+# paper over a gap in new code.
 COVER_PKG_FLOORS   := internal/workflow:88
 
 .PHONY: all tools tools-integration generate generate-proto generate-sqlc mock \
