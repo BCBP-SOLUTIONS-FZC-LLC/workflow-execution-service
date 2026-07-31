@@ -4,7 +4,12 @@ SELECT * FROM workflow_task WHERE id = $1;
 -- name: ListWorkflowTasksByInstance :many
 SELECT * FROM workflow_task
 WHERE workflow_instance_id = $1
-ORDER BY created_at DESC, id DESC;
+  AND (
+    sqlc.narg('cursor_created_at')::timestamptz IS NULL
+    OR (created_at, id) < (sqlc.narg('cursor_created_at')::timestamptz, sqlc.narg('cursor_id')::uuid)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $2;
 
 -- name: CreateWorkflowTask :one
 INSERT INTO workflow_task (

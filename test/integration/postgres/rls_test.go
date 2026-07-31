@@ -181,3 +181,110 @@ func TestAppRoleLacksBypassRLS(t *testing.T) {
 	assert.False(t, bypassRLS, "execution_app must not have BYPASSRLS")
 	assert.False(t, isSuper, "execution_app must not be a superuser")
 }
+
+// outboxRelayRolePassword is a throwaway credential for the per-test outbox
+// relay role — not a real secret.
+const outboxRelayRolePassword = "relaypassword123"
+
+// newOutboxRelayRolePool creates the dedicated BYPASSRLS role the outbox
+// relay connects as (LLD §9.2/§9.7).
+func newOutboxRelayRolePool(t *testing.T, superPool *pgcommon.Pool, superDSN string) *pgcommon.Pool {
+	t.Helper()
+	ctx := context.Background()
+
+	stmts := []string{
+		"DROP ROLE IF EXISTS execution_outbox_relay",
+		fmt.Sprintf("CREATE ROLE execution_outbox_relay LOGIN PASSWORD '%s' BYPASSRLS", outboxRelayRolePassword),
+		"GRANT CONNECT ON DATABASE testdb TO execution_outbox_relay",
+		"GRANT USAGE ON SCHEMA public TO execution_outbox_relay",
+		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO execution_outbox_relay",
+	}
+	for _, stmt := range stmts {
+		stmt := stmt
+		require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+			_, err := conn.Exec(ctx, stmt)
+			return err
+		}))
+	}
+
+	relayDSN := fmt.Sprintf("postgres://execution_outbox_relay:%s@%s", outboxRelayRolePassword, hostAndDB(superDSN))
+	relayPool, err := pgcommon.NewPool(ctx, pgcommon.Config{DSN: relayDSN})
+	require.NoError(t, err)
+	t.Cleanup(relayPool.Close)
+
+	return relayPool
+}
+
+// TestOutboxRelayRoleHasBypassRLS is the positive control to
+// TestAppRoleLacksBypassRLS — without it, that test passing could just mean
+// rolbypassrls always reads false.
+func TestOutboxRelayRoleHasBypassRLS(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	_ = newOutboxRelayRolePool(t, superPool, superDSN) // ensures the role exists
+	ctx := context.Background()
+
+	var bypassRLS, isSuper bool
+	err := superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+		return conn.QueryRow(ctx,
+			"SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = 'execution_outbox_relay'",
+		).Scan(&bypassRLS, &isSuper)
+	})
+	require.NoError(t, err)
+	assert.True(t, bypassRLS, "execution_outbox_relay must have BYPASSRLS")
+	assert.False(t, isSuper, "execution_outbox_relay must not be a superuser")
+}
+
+// TestRLSPoliciesUseCheckTenantFunction is a definition-level check distinct
+// from TestRLSPolicyEnforcement's behavioral one, which would pass unchanged
+// whether 000006's policy swap actually landed or not.
+func TestRLSPoliciesUseCheckTenantFunction(t *testing.T) {
+	superPool, _ := fixtures.NewTestPoolAndDSN(t)
+	ctx := context.Background()
+
+	swapped := []string{
+		"workflow_instance", "workflow_task", "workflow_task_assignment",
+		"workflow_data_keys", "assignee_overrides", "outbox_events", "outbox_dead_letters",
+	}
+	for _, table := range swapped {
+		t.Run(table, func(t *testing.T) {
+			var qual string
+			err := superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+				return conn.QueryRow(ctx,
+					"SELECT qual FROM pg_policies WHERE schemaname = 'public' AND tablename = $1 AND policyname = 'tenant_isolation_policy'",
+					table,
+				).Scan(&qual)
+			})
+			require.NoError(t, err)
+			assert.Contains(t, qual, "rls_check_tenant", "%s: policy should use rls_check_tenant after 000006", table)
+		})
+	}
+}
+
+// TestRLSViolationAuditLogging is a best-effort test for log_rls_violation's
+// 1%-sampled INSERT path — a large attempt count makes a hit a near-certainty
+// rather than asserting exactly one per attempt.
+func TestRLSViolationAuditLogging(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	tenantB := uuid.New()
+	instanceID := uuid.New()
+	seedWorkflowInstance(t, superPool, ctx, instanceID, tenantA)
+
+	const attempts = 500
+	for i := 0; i < attempts; i++ {
+		_ = countWorkflowInstance(t, appPool, withGUC(ctx, tenantB), instanceID)
+	}
+
+	var count int
+	err := superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+		return conn.QueryRow(ctx,
+			"SELECT count(*) FROM rls_violation_log WHERE violation_type = 'cross_tenant_access' AND table_name = 'workflow_instance'",
+		).Scan(&count)
+	})
+	require.NoError(t, err)
+	assert.Greaterf(t, count, 0,
+		"expected at least one sampled rls_violation_log row across %d cross-tenant attempts (~1%% sampling)", attempts)
+}

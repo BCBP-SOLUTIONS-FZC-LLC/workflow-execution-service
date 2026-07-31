@@ -45,10 +45,14 @@ COVER_HTML         := $(COVERAGE_DIR)/coverage.html
 COVER_EXCLUDE_PKG  := /postgres/db$$\|/mocks$$
 COVER_EXCLUDE_FILE := /postgres/db/\|/mocks/
 COVER_THRESHOLD    := 95
+# Per-package floors: packages not listed must meet COVER_THRESHOLD. Empty on
+# this branch — add an entry here for a package that's genuinely hard to
+# exercise at the global bar, never to paper over a gap in new code.
+COVER_PKG_FLOORS   :=
 
 .PHONY: all tools tools-integration generate generate-proto generate-sqlc mock \
         build migrate dev test test-integration test-ci merge-coverage \
-        cover cover-func cover-html cover-check \
+        cover cover-func cover-gaps cover-html cover-check cover-check-pkg \
         arch-lint lint lint-fix vuln \
         tidy fmt-check fix check \
         setup install-hooks \
@@ -112,10 +116,17 @@ generate-sqlc:
 	$(SQLC) generate
 	@echo "sqlc output written to internal/adapter/outbound/postgres/db/"
 
-## mock: Regenerate GoMock stubs for all core/port interfaces (no-op until Tier-1 adds port interfaces)
+## mock: Regenerate GoMock stubs for all core/port interfaces
 mock:
 	@mkdir -p internal/core/port/mocks
-	@echo "no core/port interfaces yet — nothing to mock in this Tier"
+	$(MOCKGEN) -destination=internal/core/port/mocks/repository.go -package=mocks \
+		$(MODULE)/internal/core/port InstanceRepository,TaskRepository,TaskAssignmentRepository
+	$(MOCKGEN) -destination=internal/core/port/mocks/outbox.go -package=mocks \
+		$(MODULE)/internal/core/port OutboxRepository
+	$(MOCKGEN) -destination=internal/core/port/mocks/processed_event.go -package=mocks \
+		$(MODULE)/internal/core/port ProcessedEventRepository
+	$(MOCKGEN) -destination=internal/core/port/mocks/transactor.go -package=mocks \
+		$(MODULE)/internal/core/port Transactor
 
 
 ## build: Compile the server and worker binaries to bin/
@@ -177,6 +188,11 @@ cover-func:
 	@[ -f $(COVER_PROFILE) ] || { echo "no profile — run 'make test-ci' first"; exit 1; }
 	@go tool cover -func=$(COVER_PROFILE)
 
+## cover-gaps: Show uncovered and partially-covered functions (run 'make test-ci' first)
+cover-gaps:
+	@[ -f $(COVER_PROFILE) ] || { echo "no profile — run 'make test-ci' first"; exit 1; }
+	@./scripts/uncovered.sh $(COVER_PROFILE)
+
 ## cover-html: Open HTML coverage report in the browser (run 'make test-ci' first)
 cover-html:
 	@[ -f $(COVER_PROFILE) ] || { echo "no profile — run 'make test-ci' first"; exit 1; }
@@ -184,15 +200,45 @@ cover-html:
 	@echo "✓ report: $(COVER_HTML)"
 	@open $(COVER_HTML) 2>/dev/null || xdg-open $(COVER_HTML) 2>/dev/null || true
 
-## cover-check: Global coverage gate (runs unit + integration tests automatically)
-cover-check: test-ci
-	@TOTAL=$$(go tool cover -func=$(COVER_PROFILE) | awk '/^total:/{print $$NF}' | tr -d '%'); \
-	echo "total: $${TOTAL}% (floor: $(COVER_THRESHOLD)%)"; \
-	if [ $$(echo "$${TOTAL} < $(COVER_THRESHOLD)" | bc -l) -eq 1 ]; then \
-		echo "✗ total coverage below $(COVER_THRESHOLD)%"; exit 1; \
-	else \
-		echo "✓ coverage ok"; \
-	fi
+## cover-check-pkg: Per-package coverage gate — each package must meet its floor (run 'make test-ci' first)
+cover-check-pkg:
+	@[ -f $(COVER_PROFILE) ] || { echo "no profile — run 'make test-ci' first"; exit 1; }
+	@awk \
+	  -v module="$(MODULE)/" \
+	  -v floors="$(subst \,,$(COVER_PKG_FLOORS))" \
+	  -v global="$(COVER_THRESHOLD)" \
+	  'BEGIN { \
+	    n=split(floors,pairs," "); \
+	    for(i=1;i<=n;i++){split(pairs[i],kv,":");thresh[kv[1]]=kv[2]+0} \
+	  } \
+	  /^mode:/{next} \
+	  { \
+	    key=$$1; stmts=$$2+0; count=$$3+0; \
+	    blk_stmts[key]=stmts; blk_count[key]+=count; \
+	    path=key; sub(/:.*$$/,"",path); sub(module,"",path); sub(/\/[^\/]+$$/,"",path); \
+	    blk_pkg[key]=path \
+	  } \
+	  END { \
+	    for(key in blk_stmts){ \
+	      pkg=blk_pkg[key]; \
+	      tot[pkg]+=blk_stmts[key]; \
+	      if(blk_count[key]>0) cov[pkg]+=blk_stmts[key] \
+	    } \
+	    fail=0; \
+	    for(pkg in tot){ \
+	      if(tot[pkg]==0)continue; \
+	      pct=cov[pkg]*100/tot[pkg]; \
+	      floor=(pkg in thresh)?thresh[pkg]:global; \
+	      if(pct<floor){printf "✗  %-58s %5.1f%% (need %d%%)\n",pkg,pct,floor; fail=1} \
+	      else{printf "✓  %-58s %5.1f%%\n",pkg,pct} \
+	    } \
+	    exit fail \
+	  }' $(COVER_PROFILE)
+
+## cover-check: Per-package coverage gate (runs unit + integration tests automatically)
+cover-check: test-ci cover-check-pkg
+	@go tool cover -func=$(COVER_PROFILE) | awk '/^total:/{print "total (informational):", $$NF}'
+	@echo "✓ coverage ok"
 
 
 ## tidy: Run go mod tidy

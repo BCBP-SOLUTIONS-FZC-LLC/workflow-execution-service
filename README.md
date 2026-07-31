@@ -6,7 +6,7 @@ Two independently deployed binaries, one Go module:
 - `cmd/server` — HTTP API (`:8080`) + gRPC (`:9090`) + the outbox relay + the Temporal client (`StartWorkflow`/`SignalWorkflow`/`QueryWorkflow`).
 - `cmd/worker` — the Temporal Worker process: polls task queues, hosts the workflow function and Activities. Minimal `:8081` health/metrics surface, no business HTTP/gRPC surface of its own.
 
-Status: Tier-0 (bootstrapped skeleton — build/lint/test tooling, DB schema, proto contracts). No business logic yet.
+Status: Tier-0 (bootstrap: build/lint/test tooling, DB schema, proto contracts) is done. This branch adds `internal/adapter/outbound/postgres` (the persistence layer — repositories, outbox relay wiring, RLS-violation audit logging), one of several Tier-1 pieces landing in parallel branches off `main`. `cmd/server`/`cmd/worker` bootstrap (pool DI, HTTP/gRPC servers) is still pending a later Tier-1 task.
 
 ## Private Module Access
 
@@ -77,11 +77,28 @@ internal/core/{domain,port,service}/
 internal/workflow/             — Temporal workflow function + Activities
 internal/adapter/{inbound,outbound}/
 internal/config/
-db/migrations/, db/queries/    — workflow_execution schema (RLS via app_tenant_id())
+db/migrations/, db/queries/    — workflow_execution schema (RLS via app_tenant_id()/rls_check_tenant())
+db/sqlc_schema_ref/            — non-migration DDL so sqlc can type-check queries against library-owned tables (outbox_events)
 api/proto/                     — execution_service.proto + definition.proto (buf)
 test/{fixtures,unit,integration,e2e,workflow}/
 ```
 
 ## Common commands
 
-Run `make help` for the full target list. Most used: `make tools`, `make setup`, `make docker-up`, `make migrate`, `make generate`, `make build`, `make test`, `make test-integration`, `make check`.
+Run `make help` for the full target list.
+
+| Command | What it does |
+| --- | --- |
+| `make tools` | Install pinned dev tooling (sqlc, buf, mockgen, golangci-lint, go-arch-lint) |
+| `make setup` | Copy `.env.example` → `.env`, install the pre-commit hook |
+| `make docker-up` / `make docker-down` | Start/stop local infra (Postgres, Valkey, LocalStack, PgBouncer, Temporal dev server) |
+| `make migrate` | Apply schema migrations (outbox + domain) |
+| `make generate` | Regenerate proto (buf) + sqlc code |
+| `make build` | Compile `cmd/server` and `cmd/worker` |
+| `make test` | Unit tests — `internal/...`, `test/unit/...` — race detector, coverage |
+| `make test-integration` | Integration tests (testcontainers, real Postgres) |
+| `make test-ci` | Unit + integration, merged coverage — what CI runs |
+| `make lint` / `make fix` | golangci-lint (read-only / with `--fix`) |
+| `make arch-lint` | Enforce Clean Architecture import direction (`.go-arch-lint.yml`) |
+| `make cover-gaps` | List uncovered/partially-covered functions from the last `test-ci` run |
+| `make check` | Full local CI: gofmt + lint + vet + arch-lint + test + per-package coverage gate |

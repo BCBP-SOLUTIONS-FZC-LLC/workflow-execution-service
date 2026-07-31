@@ -64,7 +64,7 @@ CREATE INDEX idx_processed_event_processed_at
 -- access, LLD §4.5/§4.9/§4.10) --------------------------------------------
 
 CREATE INDEX idx_outbox_events_instance_created
-    ON outbox_events (tenant_id, (payload->>'workflow_instance_id'), created_at DESC, id DESC);
+    ON outbox_events (tenant_id, (payload -> 'data' ->> 'workflow_instance_id'), created_at DESC, id DESC);
 
 CREATE INDEX idx_outbox_events_task
-    ON outbox_events ((payload->>'task_id')) WHERE payload->>'task_id' IS NOT NULL;
+    ON outbox_events ((payload -> 'data' ->> 'task_id')) WHERE payload -> 'data' ->> 'task_id' IS NOT NULL;

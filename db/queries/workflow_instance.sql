@@ -4,6 +4,10 @@ SELECT * FROM workflow_instance WHERE id = $1;
 -- name: ListWorkflowInstancesByTenant :many
 SELECT * FROM workflow_instance
 WHERE tenant_id = $1
+  AND (
+    sqlc.narg('cursor_created_at')::timestamptz IS NULL
+    OR (created_at, id) < (sqlc.narg('cursor_created_at')::timestamptz, sqlc.narg('cursor_id')::uuid)
+  )
 ORDER BY created_at DESC, id DESC
 LIMIT $2;
 
