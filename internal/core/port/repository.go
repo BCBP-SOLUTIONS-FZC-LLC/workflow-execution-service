@@ -9,8 +9,8 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 )
 
-// Cursor and PageRequest are T1.2's inferred keyset-pagination shape (LLD
-// §5.9) — a placeholder until T1.1's own core/port interfaces land.
+// Cursor and PageRequest are this persistence layer's keyset-pagination
+// shape (LLD §5.9).
 type Cursor struct {
 	CreatedAt time.Time
 	ID        uuid.UUID
@@ -21,11 +21,10 @@ type PageRequest struct {
 	Limit int
 }
 
-// InstanceRepository, TaskRepository, and TaskAssignmentRepository are T1.2's
-// own best-effort inference of the persistence-layer contract — T1.1 owns
-// the real interfaces; expect a mechanical reconciliation diff once they
-// land. GetByBusinessKey is deliberately omitted: no backing query exists
-// yet in db/queries.
+// InstanceRepository, TaskRepository, and TaskAssignmentRepository are this
+// persistence layer's own repository interfaces, inferred from the LLD's
+// data model. GetByBusinessKey is deliberately omitted: no backing query
+// exists yet in db/queries.
 type InstanceRepository interface {
 	Create(ctx context.Context, inst *domain.Instance) error
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.Instance, error)

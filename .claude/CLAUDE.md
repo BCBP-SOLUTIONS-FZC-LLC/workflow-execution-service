@@ -4,8 +4,6 @@
 
 `execution-service` is the Temporal-backed runtime for the BPMN Workflow Engine platform: it starts, tracks, and drives workflow instances to completion, dispatching tasks to human assignees and other services along the way. It's the execution-time counterpart to `definition_service`, which owns design-time authoring and compilation of workflow templates.
 
-Tier-0 (build/lint/test tooling, DB schema, proto contracts) is done. Tier-1 is landing in parallel branches; `internal/adapter/outbound/postgres` (persistence layer, outbox relay wiring, RLS-violation audit logging) is in.
-
 ## Getting Started
 
 Run `make help` for all available targets, or see [README.md](../README.md) for the full setup walkthrough. Use `make test`, `make lint`, `make arch-lint`, `make check` rather than calling `go test`/`golangci-lint`/`go-arch-lint` directly — the Makefile targets carry the flags (coverage, race, package scope) CI actually enforces.
