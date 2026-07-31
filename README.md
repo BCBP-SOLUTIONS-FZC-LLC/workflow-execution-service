@@ -98,4 +98,5 @@ Run `make help` for the full target list.
 | `make test-ci` | Unit + integration, merged coverage — what CI runs |
 | `make lint` / `make fix` | golangci-lint (read-only / with `--fix`) |
 | `make arch-lint` | Enforce Clean Architecture import direction (`.go-arch-lint.yml`) |
-| `make check` | Full local CI: gofmt + lint + vet + arch-lint + test + coverage gate |
+| `make cover-gaps` | List uncovered/partially-covered functions from the last `test-ci` run |
+| `make check` | Full local CI: gofmt + lint + vet + arch-lint + test + per-package coverage gate |
