@@ -4,8 +4,6 @@
 
 `execution-service` is the Temporal-backed runtime for the BPMN Workflow Engine platform: it starts, tracks, and drives workflow instances to completion, dispatching tasks to human assignees and other services along the way. It's the execution-time counterpart to `definition_service`, which owns design-time authoring and compilation of workflow templates.
 
-Currently at Tier-0: a bootstrapped skeleton (build/lint/test tooling, DB schema, proto contracts). No business logic yet.
-
 ## Getting Started
 
 Run `make help` for all available targets, or see [README.md](../README.md) for the full setup walkthrough.
