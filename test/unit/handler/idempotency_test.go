@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -183,6 +184,35 @@ func TestIdempotency_BodyReadError_BypassesProtection(t *testing.T) {
 	// point of this test is that WithIdempotency's own drainBody bypass runs
 	// the handler rather than panicking or hanging on the read error.
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, 0, calls)
+}
+
+// TestIdempotency_OversizedBody_RejectedNotProcessed is a regression test:
+// drainBody must cap its read at maxBodyBytes just like the wrapped
+// handler's own bindJSON does, so an oversized body can never be buffered in
+// full before the size floor gets a chance to reject it.
+func TestIdempotency_OversizedBody_RejectedNotProcessed(t *testing.T) {
+	calls := 0
+	fake := &fakeWorkflowClient{
+		reassignDelegate: func(context.Context, port.ReassignDelegateInput) (int, error) {
+			calls++
+			return 1, nil
+		},
+	}
+	cache := newFakeCacheStore()
+	router := newInternalRouter(newDelegateHandlerWithCache(fake, cache))
+
+	body := map[string]any{
+		"tenant_id":       testTenantID,
+		"old_delegate_id": testOldDelegateID,
+		"new_delegate_id": testNewDelegateID,
+		"padding":         strings.Repeat("a", 11<<20), // over the 10 MB cap
+	}
+	r := internalReq(http.MethodPost, "/api/v1/internal/workflows/reassign-delegate", body)
+	r.Header.Set("Idempotency-Key", "key-1")
+	w := do(router, r)
+
+	assert.NotEqual(t, http.StatusOK, w.Code, "an oversized body must never be processed as a valid idempotent request")
 	assert.Equal(t, 0, calls)
 }
 

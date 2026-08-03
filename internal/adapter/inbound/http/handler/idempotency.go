@@ -91,7 +91,7 @@ func WithIdempotency(cache port.CacheStore, ttl time.Duration, h gin.HandlerFunc
 }
 
 func drainBody(c *gin.Context) (body []byte, hash string, ok bool) {
-	b, err := io.ReadAll(c.Request.Body)
+	b, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes))
 	if err != nil {
 		return nil, "", false
 	}
