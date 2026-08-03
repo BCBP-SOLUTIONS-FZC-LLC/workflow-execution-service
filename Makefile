@@ -54,6 +54,7 @@ COVER_THRESHOLD    := 95
         setup install-hooks \
         docker-up docker-down \
         docker-build docker-build-server docker-build-worker docker-lint docker-trivy docker-check pin-base-images \
+        extract-schemas schema-validate schema-diff schema-register schema-prune \
         clean help
 
 all: generate build
@@ -291,6 +292,59 @@ pin-base-images:
 	rm -f Dockerfile.bak; \
 	printf 'golang:1.26-alpine@%s\ngcr.io/distroless/static-debian12:nonroot@%s\n' "$$GOLANG_DIGEST" "$$DISTROLESS_DIGEST" > .docker-digests; \
 	echo "Pinned base images — see .docker-digests"
+
+
+# platform-schemagov — event-schema governance (extract/validate/diff/register/prune)
+# against api/asyncapi.yaml + internal/eventschema/ (LLD §6.8). Structurally
+# copied from definition_service's Makefile (iam-user-profile agrees on shape).
+SCHEMA_GOV_IMAGE ?= ghcr.io/bcbp-solutions-fzc-llc/platform-schemagov:0.4
+
+## extract-schemas: Derive internal/eventschema/*.json from api/asyncapi.yaml
+extract-schemas:
+	docker run --rm -v "$(CURDIR)":/workspace "$(SCHEMA_GOV_IMAGE)" extract \
+	  --asyncapi   api/asyncapi.yaml \
+	  --schema-dir internal/eventschema
+
+## schema-validate: Structural/lifecycle/drift checks against api/asyncapi.yaml + internal/eventschema (no AWS required)
+schema-validate: extract-schemas
+	docker run --rm -v "$(CURDIR)":/workspace "$(SCHEMA_GOV_IMAGE)" validate \
+	  --asyncapi   api/asyncapi.yaml \
+	  --schema-dir internal/eventschema
+
+## schema-diff: Diff two JSON Schema files — usage: make schema-diff CURRENT=<current.json> PROPOSED=<proposed.json> [SCHEMA_NAME=<name>]
+schema-diff:
+	@test -n "$(CURRENT)" && test -n "$(PROPOSED)" || { \
+	  echo "Usage: make schema-diff CURRENT=<current.json> PROPOSED=<proposed.json> [SCHEMA_NAME=<name>]"; \
+	  exit 1; \
+	}
+	docker run --rm -v "$(CURDIR)":/workspace "$(SCHEMA_GOV_IMAGE)" diff \
+	  --current     "$(CURRENT)" \
+	  --proposed    "$(PROPOSED)" \
+	  --schema-name "$(or $(SCHEMA_NAME),$(notdir $(basename $(PROPOSED))))"
+
+## schema-register: Register schemas in AWS Glue (requires AWS creds or LocalStack via AWS_ENDPOINT_URL)
+schema-register:
+	@test -n "$(GLUE_REGISTRY_NAME)" || { \
+	  echo "GLUE_REGISTRY_NAME is not set — add it to .env or pass on the command line"; \
+	  exit 1; \
+	}
+	docker run --rm -v "$(CURDIR)":/workspace \
+	  -e AWS_REGION -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_ENDPOINT_URL \
+	  "$(SCHEMA_GOV_IMAGE)" register \
+	  --registry   "$(GLUE_REGISTRY_NAME)" \
+	  --schema-dir internal/eventschema
+
+## schema-prune: Report orphaned Glue schemas (set EXECUTE=true to actually delete)
+schema-prune:
+	@test -n "$(GLUE_REGISTRY_NAME)" || { \
+	  echo "GLUE_REGISTRY_NAME is not set — add it to .env or pass on the command line"; \
+	  exit 1; \
+	}
+	docker run --rm -v "$(CURDIR)":/workspace \
+	  -e AWS_REGION -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_ENDPOINT_URL \
+	  "$(SCHEMA_GOV_IMAGE)" prune \
+	  --registry "$(GLUE_REGISTRY_NAME)" \
+	  $(if $(filter true,$(EXECUTE)),--execute,)
 
 
 ## setup: First-time onboarding — copy .env.example → .env and install git hooks
