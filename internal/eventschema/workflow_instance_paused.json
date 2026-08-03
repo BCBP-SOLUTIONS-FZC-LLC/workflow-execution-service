@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WorkflowInstancePausedPayload",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["workflow_instance_id", "business_key", "workflow_version_id", "started_by_user_id", "initiator"],
+  "properties": {
+    "workflow_instance_id": { "type": "string", "format": "uuid" },
+    "business_key": { "type": "string" },
+    "workflow_version_id": { "type": "string", "format": "uuid" },
+    "started_by_user_id": { "type": "string", "format": "uuid" },
+    "initiator": { "type": "string", "enum": ["admin", "tenant_state", "safety_net", "ooo"] },
+    "actor_user_id": { "type": ["string", "null"], "format": "uuid" }
+  }
+}

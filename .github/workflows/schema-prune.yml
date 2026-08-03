@@ -1,0 +1,223 @@
+# Periodically prune orphaned (retired) schemas from the Glue Schema Registry.
+#
+# A schema is a prune candidate when it exists in Glue but has no corresponding
+# file in internal/eventschema/ — i.e. it has been retired and its JSON file
+# removed from the repo via the normal lifecycle process.
+#
+# Two modes:
+#   Dry-run (default): lists candidates and version counts. No AWS mutations.
+#   Execute          : archives all version definitions to docs/schema-archive/,
+#                      deletes the schema from Glue, commits the archive files.
+#
+# Archive layout committed to the repo:
+#   docs/schema-archive/
+#     {schema-name}/
+#       _meta.json  — provenance: schema, registry, environment, pruned_at
+#       v1.json     — raw JSON Schema definition as stored in Glue
+#       v2.json
+#       ...
+#
+# Triggers:
+#   schedule (monthly, 1st of month)  → staging dry-run report only
+#   workflow_dispatch                  → staging or production, dry-run or execute
+#
+# Design constraints:
+#   • Production pruning is NEVER scheduled — always requires a deliberate
+#     workflow_dispatch with environment=production. An operator must explicitly
+#     un-check dry_run to perform deletions.
+#   • The schedule produces a monthly candidate report. An operator reviews the
+#     output in the Actions log, then re-triggers manually with dry_run=false
+#     when ready to execute.
+#   • glue:DeleteSchema is permanent — once deleted, old consumers referencing
+#     a schema version UUID will receive an error from Glue. Only prune schemas
+#     that have been fully retired and all consumers confirmed migrated.
+#
+# Required GitHub environment secrets (staging / production):
+#   AWS_ACCESS_KEY_ID       — IAM key with glue:ListSchemas, glue:ListSchemaVersions
+#   AWS_SECRET_ACCESS_KEY     (plus glue:GetSchemaVersion + glue:DeleteSchema for execute)
+#
+# Required GitHub environment variables:
+#   AWS_REGION              — e.g. us-east-1
+#   GLUE_REGISTRY_NAME      — e.g. wf-workflow-events (staging), wf-workflow-events-prod (production)
+
+name: Schema Registry Prune
+
+"on":
+  schedule:
+    - cron: '0 2 1 * *'    # monthly on the 1st at 02:00 UTC — staging dry-run report
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target registry environment'
+        required: true
+        type: choice
+        options: [staging, production]
+        default: staging
+      dry_run:
+        description: 'Dry run — list candidates only; no deletions or archive commits'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  SCHEMA_GOV_IMAGE: ghcr.io/bcbp-solutions-fzc-llc/platform-schemagov:0.4
+
+jobs:
+  # ── Staging ─────────────────────────────────────────────────────────────────
+  # Triggered by the monthly schedule (always dry-run) or workflow_dispatch
+  # targeting staging (dry-run or execute, per the input).
+  prune-staging:
+    name: Prune schemas → staging
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
+    environment: staging
+    permissions:
+      contents: write    # required by "Commit archived schemas" step (execute mode only)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.0
+        with:
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@6.2.2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Schedule always runs dry-run (generates a monthly candidate report).
+      # workflow_dispatch respects the dry_run input; un-check to execute.
+      - name: Prune orphaned schemas
+        env:
+          # Treat any non-false value (including schedule's empty string) as dry-run.
+          IS_SCHEDULE: ${{ github.event_name == 'schedule' }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+        run: |
+          EXECUTE_FLAG=""
+          if [ "${IS_SCHEDULE}" != "true" ] && [ "${DRY_RUN_INPUT}" = "false" ]; then
+            EXECUTE_FLAG="--execute"
+          fi
+          docker run --rm \
+            -v "${{ github.workspace }}":/workspace \
+            -v "${{ runner.temp }}":/tmp \
+            -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
+            -e AWS_REGION="${{ vars.AWS_REGION }}" \
+            -e GITHUB_ACTIONS \
+            "${{ env.SCHEMA_GOV_IMAGE }}" prune \
+            --registry "${{ vars.GLUE_REGISTRY_NAME }}" \
+            --env      staging \
+            --output   /tmp/schema-prune-metrics.json \
+            ${EXECUTE_FLAG}
+
+      # Commit the archive files produced by execute mode.
+      # Skip in dry-run and on schedule (both are read-only).
+      - name: Commit archived schemas
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false }}
+        env:
+          REGISTRY_NAME: ${{ vars.GLUE_REGISTRY_NAME }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/schema-archive/
+          if git diff --cached --quiet; then
+            echo "  ·  nothing to commit (no schemas archived — all candidates may have failed)"
+            exit 0
+          fi
+          PRUNED=$(jq -r '.pruned // 0' "${RUNNER_TEMP}/schema-prune-metrics.json" 2>/dev/null || echo 0)
+          ARCHIVED=$(jq -r '.archived // 0' "${RUNNER_TEMP}/schema-prune-metrics.json" 2>/dev/null || echo 0)
+          git commit -m "chore(schema-archive): archive ${PRUNED} retired schema(s), ${ARCHIVED} version(s) from ${REGISTRY_NAME} (staging)"
+          _MAX=3 _i=0
+          while [ "$_i" -lt "$_MAX" ]; do
+            _i=$((_i + 1))
+            if git push origin HEAD; then
+              echo "  ✔  archive committed (attempt ${_i})"
+              break
+            fi
+            if [ "$_i" -ge "$_MAX" ]; then
+              echo "  ⚠  push failed after ${_MAX} attempts" >&2
+              break
+            fi
+            echo "  ⟳  push rejected (attempt ${_i}) — rebasing..."
+            git fetch origin main
+            git rebase origin/main || { git rebase --abort || true; break; }
+          done
+
+  # ── Production ──────────────────────────────────────────────────────────────
+  # NEVER triggered by schedule — only by explicit workflow_dispatch with
+  # environment=production. Defaults to dry_run=true so an operator must
+  # deliberately un-check the dry-run box to perform actual Glue deletions.
+  prune-production:
+    name: Prune schemas → production
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production'
+    environment: production
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.0
+        with:
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@6.2.2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Prune orphaned schemas
+        env:
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+        run: |
+          EXECUTE_FLAG=""
+          [ "${DRY_RUN_INPUT}" = "false" ] && EXECUTE_FLAG="--execute"
+          docker run --rm \
+            -v "${{ github.workspace }}":/workspace \
+            -v "${{ runner.temp }}":/tmp \
+            -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
+            -e AWS_REGION="${{ vars.AWS_REGION }}" \
+            -e GITHUB_ACTIONS \
+            "${{ env.SCHEMA_GOV_IMAGE }}" prune \
+            --registry "${{ vars.GLUE_REGISTRY_NAME }}" \
+            --env      production \
+            --output   /tmp/schema-prune-metrics.json \
+            ${EXECUTE_FLAG}
+
+      - name: Commit archived schemas
+        if: ${{ inputs.dry_run == false }}
+        env:
+          REGISTRY_NAME: ${{ vars.GLUE_REGISTRY_NAME }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/schema-archive/
+          if git diff --cached --quiet; then
+            echo "  ·  nothing to commit (no schemas archived)"
+            exit 0
+          fi
+          PRUNED=$(jq -r '.pruned // 0' "${RUNNER_TEMP}/schema-prune-metrics.json" 2>/dev/null || echo 0)
+          ARCHIVED=$(jq -r '.archived // 0' "${RUNNER_TEMP}/schema-prune-metrics.json" 2>/dev/null || echo 0)
+          git commit -m "chore(schema-archive): archive ${PRUNED} retired schema(s), ${ARCHIVED} version(s) from ${REGISTRY_NAME} (production)"
+          _MAX=3 _i=0
+          while [ "$_i" -lt "$_MAX" ]; do
+            _i=$((_i + 1))
+            if git push origin HEAD; then
+              echo "  ✔  archive committed (attempt ${_i})"
+              break
+            fi
+            if [ "$_i" -ge "$_MAX" ]; then
+              echo "  ⚠  push failed after ${_MAX} attempts" >&2
+              break
+            fi
+            echo "  ⟳  push rejected (attempt ${_i}) — rebasing..."
+            git fetch origin main
+            git push origin HEAD:refs/heads/main || { git rebase --abort || true; break; }
+          done

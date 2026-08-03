@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WorkflowInstanceFinishedPayload",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["workflow_instance_id", "business_key", "workflow_version_id", "started_by_user_id", "completed_at"],
+  "properties": {
+    "workflow_instance_id": { "type": "string", "format": "uuid" },
+    "business_key": { "type": "string" },
+    "workflow_version_id": { "type": "string", "format": "uuid" },
+    "started_by_user_id": { "type": "string", "format": "uuid" },
+    "completed_at": { "type": "string", "format": "date-time" }
+  }
+}
