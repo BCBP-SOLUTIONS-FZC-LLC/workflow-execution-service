@@ -44,6 +44,15 @@ type Handler struct {
 	workflowClient port.WorkflowClient
 	cache          port.CacheStore
 	idempotencyTTL time.Duration
+
+	processedEvents port.ProcessedEventRepository
+	recency         port.RecencyGuard
+	delegation      port.DelegationReconciler
+	tenantLifecycle port.TenantLifecycleReconciler
+	userSafetyNet   port.UserSafetyNetReconciler
+	oooAvailability port.OOOAvailabilityReconciler
+	templateCache   port.TemplateCachePrewarmer
+	log             port.Logger
 }
 
 type Services struct {
@@ -55,6 +64,16 @@ type Services struct {
 	// valkey.Cache and passes it in.
 	Cache          port.CacheStore
 	IdempotencyTTL time.Duration
+
+	ProcessedEvents port.ProcessedEventRepository
+	Recency         port.RecencyGuard
+	Delegation      port.DelegationReconciler
+	TenantLifecycle port.TenantLifecycleReconciler
+	UserSafetyNet   port.UserSafetyNetReconciler
+	OOOAvailability port.OOOAvailabilityReconciler
+	TemplateCache   port.TemplateCachePrewarmer
+	// Log is nil-safe throughout this package — every call site guards it.
+	Log port.Logger
 }
 
 func New(s Services) *Handler {
@@ -68,6 +87,15 @@ func New(s Services) *Handler {
 		workflowClient: s.WorkflowClient,
 		cache:          s.Cache,
 		idempotencyTTL: ttl,
+
+		processedEvents: s.ProcessedEvents,
+		recency:         s.Recency,
+		delegation:      s.Delegation,
+		tenantLifecycle: s.TenantLifecycle,
+		userSafetyNet:   s.UserSafetyNet,
+		oooAvailability: s.OOOAvailability,
+		templateCache:   s.TemplateCache,
+		log:             s.Log,
 	}
 }
 
@@ -142,6 +170,24 @@ func parseIDParam(c *gin.Context) (uuid.UUID, bool) {
 		return uuid.Nil, false
 	}
 	return id, true
+}
+
+func (h *Handler) logInfo(msg string, fields map[string]any) {
+	if h.log != nil {
+		h.log.Info(msg, fields)
+	}
+}
+
+func (h *Handler) logWarn(msg string, fields map[string]any) {
+	if h.log != nil {
+		h.log.Warn(msg, fields)
+	}
+}
+
+func (h *Handler) logError(msg string, fields map[string]any) {
+	if h.log != nil {
+		h.log.Error(msg, fields)
+	}
 }
 
 // pageParams round-trips the opaque cursor (LLD §5.9); decoding happens

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -200,6 +201,291 @@ func (f *fakeCacheStore) Ping(_ context.Context) error { return nil }
 
 var _ port.CacheStore = (*fakeCacheStore)(nil)
 
+// fakeProcessedEventRepository is the hand-rolled fake for
+// port.ProcessedEventRepository, backed by an in-memory set of
+// "eventID:consumer" keys.
+type fakeProcessedEventRepository struct {
+	seen map[string]bool
+}
+
+func newFakeProcessedEventRepository() *fakeProcessedEventRepository {
+	return &fakeProcessedEventRepository{seen: map[string]bool{}}
+}
+
+func processedKey(eventID uuid.UUID, consumer string) string {
+	return eventID.String() + ":" + consumer
+}
+
+func (f *fakeProcessedEventRepository) IsProcessed(_ context.Context, eventID uuid.UUID, consumer string) (bool, error) {
+	return f.seen[processedKey(eventID, consumer)], nil
+}
+
+func (f *fakeProcessedEventRepository) RecordIfNew(_ context.Context, eventID uuid.UUID, consumer, _ string) (bool, error) {
+	key := processedKey(eventID, consumer)
+	if f.seen[key] {
+		return false, nil
+	}
+	f.seen[key] = true
+	return true, nil
+}
+
+func (f *fakeProcessedEventRepository) PruneOlderThan(context.Context, time.Duration) (int64, error) {
+	return 0, nil
+}
+
+var _ port.ProcessedEventRepository = (*fakeProcessedEventRepository)(nil)
+
+// fakeRecencyGuard is the hand-rolled fake for port.RecencyGuard, backed by
+// an in-memory map of scopeKey -> last-applied time.
+type fakeRecencyGuard struct {
+	last map[string]time.Time
+}
+
+func newFakeRecencyGuard() *fakeRecencyGuard {
+	return &fakeRecencyGuard{last: map[string]time.Time{}}
+}
+
+func (f *fakeRecencyGuard) ShouldApply(_ context.Context, scopeKey string, eventTime time.Time) (bool, error) {
+	last, ok := f.last[scopeKey]
+	return !ok || eventTime.After(last), nil
+}
+
+func (f *fakeRecencyGuard) CheckAndCommit(_ context.Context, scopeKey string, eventTime time.Time) (bool, error) {
+	last, ok := f.last[scopeKey]
+	if ok && !eventTime.After(last) {
+		return false, nil
+	}
+	f.last[scopeKey] = eventTime
+	return true, nil
+}
+
+func (f *fakeRecencyGuard) Commit(_ context.Context, scopeKey string, eventTime time.Time) error {
+	if last, ok := f.last[scopeKey]; !ok || eventTime.After(last) {
+		f.last[scopeKey] = eventTime
+	}
+	return nil
+}
+
+var _ port.RecencyGuard = (*fakeRecencyGuard)(nil)
+
+type fakeDelegationReconciler struct {
+	reroute func(context.Context, port.DelegationRerouteInput) error
+	reverse func(context.Context, port.DelegationReversalInput) error
+}
+
+func (f *fakeDelegationReconciler) Reroute(ctx context.Context, in port.DelegationRerouteInput) error {
+	if f.reroute != nil {
+		return f.reroute(ctx, in)
+	}
+	return nil
+}
+
+func (f *fakeDelegationReconciler) Reverse(ctx context.Context, in port.DelegationReversalInput) error {
+	if f.reverse != nil {
+		return f.reverse(ctx, in)
+	}
+	return nil
+}
+
+var _ port.DelegationReconciler = (*fakeDelegationReconciler)(nil)
+
+type fakeUserSafetyNetReconciler struct {
+	vacateAssignments func(context.Context, port.UserDeletedInput) error
+}
+
+func (f *fakeUserSafetyNetReconciler) VacateAssignments(ctx context.Context, in port.UserDeletedInput) error {
+	if f.vacateAssignments != nil {
+		return f.vacateAssignments(ctx, in)
+	}
+	return nil
+}
+
+var _ port.UserSafetyNetReconciler = (*fakeUserSafetyNetReconciler)(nil)
+
+type fakeOOOAvailabilityReconciler struct {
+	apply func(context.Context, port.UserAvailabilityInput) error
+}
+
+func (f *fakeOOOAvailabilityReconciler) Apply(ctx context.Context, in port.UserAvailabilityInput) error {
+	if f.apply != nil {
+		return f.apply(ctx, in)
+	}
+	return nil
+}
+
+var _ port.OOOAvailabilityReconciler = (*fakeOOOAvailabilityReconciler)(nil)
+
+type fakeTenantLifecycleReconciler struct {
+	apply func(context.Context, port.TenantLifecycleInput) error
+}
+
+func (f *fakeTenantLifecycleReconciler) Apply(ctx context.Context, in port.TenantLifecycleInput) error {
+	if f.apply != nil {
+		return f.apply(ctx, in)
+	}
+	return nil
+}
+
+var _ port.TenantLifecycleReconciler = (*fakeTenantLifecycleReconciler)(nil)
+
+type fakeTemplateCachePrewarmer struct {
+	prewarm func(context.Context, port.TemplatePublishedInput) error
+}
+
+func (f *fakeTemplateCachePrewarmer) Prewarm(ctx context.Context, in port.TemplatePublishedInput) error {
+	if f.prewarm != nil {
+		return f.prewarm(ctx, in)
+	}
+	return nil
+}
+
+var _ port.TemplateCachePrewarmer = (*fakeTemplateCachePrewarmer)(nil)
+
+// fakeLogger records nothing by default; tests that care about a specific
+// log call inject their own func fields.
+type fakeLogger struct {
+	warn func(string, map[string]any)
+	info func(string, map[string]any)
+}
+
+func (f *fakeLogger) Debug(string, map[string]any) {}
+
+func (f *fakeLogger) Info(msg string, fields map[string]any) {
+	if f.info != nil {
+		f.info(msg, fields)
+	}
+}
+
+func (f *fakeLogger) Warn(msg string, fields map[string]any) {
+	if f.warn != nil {
+		f.warn(msg, fields)
+	}
+}
+
+func (f *fakeLogger) Error(string, map[string]any) {}
+
+var _ port.Logger = (*fakeLogger)(nil)
+
+// eventsFakes bundles one fake per internal_events.go dependency so tests
+// can construct a full handler.Services in one call and still reach into
+// any individual fake's recorded state.
+type eventsFakes struct {
+	processedEvents *fakeProcessedEventRepository
+	recency         *fakeRecencyGuard
+	delegation      *fakeDelegationReconciler
+	tenantLifecycle *fakeTenantLifecycleReconciler
+	userSafetyNet   *fakeUserSafetyNetReconciler
+	oooAvailability *fakeOOOAvailabilityReconciler
+	templateCache   *fakeTemplateCachePrewarmer
+	log             *fakeLogger
+}
+
+func newEventsFakes() *eventsFakes {
+	return &eventsFakes{
+		processedEvents: newFakeProcessedEventRepository(),
+		recency:         newFakeRecencyGuard(),
+		delegation:      &fakeDelegationReconciler{},
+		tenantLifecycle: &fakeTenantLifecycleReconciler{},
+		userSafetyNet:   &fakeUserSafetyNetReconciler{},
+		oooAvailability: &fakeOOOAvailabilityReconciler{},
+		templateCache:   &fakeTemplateCachePrewarmer{},
+		log:             &fakeLogger{},
+	}
+}
+
+// erroringRecencyGuard forces every method to return err — used to exercise
+// a handler's recency-check-failure branch without the fake's normal
+// in-memory bookkeeping getting in the way.
+type erroringRecencyGuard struct {
+	err error
+}
+
+func (e *erroringRecencyGuard) ShouldApply(context.Context, string, time.Time) (bool, error) {
+	return false, e.err
+}
+
+func (e *erroringRecencyGuard) CheckAndCommit(context.Context, string, time.Time) (bool, error) {
+	return false, e.err
+}
+
+func (e *erroringRecencyGuard) Commit(context.Context, string, time.Time) error { return e.err }
+
+var _ port.RecencyGuard = (*erroringRecencyGuard)(nil)
+
+// erroringProcessedEventRepository lets a test force IsProcessed and/or
+// RecordIfNew to fail independently, to exercise a handler's
+// "proceed anyway"/"still return 200" fallback branches.
+type erroringProcessedEventRepository struct {
+	isProcessedErr error
+	recordErr      error
+}
+
+func (e *erroringProcessedEventRepository) IsProcessed(context.Context, uuid.UUID, string) (bool, error) {
+	return false, e.isProcessedErr
+}
+
+func (e *erroringProcessedEventRepository) RecordIfNew(context.Context, uuid.UUID, string, string) (bool, error) {
+	return false, e.recordErr
+}
+
+func (e *erroringProcessedEventRepository) PruneOlderThan(context.Context, time.Duration) (int64, error) {
+	return 0, nil
+}
+
+var _ port.ProcessedEventRepository = (*erroringProcessedEventRepository)(nil)
+
+// erroringCommitRecencyGuard delegates ShouldApply/CheckAndCommit to a real
+// fakeRecencyGuard but always fails Commit — used to exercise a handler's
+// "log and proceed" fallback when the post-Apply recency commit fails.
+type erroringCommitRecencyGuard struct {
+	*fakeRecencyGuard
+}
+
+func (e *erroringCommitRecencyGuard) Commit(context.Context, string, time.Time) error {
+	return errors.New("recency commit failed")
+}
+
+var _ port.RecencyGuard = (*erroringCommitRecencyGuard)(nil)
+
+func newEventsHandlerWithRecency(f *eventsFakes, recency port.RecencyGuard) *handler.Handler {
+	return handler.New(handler.Services{
+		ProcessedEvents: f.processedEvents,
+		Recency:         recency,
+		Delegation:      f.delegation,
+		TenantLifecycle: f.tenantLifecycle,
+		UserSafetyNet:   f.userSafetyNet,
+		OOOAvailability: f.oooAvailability,
+		TemplateCache:   f.templateCache,
+		Log:             f.log,
+	})
+}
+
+func newEventsHandlerWithProcessedEvents(f *eventsFakes, processedEvents port.ProcessedEventRepository) *handler.Handler {
+	return handler.New(handler.Services{
+		ProcessedEvents: processedEvents,
+		Recency:         f.recency,
+		Delegation:      f.delegation,
+		TenantLifecycle: f.tenantLifecycle,
+		UserSafetyNet:   f.userSafetyNet,
+		OOOAvailability: f.oooAvailability,
+		TemplateCache:   f.templateCache,
+		Log:             f.log,
+	})
+}
+
+func newEventsHandler(f *eventsFakes) *handler.Handler {
+	return handler.New(handler.Services{
+		ProcessedEvents: f.processedEvents,
+		Recency:         f.recency,
+		Delegation:      f.delegation,
+		TenantLifecycle: f.tenantLifecycle,
+		UserSafetyNet:   f.userSafetyNet,
+		OOOAvailability: f.oooAvailability,
+		TemplateCache:   f.templateCache,
+		Log:             f.log,
+	})
+}
+
 func newHandler(tasks *fakeTaskService, eligibility *fakeEligibilityChecker) *handler.Handler {
 	return handler.New(handler.Services{Tasks: tasks, Eligibility: eligibility})
 }
@@ -224,13 +510,15 @@ func newRouter(h *handler.Handler) *gin.Engine {
 }
 
 // newInternalRouter builds a BARE router (no gincommon.ProtectedMiddlewares,
-// no middleware.RequireInternalToken) for the /internal/workflows/* routes —
+// no middleware.RequireInternalToken) for the /internal group's routes —
 // these callers carry no gateway identity, and the token guard is a
 // separate middleware-package concern tested on its own.
 func newInternalRouter(h *handler.Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	handler.RegisterInternalRoutes(r.Group("/api/v1/internal"), h)
+	rg := r.Group("/api/v1/internal")
+	handler.RegisterInternalRoutes(rg, h)
+	handler.RegisterInternalEventsRoutes(rg, h)
 	return r
 }
 

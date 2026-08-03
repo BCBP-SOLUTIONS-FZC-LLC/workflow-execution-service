@@ -30,3 +30,14 @@ func RegisterInternalRoutes(rg *gin.RouterGroup, h *Handler) {
 	workflows.POST("/cancel-by-delegate", WithIdempotency(h.cache, h.idempotencyTTL, h.CancelByDelegate))
 	workflows.GET("/delegate-impact", h.DelegateImpact)
 }
+
+// RegisterInternalEventsRoutes mounts POST /internal/events (LLD §6.1) onto
+// rg — the same /internal-rooted group RegisterInternalRoutes uses. Kept as
+// a sibling function rather than folded into RegisterInternalRoutes: that
+// function's own doc comment specifically scopes it to /internal/workflows/*,
+// and this repo already splits registration by feature area (RegisterRoutes
+// vs. RegisterInternalRoutes) — T2.1's future composition root calls both on
+// the same real /internal group.
+func RegisterInternalEventsRoutes(rg *gin.RouterGroup, h *Handler) {
+	rg.POST("/events", h.HandleInternalEvent)
+}
