@@ -88,13 +88,14 @@ type TenantLifecycleReconciler interface {
 }
 
 type TemplatePublishedInput struct {
-	TenantID      uuid.UUID
-	WorkflowID    uuid.UUID
-	WorkflowKey   string
-	VersionID     uuid.UUID
-	VersionNumber int
-	ArtifactHash  string
-	PublishedBy   uuid.UUID
+	TenantID            uuid.UUID
+	WorkflowID          uuid.UUID
+	WorkflowKey         string
+	VersionID           uuid.UUID
+	VersionNumber       int
+	ArtifactHash        string
+	PublishedBy         uuid.UUID
+	PromotedFromVersion *uuid.UUID
 }
 
 // TemplateCachePrewarmer.Prewarm is fail-open by handler contract (LLD §6.2

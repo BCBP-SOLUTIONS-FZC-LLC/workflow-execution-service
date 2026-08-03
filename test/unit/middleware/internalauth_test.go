@@ -1,12 +1,14 @@
 package middleware_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/middleware"
 )
@@ -46,6 +48,7 @@ func TestRequireInternalToken_MissingHeader_401(t *testing.T) {
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/probe", nil))
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assertProblemBody(t, w)
 }
 
 func TestRequireInternalToken_MismatchedHeader_401(t *testing.T) {
@@ -57,4 +60,19 @@ func TestRequireInternalToken_MismatchedHeader_401(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assertProblemBody(t, w)
+}
+
+// assertProblemBody is a regression check: the 401 used to be a bare status
+// code with no body at all, unlike the OpenAPI spec's documented Unauthorized
+// RFC-9457 response.
+func assertProblemBody(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	var body struct {
+		Code   string `json:"code"`
+		Status int    `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "UNAUTHORIZED", body.Code)
+	assert.Equal(t, http.StatusUnauthorized, body.Status)
 }

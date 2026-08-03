@@ -75,10 +75,12 @@ var problemTypes = map[int]string{
 
 // problemTypesByCode overrides problemTypes[status] for codes whose OpenAPI
 // contract names a `type` URI distinct from their status's generic one —
-// only TENANT_MISMATCH today (its 403 example is distinct from a generic
-// forbidden); every other code keeps sharing the status-keyed URI above.
+// TENANT_MISMATCH (its 403 example is distinct from a generic forbidden) and
+// IDEMPOTENCY_KEY_REPLAY (its 409 example is distinct from a generic
+// conflict); every other code keeps sharing the status-keyed URI above.
 var problemTypesByCode = map[ErrCode]string{
-	CodeTenantMismatch: errBase + "tenant-mismatch",
+	CodeTenantMismatch:    errBase + "tenant-mismatch",
+	CodeIdempotencyReplay: errBase + "idempotency-key-replay",
 }
 
 type problemDetails struct {

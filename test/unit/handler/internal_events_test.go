@@ -214,6 +214,26 @@ func TestHandleInternalEvent_DelegationEnded_Success(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, testDelegationID2, gotIn.DelegationID)
 	assert.Equal(t, "expired", gotIn.EndedReason)
+	assert.Equal(t, testTenantID, gotIn.TenantID, "DelegationReversalInput.TenantID must be threaded through, matching every sibling handler")
+}
+
+// TestHandleInternalEvent_DelegationEnded_InvalidEnvelopeTenantID_400 is a
+// regression test: handleDelegationEnded previously never validated
+// env.TenantID at all, silently leaving DelegationReversalInput.TenantID
+// zero-valued instead of rejecting a malformed envelope like every sibling
+// handler does.
+func TestHandleInternalEvent_DelegationEnded_InvalidEnvelopeTenantID_400(t *testing.T) {
+	fakes := newEventsFakes()
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	body := envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
+		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID,
+		"delegate_id": testDelegateID2, "ended_reason": "expired",
+	})
+	body["tenant_id"] = "not-a-uuid"
+
+	w := postEvent(router, body)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestHandleInternalEvent_DelegationEnded_UnknownEndedReason_StillProcessed(t *testing.T) {
@@ -455,6 +475,32 @@ func TestHandleInternalEvent_TemplatePublished_Success(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "tender-approval", gotIn.WorkflowKey)
+	assert.Nil(t, gotIn.PromotedFromVersion)
+}
+
+func TestHandleInternalEvent_TemplatePublished_PromotedFromVersion_PassedThrough(t *testing.T) {
+	fakes := newEventsFakes()
+	var gotIn port.TemplatePublishedInput
+	fakes.templateCache.prewarm = func(_ context.Context, in port.TemplatePublishedInput) error {
+		gotIn = in
+		return nil
+	}
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	promotedFrom := uuid.New()
+	w := postEvent(router, envelope("workflow.template.published", uuid.New(), testTenantID, time.Now(), map[string]any{
+		"workflow_id":              testInstID.String(),
+		"workflow_key":             "tender-approval",
+		"version_id":               testTaskID.String(),
+		"version_number":           3,
+		"artifact_hash":            "sha256:abc",
+		"published_by":             testUserID.String(),
+		"promoted_from_version_id": promotedFrom.String(),
+	}))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotNil(t, gotIn.PromotedFromVersion)
+	assert.Equal(t, promotedFrom, *gotIn.PromotedFromVersion)
 }
 
 func TestHandleInternalEvent_TemplatePublished_PrewarmFails_StillReturns200_FailOpen(t *testing.T) {
@@ -707,7 +753,7 @@ func TestHandleInternalEvent_TemplatePublished_InvalidFields(t *testing.T) {
 			"published_by":   testUserID.String(),
 		}
 	}
-	for _, field := range []string{"workflow_id", "version_id", "published_by"} {
+	for _, field := range []string{"workflow_id", "version_id", "published_by", "promoted_from_version_id"} {
 		t.Run(field, func(t *testing.T) {
 			fakes := newEventsFakes()
 			router := newInternalRouter(newEventsHandler(fakes))

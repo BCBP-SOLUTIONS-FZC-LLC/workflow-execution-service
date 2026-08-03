@@ -26,8 +26,8 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler) {
 // middleware.RequireInternalToken on rg itself before calling this.
 func RegisterInternalRoutes(rg *gin.RouterGroup, h *Handler) {
 	workflows := rg.Group("/workflows")
-	workflows.POST("/reassign-delegate", WithIdempotency(h.cache, h.idempotencyTTL, h.ReassignDelegate))
-	workflows.POST("/cancel-by-delegate", WithIdempotency(h.cache, h.idempotencyTTL, h.CancelByDelegate))
+	workflows.POST("/reassign-delegate", WithIdempotency(h.cache, h.idempotencyTTL, h.log, h.ReassignDelegate))
+	workflows.POST("/cancel-by-delegate", WithIdempotency(h.cache, h.idempotencyTTL, h.log, h.CancelByDelegate))
 	workflows.GET("/delegate-impact", h.DelegateImpact)
 }
 

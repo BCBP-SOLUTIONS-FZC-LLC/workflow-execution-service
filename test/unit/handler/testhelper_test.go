@@ -498,6 +498,10 @@ func newDelegateHandlerWithCache(wc *fakeWorkflowClient, cache *fakeCacheStore) 
 	return handler.New(handler.Services{WorkflowClient: wc, Cache: cache, IdempotencyTTL: time.Hour})
 }
 
+func newDelegateHandlerWithCacheAndLog(wc *fakeWorkflowClient, cache *fakeCacheStore, log *fakeLogger) *handler.Handler {
+	return handler.New(handler.Services{WorkflowClient: wc, Cache: cache, IdempotencyTTL: time.Hour, Log: log})
+}
+
 func newRouter(h *handler.Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

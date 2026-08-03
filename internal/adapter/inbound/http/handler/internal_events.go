@@ -249,6 +249,10 @@ func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json
 	if !ok {
 		return
 	}
+	tenantID, ok := h.parseTenantID(c, eventType, env.TenantID)
+	if !ok {
+		return
+	}
 	delegationID, err := uuid.Parse(p.DelegationID)
 	if err != nil {
 		h.badPayload(c, eventType, "invalid delegation_id in payload")
@@ -279,6 +283,7 @@ func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json
 
 	ctx := guCtx(c, env.TenantID)
 	if err := h.delegation.Reverse(ctx, port.DelegationReversalInput{
+		TenantID:     tenantID,
 		DelegationID: delegationID,
 		DelegatorID:  delegatorID,
 		DelegateID:   delegateID,
@@ -539,12 +544,13 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 // --- workflow.template.published ---
 
 type templatePublishedPayload struct {
-	WorkflowID    string `json:"workflow_id"`
-	WorkflowKey   string `json:"workflow_key"`
-	VersionID     string `json:"version_id"`
-	VersionNumber int    `json:"version_number"`
-	ArtifactHash  string `json:"artifact_hash"`
-	PublishedBy   string `json:"published_by"`
+	WorkflowID          string  `json:"workflow_id"`
+	WorkflowKey         string  `json:"workflow_key"`
+	VersionID           string  `json:"version_id"`
+	VersionNumber       int     `json:"version_number"`
+	ArtifactHash        string  `json:"artifact_hash"`
+	PublishedBy         string  `json:"published_by"`
+	PromotedFromVersion *string `json:"promoted_from_version_id"`
 }
 
 func (h *Handler) handleTemplatePublished(c *gin.Context, env events.Envelope[json.RawMessage]) {
@@ -577,6 +583,15 @@ func (h *Handler) handleTemplatePublished(c *gin.Context, env events.Envelope[js
 		h.badPayload(c, eventType, "invalid published_by in payload")
 		return
 	}
+	var promotedFromVersion *uuid.UUID
+	if p.PromotedFromVersion != nil {
+		v, err := uuid.Parse(*p.PromotedFromVersion)
+		if err != nil {
+			h.badPayload(c, eventType, "invalid promoted_from_version_id in payload")
+			return
+		}
+		promotedFromVersion = &v
+	}
 
 	if h.alreadyProcessed(c, eventID, consumerTemplate, eventType) {
 		return
@@ -597,13 +612,14 @@ func (h *Handler) handleTemplatePublished(c *gin.Context, env events.Envelope[js
 	if applied {
 		ctx := guCtx(c, env.TenantID)
 		if err := h.templateCache.Prewarm(ctx, port.TemplatePublishedInput{
-			TenantID:      tenantID,
-			WorkflowID:    workflowID,
-			WorkflowKey:   p.WorkflowKey,
-			VersionID:     versionID,
-			VersionNumber: p.VersionNumber,
-			ArtifactHash:  p.ArtifactHash,
-			PublishedBy:   publishedBy,
+			TenantID:            tenantID,
+			WorkflowID:          workflowID,
+			WorkflowKey:         p.WorkflowKey,
+			VersionID:           versionID,
+			VersionNumber:       p.VersionNumber,
+			ArtifactHash:        p.ArtifactHash,
+			PublishedBy:         publishedBy,
+			PromotedFromVersion: promotedFromVersion,
 		}); err != nil {
 			// Fail-open by design (LLD §6.2 item 5): a warm-fetch failure
 			// logs and still returns 200 — the plan loads lazily on the next

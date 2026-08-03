@@ -53,12 +53,11 @@ func hashBody(b []byte) string {
 //
 // If cache is nil (dev/test, or before T2.1 wires a real Valkey client) or
 // the header is absent, the handler runs as-is with no idempotency
-// enforcement — unlike definition_service's version, this one does not take
-// a logger: execution_service has no port.Logger abstraction yet, and the
-// one rare failure mode this would log (a request-body read error) simply
-// bypasses idempotency protection instead, matching the wrapper's own
-// existing "run the handler anyway" fallback behavior for that case.
-func WithIdempotency(cache port.CacheStore, ttl time.Duration, h gin.HandlerFunc) gin.HandlerFunc {
+// enforcement. A cache Get/Set failure is fail-open (LLD §5.9: Valkey being
+// unreachable never blocks the request) and is logged at WARN via log, which
+// may be nil (in which case it's silently skipped, same as every other
+// logWarn call site in this package).
+func WithIdempotency(cache port.CacheStore, ttl time.Duration, log port.Logger, h gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		key := c.GetHeader("Idempotency-Key")
 		if key == "" || cache == nil {
@@ -79,14 +78,20 @@ func WithIdempotency(cache port.CacheStore, ttl time.Duration, h gin.HandlerFunc
 		// scope by, and body-hash comparison already prevents cross-tenant
 		// key reuse from replaying the wrong tenant's cached response.
 		cacheKey := "idem:" + c.Request.Method + ":" + c.Request.URL.Path + ":" + key
-		if replayed := replayIfCached(c, cache, cacheKey, incomingHash); replayed {
+		if replayed := replayIfCached(c, cache, cacheKey, incomingHash, log); replayed {
 			return
 		}
 
 		rec := &bodyRecorder{ResponseWriter: c.Writer, buf: &bytes.Buffer{}}
 		c.Writer = rec
 		h(c)
-		storeIfSuccess(c, cache, cacheKey, incomingHash, ttl, rec)
+		storeIfSuccess(c, cache, cacheKey, incomingHash, ttl, rec, log)
+	}
+}
+
+func idempotencyLogWarn(log port.Logger, msg string, fields map[string]any) {
+	if log != nil {
+		log.Warn(msg, fields)
 	}
 }
 
@@ -98,9 +103,15 @@ func drainBody(c *gin.Context) (body []byte, hash string, ok bool) {
 	return b, hashBody(b), true
 }
 
-func replayIfCached(c *gin.Context, cache port.CacheStore, cacheKey, incomingHash string) bool {
+func replayIfCached(c *gin.Context, cache port.CacheStore, cacheKey, incomingHash string, log port.Logger) bool {
 	raw, err := cache.Get(c.Request.Context(), cacheKey)
-	if err != nil || raw == "" {
+	if err != nil {
+		idempotencyLogWarn(log, "idempotency: cache get failed, proceeding without replay", map[string]any{
+			"cache_key": cacheKey, "error": err.Error(),
+		})
+		return false
+	}
+	if raw == "" {
 		return false
 	}
 	var cr cachedResp
@@ -115,12 +126,16 @@ func replayIfCached(c *gin.Context, cache port.CacheStore, cacheKey, incomingHas
 	return true
 }
 
-func storeIfSuccess(c *gin.Context, cache port.CacheStore, cacheKey, incomingHash string, ttl time.Duration, rec *bodyRecorder) {
+func storeIfSuccess(c *gin.Context, cache port.CacheStore, cacheKey, incomingHash string, ttl time.Duration, rec *bodyRecorder, log port.Logger) {
 	status := rec.Status()
 	if status < http.StatusOK || status >= http.StatusMultipleChoices {
 		return
 	}
 	entry := cachedResp{Status: status, Body: rec.buf.Bytes(), BodyHash: incomingHash}
 	b, _ := json.Marshal(entry) // cachedResp contains only JSON-safe types; Marshal never errors
-	_ = cache.Set(c.Request.Context(), cacheKey, string(b), ttl)
+	if err := cache.Set(c.Request.Context(), cacheKey, string(b), ttl); err != nil {
+		idempotencyLogWarn(log, "idempotency: cache set failed, response not cached for replay", map[string]any{
+			"cache_key": cacheKey, "error": err.Error(),
+		})
+	}
 }

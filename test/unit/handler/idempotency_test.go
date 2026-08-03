@@ -129,9 +129,11 @@ func TestIdempotency_ReplayDifferentBody_409(t *testing.T) {
 	require.Equal(t, http.StatusConflict, w2.Code)
 	var resp struct {
 		Code string `json:"code"`
+		Type string `json:"type"`
 	}
 	decodeJSON(t, w2.Body, &resp)
 	assert.Equal(t, "IDEMPOTENCY_KEY_REPLAY", resp.Code)
+	assert.Equal(t, "https://api.bcbpsolutions.com/problems/idempotency-key-replay", resp.Type, "must use its own dedicated type URI, not the generic conflict one")
 }
 
 func TestIdempotency_NonSuccessResponse_NotCached(t *testing.T) {
@@ -239,6 +241,35 @@ func TestIdempotency_CacheGetError_RunsHandlerUncached(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, 1, calls, "a cache read error must not block the handler")
+}
+
+// TestIdempotency_CacheGetError_LogsWarn is a regression test: WithIdempotency
+// used to have no way to log a cache failure at all (its own doc comment
+// claimed "execution_service has no port.Logger abstraction yet", which was
+// already stale — port.Logger existed elsewhere in the same commit set).
+func TestIdempotency_CacheGetError_LogsWarn(t *testing.T) {
+	fake := &fakeWorkflowClient{
+		reassignDelegate: func(context.Context, port.ReassignDelegateInput) (int, error) {
+			return 1, nil
+		},
+	}
+	cache := newFakeCacheStore()
+	cache.getErr = errors.New("cache transiently unavailable")
+	var warned bool
+	log := &fakeLogger{warn: func(string, map[string]any) { warned = true }}
+	router := newInternalRouter(newDelegateHandlerWithCacheAndLog(fake, cache, log))
+
+	body := map[string]any{
+		"tenant_id":       testTenantID,
+		"old_delegate_id": testOldDelegateID,
+		"new_delegate_id": testNewDelegateID,
+	}
+	r := internalReq(http.MethodPost, "/api/v1/internal/workflows/reassign-delegate", body)
+	r.Header.Set("Idempotency-Key", "key-1")
+	w := do(router, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, warned, "a cache get failure must be logged at WARN, not silently swallowed")
 }
 
 func TestIdempotency_CorruptedCacheEntry_RunsHandlerUncached(t *testing.T) {
