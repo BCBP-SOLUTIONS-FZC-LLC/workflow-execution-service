@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -69,7 +70,9 @@ func TestListTasks_StatusAndInstanceFilterAndPaging(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodGet, "/api/v1/tasks?status=READY&instance_id="+instID.String()+"&department_id="+deptID.String()+"&limit=500&cursor=abc", nil))
+	cursorPos := port.CursorPosition{CreatedAt: time.Now().Truncate(time.Millisecond), ID: uuid.New()}
+	cursor := url.QueryEscape(port.EncodeCursor(cursorPos))
+	w := do(router, req(http.MethodGet, "/api/v1/tasks?status=READY&instance_id="+instID.String()+"&department_id="+deptID.String()+"&limit=500&cursor="+cursor, nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	require.NotNil(t, gotFilter.Status)
@@ -79,7 +82,9 @@ func TestListTasks_StatusAndInstanceFilterAndPaging(t *testing.T) {
 	require.NotNil(t, gotFilter.DepartmentID)
 	assert.Equal(t, deptID, *gotFilter.DepartmentID)
 	assert.Equal(t, 100, gotPage.Limit, "limit clamps to the 100 max")
-	assert.Equal(t, "abc", gotPage.Cursor)
+	require.NotNil(t, gotPage.Cursor)
+	assert.True(t, cursorPos.CreatedAt.Equal(gotPage.Cursor.CreatedAt))
+	assert.Equal(t, cursorPos.ID, gotPage.Cursor.ID)
 }
 
 func TestListTasks_InvalidDepartmentIDFilter(t *testing.T) {
@@ -135,6 +140,27 @@ func TestListTasks_InvalidLimit_Rejected(t *testing.T) {
 			router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
 
 			w := do(router, req(http.MethodGet, "/api/v1/tasks?limit="+limit, nil))
+
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+		})
+	}
+}
+
+// TestListTasks_InvalidCursor_Rejected is a regression test: an unparseable
+// or tampered cursor used to be passed straight through as an opaque string
+// with no validation at all; the LLD is explicit that this must be rejected
+// with 400 rather than silently treated as "no cursor" (which would mask a
+// client-side bug as a quietly-restarted page).
+func TestListTasks_InvalidCursor_Rejected(t *testing.T) {
+	for name, cursor := range map[string]string{
+		"not base64":              "not-a-valid-cursor!!!",
+		"base64 but not JSON":     "bm90LWpzb24=",
+		"valid JSON, wrong shape": "eyJmb28iOiJiYXIifQ==",
+	} {
+		t.Run(name, func(t *testing.T) {
+			router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
+
+			w := do(router, req(http.MethodGet, "/api/v1/tasks?cursor="+url.QueryEscape(cursor), nil))
 
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 		})

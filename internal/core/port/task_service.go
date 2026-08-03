@@ -84,8 +84,13 @@ type ReadScope struct {
 	IsAdmin      bool
 }
 
+// Page is a list endpoint's decoded, validated pagination input. Cursor is
+// nil on a first page — by the time a Page reaches this port boundary, an
+// incoming cursor has already been decoded and validated (CursorPosition),
+// never a raw, unchecked string (LLD §5.9's "unparseable or tampered cursor
+// is rejected outright" requirement).
 type Page struct {
-	Cursor string
+	Cursor *CursorPosition
 	Limit  int
 }
 

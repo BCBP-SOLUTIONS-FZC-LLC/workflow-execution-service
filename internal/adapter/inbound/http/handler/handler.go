@@ -190,11 +190,14 @@ func (h *Handler) logError(msg string, fields map[string]any) {
 	}
 }
 
-// pageParams round-trips the opaque cursor (LLD §5.9); decoding happens
-// wherever it's actually interpreted, not in this handler. Per §5.9's
-// LimitQuery: values above 100 are clamped, not rejected; values <= 0 (or a
-// non-integer) are rejected with 400 — the false return means the caller
-// must return immediately, the response is already written.
+// pageParams decodes and validates both query params (LLD §5.9); the false
+// return means the caller must return immediately, the response is already
+// written. LimitQuery: values above 100 are clamped, not rejected; values
+// <= 0 (or a non-integer) are rejected with 400. CursorQuery: an unparseable
+// or tampered cursor is rejected with 400 rather than silently treated as
+// "no cursor", which would mask a client-side bug as a quietly-restarted
+// page — decoding happens here, once, so the port boundary only ever sees an
+// already-validated CursorPosition, never a raw client string.
 func pageParams(c *gin.Context) (port.Page, bool) {
 	limit := defaultPageLimit
 	if raw := c.Query("limit"); raw != "" {
@@ -208,5 +211,14 @@ func pageParams(c *gin.Context) (port.Page, bool) {
 	if limit > maxPageLimit {
 		limit = maxPageLimit
 	}
-	return port.Page{Cursor: c.Query("cursor"), Limit: limit}, true
+	var cursor *port.CursorPosition
+	if raw := c.Query("cursor"); raw != "" {
+		pos, err := port.DecodeCursor(raw)
+		if err != nil {
+			writeProblem(c, http.StatusBadRequest, CodeBadRequest, "invalid cursor", nil)
+			return port.Page{}, false
+		}
+		cursor = &pos
+	}
+	return port.Page{Cursor: cursor, Limit: limit}, true
 }

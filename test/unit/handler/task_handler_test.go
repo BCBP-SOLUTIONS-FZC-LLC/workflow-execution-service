@@ -259,6 +259,14 @@ func TestListActiveByUser_InvalidLimit_Rejected(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestListActiveByUser_InvalidCursor_Rejected(t *testing.T) {
+	router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
+
+	w := do(router, req(http.MethodGet, "/api/v1/workflows/active-by-user?user_id="+uuid.New().String()+"&cursor=not-a-valid-cursor", nil))
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
 func TestUnauthenticatedRequest(t *testing.T) {
 	router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
 

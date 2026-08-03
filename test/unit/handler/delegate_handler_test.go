@@ -3,7 +3,9 @@ package handler_test
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -510,9 +512,19 @@ func TestDelegateImpact_InvalidDelegationIDQuery(t *testing.T) {
 func TestDelegateImpact_InvalidLimit_Rejected(t *testing.T) {
 	router := newInternalRouter(newDelegateHandler(&fakeWorkflowClient{}))
 
-	url := "/api/v1/internal/workflows/delegate-impact?tenant_id=" + testTenantID.String() +
+	reqURL := "/api/v1/internal/workflows/delegate-impact?tenant_id=" + testTenantID.String() +
 		"&delegate_user_id=" + testOldDelegateID.String() + "&limit=-5"
-	w := do(router, internalReq(http.MethodGet, url, nil))
+	w := do(router, internalReq(http.MethodGet, reqURL, nil))
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestDelegateImpact_InvalidCursor_Rejected(t *testing.T) {
+	router := newInternalRouter(newDelegateHandler(&fakeWorkflowClient{}))
+
+	reqURL := "/api/v1/internal/workflows/delegate-impact?tenant_id=" + testTenantID.String() +
+		"&delegate_user_id=" + testOldDelegateID.String() + "&cursor=not-a-valid-cursor"
+	w := do(router, internalReq(http.MethodGet, reqURL, nil))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
@@ -564,12 +576,15 @@ func TestDelegateImpact_CursorAndLimitPassthrough(t *testing.T) {
 	}
 	router := newInternalRouter(newDelegateHandler(fake))
 
-	url := "/api/v1/internal/workflows/delegate-impact?tenant_id=" + testTenantID.String() +
-		"&delegate_user_id=" + testOldDelegateID.String() + "&cursor=xyz&limit=10"
-	w := do(router, internalReq(http.MethodGet, url, nil))
+	cursorPos := port.CursorPosition{CreatedAt: time.Now().Truncate(time.Millisecond), ID: uuid.New()}
+	reqURL := "/api/v1/internal/workflows/delegate-impact?tenant_id=" + testTenantID.String() +
+		"&delegate_user_id=" + testOldDelegateID.String() + "&cursor=" + url.QueryEscape(port.EncodeCursor(cursorPos)) + "&limit=10"
+	w := do(router, internalReq(http.MethodGet, reqURL, nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "xyz", gotIn.Page.Cursor)
+	require.NotNil(t, gotIn.Page.Cursor)
+	assert.True(t, cursorPos.CreatedAt.Equal(gotIn.Page.Cursor.CreatedAt))
+	assert.Equal(t, cursorPos.ID, gotIn.Page.Cursor.ID)
 	assert.Equal(t, 10, gotIn.Page.Limit)
 }
 
