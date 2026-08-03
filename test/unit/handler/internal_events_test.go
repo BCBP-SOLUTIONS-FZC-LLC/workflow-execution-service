@@ -267,7 +267,7 @@ func TestHandleInternalEvent_UserDeleted_Success_VacatesPerAssignment(t *testing
 	}
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("UserDeleted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("user.deleted", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id":    testUserID.String(),
 		"deleted_at": time.Now().Format(time.RFC3339),
 	}))
@@ -281,7 +281,7 @@ func TestHandleInternalEvent_UserDeleted_BadPayload(t *testing.T) {
 	fakes := newEventsFakes()
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("UserDeleted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("user.deleted", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": "not-a-uuid",
 	}))
 
@@ -299,7 +299,7 @@ func TestHandleInternalEvent_UserAvailabilityChanged_OOO_Pauses(t *testing.T) {
 	}
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("UserAvailabilityChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("user.availability.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(),
 		"status":  "ooo",
 	}))
@@ -317,7 +317,7 @@ func TestHandleInternalEvent_UserAvailabilityChanged_Available_Resumes(t *testin
 	}
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("UserAvailabilityChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("user.availability.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(),
 		"status":  "available",
 	}))
@@ -338,13 +338,13 @@ func TestHandleInternalEvent_UserAvailabilityChanged_RecencyGuard_SkipsStaleEven
 	newer := time.Now()
 	older := newer.Add(-time.Hour)
 
-	w1 := postEvent(router, envelope("UserAvailabilityChanged", uuid.New(), testTenantID, newer, map[string]any{
+	w1 := postEvent(router, envelope("user.availability.changed", uuid.New(), testTenantID, newer, map[string]any{
 		"user_id": testUserID.String(), "status": "ooo",
 	}))
 	require.Equal(t, http.StatusOK, w1.Code)
 	require.Equal(t, 1, calls)
 
-	w2 := postEvent(router, envelope("UserAvailabilityChanged", uuid.New(), testTenantID, older, map[string]any{
+	w2 := postEvent(router, envelope("user.availability.changed", uuid.New(), testTenantID, older, map[string]any{
 		"user_id": testUserID.String(), "status": "available",
 	}))
 	require.Equal(t, http.StatusOK, w2.Code)
@@ -542,7 +542,7 @@ func TestHandleInternalEvent_InvalidEnvelopeTenantID_400(t *testing.T) {
 	fakes := newEventsFakes()
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	body := envelope("UserDeleted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	body := envelope("user.deleted", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(), "deleted_at": time.Now().Format(time.RFC3339),
 	})
 	body["tenant_id"] = "not-a-uuid"
@@ -625,7 +625,7 @@ func TestHandleInternalEvent_UserDeleted_InvalidDeletedAt(t *testing.T) {
 	fakes := newEventsFakes()
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("UserDeleted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("user.deleted", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(), "deleted_at": "not-a-time",
 	}))
 
@@ -657,7 +657,7 @@ func TestHandleInternalEvent_UserAvailabilityChanged_InvalidFields(t *testing.T)
 
 			data := validData()
 			data[tc.field] = tc.value
-			w := postEvent(router, envelope("UserAvailabilityChanged", uuid.New(), testTenantID, time.Now(), data))
+			w := postEvent(router, envelope("user.availability.changed", uuid.New(), testTenantID, time.Now(), data))
 
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 		})
@@ -673,7 +673,7 @@ func TestHandleInternalEvent_UserAvailabilityChanged_NoDelegateUserID(t *testing
 	}
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("UserAvailabilityChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("user.availability.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(), "status": "ooo",
 	}))
 
@@ -688,7 +688,7 @@ func TestHandleInternalEvent_UserAvailabilityChanged_RecencyCheckError_500(t *te
 	errFakeRecency := &erroringRecencyGuard{err: errors.New("recency store unavailable")}
 	router := newInternalRouter(newEventsHandlerWithRecency(fakes, errFakeRecency))
 
-	w := postEvent(router, envelope("UserAvailabilityChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("user.availability.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(), "status": "ooo",
 	}))
 
@@ -840,7 +840,7 @@ func TestHandleInternalEvent_RecordIfNewError_StillReturns200(t *testing.T) {
 	h := newEventsHandlerWithProcessedEvents(fakes, &erroringProcessedEventRepository{recordErr: errors.New("db down")})
 	router := newInternalRouter(h)
 
-	w := postEvent(router, envelope("UserDeleted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("user.deleted", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(), "deleted_at": time.Now().Format(time.RFC3339),
 	}))
 
@@ -857,7 +857,7 @@ func TestHandleInternalEvent_IsProcessedError_ProceedsAnyway(t *testing.T) {
 	h := newEventsHandlerWithProcessedEvents(fakes, &erroringProcessedEventRepository{isProcessedErr: errors.New("db down")})
 	router := newInternalRouter(h)
 
-	w := postEvent(router, envelope("UserDeleted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("user.deleted", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(), "deleted_at": time.Now().Format(time.RFC3339),
 	}))
 
@@ -919,7 +919,7 @@ func TestHandleInternalEvent_UserDeleted_AlreadyProcessed_SkipsVacate(t *testing
 	fakes.userSafetyNet.vacateAssignments = func(context.Context, port.UserDeletedInput) error { calls++; return nil }
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	body := envelope("UserDeleted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	body := envelope("user.deleted", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(), "deleted_at": time.Now().Format(time.RFC3339),
 	})
 	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
@@ -933,7 +933,7 @@ func TestHandleInternalEvent_UserAvailabilityChanged_AlreadyProcessed_SkipsApply
 	fakes.oooAvailability.apply = func(context.Context, port.UserAvailabilityInput) error { calls++; return nil }
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	body := envelope("UserAvailabilityChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	body := envelope("user.availability.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(), "status": "ooo",
 	})
 	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
@@ -1014,8 +1014,8 @@ func rawBody(eventType string, eventID, tenantID uuid.UUID, data any) map[string
 
 func TestHandleInternalEvent_MalformedDataPayload_PerEventType(t *testing.T) {
 	for _, eventType := range []string{
-		"DelegationStarted", "DelegationEnded", "UserDeleted",
-		"UserAvailabilityChanged", "TenantStateChanged", "workflow.template.published",
+		"DelegationStarted", "DelegationEnded", "user.deleted",
+		"user.availability.changed", "TenantStateChanged", "workflow.template.published",
 	} {
 		t.Run(eventType, func(t *testing.T) {
 			fakes := newEventsFakes()
@@ -1053,14 +1053,14 @@ func TestHandleInternalEvent_UserAvailabilityChanged_InvalidEnvelopeIDs(t *testi
 	t.Run("invalid event id", func(t *testing.T) {
 		fakes := newEventsFakes()
 		router := newInternalRouter(newEventsHandler(fakes))
-		body := envelope("UserAvailabilityChanged", uuid.New(), testTenantID, time.Now(), validData)
+		body := envelope("user.availability.changed", uuid.New(), testTenantID, time.Now(), validData)
 		body["id"] = "not-a-uuid"
 		assert.Equal(t, http.StatusBadRequest, postEvent(router, body).Code)
 	})
 	t.Run("invalid tenant id", func(t *testing.T) {
 		fakes := newEventsFakes()
 		router := newInternalRouter(newEventsHandler(fakes))
-		body := envelope("UserAvailabilityChanged", uuid.New(), testTenantID, time.Now(), validData)
+		body := envelope("user.availability.changed", uuid.New(), testTenantID, time.Now(), validData)
 		body["tenant_id"] = "not-a-uuid"
 		assert.Equal(t, http.StatusBadRequest, postEvent(router, body).Code)
 	})
@@ -1133,7 +1133,7 @@ func TestHandleInternalEvent_UserDeleted_ReconcilerError_500(t *testing.T) {
 	}
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("UserDeleted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("user.deleted", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(), "deleted_at": time.Now().Format(time.RFC3339),
 	}))
 
@@ -1146,7 +1146,7 @@ func TestHandleInternalEvent_UserAvailabilityChanged_ValidDelegateUserID(t *test
 	fakes.oooAvailability.apply = func(_ context.Context, in port.UserAvailabilityInput) error { gotIn = in; return nil }
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("UserAvailabilityChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("user.availability.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(), "status": "ooo", "delegate_user_id": testDelegateID2.String(),
 	}))
 
@@ -1162,7 +1162,7 @@ func TestHandleInternalEvent_UserAvailabilityChanged_ReconcilerError_500(t *test
 	}
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("UserAvailabilityChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("user.availability.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(), "status": "ooo",
 	}))
 
@@ -1189,14 +1189,14 @@ func TestHandleInternalEvent_UserAvailabilityChanged_ApplyFails_RecencyNotAdvanc
 	router := newInternalRouter(newEventsHandler(fakes))
 
 	at := time.Now()
-	w1 := postEvent(router, envelope("UserAvailabilityChanged", uuid.New(), testTenantID, at, map[string]any{
+	w1 := postEvent(router, envelope("user.availability.changed", uuid.New(), testTenantID, at, map[string]any{
 		"user_id": testUserID.String(), "status": "ooo",
 	}))
 	require.Equal(t, http.StatusInternalServerError, w1.Code)
 	require.Equal(t, 1, calls)
 
 	fail = false
-	w2 := postEvent(router, envelope("UserAvailabilityChanged", uuid.New(), testTenantID, at, map[string]any{
+	w2 := postEvent(router, envelope("user.availability.changed", uuid.New(), testTenantID, at, map[string]any{
 		"user_id": testUserID.String(), "status": "ooo",
 	}))
 	require.Equal(t, http.StatusOK, w2.Code)
@@ -1209,7 +1209,7 @@ func TestHandleInternalEvent_UserAvailabilityChanged_CommitError_StillReturns200
 	errRecency := &erroringCommitRecencyGuard{fakeRecencyGuard: fakes.recency}
 	router := newInternalRouter(newEventsHandlerWithRecency(fakes, errRecency))
 
-	w := postEvent(router, envelope("UserAvailabilityChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("user.availability.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"user_id": testUserID.String(), "status": "ooo",
 	}))
 

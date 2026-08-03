@@ -81,9 +81,9 @@ func (h *Handler) HandleInternalEvent(c *gin.Context) {
 		h.handleDelegationStarted(c, env)
 	case "DelegationEnded":
 		h.handleDelegationEnded(c, env)
-	case "UserDeleted":
+	case "user.deleted":
 		h.handleUserDeleted(c, env)
-	case "UserAvailabilityChanged":
+	case "user.availability.changed":
 		h.handleUserAvailabilityChanged(c, env)
 	case "TenantStateChanged":
 		h.handleTenantStateChanged(c, env)
@@ -313,7 +313,7 @@ type userDeletedPayload struct {
 }
 
 func (h *Handler) handleUserDeleted(c *gin.Context, env events.Envelope[json.RawMessage]) {
-	const eventType = "UserDeleted"
+	const eventType = "user.deleted"
 	var p userDeletedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		h.badPayload(c, eventType, "invalid UserDeleted payload")
@@ -366,7 +366,7 @@ type userAvailabilityChangedPayload struct {
 }
 
 func (h *Handler) handleUserAvailabilityChanged(c *gin.Context, env events.Envelope[json.RawMessage]) {
-	const eventType = "UserAvailabilityChanged"
+	const eventType = "user.availability.changed"
 	var p userAvailabilityChangedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		h.badPayload(c, eventType, "invalid UserAvailabilityChanged payload")
