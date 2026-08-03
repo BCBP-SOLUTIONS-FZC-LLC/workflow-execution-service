@@ -32,6 +32,8 @@ const (
 	CodePayloadTooLarge          ErrCode = "PAYLOAD_TOO_LARGE"
 	CodeUnsupportedMediaType     ErrCode = "UNSUPPORTED_MEDIA_TYPE"
 	CodeInternal                 ErrCode = "INTERNAL_ERROR"
+	CodeTenantMismatch           ErrCode = "TENANT_MISMATCH"
+	CodeIdempotencyReplay        ErrCode = "IDEMPOTENCY_KEY_REPLAY"
 )
 
 var codeTitles = map[ErrCode]string{
@@ -52,6 +54,8 @@ var codeTitles = map[ErrCode]string{
 	CodePayloadTooLarge:          "Payload Too Large",
 	CodeUnsupportedMediaType:     "Unsupported Media Type",
 	CodeInternal:                 "Internal Error",
+	CodeTenantMismatch:           "Tenant Mismatch",
+	CodeIdempotencyReplay:        "Idempotency Key Replay",
 }
 
 const errBase = "https://api.bcbpsolutions.com/problems/"
@@ -69,6 +73,14 @@ var problemTypes = map[int]string{
 	http.StatusServiceUnavailable:    errBase + "service-unavailable",
 }
 
+// problemTypesByCode overrides problemTypes[status] for codes whose OpenAPI
+// contract names a `type` URI distinct from their status's generic one —
+// only TENANT_MISMATCH today (its 403 example is distinct from a generic
+// forbidden); every other code keeps sharing the status-keyed URI above.
+var problemTypesByCode = map[ErrCode]string{
+	CodeTenantMismatch: errBase + "tenant-mismatch",
+}
+
 type problemDetails struct {
 	Type     string  `json:"type"`
 	Title    string  `json:"title"`
@@ -79,9 +91,12 @@ type problemDetails struct {
 }
 
 func writeProblem(c *gin.Context, status int, code ErrCode, detail string, _ any) {
-	typeURI, ok := problemTypes[status]
+	typeURI, ok := problemTypesByCode[code]
 	if !ok {
-		typeURI = errBase + "internal-error"
+		typeURI, ok = problemTypes[status]
+		if !ok {
+			typeURI = errBase + "internal-error"
+		}
 	}
 	c.JSON(status, problemDetails{
 		Type:     typeURI,
@@ -124,6 +139,10 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusConflict, CodeInvalidTaskState, err.Error()
 	case errors.Is(err, port.ErrNodeAlreadyResolved):
 		return http.StatusConflict, CodeNodeAlreadyResolved, err.Error()
+	case errors.Is(err, port.ErrTenantMismatch):
+		return http.StatusForbidden, CodeTenantMismatch, err.Error()
+	case errors.Is(err, port.ErrIdempotencyKeyReplay):
+		return http.StatusConflict, CodeIdempotencyReplay, err.Error()
 	case errors.Is(err, port.ErrOverrideNoOp):
 		return http.StatusBadRequest, CodeOverrideNoOp, err.Error()
 	case errors.Is(err, adapterhttp.ErrUpstreamUnavailable):

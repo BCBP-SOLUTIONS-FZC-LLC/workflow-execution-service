@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -32,20 +33,42 @@ const (
 	maxBodyBytes = 10 << 20
 )
 
+// defaultIdempotencyTTL is used when Services.IdempotencyTTL is left zero.
+const defaultIdempotencyTTL = 24 * time.Hour
+
 // Handler codes against port interfaces, not a concrete internal/core/service
 // implementation; tests inject hand-rolled fakes.
 type Handler struct {
-	tasks       port.TaskService
-	eligibility port.EligibilityChecker
+	tasks          port.TaskService
+	eligibility    port.EligibilityChecker
+	workflowClient port.WorkflowClient
+	cache          port.CacheStore
+	idempotencyTTL time.Duration
 }
 
 type Services struct {
-	Tasks       port.TaskService
-	Eligibility port.EligibilityChecker
+	Tasks          port.TaskService
+	Eligibility    port.EligibilityChecker
+	WorkflowClient port.WorkflowClient
+	// Cache is nil-safe: WithIdempotency no-ops when it's nil, which is the
+	// expected state until T2.1's composition root constructs a real
+	// valkey.Cache and passes it in.
+	Cache          port.CacheStore
+	IdempotencyTTL time.Duration
 }
 
 func New(s Services) *Handler {
-	return &Handler{tasks: s.Tasks, eligibility: s.Eligibility}
+	ttl := s.IdempotencyTTL
+	if ttl == 0 {
+		ttl = defaultIdempotencyTTL
+	}
+	return &Handler{
+		tasks:          s.Tasks,
+		eligibility:    s.Eligibility,
+		workflowClient: s.WorkflowClient,
+		cache:          s.Cache,
+		idempotencyTTL: ttl,
+	}
 }
 
 func callerIdentity(c *gin.Context) (tenantID, userID uuid.UUID, ok bool) {

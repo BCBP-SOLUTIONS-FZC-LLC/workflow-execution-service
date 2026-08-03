@@ -38,6 +38,7 @@ type Config struct {
 	ValkeyPassword    string
 	ValkeyDialTimeout time.Duration
 	ValkeyReadTimeout time.Duration
+	IdempotencyTTL    time.Duration
 
 	TemporalHostPort  string
 	TemporalNamespace string
@@ -81,6 +82,7 @@ func Load() (*Config, error) {
 		ValkeyPassword:    getEnvOrDefault("VALKEY_PASSWORD", ""),
 		ValkeyDialTimeout: getEnvDurationOrDefault("VALKEY_DIAL_TIMEOUT", 2*time.Second),
 		ValkeyReadTimeout: getEnvDurationOrDefault("VALKEY_READ_TIMEOUT", 1*time.Second),
+		IdempotencyTTL:    getEnvDurationOrDefault("IDEMPOTENCY_TTL", 24*time.Hour),
 
 		TemporalHostPort:  getEnvOrDefault("TEMPORAL_HOST_PORT", "localhost:7233"),
 		TemporalNamespace: getEnvOrDefault("TEMPORAL_NAMESPACE", "default"),

@@ -16,3 +16,17 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler) {
 	rg.GET("/workflows/active-by-user", h.ListActiveByUser)
 	rg.POST("/instances/:id/nodes/:node/override", h.OverrideNodeAssignee)
 }
+
+// RegisterInternalRoutes mounts the /internal/workflows/* routes (LLD §5.8)
+// onto rg. rg must be an independent group off the raw gin.Engine — never a
+// descendant of RegisterRoutes's own group — since gin subgroups inherit
+// every parent .Use() call, and these routes must never see the
+// gateway-identity-assuming middleware ordinary /api/v1 routes carry. The
+// caller (cmd/server, T2.1) is responsible for layering
+// middleware.RequireInternalToken on rg itself before calling this.
+func RegisterInternalRoutes(rg *gin.RouterGroup, h *Handler) {
+	workflows := rg.Group("/workflows")
+	workflows.POST("/reassign-delegate", WithIdempotency(h.cache, h.idempotencyTTL, h.ReassignDelegate))
+	workflows.POST("/cancel-by-delegate", WithIdempotency(h.cache, h.idempotencyTTL, h.CancelByDelegate))
+	workflows.GET("/delegate-impact", h.DelegateImpact)
+}

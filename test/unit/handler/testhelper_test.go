@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -127,8 +128,88 @@ func (f *fakeEligibilityChecker) CheckEligibility(ctx context.Context, newUserID
 
 var _ port.EligibilityChecker = (*fakeEligibilityChecker)(nil)
 
+type fakeWorkflowClient struct {
+	reassignDelegate func(context.Context, port.ReassignDelegateInput) (int, error)
+	cancelByDelegate func(context.Context, port.CancelByDelegateInput) (int, error)
+	delegateImpact   func(context.Context, port.DelegateImpactInput) (port.DelegateImpactResult, error)
+}
+
+func (f *fakeWorkflowClient) ReassignDelegate(ctx context.Context, in port.ReassignDelegateInput) (int, error) {
+	if f.reassignDelegate != nil {
+		return f.reassignDelegate(ctx, in)
+	}
+	return 0, nil
+}
+
+func (f *fakeWorkflowClient) CancelByDelegate(ctx context.Context, in port.CancelByDelegateInput) (int, error) {
+	if f.cancelByDelegate != nil {
+		return f.cancelByDelegate(ctx, in)
+	}
+	return 0, nil
+}
+
+func (f *fakeWorkflowClient) DelegateImpact(ctx context.Context, in port.DelegateImpactInput) (port.DelegateImpactResult, error) {
+	if f.delegateImpact != nil {
+		return f.delegateImpact(ctx, in)
+	}
+	return port.DelegateImpactResult{}, nil
+}
+
+var _ port.WorkflowClient = (*fakeWorkflowClient)(nil)
+
+// fakeCacheStore is the hand-rolled fake for port.CacheStore, backed by an
+// in-memory map — used by the idempotency wrapper's tests. getErr, when set,
+// forces Get to return an error (e.g. a transient cache-unavailable case).
+type fakeCacheStore struct {
+	data   map[string]string
+	getErr error
+}
+
+func newFakeCacheStore() *fakeCacheStore {
+	return &fakeCacheStore{data: map[string]string{}}
+}
+
+func (f *fakeCacheStore) Get(_ context.Context, key string) (string, error) {
+	if f.getErr != nil {
+		return "", f.getErr
+	}
+	return f.data[key], nil
+}
+
+func (f *fakeCacheStore) Set(_ context.Context, key string, value string, _ time.Duration) error {
+	f.data[key] = value
+	return nil
+}
+
+func (f *fakeCacheStore) Del(_ context.Context, keys ...string) error {
+	for _, k := range keys {
+		delete(f.data, k)
+	}
+	return nil
+}
+
+func (f *fakeCacheStore) SetNX(_ context.Context, key string, value string, _ time.Duration) (bool, error) {
+	if _, exists := f.data[key]; exists {
+		return false, nil
+	}
+	f.data[key] = value
+	return true, nil
+}
+
+func (f *fakeCacheStore) Ping(_ context.Context) error { return nil }
+
+var _ port.CacheStore = (*fakeCacheStore)(nil)
+
 func newHandler(tasks *fakeTaskService, eligibility *fakeEligibilityChecker) *handler.Handler {
 	return handler.New(handler.Services{Tasks: tasks, Eligibility: eligibility})
+}
+
+func newDelegateHandler(wc *fakeWorkflowClient) *handler.Handler {
+	return handler.New(handler.Services{WorkflowClient: wc})
+}
+
+func newDelegateHandlerWithCache(wc *fakeWorkflowClient, cache *fakeCacheStore) *handler.Handler {
+	return handler.New(handler.Services{WorkflowClient: wc, Cache: cache, IdempotencyTTL: time.Hour})
 }
 
 func newRouter(h *handler.Handler) *gin.Engine {
@@ -140,6 +221,29 @@ func newRouter(h *handler.Handler) *gin.Engine {
 	rg := r.Group("/api/v1")
 	handler.RegisterRoutes(rg, h)
 	return r
+}
+
+// newInternalRouter builds a BARE router (no gincommon.ProtectedMiddlewares,
+// no middleware.RequireInternalToken) for the /internal/workflows/* routes —
+// these callers carry no gateway identity, and the token guard is a
+// separate middleware-package concern tested on its own.
+func newInternalRouter(h *handler.Handler) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	handler.RegisterInternalRoutes(r.Group("/api/v1/internal"), h)
+	return r
+}
+
+// internalReq is like req() but WITHOUT gateway identity headers — these
+// routes ignore x-tenant-id/x-user-id entirely.
+func internalReq(method, path string, body any) *http.Request {
+	var r io.Reader
+	if body != nil {
+		r = jsonBody(body)
+	}
+	httpReq := httptest.NewRequest(method, path, r)
+	httpReq.Header.Set("Content-Type", "application/json")
+	return httpReq
 }
 
 // req builds a request with the standard gateway identity headers. Extra

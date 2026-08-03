@@ -14,4 +14,13 @@ var (
 	ErrNodeAlreadyResolved   = errors.New("node has already progressed")
 	ErrOverrideNoOp          = errors.New("new assignee is already the current assignee")
 	ErrNotAuthorizedForRead  = errors.New("caller is not authorized to read this resource")
+
+	// ErrTenantMismatch is the port.WorkflowClient family's own sentinel
+	// (LLD §5.7/§5.8): a supplied delegation_id belongs to a different
+	// tenant than the request's own tenant_id.
+	ErrTenantMismatch = errors.New("delegation_id belongs to a different tenant than tenant_id")
+
+	// ErrIdempotencyKeyReplay signals an Idempotency-Key reused with a
+	// different request body (LLD §5.9).
+	ErrIdempotencyKeyReplay = errors.New("idempotency key replay with different payload")
 )
