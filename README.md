@@ -6,7 +6,7 @@ Two independently deployed binaries, one Go module:
 - `cmd/server` — HTTP API (`:8080`) + gRPC (`:9090`) + the outbox relay + the Temporal client (`StartWorkflow`/`SignalWorkflow`/`QueryWorkflow`).
 - `cmd/worker` — the Temporal Worker process: polls task queues, hosts the workflow function and Activities. Minimal `:8081` health/metrics surface, no business HTTP/gRPC surface of its own.
 
-Status: Tier-0 (bootstrapped skeleton — build/lint/test tooling, DB schema, proto contracts). No business logic yet.
+Status: Tier-1 landing in parallel branches. Tier-0 (build/lint/test tooling, DB schema, proto contracts) is done.
 
 ## Private Module Access
 
@@ -76,11 +76,17 @@ cmd/server/, cmd/worker/       — composition roots (two independently deployed
 internal/core/{domain,port,service}/
 internal/workflow/             — Temporal workflow function + Activities
 internal/adapter/{inbound,outbound}/
+internal/eventschema/          — embedded JSON Schemas for the 18 outbound events (LLD §6.8)
 internal/config/
 db/migrations/, db/queries/    — workflow_execution schema (RLS via app_tenant_id())
 api/proto/                     — execution_service.proto + definition.proto (buf)
+api/asyncapi.yaml              — outbound/inbound event contract (LLD §6)
 test/{fixtures,unit,integration,e2e,workflow}/
 ```
+
+## Event schema governance
+
+`make schema-validate` runs `platform-schemagov` (Docker) against `api/asyncapi.yaml` + `internal/eventschema/`. See `make help` for `extract-schemas`/`schema-diff`/`schema-register`/`schema-prune`.
 
 ## Common commands
 
