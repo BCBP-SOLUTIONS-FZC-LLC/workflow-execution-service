@@ -133,7 +133,7 @@ func TestIdempotency_ReplayDifferentBody_409(t *testing.T) {
 	}
 	decodeJSON(t, w2.Body, &resp)
 	assert.Equal(t, "IDEMPOTENCY_KEY_REPLAY", resp.Code)
-	assert.Equal(t, "https://api.bcbpsolutions.com/problems/idempotency-key-replay", resp.Type, "must use its own dedicated type URI, not the generic conflict one")
+	assert.Equal(t, "https://errors.bcbp.io/execution/idempotency-key-replay", resp.Type, "must use its own dedicated type URI, not the generic conflict one")
 }
 
 func TestIdempotency_NonSuccessResponse_NotCached(t *testing.T) {

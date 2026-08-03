@@ -37,8 +37,9 @@ func RequireInternalToken(token string) gin.HandlerFunc {
 		}
 		provided := c.GetHeader(InternalTokenHeader)
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+			c.Header("Content-Type", "application/problem+json")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, problemDetails{
-				Type:     "https://api.bcbpsolutions.com/problems/unauthorized",
+				Type:     "https://errors.bcbp.io/execution/unauthorized",
 				Title:    "Unauthorized",
 				Status:   http.StatusUnauthorized,
 				Detail:   "missing or invalid x-internal-token header",

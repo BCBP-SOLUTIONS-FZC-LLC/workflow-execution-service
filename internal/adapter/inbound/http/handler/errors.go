@@ -40,47 +40,46 @@ var codeTitles = map[ErrCode]string{
 	CodeBadRequest:               "Bad Request",
 	CodeUnauthorized:             "Unauthorized",
 	CodeForbidden:                "Forbidden",
-	CodeNotAssignee:              "Not The Task's Assignee",
-	CodeNotAuthorizedForResource: "Not Authorized For This Resource",
+	CodeNotAssignee:              "Not Assigned",
+	CodeNotAuthorizedForResource: "Not Authorized For Resource",
 	CodeTaskNotFound:             "Task Not Found",
-	CodeOverrideNoOp:             "Override Is A No-Op",
+	CodeOverrideNoOp:             "Override No-Op",
 	CodeRecordVersionConflict:    "Record Version Conflict",
 	CodeTaskAlreadyClaimed:       "Task Already Claimed",
 	CodeClaimNotApplicable:       "Claim Not Applicable",
 	CodeInvalidTaskState:         "Invalid Task State",
 	CodeNodeAlreadyResolved:      "Node Already Resolved",
 	CodeAssigneeIneligible:       "Assignee Ineligible",
-	CodeUpstreamUnavailable:      "Upstream Service Unavailable",
+	CodeUpstreamUnavailable:      "Service Unavailable",
 	CodePayloadTooLarge:          "Payload Too Large",
 	CodeUnsupportedMediaType:     "Unsupported Media Type",
-	CodeInternal:                 "Internal Error",
+	CodeInternal:                 "Internal Server Error",
 	CodeTenantMismatch:           "Tenant Mismatch",
 	CodeIdempotencyReplay:        "Idempotency Key Replay",
 }
 
-const errBase = "https://api.bcbpsolutions.com/problems/"
+const errBase = "https://errors.bcbp.io/execution/"
 
-var problemTypes = map[int]string{
-	http.StatusBadRequest:            errBase + "bad-request",
-	http.StatusUnauthorized:          errBase + "unauthorized",
-	http.StatusForbidden:             errBase + "forbidden",
-	http.StatusNotFound:              errBase + "not-found",
-	http.StatusConflict:              errBase + "conflict",
-	http.StatusUnprocessableEntity:   errBase + "validation-failed",
-	http.StatusRequestEntityTooLarge: errBase + "payload-too-large",
-	http.StatusUnsupportedMediaType:  errBase + "unsupported-media-type",
-	http.StatusInternalServerError:   errBase + "internal-error",
-	http.StatusServiceUnavailable:    errBase + "service-unavailable",
-}
-
-// problemTypesByCode overrides problemTypes[status] for codes whose OpenAPI
-// contract names a `type` URI distinct from their status's generic one —
-// TENANT_MISMATCH (its 403 example is distinct from a generic forbidden) and
-// IDEMPOTENCY_KEY_REPLAY (its 409 example is distinct from a generic
-// conflict); every other code keeps sharing the status-keyed URI above.
-var problemTypesByCode = map[ErrCode]string{
-	CodeTenantMismatch:    errBase + "tenant-mismatch",
-	CodeIdempotencyReplay: errBase + "idempotency-key-replay",
+var problemTypes = map[ErrCode]string{
+	CodeBadRequest:               errBase + "bad-request",
+	CodeUnauthorized:             errBase + "unauthorized",
+	CodeForbidden:                errBase + "forbidden",
+	CodeNotAssignee:              errBase + "assignee-not-assigned",
+	CodeNotAuthorizedForResource: errBase + "not-authorized-for-resource",
+	CodeTaskNotFound:             errBase + "task-not-found",
+	CodeOverrideNoOp:             errBase + "override-no-op",
+	CodeRecordVersionConflict:    errBase + "record-version-conflict",
+	CodeTaskAlreadyClaimed:       errBase + "task-already-claimed",
+	CodeClaimNotApplicable:       errBase + "claim-not-applicable",
+	CodeInvalidTaskState:         errBase + "invalid-task-state",
+	CodeNodeAlreadyResolved:      errBase + "node-already-resolved",
+	CodeAssigneeIneligible:       errBase + "assignee-ineligible",
+	CodeUpstreamUnavailable:      errBase + "temporal-unavailable",
+	CodePayloadTooLarge:          errBase + "payload-too-large",
+	CodeUnsupportedMediaType:     errBase + "unsupported-media-type",
+	CodeInternal:                 errBase + "internal-error",
+	CodeTenantMismatch:           errBase + "tenant-mismatch",
+	CodeIdempotencyReplay:        errBase + "idempotency-key-replay",
 }
 
 type problemDetails struct {
@@ -93,13 +92,11 @@ type problemDetails struct {
 }
 
 func writeProblem(c *gin.Context, status int, code ErrCode, detail string, _ any) {
-	typeURI, ok := problemTypesByCode[code]
+	typeURI, ok := problemTypes[code]
 	if !ok {
-		typeURI, ok = problemTypes[status]
-		if !ok {
-			typeURI = errBase + "internal-error"
-		}
+		typeURI = errBase + "internal-error"
 	}
+	c.Header("Content-Type", "application/problem+json")
 	c.JSON(status, problemDetails{
 		Type:     typeURI,
 		Title:    codeTitles[code],

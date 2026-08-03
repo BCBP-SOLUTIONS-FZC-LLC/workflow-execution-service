@@ -122,7 +122,11 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		filter.DepartmentID = &id
 	}
 
-	result, err := h.tasks.List(c.Request.Context(), tenantID, readScope(c, userID), filter, pageParams(c))
+	page, ok := pageParams(c)
+	if !ok {
+		return
+	}
+	result, err := h.tasks.List(c.Request.Context(), tenantID, readScope(c, userID), filter, page)
 	if err != nil {
 		errResponse(c, err)
 		return
@@ -276,7 +280,11 @@ func (h *Handler) ListActiveByUser(c *gin.Context) {
 		return
 	}
 
-	result, err := h.tasks.ActiveByUser(c.Request.Context(), tenantID, userID, pageParams(c))
+	page, ok := pageParams(c)
+	if !ok {
+		return
+	}
+	result, err := h.tasks.ActiveByUser(c.Request.Context(), tenantID, userID, page)
 	if err != nil {
 		errResponse(c, err)
 		return

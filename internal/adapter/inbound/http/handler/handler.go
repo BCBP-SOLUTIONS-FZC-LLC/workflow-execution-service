@@ -191,16 +191,22 @@ func (h *Handler) logError(msg string, fields map[string]any) {
 }
 
 // pageParams round-trips the opaque cursor (LLD §5.9); decoding happens
-// wherever it's actually interpreted, not in this handler.
-func pageParams(c *gin.Context) port.Page {
+// wherever it's actually interpreted, not in this handler. Per §5.9's
+// LimitQuery: values above 100 are clamped, not rejected; values <= 0 (or a
+// non-integer) are rejected with 400 — the false return means the caller
+// must return immediately, the response is already written.
+func pageParams(c *gin.Context) (port.Page, bool) {
 	limit := defaultPageLimit
 	if raw := c.Query("limit"); raw != "" {
-		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
-			limit = v
+		v, err := strconv.Atoi(raw)
+		if err != nil || v <= 0 {
+			writeProblem(c, http.StatusBadRequest, CodeBadRequest, "limit must be a positive integer", nil)
+			return port.Page{}, false
 		}
+		limit = v
 	}
 	if limit > maxPageLimit {
 		limit = maxPageLimit
 	}
-	return port.Page{Cursor: c.Query("cursor"), Limit: limit}
+	return port.Page{Cursor: c.Query("cursor"), Limit: limit}, true
 }

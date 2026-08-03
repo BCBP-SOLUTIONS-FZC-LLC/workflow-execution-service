@@ -108,7 +108,7 @@ func TestGetTask_UpstreamTimeout(t *testing.T) {
 	assert.Equal(t, "UPSTREAM_UNAVAILABLE", body.Code)
 }
 
-func TestListTasks_DefaultLimit(t *testing.T) {
+func TestListTasks_NoLimitProvided_DefaultsTo25(t *testing.T) {
 	var gotPage port.Page
 	fake := &fakeTaskService{
 		list: func(_ context.Context, _ uuid.UUID, _ port.ReadScope, _ port.TaskFilter, page port.Page) (port.PageResult[*port.Task], error) {
@@ -118,10 +118,27 @@ func TestListTasks_DefaultLimit(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodGet, "/api/v1/tasks?limit=not-a-number", nil))
+	w := do(router, req(http.MethodGet, "/api/v1/tasks", nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, 25, gotPage.Limit)
+}
+
+// TestListTasks_InvalidLimit_Rejected is a regression test: limit used to
+// silently fall back to the default for any unparseable or non-positive
+// value; the LLD's LimitQuery is explicit that values <= 0 (and, by the same
+// "must be a valid positive integer" logic, non-numeric values) must be
+// rejected with 400, not silently coerced.
+func TestListTasks_InvalidLimit_Rejected(t *testing.T) {
+	for _, limit := range []string{"not-a-number", "0", "-1"} {
+		t.Run(limit, func(t *testing.T) {
+			router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
+
+			w := do(router, req(http.MethodGet, "/api/v1/tasks?limit="+limit, nil))
+
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+		})
+	}
 }
 
 func TestListTasks_ServiceError(t *testing.T) {

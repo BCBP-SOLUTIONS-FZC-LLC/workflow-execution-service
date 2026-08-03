@@ -109,11 +109,15 @@ func (h *Handler) DelegateImpact(c *gin.Context) {
 		delegationID = &id
 	}
 
+	page, ok := pageParams(c)
+	if !ok {
+		return
+	}
 	result, err := h.workflowClient.DelegateImpact(c.Request.Context(), port.DelegateImpactInput{
 		TenantID:       tenantID,
 		DelegateUserID: delegateUserID,
 		DelegationID:   delegationID,
-		Page:           pageParams(c),
+		Page:           page,
 	})
 	if err != nil {
 		errResponse(c, err)

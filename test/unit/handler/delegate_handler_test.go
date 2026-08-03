@@ -507,6 +507,16 @@ func TestDelegateImpact_InvalidDelegationIDQuery(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestDelegateImpact_InvalidLimit_Rejected(t *testing.T) {
+	router := newInternalRouter(newDelegateHandler(&fakeWorkflowClient{}))
+
+	url := "/api/v1/internal/workflows/delegate-impact?tenant_id=" + testTenantID.String() +
+		"&delegate_user_id=" + testOldDelegateID.String() + "&limit=-5"
+	w := do(router, internalReq(http.MethodGet, url, nil))
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
 func TestDelegateImpact_DelegationIDOmittedVsPresent(t *testing.T) {
 	var gotIn port.DelegateImpactInput
 	fake := &fakeWorkflowClient{
