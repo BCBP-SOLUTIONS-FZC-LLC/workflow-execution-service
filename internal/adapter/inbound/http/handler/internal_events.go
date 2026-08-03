@@ -582,7 +582,11 @@ func (h *Handler) handleTemplatePublished(c *gin.Context, env events.Envelope[js
 		return
 	}
 
-	scopeKey := "template:" + p.WorkflowKey
+	// workflow_key is only unique per tenant (definition_service's workflow
+	// table is UNIQUE(tenant_id, business_key)) — tenantID must be part of
+	// the scope key, or two tenants publishing the same business key would
+	// share one recency row and could skip each other's legitimate publishes.
+	scopeKey := "template:" + tenantID.String() + ":" + p.WorkflowKey
 	applied, err := h.recency.CheckAndCommit(c.Request.Context(), scopeKey, env.Timestamp)
 	if err != nil {
 		h.logWarn("internal events: recency check failed, proceeding fail-open", map[string]any{

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -163,6 +164,8 @@ func TestHandleInternalEvent_DelegationStarted_ObservesRerouteDuration(t *testin
 	fakes.delegation.reroute = func(context.Context, port.DelegationRerouteInput) error { return nil }
 	router := newInternalRouter(newEventsHandler(fakes))
 
+	before := rerouteDurationSampleCount(t)
+
 	w := postEvent(router, envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2,
 		"delegator_id":  testDelegatorID,
@@ -171,7 +174,23 @@ func TestHandleInternalEvent_DelegationStarted_ObservesRerouteDuration(t *testin
 		"starts_at":     time.Now().Format(time.RFC3339),
 	}))
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, before+1, rerouteDurationSampleCount(t), "a successful Reroute must add one observation to delegation_reroute_duration_seconds")
+}
+
+// rerouteDurationSampleCount reads delegation_reroute_duration_seconds'
+// current sample count straight from the default Prometheus registry —
+// internal_events.go registers it via promauto with no custom registerer.
+func rerouteDurationSampleCount(t *testing.T) uint64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	require.NoError(t, err)
+	for _, f := range families {
+		if f.GetName() == "delegation_reroute_duration_seconds" {
+			return f.GetMetric()[0].GetHistogram().GetSampleCount()
+		}
+	}
+	return 0
 }
 
 // --- DelegationEnded ---
@@ -727,6 +746,44 @@ func TestHandleInternalEvent_TemplatePublished_RecencyGuard_SkipsStalePrewarm(t 
 	}))
 	require.Equal(t, http.StatusOK, w2.Code)
 	assert.Equal(t, 1, calls, "a stale republish must skip the prewarm call")
+}
+
+// TestHandleInternalEvent_TemplatePublished_RecencyGuard_ScopedPerTenant is a
+// regression test: workflow_key is only unique per tenant (definition_service's
+// workflow table is UNIQUE(tenant_id, business_key)), so the recency guard's
+// scope key must include tenant_id — otherwise two tenants publishing the
+// same business key would share one recency row and a later publish from one
+// tenant could cause the other tenant's own, unrelated publish to be
+// wrongly skipped as stale.
+func TestHandleInternalEvent_TemplatePublished_RecencyGuard_ScopedPerTenant(t *testing.T) {
+	fakes := newEventsFakes()
+	calls := 0
+	fakes.templateCache.prewarm = func(context.Context, port.TemplatePublishedInput) error {
+		calls++
+		return nil
+	}
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	otherTenantID := uuid.New()
+	newer := time.Now()
+	older := newer.Add(-time.Hour)
+
+	w1 := postEvent(router, envelope("workflow.template.published", uuid.New(), testTenantID, newer, map[string]any{
+		"workflow_id": testInstID.String(), "workflow_key": "shared-business-key", "version_id": testTaskID.String(),
+		"version_number": 3, "artifact_hash": "sha256:abc", "published_by": testUserID.String(),
+	}))
+	require.Equal(t, http.StatusOK, w1.Code)
+	require.Equal(t, 1, calls)
+
+	// A different tenant publishing the SAME workflow_key at an OLDER
+	// timestamp must still apply — it's a distinct scope, not a stale
+	// republish of the first tenant's event.
+	w2 := postEvent(router, envelope("workflow.template.published", uuid.New(), otherTenantID, older, map[string]any{
+		"workflow_id": testInstID.String(), "workflow_key": "shared-business-key", "version_id": testTaskID.String(),
+		"version_number": 1, "artifact_hash": "sha256:def", "published_by": testUserID.String(),
+	}))
+	require.Equal(t, http.StatusOK, w2.Code)
+	assert.Equal(t, 2, calls, "a different tenant's publish of the same workflow_key must not be skipped by the first tenant's recency state")
 }
 
 // --- respondOK / alreadyProcessed error paths ---
