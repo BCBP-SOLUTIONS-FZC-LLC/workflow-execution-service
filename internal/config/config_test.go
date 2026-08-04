@@ -64,21 +64,23 @@ func TestValidate(t *testing.T) {
 		{"outbox poll interval zero", func(c *Config) { c.OutboxPollInterval = 0 }, true},
 		{"aws not stubbed without sns topic", func(c *Config) { c.AWSUseStub = false; c.SNSTopicARN = "" }, true},
 		{"aws not stubbed with sns topic", func(c *Config) { c.AWSUseStub = false; c.SNSTopicARN = "arn:aws:sns:x" }, false},
+		{"definition client timeout zero", func(c *Config) { c.DefinitionClientTimeout = 0 }, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{
-				DatabaseURL:            "postgres://x",
-				HTTPPort:               8080,
-				GRPCPort:               9090,
-				WorkerHealthPort:       8081,
-				PGMaxConns:             10,
-				PGMinConns:             2,
-				OTELTracesSamplerRatio: 1.0,
-				OutboxBatchSize:        50,
-				OutboxPollInterval:     time.Second,
-				AWSUseStub:             true,
+				DatabaseURL:             "postgres://x",
+				HTTPPort:                8080,
+				GRPCPort:                9090,
+				WorkerHealthPort:        8081,
+				PGMaxConns:              10,
+				PGMinConns:              2,
+				OTELTracesSamplerRatio:  1.0,
+				OutboxBatchSize:         50,
+				OutboxPollInterval:      time.Second,
+				AWSUseStub:              true,
+				DefinitionClientTimeout: 5 * time.Second,
 			}
 			tt.mutate(cfg)
 
