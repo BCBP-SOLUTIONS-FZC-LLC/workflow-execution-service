@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -299,4 +300,35 @@ func TestIdempotency_CorruptedCacheEntry_RunsHandlerUncached(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, 1, calls, "an unparseable cache entry must not block the handler")
+}
+
+// TestIdempotency_ClaimTask_ReplaySameBody_ReturnsCachedResponse guards
+// against a regression on /api/v1/tasks/:id/claim specifically: it was
+// registered bare (no WithIdempotency) despite the OpenAPI spec documenting
+// Idempotency-Key support for it, same as every other mutating endpoint.
+func TestIdempotency_ClaimTask_ReplaySameBody_ReturnsCachedResponse(t *testing.T) {
+	calls := 0
+	fake := &fakeTaskService{
+		claim: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int64) (*port.Task, error) {
+			calls++
+			return &port.Task{ID: testTaskID, RecordVersion: 1}, nil
+		},
+	}
+	cache := newFakeCacheStore()
+	router := newRouter(newHandlerWithCache(fake, &fakeEligibilityChecker{}, cache))
+
+	body := map[string]any{"record_version": 1}
+
+	r1 := req(http.MethodPost, "/api/v1/tasks/"+testTaskID.String()+"/claim", body)
+	r1.Header.Set("Idempotency-Key", "claim-key-1")
+	w1 := do(router, r1)
+	require.Equal(t, http.StatusAccepted, w1.Code)
+
+	r2 := req(http.MethodPost, "/api/v1/tasks/"+testTaskID.String()+"/claim", body)
+	r2.Header.Set("Idempotency-Key", "claim-key-1")
+	w2 := do(router, r2)
+
+	require.Equal(t, http.StatusAccepted, w2.Code)
+	assert.Equal(t, w1.Body.String(), w2.Body.String())
+	assert.Equal(t, 1, calls, "a safe retry with the same Idempotency-Key must not re-invoke the handler")
 }

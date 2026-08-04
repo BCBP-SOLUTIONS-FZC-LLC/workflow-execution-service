@@ -407,7 +407,7 @@ func (h *Handler) handleUserAvailabilityChanged(c *gin.Context, env events.Envel
 		return
 	}
 
-	scopeKey := "user_availability:" + userID.String()
+	scopeKey := "user_availability:" + tenantID.String() + ":" + userID.String()
 	shouldApply, err := h.recency.ShouldApply(c.Request.Context(), scopeKey, env.Timestamp)
 	if err != nil {
 		h.reconcilerError(c, eventType, err)

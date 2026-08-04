@@ -26,13 +26,20 @@ type Task struct {
 	TenantID           uuid.UUID
 	WorkflowInstanceID uuid.UUID
 	NodeKey            string
-	DepartmentID       uuid.UUID
+	// TaskType is reserved for future extension (LLD §4.2: default "userTask"
+	// today) — zero-valued until a real compiled-plan source populates it.
+	TaskType     string
+	DepartmentID uuid.UUID
 	// RequiredLevel is the node's eligibility-level requirement, supplied to
 	// the outbound eligibility check alongside DepartmentID (LLD §5.4 step 2).
-	RequiredLevel      string
-	Status             TaskStatus
-	RecordVersion      int64
-	AssigneeMode       string
+	RequiredLevel string
+	Status        TaskStatus
+	RecordVersion int64
+	AssigneeMode  string
+	// AssigneeCount is the expected number of active assignments for this
+	// task, zero-valued until multi-assignee counting (LLD Appendix B,
+	// "multi-assignee claim-release mechanics undesigned") is built.
+	AssigneeCount      int
 	ExtrasJSON         json.RawMessage
 	DeferredFromTaskID *uuid.UUID
 	DueAt              *time.Time

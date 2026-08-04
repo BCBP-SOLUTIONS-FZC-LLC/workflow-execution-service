@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
 
 type cachedResp struct {
@@ -72,12 +73,13 @@ func WithIdempotency(cache port.CacheStore, ttl time.Duration, log port.Logger, 
 		}
 		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
-		// Key is scoped to method + path (concrete resource IDs, if any, are
-		// part of the path already) + the client-supplied key. tenant_id
-		// isn't read here — these internal routes have no gateway identity to
-		// scope by, and body-hash comparison already prevents cross-tenant
-		// key reuse from replaying the wrong tenant's cached response.
-		cacheKey := "idem:" + c.Request.Method + ":" + c.Request.URL.Path + ":" + key
+		// Key is scoped to tenant (when gateway identity is present) + method +
+		// path (concrete resource IDs, if any, are part of the path already) +
+		// the client-supplied key. Internal routes carry no gateway identity,
+		// so idempotencyScopePrefix falls back to no tenant segment for them —
+		// body-hash comparison still prevents cross-tenant key reuse there,
+		// since tenant_id is always part of their request body.
+		cacheKey := "idem:" + idempotencyScopePrefix(c) + c.Request.Method + ":" + c.Request.URL.Path + ":" + key
 		if replayed := replayIfCached(c, cache, cacheKey, incomingHash, log); replayed {
 			return
 		}
@@ -87,6 +89,16 @@ func WithIdempotency(cache port.CacheStore, ttl time.Duration, log port.Logger, 
 		h(c)
 		storeIfSuccess(c, cache, cacheKey, incomingHash, ttl, rec, log)
 	}
+}
+
+// idempotencyScopePrefix returns "<tenantID>:" when the request carries
+// gateway identity, or "" for internal routes that don't (RegisterInternalRoutes
+// mounts a bare group with no ProtectedMiddlewares — see router.go).
+func idempotencyScopePrefix(c *gin.Context) string {
+	if rc, ok := gincommon.RequestContext(c); ok && rc.TenantID != "" {
+		return rc.TenantID + ":"
+	}
+	return ""
 }
 
 func idempotencyLogWarn(log port.Logger, msg string, fields map[string]any) {

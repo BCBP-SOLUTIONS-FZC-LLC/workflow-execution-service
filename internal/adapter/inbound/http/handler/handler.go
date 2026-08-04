@@ -1,7 +1,7 @@
-// Package handler is the HTTP surface for /tasks, GET /workflows/active-by-user,
-// and POST /instances/:id/nodes/:node/override. Route registration lives in
-// router.go's RegisterRoutes — this package never starts a gin.Engine or
-// touches cmd/server.
+// Package handler is the HTTP surface for /tasks, /instances,
+// GET /workflows/active-by-user, and POST /instances/:id/nodes/:node/override.
+// Route registration lives in router.go's RegisterRoutes — this package
+// never starts a gin.Engine or touches cmd/server.
 package handler
 
 import (
@@ -40,6 +40,7 @@ const defaultIdempotencyTTL = 24 * time.Hour
 // implementation; tests inject hand-rolled fakes.
 type Handler struct {
 	tasks          port.TaskService
+	instances      port.InstanceService
 	eligibility    port.EligibilityChecker
 	workflowClient port.WorkflowClient
 	cache          port.CacheStore
@@ -57,6 +58,7 @@ type Handler struct {
 
 type Services struct {
 	Tasks          port.TaskService
+	Instances      port.InstanceService
 	Eligibility    port.EligibilityChecker
 	WorkflowClient port.WorkflowClient
 	// Cache is nil-safe: WithIdempotency no-ops when it's nil, which is the
@@ -83,6 +85,7 @@ func New(s Services) *Handler {
 	}
 	return &Handler{
 		tasks:          s.Tasks,
+		instances:      s.Instances,
 		eligibility:    s.Eligibility,
 		workflowClient: s.WorkflowClient,
 		cache:          s.Cache,
@@ -130,6 +133,17 @@ func isAdmin(c *gin.Context) bool {
 		}
 	}
 	return false
+}
+
+// requireAdmin writes 403 FORBIDDEN and returns false if the caller lacks
+// AdminRole (LLD §9.2) — a hard gate for admin-only endpoints, unlike
+// isAdmin's use inside readScope() as a visibility-check bypass.
+func requireAdmin(c *gin.Context) bool {
+	if !isAdmin(c) {
+		writeProblem(c, http.StatusForbidden, CodeForbidden, "caller lacks tenant_admin/tenant_owner role", nil)
+		return false
+	}
+	return true
 }
 
 func callerDepartments(c *gin.Context) []string {

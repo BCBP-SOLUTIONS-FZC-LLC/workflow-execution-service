@@ -27,7 +27,7 @@ type cursorWire struct {
 // value a real list query hands back after its last row.
 func EncodeCursor(p CursorPosition) string {
 	b, _ := json.Marshal(cursorWire(p)) // fields are always JSON-safe; Marshal never errors
-	return base64.StdEncoding.EncodeToString(b)
+	return base64.URLEncoding.EncodeToString(b)
 }
 
 // DecodeCursor reverses EncodeCursor. Per LLD §5.9's explicit edge-case
@@ -35,7 +35,7 @@ func EncodeCursor(p CursorPosition) string {
 // (400 BAD_REQUEST at the call site) rather than silently treated as "no
 // cursor" — that would mask a client-side bug as a quietly-restarted page.
 func DecodeCursor(raw string) (CursorPosition, error) {
-	b, err := base64.StdEncoding.DecodeString(raw)
+	b, err := base64.URLEncoding.DecodeString(raw)
 	if err != nil {
 		return CursorPosition{}, fmt.Errorf("decode cursor: %w", err)
 	}

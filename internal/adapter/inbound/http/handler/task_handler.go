@@ -15,10 +15,12 @@ type taskResp struct {
 	ID                 uuid.UUID  `json:"id"`
 	WorkflowInstanceID uuid.UUID  `json:"workflow_instance_id"`
 	NodeKey            string     `json:"node_key"`
+	TaskType           string     `json:"task_type"`
 	DepartmentID       uuid.UUID  `json:"department_id"`
 	Status             string     `json:"status"`
 	RecordVersion      int64      `json:"record_version"`
 	AssigneeMode       string     `json:"assignee_mode"`
+	AssigneeCount      int        `json:"assignee_count"`
 	CreatedAt          time.Time  `json:"created_at"`
 	CompletedAt        *time.Time `json:"completed_at,omitempty"`
 }
@@ -61,10 +63,12 @@ func toTaskResp(t *port.Task) taskResp {
 		ID:                 t.ID,
 		WorkflowInstanceID: t.WorkflowInstanceID,
 		NodeKey:            t.NodeKey,
+		TaskType:           t.TaskType,
 		DepartmentID:       t.DepartmentID,
 		Status:             string(t.Status),
 		RecordVersion:      t.RecordVersion,
 		AssigneeMode:       t.AssigneeMode,
+		AssigneeCount:      t.AssigneeCount,
 		CreatedAt:          t.CreatedAt,
 		CompletedAt:        t.CompletedAt,
 	}
@@ -253,6 +257,9 @@ func (h *Handler) ReassignTask(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !requireAdmin(c) {
+		return
+	}
 	taskID, ok := parseIDParam(c)
 	if !ok {
 		return
@@ -273,6 +280,9 @@ func (h *Handler) ReassignTask(c *gin.Context) {
 func (h *Handler) ListActiveByUser(c *gin.Context) {
 	tenantID, _, ok := callerIdentity(c)
 	if !ok {
+		return
+	}
+	if !requireAdmin(c) {
 		return
 	}
 	userID, ok := parseUUIDQuery(c, "user_id")

@@ -34,6 +34,17 @@ const (
 	CodeInternal                 ErrCode = "INTERNAL_ERROR"
 	CodeTenantMismatch           ErrCode = "TENANT_MISMATCH"
 	CodeIdempotencyReplay        ErrCode = "IDEMPOTENCY_KEY_REPLAY"
+
+	CodeInstanceNotFound        ErrCode = "INSTANCE_NOT_FOUND"
+	CodeTargetNodeNotFound      ErrCode = "TARGET_NODE_NOT_FOUND"
+	CodeDuplicateBusinessKey    ErrCode = "DUPLICATE_BUSINESS_KEY"
+	CodeTenantNotActive         ErrCode = "TENANT_NOT_ACTIVE"
+	CodeVersionNotPublished     ErrCode = "VERSION_NOT_PUBLISHED"
+	CodeVersionInvalid          ErrCode = "VERSION_INVALID"
+	CodeInstanceAlreadyTerminal ErrCode = "INSTANCE_ALREADY_TERMINAL"
+	CodeInvalidInstanceState    ErrCode = "INVALID_INSTANCE_STATE"
+	CodeForceBackNoSavedBranch  ErrCode = "FORCE_BACK_NO_SAVED_BRANCH"
+	CodeOverrideMapInvalid      ErrCode = "OVERRIDE_MAP_INVALID"
 )
 
 var codeTitles = map[ErrCode]string{
@@ -56,6 +67,17 @@ var codeTitles = map[ErrCode]string{
 	CodeInternal:                 "Internal Server Error",
 	CodeTenantMismatch:           "Tenant Mismatch",
 	CodeIdempotencyReplay:        "Idempotency Key Replay",
+
+	CodeInstanceNotFound:        "Instance Not Found",
+	CodeTargetNodeNotFound:      "Target Node Not Found",
+	CodeDuplicateBusinessKey:    "Duplicate Business Key",
+	CodeTenantNotActive:         "Tenant Not Active",
+	CodeVersionNotPublished:     "Version Not Published",
+	CodeVersionInvalid:          "Version Invalid",
+	CodeInstanceAlreadyTerminal: "Instance Already Terminal",
+	CodeInvalidInstanceState:    "Invalid Instance State",
+	CodeForceBackNoSavedBranch:  "Force Back No Saved Branch",
+	CodeOverrideMapInvalid:      "Override Map Invalid",
 }
 
 const errBase = "https://errors.bcbp.io/execution/"
@@ -80,6 +102,17 @@ var problemTypes = map[ErrCode]string{
 	CodeInternal:                 errBase + "internal-error",
 	CodeTenantMismatch:           errBase + "tenant-mismatch",
 	CodeIdempotencyReplay:        errBase + "idempotency-key-replay",
+
+	CodeInstanceNotFound:        errBase + "instance-not-found",
+	CodeTargetNodeNotFound:      errBase + "target-node-not-found",
+	CodeDuplicateBusinessKey:    errBase + "duplicate-business-key",
+	CodeTenantNotActive:         errBase + "tenant-not-active",
+	CodeVersionNotPublished:     errBase + "version-not-published",
+	CodeVersionInvalid:          errBase + "version-invalid",
+	CodeInstanceAlreadyTerminal: errBase + "instance-already-terminal",
+	CodeInvalidInstanceState:    errBase + "invalid-instance-state",
+	CodeForceBackNoSavedBranch:  errBase + "force-back-no-saved-branch",
+	CodeOverrideMapInvalid:      errBase + "override-map-invalid",
 }
 
 type problemDetails struct {
@@ -144,6 +177,28 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusConflict, CodeIdempotencyReplay, err.Error()
 	case errors.Is(err, port.ErrOverrideNoOp):
 		return http.StatusBadRequest, CodeOverrideNoOp, err.Error()
+	case errors.Is(err, port.ErrInstanceNotFound):
+		return http.StatusNotFound, CodeInstanceNotFound, err.Error()
+	case errors.Is(err, port.ErrTargetNodeNotFound):
+		return http.StatusConflict, CodeTargetNodeNotFound, err.Error()
+	case errors.Is(err, port.ErrDuplicateBusinessKey):
+		return http.StatusConflict, CodeDuplicateBusinessKey, err.Error()
+	case errors.Is(err, port.ErrTenantNotActive):
+		return http.StatusConflict, CodeTenantNotActive, err.Error()
+	case errors.Is(err, port.ErrVersionNotPublished):
+		return http.StatusConflict, CodeVersionNotPublished, err.Error()
+	case errors.Is(err, port.ErrVersionInvalid):
+		return http.StatusConflict, CodeVersionInvalid, err.Error()
+	case errors.Is(err, port.ErrInstanceAlreadyTerminal):
+		return http.StatusConflict, CodeInstanceAlreadyTerminal, err.Error()
+	case errors.Is(err, port.ErrInvalidInstanceState):
+		return http.StatusConflict, CodeInvalidInstanceState, err.Error()
+	case errors.Is(err, port.ErrForceBackNoSavedBranch):
+		return http.StatusConflict, CodeForceBackNoSavedBranch, err.Error()
+	case errors.Is(err, port.ErrOverrideMapInvalid):
+		return http.StatusUnprocessableEntity, CodeOverrideMapInvalid, err.Error()
+	case errors.Is(err, port.ErrAssigneeIneligible):
+		return http.StatusUnprocessableEntity, CodeAssigneeIneligible, err.Error()
 	case errors.Is(err, adapterhttp.ErrUpstreamUnavailable):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, err.Error()
 	case errors.Is(err, context.DeadlineExceeded):

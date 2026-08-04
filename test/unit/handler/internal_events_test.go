@@ -351,6 +351,36 @@ func TestHandleInternalEvent_UserAvailabilityChanged_RecencyGuard_SkipsStaleEven
 	assert.Equal(t, 1, calls, "a stale (older) event must be skipped by the recency guard, not applied")
 }
 
+func TestHandleInternalEvent_UserAvailabilityChanged_RecencyGuard_ScopedPerTenant(t *testing.T) {
+	fakes := newEventsFakes()
+	calls := 0
+	fakes.oooAvailability.apply = func(context.Context, port.UserAvailabilityInput) error {
+		calls++
+		return nil
+	}
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	otherTenantID := uuid.New()
+	newer := time.Now()
+	older := newer.Add(-time.Hour)
+
+	w1 := postEvent(router, envelope("user.availability.changed", uuid.New(), testTenantID, newer, map[string]any{
+		"user_id": testUserID.String(), "status": "ooo",
+	}))
+	require.Equal(t, http.StatusOK, w1.Code)
+	require.Equal(t, 1, calls)
+
+	// A different tenant reporting the SAME user_id's availability at an
+	// OLDER timestamp must still apply — a Keycloak user_id can hold
+	// independent availability state per tenant, so this is a distinct
+	// scope, not a stale republish of the first tenant's event.
+	w2 := postEvent(router, envelope("user.availability.changed", uuid.New(), otherTenantID, older, map[string]any{
+		"user_id": testUserID.String(), "status": "available",
+	}))
+	require.Equal(t, http.StatusOK, w2.Code)
+	assert.Equal(t, 2, calls, "a different tenant's availability change for the same user_id must not be skipped by the first tenant's recency state")
+}
+
 // --- TenantStateChanged ---
 
 func TestHandleInternalEvent_TenantStateChanged_Success(t *testing.T) {

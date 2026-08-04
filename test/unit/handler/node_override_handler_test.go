@@ -64,9 +64,9 @@ func TestOverrideNodeAssignee_Success(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, elig))
 
-	w := do(router, req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
+	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
 		"new_user_id": newUser, "reason": "primary reviewer on leave", "record_version": 4,
-	}))
+	})))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, newUser, eligibilityCalledWith.newUserID)
@@ -102,9 +102,9 @@ func TestOverrideNodeAssignee_AlreadyResolved(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, elig))
 
-	w := do(router, req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
+	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
 		"new_user_id": uuid.New(), "record_version": 4,
-	}))
+	})))
 
 	require.Equal(t, http.StatusConflict, w.Code)
 	var body struct {
@@ -128,9 +128,9 @@ func TestOverrideNodeAssignee_StaleRecordVersion(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, elig))
 
-	w := do(router, req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
+	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
 		"new_user_id": uuid.New(), "record_version": 4,
-	}))
+	})))
 
 	require.Equal(t, http.StatusConflict, w.Code)
 	var body struct {
@@ -158,9 +158,9 @@ func TestOverrideNodeAssignee_Ineligible(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, elig))
 
-	w := do(router, req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
+	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
 		"new_user_id": uuid.New(), "record_version": 4,
-	}))
+	})))
 
 	require.Equal(t, http.StatusUnprocessableEntity, w.Code)
 	assert.False(t, persisted, "an ineligible request must leave zero rows persisted")
@@ -184,9 +184,9 @@ func TestOverrideNodeAssignee_UpstreamUnavailable(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, elig))
 
-	w := do(router, req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
+	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
 		"new_user_id": uuid.New(), "record_version": 4,
-	}))
+	})))
 
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
@@ -206,9 +206,30 @@ func TestOverrideNodeAssignee_PersistConflict(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
+	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
+		"new_user_id": uuid.New(), "record_version": 4,
+	})))
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+}
+
+func TestOverrideNodeAssignee_NotAdmin_Forbidden(t *testing.T) {
+	fake := &fakeTaskService{
+		getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
+			t.Fatal("must not call the service when the caller is not admin")
+			return nil, nil
+		},
+	}
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
+
 	w := do(router, req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
 		"new_user_id": uuid.New(), "record_version": 4,
 	}))
 
-	assert.Equal(t, http.StatusConflict, w.Code)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	var body struct {
+		Code string `json:"code"`
+	}
+	decodeJSON(t, w.Body, &body)
+	assert.Equal(t, "FORBIDDEN", body.Code)
 }

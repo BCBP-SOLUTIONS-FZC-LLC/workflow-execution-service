@@ -213,11 +213,32 @@ func TestReassignTask(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodPost, "/api/v1/tasks/"+testTaskID.String()+"/reassign", map[string]any{
+	w := do(router, asAdmin(req(http.MethodPost, "/api/v1/tasks/"+testTaskID.String()+"/reassign", map[string]any{
 		"new_user_id": newUser, "record_version": 4,
-	}))
+	})))
 
 	assert.Equal(t, http.StatusAccepted, w.Code)
+}
+
+func TestReassignTask_NotAdmin_Forbidden(t *testing.T) {
+	fake := &fakeTaskService{
+		reassign: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, int64) (*port.Task, error) {
+			t.Fatal("must not call the service when the caller is not admin")
+			return nil, nil
+		},
+	}
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
+
+	w := do(router, req(http.MethodPost, "/api/v1/tasks/"+testTaskID.String()+"/reassign", map[string]any{
+		"new_user_id": uuid.New(), "record_version": 4,
+	}))
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	var body struct {
+		Code string `json:"code"`
+	}
+	decodeJSON(t, w.Body, &body)
+	assert.Equal(t, "FORBIDDEN", body.Code)
 }
 
 func TestListActiveByUser(t *testing.T) {
@@ -233,7 +254,7 @@ func TestListActiveByUser(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodGet, "/api/v1/workflows/active-by-user?user_id="+targetUser.String(), nil))
+	w := do(router, asAdmin(req(http.MethodGet, "/api/v1/workflows/active-by-user?user_id="+targetUser.String(), nil)))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var body struct {
@@ -243,10 +264,29 @@ func TestListActiveByUser(t *testing.T) {
 	assert.Len(t, body.Items, 1)
 }
 
+func TestListActiveByUser_NotAdmin_Forbidden(t *testing.T) {
+	fake := &fakeTaskService{
+		activeByUser: func(context.Context, uuid.UUID, uuid.UUID, port.Page) (port.PageResult[*port.ActiveUserTask], error) {
+			t.Fatal("must not call the service when the caller is not admin")
+			return port.PageResult[*port.ActiveUserTask]{}, nil
+		},
+	}
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
+
+	w := do(router, req(http.MethodGet, "/api/v1/workflows/active-by-user?user_id="+uuid.New().String(), nil))
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	var body struct {
+		Code string `json:"code"`
+	}
+	decodeJSON(t, w.Body, &body)
+	assert.Equal(t, "FORBIDDEN", body.Code)
+}
+
 func TestListActiveByUser_MissingUserID(t *testing.T) {
 	router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodGet, "/api/v1/workflows/active-by-user", nil))
+	w := do(router, asAdmin(req(http.MethodGet, "/api/v1/workflows/active-by-user", nil)))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
@@ -254,7 +294,7 @@ func TestListActiveByUser_MissingUserID(t *testing.T) {
 func TestListActiveByUser_InvalidLimit_Rejected(t *testing.T) {
 	router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodGet, "/api/v1/workflows/active-by-user?user_id="+uuid.New().String()+"&limit=0", nil))
+	w := do(router, asAdmin(req(http.MethodGet, "/api/v1/workflows/active-by-user?user_id="+uuid.New().String()+"&limit=0", nil)))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
@@ -262,7 +302,7 @@ func TestListActiveByUser_InvalidLimit_Rejected(t *testing.T) {
 func TestListActiveByUser_InvalidCursor_Rejected(t *testing.T) {
 	router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodGet, "/api/v1/workflows/active-by-user?user_id="+uuid.New().String()+"&cursor=not-a-valid-cursor", nil))
+	w := do(router, asAdmin(req(http.MethodGet, "/api/v1/workflows/active-by-user?user_id="+uuid.New().String()+"&cursor=not-a-valid-cursor", nil)))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }

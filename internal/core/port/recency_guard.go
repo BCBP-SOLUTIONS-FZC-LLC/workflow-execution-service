@@ -8,10 +8,11 @@ import (
 // RecencyGuard is the generic <=-skip-with-tie-resolves-to-skip out-of-order
 // delivery guard shared by TenantStateChanged, UserAvailabilityChanged, and
 // workflow.template.published (LLD §6.2 items 4/6, Appendix A #25/#26).
-// scopeKey conventions: "tenant:<tenant_id>", "user_availability:<user_id>",
-// "template:<tenant_id>:<workflow_key>" — workflow_key is only unique per
-// tenant, so the tenant_id must be part of the key or two tenants sharing a
-// business key would collide on one recency row.
+// scopeKey conventions: "tenant:<tenant_id>", "user_availability:<tenant_id>:<user_id>",
+// "template:<tenant_id>:<workflow_key>" — a Keycloak user_id and a workflow_key
+// are each only unique per tenant, so tenant_id must be part of every
+// multi-tenant scope key or two tenants sharing a user/business key would
+// collide on one recency row.
 type RecencyGuard interface {
 	// ShouldApply is a pure read: true when eventTime is strictly newer than
 	// the stored value (or no row exists yet), false otherwise. It performs

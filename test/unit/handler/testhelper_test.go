@@ -114,6 +114,94 @@ func (f *fakeTaskService) ActiveByUser(ctx context.Context, tenantID, userID uui
 
 var _ port.TaskService = (*fakeTaskService)(nil)
 
+// fakeInstanceService is the hand-rolled fake for port.InstanceService,
+// following fakeTaskService's exact convention: one optional func field per
+// method, falling back to a zero-value default when unset.
+type fakeInstanceService struct {
+	start        func(context.Context, port.StartInstanceInput) (*port.Instance, error)
+	list         func(context.Context, uuid.UUID, port.ReadScope, port.InstanceFilter, port.Page) (port.PageResult[*port.Instance], error)
+	get          func(context.Context, uuid.UUID, uuid.UUID, port.ReadScope) (*port.Instance, []*port.Task, error)
+	pause        func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, int64) error
+	resume       func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int64) error
+	cancel       func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, int64) error
+	terminate    func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) error
+	forceForward func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, int64) error
+	forceBack    func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int64) error
+	listEvents   func(context.Context, uuid.UUID, uuid.UUID, port.ReadScope, port.Page) (port.PageResult[*port.WorkflowEvent], error)
+}
+
+func (f *fakeInstanceService) Start(ctx context.Context, in port.StartInstanceInput) (*port.Instance, error) {
+	if f.start != nil {
+		return f.start(ctx, in)
+	}
+	return nil, nil
+}
+
+func (f *fakeInstanceService) List(ctx context.Context, tenantID uuid.UUID, scope port.ReadScope, filter port.InstanceFilter, page port.Page) (port.PageResult[*port.Instance], error) {
+	if f.list != nil {
+		return f.list(ctx, tenantID, scope, filter, page)
+	}
+	return port.PageResult[*port.Instance]{}, nil
+}
+
+func (f *fakeInstanceService) Get(ctx context.Context, tenantID, instanceID uuid.UUID, scope port.ReadScope) (*port.Instance, []*port.Task, error) {
+	if f.get != nil {
+		return f.get(ctx, tenantID, instanceID, scope)
+	}
+	return nil, nil, nil
+}
+
+func (f *fakeInstanceService) Pause(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string, recordVersion int64) error {
+	if f.pause != nil {
+		return f.pause(ctx, tenantID, instanceID, actorUserID, reason, recordVersion)
+	}
+	return nil
+}
+
+func (f *fakeInstanceService) Resume(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, recordVersion int64) error {
+	if f.resume != nil {
+		return f.resume(ctx, tenantID, instanceID, actorUserID, recordVersion)
+	}
+	return nil
+}
+
+func (f *fakeInstanceService) Cancel(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string, recordVersion int64) error {
+	if f.cancel != nil {
+		return f.cancel(ctx, tenantID, instanceID, actorUserID, reason, recordVersion)
+	}
+	return nil
+}
+
+func (f *fakeInstanceService) Terminate(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string) error {
+	if f.terminate != nil {
+		return f.terminate(ctx, tenantID, instanceID, actorUserID, reason)
+	}
+	return nil
+}
+
+func (f *fakeInstanceService) ForceForward(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, targetNodeKey string, recordVersion int64) error {
+	if f.forceForward != nil {
+		return f.forceForward(ctx, tenantID, instanceID, actorUserID, targetNodeKey, recordVersion)
+	}
+	return nil
+}
+
+func (f *fakeInstanceService) ForceBack(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, recordVersion int64) error {
+	if f.forceBack != nil {
+		return f.forceBack(ctx, tenantID, instanceID, actorUserID, recordVersion)
+	}
+	return nil
+}
+
+func (f *fakeInstanceService) ListEvents(ctx context.Context, tenantID, instanceID uuid.UUID, scope port.ReadScope, page port.Page) (port.PageResult[*port.WorkflowEvent], error) {
+	if f.listEvents != nil {
+		return f.listEvents(ctx, tenantID, instanceID, scope, page)
+	}
+	return port.PageResult[*port.WorkflowEvent]{}, nil
+}
+
+var _ port.InstanceService = (*fakeInstanceService)(nil)
+
 // fakeEligibilityChecker is the equivalent hand-rolled fake for
 // port.EligibilityChecker.
 type fakeEligibilityChecker struct {
@@ -488,6 +576,18 @@ func newEventsHandler(f *eventsFakes) *handler.Handler {
 
 func newHandler(tasks *fakeTaskService, eligibility *fakeEligibilityChecker) *handler.Handler {
 	return handler.New(handler.Services{Tasks: tasks, Eligibility: eligibility})
+}
+
+func newHandlerWithCache(tasks *fakeTaskService, eligibility *fakeEligibilityChecker, cache *fakeCacheStore) *handler.Handler {
+	return handler.New(handler.Services{Tasks: tasks, Eligibility: eligibility, Cache: cache, IdempotencyTTL: time.Hour})
+}
+
+func newInstanceHandler(instances *fakeInstanceService) *handler.Handler {
+	return handler.New(handler.Services{Instances: instances})
+}
+
+func newInstanceHandlerWithCache(instances *fakeInstanceService, cache *fakeCacheStore) *handler.Handler {
+	return handler.New(handler.Services{Instances: instances, Cache: cache, IdempotencyTTL: time.Hour})
 }
 
 func newDelegateHandler(wc *fakeWorkflowClient) *handler.Handler {

@@ -271,9 +271,9 @@ func TestReassignTask_UnknownError(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodPost, "/api/v1/tasks/"+testTaskID.String()+"/reassign", map[string]any{
+	w := do(router, asAdmin(req(http.MethodPost, "/api/v1/tasks/"+testTaskID.String()+"/reassign", map[string]any{
 		"new_user_id": uuid.New(), "record_version": 1,
-	}))
+	})))
 
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 	var body struct {
@@ -300,9 +300,9 @@ func TestOverrideNodeAssignee_OverrideNoOp(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
+	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
 		"new_user_id": uuid.New(), "record_version": 4,
-	}))
+	})))
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	var body struct {
@@ -320,9 +320,9 @@ func TestOverrideNodeAssignee_GetByNodeError(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
+	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
 		"new_user_id": uuid.New(), "record_version": 4,
-	}))
+	})))
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
@@ -341,9 +341,9 @@ func TestOverrideNodeAssignee_SignalFailure(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
+	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
 		"new_user_id": uuid.New(), "record_version": 4,
-	}))
+	})))
 
 	// Persist already committed; the signal failing afterward is the accepted
 	// residual gap (LLD Appendix B) — the response reports the failure, but
@@ -354,7 +354,7 @@ func TestOverrideNodeAssignee_SignalFailure(t *testing.T) {
 func TestOverrideNodeAssignee_InvalidBody(t *testing.T) {
 	router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{}))
+	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{})))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
@@ -413,7 +413,7 @@ func TestDeferTask_InvalidID(t *testing.T) {
 func TestReassignTask_MissingFields(t *testing.T) {
 	router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodPost, "/api/v1/tasks/"+testTaskID.String()+"/reassign", map[string]any{}))
+	w := do(router, asAdmin(req(http.MethodPost, "/api/v1/tasks/"+testTaskID.String()+"/reassign", map[string]any{})))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
@@ -421,9 +421,9 @@ func TestReassignTask_MissingFields(t *testing.T) {
 func TestReassignTask_InvalidID(t *testing.T) {
 	router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodPost, "/api/v1/tasks/not-a-uuid/reassign", map[string]any{
+	w := do(router, asAdmin(req(http.MethodPost, "/api/v1/tasks/not-a-uuid/reassign", map[string]any{
 		"new_user_id": uuid.New(), "record_version": 1,
-	}))
+	})))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
@@ -436,7 +436,7 @@ func TestListActiveByUser_ServiceError(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
-	w := do(router, req(http.MethodGet, "/api/v1/workflows/active-by-user?user_id="+uuid.New().String(), nil))
+	w := do(router, asAdmin(req(http.MethodGet, "/api/v1/workflows/active-by-user?user_id="+uuid.New().String(), nil)))
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
@@ -477,9 +477,9 @@ func TestDeferTask_PayloadTooLarge(t *testing.T) {
 func TestOverrideNodeAssignee_UnsupportedMediaType(t *testing.T) {
 	router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
 
-	r := req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
+	r := asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
 		"new_user_id": uuid.New(), "record_version": 4,
-	})
+	}))
 	r.Header.Set("Content-Type", "application/xml")
 	w := do(router, r)
 

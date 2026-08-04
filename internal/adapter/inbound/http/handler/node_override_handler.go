@@ -53,6 +53,9 @@ func (h *Handler) OverrideNodeAssignee(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !requireAdmin(c) {
+		return
+	}
 	instanceID, ok := parseIDParam(c)
 	if !ok {
 		return
