@@ -26,8 +26,12 @@ type completedBranch struct {
 
 // runParallel dispatches ParallelBranch entries, one workflow.Go per branch
 // (execution LLD §2.5 point 2.ii). A force-back while all branches are still
-// active pauses and regresses in place (§2.7); DEGRADED (§3.3) only once a
-// branch actually fails.
+// active pauses and regresses in place (§2.7); a force-forward while still
+// active supersedes and resumes past just the addressed branch, leaving
+// every other sibling running untouched (§3.1's "RUNNING or DEGRADED"
+// precondition on instance-force-forward, and the same "siblings are not
+// cancelled" framing §3.3 already applies to DEGRADED's own force-forward
+// case); DEGRADED (§3.3) only once a branch actually fails.
 func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branches []dsl.ParallelBranch, admin wf.Channel) (stepOutcome, error) {
 	preFork := in.history.PreForkEntry()
 
@@ -36,11 +40,19 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 
 	settle := wf.NewChannel(ctx)
 	deptIDs := make([]string, 0, len(branches))
+	cancels := make(map[string]wf.CancelFunc, len(branches))
+	// resolved guards two races a force-forward introduces: a stale settle
+	// landing after its branch has already been force-forwarded past, and a
+	// duplicate/late force-forward for a dept already resolved.
+	resolved := make(map[string]bool, len(branches))
 	for _, b := range branches {
 		deptIDs = append(deptIDs, b.DeptID)
-		wf.Go(ctx, func(gctx wf.Context) {
-			out, err := in.runSteps(gctx, plan, b.Steps, admin)
-			settle.Send(gctx, branchOutcome{DeptID: b.DeptID, LastNode: out.LastNode, Err: err})
+		bctx, cancel := wf.WithCancel(ctx)
+		cancels[b.DeptID] = cancel
+		deptID, steps := b.DeptID, b.Steps
+		wf.Go(bctx, func(gctx wf.Context) {
+			out, err := in.runSteps(gctx, plan, steps, admin)
+			settle.Send(gctx, branchOutcome{DeptID: deptID, LastNode: out.LastNode, Err: err})
 		})
 	}
 
@@ -58,6 +70,10 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 		sel.AddReceive(settle, func(c wf.ReceiveChannel, more bool) {
 			var out branchOutcome
 			c.Receive(ctx, &out)
+			if resolved[out.DeptID] {
+				return // stale settle from a branch already force-forwarded past
+			}
+			resolved[out.DeptID] = true
 			remaining--
 			if out.Err != nil {
 				failed = append(failed, failedBranch{DeptID: out.DeptID, LastCompletedNode: out.LastNode, Err: out.Err})
@@ -75,13 +91,42 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 			return stepOutcome{Terminated: true}, nil
 
 		case SignalInstanceForceFwd:
-			// Known gap: not implemented for an active Parallel gateway with
-			// no failed branch yet — would need a redirect target threaded
-			// back through every nesting level, which stepOutcome doesn't
-			// carry today. Log and drop rather than fail the instance;
-			// force-back or waiting for DEGRADED are the workarounds.
-			wf.GetLogger(ctx).Warn("instance-force-forward while a Parallel gateway is active with no failed branch is not implemented; dropping",
-				"target_node_key", string(envelope.Signal.TargetNodeKey))
+			sig := envelope.Signal
+			deptID := sig.TargetDeptID
+			if resolved[deptID] || !containsDept(deptIDs, deptID) {
+				wf.GetLogger(ctx).Warn("instance-force-forward: target_dept_id doesn't name a still-active branch of this gateway; dropping",
+					"target_dept_id", deptID)
+				continue
+			}
+			var oldKeys []domain.NodeKey
+			if node := in.currentPendingNode(deptID); node != "" {
+				oldKeys = []domain.NodeKey{node}
+			}
+			// Best-effort, same reasoning as runTopLevel's and enterDegraded's
+			// own ForceFwd cases: both retry unlimited on anything retryable
+			// already (dbWriteActivityOptions).
+			_ = recordForceRoute(ctx, port.RecordForceRouteInput{
+				InstanceID: in.instanceID, TenantID: in.tenantID,
+				OldNodeKeys: oldKeys, TargetNodeID: string(sig.TargetNodeKey),
+				AdminUserID: sig.AdminUserID, RecordVersion: sig.RecordVersion,
+			})
+			_ = updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
+				InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{sig.TargetNodeKey},
+			})
+			// Known limitation: cancel() only reliably interrupts a branch
+			// mid-ExecuteActivity. A branch parked in runTaskStage's own
+			// Selector waiting on a real signal (stage.go) has no ctx.Done()
+			// case registered and is left orphaned/blocked — harmless, since
+			// RecordForceRouteActivity above vacates its assignment, so no
+			// legitimate future signal should resolve it anyway. The same
+			// trade-off already exists, unflagged, in runTopLevel's own
+			// force-forward case (workflow.go).
+			if cancel, ok := cancels[deptID]; ok {
+				cancel()
+			}
+			resolved[deptID] = true
+			remaining--
+			completed = append(completed, completedBranch{DeptID: deptID, LastNode: sig.TargetNodeKey})
 
 		case SignalInstanceForceBack:
 			for _, d := range deptIDs {

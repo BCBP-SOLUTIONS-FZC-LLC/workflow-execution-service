@@ -140,6 +140,31 @@ func deptFromNodeKey(key domain.NodeKey) string {
 	return s
 }
 
+// currentPendingNode returns deptID's currently in-flight task-stage node
+// key, if any — a dept-prefix match over in.pending (stage.go's nodeKey ->
+// resolveCh map). Empty if deptID isn't blocked on a task-stage wait right
+// now (e.g. between stages, or mid message-buffer stage).
+//
+// Assumes one department runs directly per ParallelBranch — the same flat
+// scope limit parallelDepth's own doc comment (types.go) already accepts.
+func (in *interpreter) currentPendingNode(deptID string) domain.NodeKey {
+	for key := range in.pending {
+		if deptFromNodeKey(key) == deptID {
+			return key
+		}
+	}
+	return ""
+}
+
+func containsDept(deptIDs []string, deptID string) bool {
+	for _, d := range deptIDs {
+		if d == deptID {
+			return true
+		}
+	}
+	return false
+}
+
 // stageIndexAfter returns the index of the stage immediately following
 // lastCompletedNode within dept, or 0 if not found — used by DEGRADED
 // respawn to resume just past a failed branch's last completed stage rather

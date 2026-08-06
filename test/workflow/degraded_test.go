@@ -142,6 +142,129 @@ func TestExecute_ParallelBranchFailureDegradesThenForceBackRespawns(t *testing.T
 	}
 }
 
+// TestExecute_ActiveParallelForceForwardSupersedesOneBranch closes the T1.1
+// gap: instance-force-forward's LLD §3.1 precondition is "RUNNING or
+// DEGRADED", not DEGRADED-only — force-forward must resolve a still-active
+// Parallel branch (neither branch has failed, the instance never enters
+// DEGRADED at all) exactly like it already does for a failed one. billing is
+// force-forwarded away and never signalled to complete; only warehouse's own
+// completion is needed for the instance to finish.
+func TestExecute_ActiveParallelForceForwardSupersedesOneBranch(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := parallelCollaboration()
+	var recordedOldNodeKeys []string
+	forceRouteCalls := 0
+	sawDegraded := false
+	registerFakeActivities(env, collab, &activityHooks{
+		recordForceRoute: func(in port.RecordForceRouteInput) {
+			forceRouteCalls++
+			for _, k := range in.OldNodeKeys {
+				recordedOldNodeKeys = append(recordedOldNodeKeys, string(k))
+			}
+		},
+		updateInstanceStatus: func(in port.UpdateInstanceStatusInput) {
+			if in.Status == domain.InstanceStatusDegraded {
+				sawDegraded = true
+			}
+		},
+	})
+
+	// Fires while both warehouse and billing are still pending (neither has
+	// settled) — the gap this test closes, not DEGRADED's own force-forward.
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
+		})
+	}, 5*time.Millisecond)
+
+	// Deliberately never signal billing/prep's completion — if the
+	// implementation fell back to the old drop-and-log behavior, this test
+	// would hang until the test environment's default execution timeout,
+	// not merely fail an assertion.
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+		})
+	}, 10*time.Millisecond)
+
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+	})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	var out wfengine.ExecuteOutput
+	if err := env.GetWorkflowResult(&out); err != nil {
+		t.Fatalf("GetWorkflowResult error: %v", err)
+	}
+	if out.Status != domain.InstanceStatusCompleted {
+		t.Errorf("Status = %v, want COMPLETED", out.Status)
+	}
+	if sawDegraded {
+		t.Error("instance entered DEGRADED; force-forward on a still-active branch must resolve without ever degrading")
+	}
+	if forceRouteCalls != 1 {
+		t.Errorf("RecordForceRouteActivity calls = %d, want 1", forceRouteCalls)
+	}
+	if len(recordedOldNodeKeys) != 1 || recordedOldNodeKeys[0] != "billing/prep" {
+		t.Errorf("RecordForceRouteActivity's OldNodeKeys = %v, want exactly [billing/prep]", recordedOldNodeKeys)
+	}
+}
+
+// TestExecute_ActiveParallelForceForwardDuplicateSignalIsNoOp drives the
+// resolved-guard added alongside the fix above: a second force-forward for a
+// dept already resolved (whether a genuine duplicate delivery or simply
+// late) must be dropped, not processed again.
+func TestExecute_ActiveParallelForceForwardDuplicateSignalIsNoOp(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := parallelCollaboration()
+	forceRouteCalls := 0
+	registerFakeActivities(env, collab, &activityHooks{
+		recordForceRoute: func(port.RecordForceRouteInput) { forceRouteCalls++ },
+	})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
+		})
+	}, 5*time.Millisecond)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
+		})
+	}, 6*time.Millisecond)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+		})
+	}, 10*time.Millisecond)
+
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+	})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	var out wfengine.ExecuteOutput
+	if err := env.GetWorkflowResult(&out); err != nil {
+		t.Fatalf("GetWorkflowResult error: %v", err)
+	}
+	if out.Status != domain.InstanceStatusCompleted {
+		t.Errorf("Status = %v, want COMPLETED", out.Status)
+	}
+	if forceRouteCalls != 1 {
+		t.Errorf("RecordForceRouteActivity calls = %d, want exactly 1 (duplicate force-forward must be dropped)", forceRouteCalls)
+	}
+}
+
 // TestExecute_DEGRADEDRejectsInstancePause is the workflow-level companion
 // to LLD §7.2 test #5's unit-level validateSignal coverage: while an
 // instance is parked in DEGRADED, an instance-pause signal must be rejected

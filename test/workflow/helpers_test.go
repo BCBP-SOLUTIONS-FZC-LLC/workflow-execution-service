@@ -41,10 +41,11 @@ func singleStageCollaboration(stage dsl.StageDef) *dsl.CompiledCollaboration {
 // activity bodies without every test needing to know every activity's
 // signature. Nil fields fall back to a harmless default.
 type activityHooks struct {
-	createTask       func(port.CreateTaskInput) (port.CreateTaskOutput, error)
-	recordSLAWarn    func(port.RecordSLAWarningInput)
-	recordSLABreach  func(port.RecordSLABreachInput)
-	recordForceRoute func(port.RecordForceRouteInput)
+	createTask           func(port.CreateTaskInput) (port.CreateTaskOutput, error)
+	recordSLAWarn        func(port.RecordSLAWarningInput)
+	recordSLABreach      func(port.RecordSLABreachInput)
+	recordForceRoute     func(port.RecordForceRouteInput)
+	updateInstanceStatus func(port.UpdateInstanceStatusInput)
 }
 
 // registerFakeActivities registers minimal, real (not testify-mocked)
@@ -94,7 +95,12 @@ func registerFakeActivities(env *testsuite.TestWorkflowEnvironment, collab *dsl.
 		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
 	)
 	env.RegisterActivityWithOptions(
-		func(_ context.Context, _ port.UpdateInstanceStatusInput) error { return nil },
+		func(_ context.Context, in port.UpdateInstanceStatusInput) error {
+			if hooks.updateInstanceStatus != nil {
+				hooks.updateInstanceStatus(in)
+			}
+			return nil
+		},
 		activity.RegisterOptions{Name: port.ActivityUpdateInstanceStatus},
 	)
 	env.RegisterActivityWithOptions(
