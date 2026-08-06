@@ -17,7 +17,6 @@ type Config struct {
 	GRPCPort         int
 	WorkerHealthPort int
 
-	// OTel — consumed by platform-gincommon.InitTracingFromEnv()
 	OTELServiceName        string
 	OTELExporterEndpoint   string
 	OTELExporterInsecure   bool
@@ -38,6 +37,7 @@ type Config struct {
 	ValkeyPassword    string
 	ValkeyDialTimeout time.Duration
 	ValkeyReadTimeout time.Duration
+	IdempotencyTTL    time.Duration
 
 	TemporalHostPort  string
 	TemporalNamespace string
@@ -51,7 +51,13 @@ type Config struct {
 	OutboxPollInterval time.Duration
 	OutboxBatchSize    int
 
-	DefinitionServiceAddr string
+	// DefinitionServiceAddr is optional: empty disables the outbound
+	// DefinitionClient. Whoever builds the composition root must guard
+	// construction on non-empty, mirroring definition_service's own
+	// `if cfg.ExecutionServiceAddr != ""` pattern — this is deliberately not
+	// enforced in validate() below.
+	DefinitionServiceAddr   string
+	DefinitionClientTimeout time.Duration
 }
 
 func Load() (*Config, error) {
@@ -81,6 +87,7 @@ func Load() (*Config, error) {
 		ValkeyPassword:    getEnvOrDefault("VALKEY_PASSWORD", ""),
 		ValkeyDialTimeout: getEnvDurationOrDefault("VALKEY_DIAL_TIMEOUT", 2*time.Second),
 		ValkeyReadTimeout: getEnvDurationOrDefault("VALKEY_READ_TIMEOUT", 1*time.Second),
+		IdempotencyTTL:    getEnvDurationOrDefault("IDEMPOTENCY_TTL", 24*time.Hour),
 
 		TemporalHostPort:  getEnvOrDefault("TEMPORAL_HOST_PORT", "localhost:7233"),
 		TemporalNamespace: getEnvOrDefault("TEMPORAL_NAMESPACE", "default"),
@@ -94,7 +101,8 @@ func Load() (*Config, error) {
 		OutboxPollInterval: getEnvDurationOrDefault("OUTBOX_POLL_INTERVAL", 500*time.Millisecond),
 		OutboxBatchSize:    getEnvIntOrDefault("OUTBOX_BATCH_SIZE", 50),
 
-		DefinitionServiceAddr: getEnvOrDefault("DEFINITION_SERVICE_ADDR", ""),
+		DefinitionServiceAddr:   getEnvOrDefault("DEFINITION_SERVICE_ADDR", ""),
+		DefinitionClientTimeout: getEnvDurationOrDefault("DEFINITION_CLIENT_TIMEOUT", 5*time.Second),
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -140,12 +148,12 @@ func (c *Config) validate() error {
 			return fmt.Errorf("SNS_TOPIC_ARN is required when AWS_USE_STUB=false")
 		}
 	}
+	if c.DefinitionClientTimeout <= 0 {
+		return fmt.Errorf("DEFINITION_CLIENT_TIMEOUT must be > 0")
+	}
 	return nil
 }
 
-// MigrationDSN returns the DSN to use for schema migrations. It prefers
-// MIGRATION_DATABASE_URL so migrations can bypass PgBouncer (advisory locks
-// require a direct Postgres connection), falling back to DATABASE_URL.
 func (c *Config) MigrationDSN() string {
 	if c.MigrationDatabaseURL != "" {
 		return c.MigrationDatabaseURL

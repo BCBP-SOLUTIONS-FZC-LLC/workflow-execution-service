@@ -159,7 +159,7 @@ func TestRLSForceEnabledOnTenantTables(t *testing.T) {
 		assert.Truef(t, forced, "%s: relforcerowsecurity should be true", table)
 	}
 
-	exceptions := []string{"active_task_queues", "processed_event"}
+	exceptions := []string{"active_task_queues", "processed_event", "event_recency_guard"}
 	for _, table := range exceptions {
 		enabled, _ := rlsFlags(t, superPool, ctx, table)
 		assert.Falsef(t, enabled, "%s: relrowsecurity should be false (named RLS exception)", table)

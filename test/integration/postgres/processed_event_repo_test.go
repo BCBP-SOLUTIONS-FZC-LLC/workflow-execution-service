@@ -36,6 +36,25 @@ func TestProcessedEventRepo_RecordIfNew(t *testing.T) {
 	assert.True(t, isNew, "same event_id under a different consumer dedups independently")
 }
 
+func TestProcessedEventRepo_IsProcessed(t *testing.T) {
+	pool := fixtures.NewTestPool(t)
+	repo := postgres.NewProcessedEventRepo(pool)
+	ctx := context.Background()
+
+	eventID := uuid.New()
+
+	processed, err := repo.IsProcessed(ctx, eventID, "membership-execution")
+	require.NoError(t, err)
+	assert.False(t, processed)
+
+	_, err = repo.RecordIfNew(ctx, eventID, "membership-execution", "DelegationStarted")
+	require.NoError(t, err)
+
+	processed, err = repo.IsProcessed(ctx, eventID, "membership-execution")
+	require.NoError(t, err)
+	assert.True(t, processed)
+}
+
 func TestProcessedEventRepo_PruneOlderThan(t *testing.T) {
 	superPool, _ := fixtures.NewTestPoolAndDSN(t)
 	repo := postgres.NewProcessedEventRepo(superPool)
@@ -65,4 +84,8 @@ func TestProcessedEventRepo_PruneOlderThan(t *testing.T) {
 		return conn.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM processed_event WHERE event_id = $1)", freshID).Scan(&freshStillThere)
 	}))
 	assert.True(t, freshStillThere, "a row inside the retention window must survive the prune")
+
+	processed, err := repo.IsProcessed(ctx, oldID, "membership-execution")
+	require.NoError(t, err)
+	assert.False(t, processed, "pruned rows must no longer be considered processed")
 }

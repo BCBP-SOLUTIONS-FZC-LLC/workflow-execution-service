@@ -2,10 +2,12 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres/db"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -21,8 +23,23 @@ func NewProcessedEventRepo(pool *pgcommon.Pool) *ProcessedEventRepo {
 	return &ProcessedEventRepo{pool: pool}
 }
 
-// RecordIfNew inserts the (event_id, consumer) pair and returns true if new,
-// false if already seen (ON CONFLICT DO NOTHING affects zero rows).
+func (r *ProcessedEventRepo) IsProcessed(ctx context.Context, eventID uuid.UUID, consumer string) (bool, error) {
+	var processed bool
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		_, err := db.New(dbtx).GetProcessedEvent(ctx, db.GetProcessedEventParams{EventID: eventID, Consumer: consumer})
+		if errors.Is(err, pgx.ErrNoRows) {
+			processed = false
+			return nil
+		}
+		if err != nil {
+			return mapErr(err)
+		}
+		processed = true
+		return nil
+	})
+	return processed, err
+}
+
 func (r *ProcessedEventRepo) RecordIfNew(
 	ctx context.Context,
 	eventID uuid.UUID,
@@ -44,8 +61,6 @@ func (r *ProcessedEventRepo) RecordIfNew(
 	return isNew, err
 }
 
-// PruneOlderThan is a distinct retention policy from outbox_events' own
-// PrunePublished — never share a constant between the two.
 func (r *ProcessedEventRepo) PruneOlderThan(ctx context.Context, olderThan time.Duration) (int64, error) {
 	var deleted int64
 	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {

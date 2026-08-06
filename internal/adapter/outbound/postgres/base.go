@@ -24,8 +24,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres/db"
 )
 
-// exec runs fn with either the transaction stored in ctx (when inside a
-// Transactor.RunInTx callback) or a fresh connection from pool.
 func exec(ctx context.Context, pool *pgcommon.Pool, fn func(db.DBTX) error) error {
 	if tx, ok := txFromContext(ctx); ok {
 		return fn(tx)
