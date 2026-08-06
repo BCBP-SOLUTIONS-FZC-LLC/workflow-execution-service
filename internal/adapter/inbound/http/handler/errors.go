@@ -34,6 +34,7 @@ const (
 	CodeInternal                 ErrCode = "INTERNAL_ERROR"
 	CodeTenantMismatch           ErrCode = "TENANT_MISMATCH"
 	CodeIdempotencyReplay        ErrCode = "IDEMPOTENCY_KEY_REPLAY"
+	CodeEventDecodeFailed        ErrCode = "EVENT_DECODE_FAILED"
 
 	CodeInstanceNotFound        ErrCode = "INSTANCE_NOT_FOUND"
 	CodeTargetNodeNotFound      ErrCode = "TARGET_NODE_NOT_FOUND"
@@ -67,6 +68,7 @@ var codeTitles = map[ErrCode]string{
 	CodeInternal:                 "Internal Server Error",
 	CodeTenantMismatch:           "Tenant Mismatch",
 	CodeIdempotencyReplay:        "Idempotency Key Replay",
+	CodeEventDecodeFailed:        "Event Decode Failed",
 
 	CodeInstanceNotFound:        "Instance Not Found",
 	CodeTargetNodeNotFound:      "Target Node Not Found",
@@ -102,6 +104,7 @@ var problemTypes = map[ErrCode]string{
 	CodeInternal:                 errBase + "internal-error",
 	CodeTenantMismatch:           errBase + "tenant-mismatch",
 	CodeIdempotencyReplay:        errBase + "idempotency-key-replay",
+	CodeEventDecodeFailed:        errBase + "event-decode-failed",
 
 	CodeInstanceNotFound:        errBase + "instance-not-found",
 	CodeTargetNodeNotFound:      errBase + "target-node-not-found",

@@ -34,7 +34,7 @@ components:
   db:
     in: "internal/adapter/outbound/postgres/db/**"
   # Embedded event JSON Schemas (go:embed only); declared separately, same
-  # reasoning as db, so adapter (eventbus.ValidatingCodec) can import it.
+  # reasoning as db, so adapter (eventbus.SchemaValidator) can import it.
   eventschema:
     in: "internal/eventschema/**"
   adapter:
@@ -68,7 +68,7 @@ deps:
       - adapter     # inbound handlers reference outbound clients' sentinel errors (e.g. eligibility_client.go)
       - service     # handlers reference service request/response types
       - db          # sqlc-generated types
-      - eventschema # eventbus.ValidatingCodec embeds the event JSON Schemas
+      - eventschema # eventbus.SchemaValidator embeds the event JSON Schemas
       - gen         # proto-generated types (grpc server + definition client)
   cmd:
     mayDependOn:

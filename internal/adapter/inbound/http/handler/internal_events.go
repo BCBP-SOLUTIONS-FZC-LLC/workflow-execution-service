@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -76,6 +77,14 @@ func (h *Handler) HandleInternalEvent(c *gin.Context) {
 		return
 	}
 
+	if env.SchemaID != "" {
+		decoded, ok := h.decodeSchemaRegistryPayload(c, env)
+		if !ok {
+			return
+		}
+		env.Payload = decoded
+	}
+
 	switch env.Type {
 	case "DelegationStarted":
 		h.handleDelegationStarted(c, env)
@@ -110,6 +119,48 @@ func (h *Handler) reconcilerError(c *gin.Context, eventType string, err error) {
 	internalEventsIngestTotal.WithLabelValues(eventType, "error").Inc()
 	h.logError("internal events: reconciler call failed", map[string]any{"event_type": eventType, "error": err.Error()})
 	writeProblem(c, http.StatusInternalServerError, CodeInternal, "failed to process event", nil)
+}
+
+// decodeFailed responds to a schema-registry decode failure with a 502: this
+// is a retryable infra problem (missing/misconfigured decoder, or a registry
+// hiccup reversing otherwise-valid encoded bytes), never a malformed client
+// payload, so the shared event-delivery bridge that forwards these HTTP
+// requests must retry it rather than treat it as permanently rejected like
+// badPayload's 400 does.
+func (h *Handler) decodeFailed(c *gin.Context, eventType, detail string) {
+	internalEventsIngestTotal.WithLabelValues(eventType, "decode_failed").Inc()
+	writeProblem(c, http.StatusBadGateway, CodeEventDecodeFailed, detail, nil)
+}
+
+// decodeSchemaRegistryPayload reverses what events.WithCodec does to an
+// outbound envelope's Payload on the way out (base64-wrap the codec's native
+// wire bytes as a JSON string, domain.WrapCodecPayload) so the typed
+// per-event handlers below always see plain JSON. platform-events' own
+// unwrap step (domain.UnwrapCodecPayload) isn't exported, so its two steps
+// are replicated here.
+func (h *Handler) decodeSchemaRegistryPayload(c *gin.Context, env events.Envelope[json.RawMessage]) (json.RawMessage, bool) {
+	if h.eventDecoder == nil {
+		h.decodeFailed(c, env.Type, "event carries a schema id but no event decoder is configured")
+		return nil, false
+	}
+
+	var b64 string
+	if err := json.Unmarshal(env.Payload, &b64); err != nil {
+		h.decodeFailed(c, env.Type, "schema-registry payload is not a base64 JSON string")
+		return nil, false
+	}
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		h.decodeFailed(c, env.Type, "schema-registry payload base64 decode failed")
+		return nil, false
+	}
+
+	decoded, err := h.eventDecoder.Decode(c.Request.Context(), env.SchemaID, raw)
+	if err != nil {
+		h.decodeFailed(c, env.Type, "schema-registry payload decode failed")
+		return nil, false
+	}
+	return decoded, true
 }
 
 // respondOK finishes every successful dispatch path: dedup recorded last

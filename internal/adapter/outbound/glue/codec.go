@@ -1,8 +1,9 @@
-// Package glue implements port.GlueCodec against AWS Glue Schema Registry.
+// Package glue implements events.Codec against AWS Glue Schema Registry.
 package glue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -11,11 +12,22 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/glue"
 	"github.com/aws/aws-sdk-go-v2/service/glue/types"
+	"github.com/google/uuid"
 
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/pkg/events"
 )
 
-var _ port.GlueCodec = (*Codec)(nil)
+var _ events.Codec = (*Codec)(nil)
+
+// glueHeaderVersion, glueNoCompression, and glueHeaderSize describe the AWS
+// Glue Schema Registry wire-format header: a 1-byte format version, a 1-byte
+// compression flag, and the 16-byte schema-version UUID, prepended to every
+// encoded payload.
+const (
+	glueHeaderVersion byte = 0x03
+	glueNoCompression byte = 0x00
+	glueHeaderSize         = 18 // 1 (version) + 1 (compression) + 16 (schema-version UUID)
+)
 
 type schemaVersionGetter interface {
 	GetSchemaVersion(ctx context.Context, params *glue.GetSchemaVersionInput, optFns ...func(*glue.Options)) (*glue.GetSchemaVersionOutput, error)
@@ -27,25 +39,17 @@ type cacheEntry struct {
 }
 
 // Codec resolves an event type's latest registered schema version in AWS
-// Glue Schema Registry before allowing it to publish - a fail-closed check
-// that a payload's schema actually exists in the registry.
+// Glue Schema Registry and prepends the registry's wire-format header to the
+// payload before it publishes - a fail-closed check that a payload's schema
+// actually exists in the registry, and real framing for downstream
+// Glue-aware consumers.
 //
-// Deviation from definition_service/iam-user-profile's own GlueCodec: those
-// implementations prepend the AWS Glue wire-format binary header (0x03 magic
-// + 0x00 compression + 16-byte schema-version UUID) directly onto the
-// returned bytes. That output is embedded straight into
-// events.Envelope[json.RawMessage].Payload by buildEnvelope, and
-// outbox.Enqueue's internal json.Marshal(env) errors the instant those bytes
-// are non-JSON (confirmed via direct repro: "invalid character '\x03'
-// looking for beginning of value") - a defect present, unfixed, and masked
-// by AWS_USE_STUB=true in both reference repos today. Encode here performs
-// the same registry lookup (so a missing/unregistered schema still fails
-// closed) but always returns the payload unchanged, so the envelope stays
-// valid JSON regardless of useStub. Real Glue wire-format framing for
-// downstream Glue-aware consumers, if ever needed, has to be applied at
-// actual SNS-publish time by a custom Publisher wrapper - platform-events'
-// current Runner/Publisher has no such hook - which is out of this task's
-// scope (see design/LLD/execution_service.md §6.8 deviation note).
+// This type is meant to be injected via events.WithCodec(...) into a real
+// events.NewSNSPublisher(...) call once that composition-root wiring exists
+// in cmd/server (it doesn't yet) - platform-events' publisher base64-wraps
+// Encode's returned bytes before assigning them to Envelope.Payload, so the
+// envelope's "data" field stays valid JSON regardless of what Codec.Encode
+// returns.
 type Codec struct {
 	client       schemaVersionGetter
 	registryName string
@@ -76,14 +80,45 @@ func NewCodec(cfg aws.Config, registryName string, useStub bool, customEndpoint 
 	}
 }
 
-func (c *Codec) Encode(ctx context.Context, schemaName string, payload []byte) ([]byte, error) {
+func (c *Codec) Encode(ctx context.Context, schemaName string, payload json.RawMessage) ([]byte, string, error) {
 	if c.useStub {
-		return payload, nil
+		return payload, "", nil
 	}
-	if _, err := c.getSchemaVersionID(ctx, schemaName); err != nil {
-		return nil, fmt.Errorf("resolve schema version id: %w", err)
+	versionID, err := c.getSchemaVersionID(ctx, schemaName)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve schema version id: %w", err)
 	}
-	return payload, nil
+	encoded, err := prependGlueHeader(versionID, payload)
+	if err != nil {
+		return nil, "", err
+	}
+	return encoded, versionID, nil
+}
+
+// Decode reverses Encode: the version UUID travels self-contained in the
+// header bytes, so the schemaID recorded on the envelope (mirrored here to
+// satisfy events.Codec/port.EventDecoder) isn't needed to strip it back off.
+func (c *Codec) Decode(_ context.Context, _ string, encoded []byte) (json.RawMessage, error) {
+	if len(encoded) < glueHeaderSize {
+		return nil, fmt.Errorf("glue codec: encoded payload is %d bytes — shorter than the %d-byte Glue header", len(encoded), glueHeaderSize)
+	}
+	if encoded[0] != glueHeaderVersion {
+		return nil, fmt.Errorf("glue codec: unexpected header version byte 0x%02x — want 0x%02x", encoded[0], glueHeaderVersion)
+	}
+	return json.RawMessage(encoded[glueHeaderSize:]), nil
+}
+
+func prependGlueHeader(versionID string, payload []byte) ([]byte, error) {
+	id, err := uuid.Parse(versionID)
+	if err != nil {
+		return nil, fmt.Errorf("parse schema version uuid %q: %w", versionID, err)
+	}
+	out := make([]byte, glueHeaderSize+len(payload))
+	out[0] = glueHeaderVersion
+	out[1] = glueNoCompression
+	copy(out[2:glueHeaderSize], id[:])
+	copy(out[glueHeaderSize:], payload)
+	return out, nil
 }
 
 func (c *Codec) getSchemaVersionID(ctx context.Context, schemaName string) (string, error) {

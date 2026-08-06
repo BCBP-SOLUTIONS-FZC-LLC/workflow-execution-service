@@ -18,17 +18,17 @@ type stubPayload struct {
 	WorkflowInstanceID uuid.UUID `json:"workflow_instance_id"`
 }
 
-type erroringCodec struct{ err error }
+type erroringValidator struct{ err error }
 
-func (c erroringCodec) Encode(_ context.Context, _ string, _ []byte) ([]byte, error) {
-	return nil, c.err
+func (v erroringValidator) Validate(_ context.Context, _ string, _ json.RawMessage) error {
+	return v.err
 }
 
 func TestBuildEnvelope_SetsCoreFields(t *testing.T) {
 	instID := uuid.New()
 	payload := stubPayload{WorkflowInstanceID: instID}
 
-	env, err := buildEnvelope(context.Background(), noopGlueCodec{}, domain.EventWorkflowInstanceStarted, "tenant-1", "instances/"+instID.String(), "user-1", payload)
+	env, err := buildEnvelope(context.Background(), noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "instances/"+instID.String(), "user-1", payload)
 	require.NoError(t, err)
 
 	assert.Equal(t, domain.EventWorkflowInstanceStarted, env.Type)
@@ -41,7 +41,7 @@ func TestBuildEnvelope_SetsCoreFields(t *testing.T) {
 }
 
 func TestBuildEnvelope_OmitsEmptySubjectAndActor(t *testing.T) {
-	env, err := buildEnvelope(context.Background(), noopGlueCodec{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{})
+	env, err := buildEnvelope(context.Background(), noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{})
 	require.NoError(t, err)
 
 	assert.Empty(t, env.Subject)
@@ -60,15 +60,28 @@ func TestBuildEnvelope_SetsTraceIDWhenSpanValid(t *testing.T) {
 	})
 	ctx := trace.ContextWithSpanContext(context.Background(), sc)
 
-	env, err := buildEnvelope(ctx, noopGlueCodec{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{})
+	env, err := buildEnvelope(ctx, noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{})
 	require.NoError(t, err)
 
 	assert.Equal(t, traceID.String(), env.TraceID)
 }
 
-func TestBuildEnvelope_GlueEncodeError(t *testing.T) {
-	wantErr := errors.New("glue unavailable")
-	_, err := buildEnvelope(context.Background(), erroringCodec{err: wantErr}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{})
+// unmarshalablePayload has a chan field, which encoding/json can never
+// marshal - used to exercise buildEnvelope's own json.Marshal error branch,
+// distinct from a validator rejection.
+type unmarshalablePayload struct {
+	Ch chan int `json:"ch"`
+}
+
+func TestBuildEnvelope_MarshalError(t *testing.T) {
+	_, err := buildEnvelope(context.Background(), noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", unmarshalablePayload{Ch: make(chan int)})
+
+	require.Error(t, err)
+}
+
+func TestBuildEnvelope_ValidationError(t *testing.T) {
+	wantErr := errors.New("payload violates schema")
+	_, err := buildEnvelope(context.Background(), erroringValidator{err: wantErr}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{})
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, wantErr)
@@ -79,7 +92,7 @@ func TestBuildEnvelope_GlueEncodeError(t *testing.T) {
 // trust events.NewEnvelope's nesting implicitly, assert it directly.
 func TestBuildEnvelope_NestsPayloadUnderDataKey(t *testing.T) {
 	instID := uuid.New()
-	env, err := buildEnvelope(context.Background(), noopGlueCodec{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{WorkflowInstanceID: instID})
+	env, err := buildEnvelope(context.Background(), noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{WorkflowInstanceID: instID})
 	require.NoError(t, err)
 
 	marshaled, err := json.Marshal(env)
@@ -94,9 +107,7 @@ func TestBuildEnvelope_NestsPayloadUnderDataKey(t *testing.T) {
 	assert.Equal(t, instID.String(), data["workflow_instance_id"])
 }
 
-func TestNoopGlueCodec_PassesThrough(t *testing.T) {
-	in := []byte(`{"a":1}`)
-	out, err := noopGlueCodec{}.Encode(context.Background(), "any-schema", in)
+func TestNoopValidator_AlwaysAccepts(t *testing.T) {
+	err := noopValidator{}.Validate(context.Background(), "any-schema", json.RawMessage(`{"a":1}`))
 	require.NoError(t, err)
-	assert.Equal(t, in, out)
 }

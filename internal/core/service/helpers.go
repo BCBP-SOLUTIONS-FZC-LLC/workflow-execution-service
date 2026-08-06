@@ -17,7 +17,7 @@ import (
 
 func buildEnvelope[T any](
 	ctx context.Context,
-	codec port.GlueCodec,
+	validator port.EventValidator,
 	eventType, tenantID, subject, actor string,
 	payload T,
 ) (events.Envelope[json.RawMessage], error) {
@@ -25,9 +25,8 @@ func buildEnvelope[T any](
 	if err != nil {
 		return events.Envelope[json.RawMessage]{}, fmt.Errorf("marshal event payload: %w", err)
 	}
-	encoded, err := codec.Encode(ctx, eventType, raw)
-	if err != nil {
-		return events.Envelope[json.RawMessage]{}, fmt.Errorf("glue encode event payload: %w", err)
+	if err := validator.Validate(ctx, eventType, raw); err != nil {
+		return events.Envelope[json.RawMessage]{}, fmt.Errorf("validate event payload: %w", err)
 	}
 	opts := []events.EnvelopeOpt{
 		events.WithTenantID(tenantID),
@@ -42,15 +41,13 @@ func buildEnvelope[T any](
 	if sc := trace.SpanFromContext(ctx).SpanContext(); sc.IsValid() {
 		opts = append(opts, events.WithTraceID(sc.TraceID().String()))
 	}
-	return events.NewEnvelope[json.RawMessage](eventType, domain.EventSource, encoded, opts...), nil
+	return events.NewEnvelope[json.RawMessage](eventType, domain.EventSource, raw, opts...), nil
 }
 
-// noopGlueCodec is the zero-value fallback used when a caller's GlueCodec
-// dependency is nil - distinct from the real adapter's own useStub flag
-// (internal/adapter/outbound/glue.Codec), which is the dev/test no-op path
-// when a GlueCodec is actually wired up.
-type noopGlueCodec struct{}
+// noopValidator is the zero-value fallback used when a caller's
+// EventValidator dependency is nil.
+type noopValidator struct{}
 
-func (noopGlueCodec) Encode(_ context.Context, _ string, payload []byte) ([]byte, error) {
-	return payload, nil
+func (noopValidator) Validate(_ context.Context, _ string, _ json.RawMessage) error {
+	return nil
 }

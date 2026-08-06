@@ -14,13 +14,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 )
 
-type spyGlueCodec struct{ called bool }
-
-func (s *spyGlueCodec) Encode(_ context.Context, _ string, payload []byte) ([]byte, error) {
-	s.called = true
-	return payload, nil
-}
-
 func testCore() domain.CommonCore {
 	return domain.CommonCore{
 		WorkflowInstanceID: uuid.New(),
@@ -188,30 +181,28 @@ var allEvents = []eventCase{
 	},
 }
 
-func TestValidatingCodec_AllEventTypes_AreRegistered(t *testing.T) {
+func TestSchemaValidator_AllEventTypes_AreRegistered(t *testing.T) {
 	// Guards against an accidental resurrection of workflow.task.message-sent
 	// or a dropped table entry - the catalogue is exactly 18 events.
 	assert.Len(t, allEvents, 18)
 }
 
-func TestValidatingCodec_ValidPayload_Accepted(t *testing.T) {
+func TestSchemaValidator_ValidPayload_Accepted(t *testing.T) {
 	for _, tc := range allEvents {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := json.Marshal(tc.payload())
 			require.NoError(t, err)
 
-			spy := &spyGlueCodec{}
-			codec, err := eventbus.NewValidatingCodec(spy)
+			validator, err := eventbus.NewSchemaValidator()
 			require.NoError(t, err)
 
-			_, err = codec.Encode(context.Background(), tc.eventType, raw)
+			err = validator.Validate(context.Background(), tc.eventType, raw)
 			require.NoError(t, err)
-			assert.True(t, spy.called)
 		})
 	}
 }
 
-func TestValidatingCodec_MissingRequiredField_Rejected(t *testing.T) {
+func TestSchemaValidator_MissingRequiredField_Rejected(t *testing.T) {
 	for _, tc := range allEvents {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := json.Marshal(tc.payload())
@@ -223,33 +214,27 @@ func TestValidatingCodec_MissingRequiredField_Rejected(t *testing.T) {
 			broken, err := json.Marshal(m)
 			require.NoError(t, err)
 
-			spy := &spyGlueCodec{}
-			codec, err := eventbus.NewValidatingCodec(spy)
+			validator, err := eventbus.NewSchemaValidator()
 			require.NoError(t, err)
 
-			_, err = codec.Encode(context.Background(), tc.eventType, broken)
+			err = validator.Validate(context.Background(), tc.eventType, broken)
 			require.Error(t, err)
-			assert.False(t, spy.called, "fail-closed: inner codec must not run on an invalid payload")
 		})
 	}
 }
 
-func TestValidatingCodec_UnknownEventType_FailsClosed(t *testing.T) {
-	spy := &spyGlueCodec{}
-	codec, err := eventbus.NewValidatingCodec(spy)
+func TestSchemaValidator_UnknownEventType_FailsClosed(t *testing.T) {
+	validator, err := eventbus.NewSchemaValidator()
 	require.NoError(t, err)
 
-	_, err = codec.Encode(context.Background(), "workflow.task.message-sent", []byte(`{}`))
-	require.Error(t, err)
-	assert.False(t, spy.called, "fail-closed: inner codec must not run for an unregistered event type")
+	err = validator.Validate(context.Background(), "workflow.task.message-sent", []byte(`{}`))
+	require.Error(t, err, "fail-closed: an unregistered event type must be rejected")
 }
 
-func TestValidatingCodec_InvalidJSON_Rejected(t *testing.T) {
-	spy := &spyGlueCodec{}
-	codec, err := eventbus.NewValidatingCodec(spy)
+func TestSchemaValidator_InvalidJSON_Rejected(t *testing.T) {
+	validator, err := eventbus.NewSchemaValidator()
 	require.NoError(t, err)
 
-	_, err = codec.Encode(context.Background(), domain.EventWorkflowInstanceStarted, []byte(`{not valid json`))
+	err = validator.Validate(context.Background(), domain.EventWorkflowInstanceStarted, []byte(`{not valid json`))
 	require.Error(t, err)
-	assert.False(t, spy.called)
 }

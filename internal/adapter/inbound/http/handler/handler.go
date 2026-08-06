@@ -53,6 +53,7 @@ type Handler struct {
 	userSafetyNet   port.UserSafetyNetReconciler
 	oooAvailability port.OOOAvailabilityReconciler
 	templateCache   port.TemplateCachePrewarmer
+	eventDecoder    port.EventDecoder
 	log             port.Logger
 }
 
@@ -74,6 +75,11 @@ type Services struct {
 	UserSafetyNet   port.UserSafetyNetReconciler
 	OOOAvailability port.OOOAvailabilityReconciler
 	TemplateCache   port.TemplateCachePrewarmer
+	// EventDecoder is nil-safe: HandleInternalEvent treats a nil decoder as
+	// a decode failure only for envelopes that actually carry a SchemaID -
+	// until a real events.Codec is wired up in cmd/server, no producer sets
+	// SchemaID, so this stays unused in practice today.
+	EventDecoder port.EventDecoder
 	// Log is nil-safe throughout this package — every call site guards it.
 	Log port.Logger
 }
@@ -98,6 +104,7 @@ func New(s Services) *Handler {
 		userSafetyNet:   s.UserSafetyNet,
 		oooAvailability: s.OOOAvailability,
 		templateCache:   s.TemplateCache,
+		eventDecoder:    s.EventDecoder,
 		log:             s.Log,
 	}
 }

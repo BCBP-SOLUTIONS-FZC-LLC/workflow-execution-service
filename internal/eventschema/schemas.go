@@ -1,5 +1,5 @@
 // Package eventschema embeds the 18 outbound event JSON Schemas (LLD §6.8)
-// consumed by internal/adapter/outbound/eventbus.ValidatingCodec and
+// consumed by internal/adapter/outbound/eventbus.SchemaValidator and
 // extracted by the Makefile's schema-* targets for platform-schemagov.
 package eventschema
 

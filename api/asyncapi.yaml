@@ -160,18 +160,17 @@ components:
           messageAttributes:
             type: object
             description: >
-              Deviation from the platform's usual Glue wire format: execution_service's
-              real GlueCodec (internal/adapter/outbound/glue) deliberately does NOT
-              prepend the AWS Glue Schema Registry's 18-byte binary header
-              ([0x03][0x00][16-byte schema-version UUID]) to the published envelope.
-              Doing so would make the envelope's `data` field invalid JSON and break
-              the outbox insert itself (outbox.Enqueue's json.Marshal errors on
-              non-JSON bytes) — a defect confirmed present, unfixed, and masked by
-              AWS_USE_STUB=true in both definition_service and iam-user-profile today.
-              GlueCodec here still resolves each event's latest registered schema
-              version via GetSchemaVersion (failing closed if the schema is missing
-              from the registry) — Glue is used purely as a schema registry/
-              governance mechanism, not as a wire-serialization codec. See
+              execution_service's GlueCodec (internal/adapter/outbound/glue) now
+              matches definition_service's and iam-user-profile's own GlueCodec:
+              it prepends the AWS Glue Schema Registry's 18-byte binary header
+              ([0x03][0x00][16-byte schema-version UUID]) to the plain-JSON
+              payload. This is safe because platform-events v1.4.0's
+              events.WithCodec applies that encoding at SNS-publish time, after
+              the plain-JSON envelope has already been safely inserted into the
+              outbox — outbox.Enqueue's json.Marshal never sees the header-prefixed
+              bytes. GlueCodec still resolves each event's latest registered
+              schema version via GetSchemaVersion first, failing closed if the
+              schema is missing from the registry. See
               internal/adapter/outbound/glue/codec.go's doc comment. SNS
               MessageAttributes below carry the routing keys consumer filter
               policies match on.
