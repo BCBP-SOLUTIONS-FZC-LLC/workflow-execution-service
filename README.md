@@ -3,6 +3,7 @@
 The Temporal-backed execution control plane for the BPMN Workflow Engine platform. Starts, tracks, and drives workflow instances to completion; dispatches tasks to human assignees and other services. Execution-time counterpart to `definition_service` (design-time authoring/compilation of workflow templates).
 
 Two independently deployed binaries, one Go module:
+
 - `cmd/server` — HTTP API (`:8080`) + gRPC (`:9090`) + the outbox relay + the Temporal client (`StartWorkflow`/`SignalWorkflow`/`QueryWorkflow`).
 - `cmd/worker` — the Temporal Worker process: polls task queues, hosts the workflow function and Activities. Minimal `:8081` health/metrics surface, no business HTTP/gRPC surface of its own.
 
@@ -69,7 +70,7 @@ Temporal's Web UI is available at <http://localhost:8233> once `make docker-up` 
 
 Clean Architecture, dependency direction `domain ← port ← service ← adapter`, plus a new peer layer `internal/workflow` for the Temporal workflow function and Activities (never imported by `adapter/`, never imports it back — the two connect only via runtime registration in `cmd/worker/main.go`). See `.go-arch-lint.yml` for the enforced import graph.
 
-```
+```sh
 cmd/server/, cmd/worker/       — composition roots (two independently deployed binaries)
 internal/core/{domain,port,service}/
 internal/workflow/             — Temporal workflow function + Activities
@@ -93,7 +94,7 @@ Run `make help` for the full target list.
 | `make migrate` | Apply schema migrations (outbox + domain) |
 | `make generate` | Regenerate proto (buf) + sqlc code |
 | `make build` | Compile `cmd/server` and `cmd/worker` |
-| `make test` | Unit tests — `internal/...`, `test/unit/...` — race detector, coverage |
+| `make test` | Unit tests — `internal/...`, `test/unit/...`, `test/workflow/...` — race detector, coverage |
 | `make test-integration` | Integration tests (testcontainers, real Postgres) |
 | `make test-ci` | Unit + integration, merged coverage — what CI runs |
 | `make lint` / `make fix` | golangci-lint (read-only / with `--fix`) |
