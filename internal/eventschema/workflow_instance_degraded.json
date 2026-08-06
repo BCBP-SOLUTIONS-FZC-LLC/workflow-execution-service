@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WorkflowInstanceDegradedPayload",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["workflow_instance_id", "business_key", "workflow_version_id", "failed_branches"],
+  "properties": {
+    "workflow_instance_id": { "type": "string", "format": "uuid" },
+    "business_key": { "type": "string" },
+    "workflow_version_id": { "type": "string", "format": "uuid" },
+    "failed_branches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["department_id", "last_node_key"],
+        "properties": {
+          "department_id": { "type": "string", "format": "uuid" },
+          "last_node_key": { "type": "string" }
+        }
+      }
+    }
+  }
+}

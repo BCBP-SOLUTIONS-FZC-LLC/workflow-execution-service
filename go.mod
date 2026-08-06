@@ -6,11 +6,15 @@ require (
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events v1.3.0
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon v1.1.1
 	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models v1.1.0
+	github.com/aws/aws-sdk-go-v2 v1.43.3
+	github.com/aws/aws-sdk-go-v2/service/glue v1.151.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/joho/godotenv v1.5.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.43.0
+	go.opentelemetry.io/otel/trace v1.44.0
 	go.temporal.io/sdk v1.46.0
 	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.11
@@ -20,12 +24,11 @@ require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.41.12 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.32.23 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.22 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.28 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.28 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.28 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.34 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.34 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.29 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.28 // indirect
@@ -35,7 +38,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.31.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.36.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.2 // indirect
-	github.com/aws/smithy-go v1.27.1 // indirect
+	github.com/aws/smithy-go v1.27.6 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -97,7 +100,6 @@ require (
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
-	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.temporal.io/api v1.63.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	golang.org/x/crypto v0.52.0 // indirect

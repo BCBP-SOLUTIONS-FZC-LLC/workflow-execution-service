@@ -1,0 +1,791 @@
+asyncapi: 3.0.0
+info:
+  title: workflow-execution-svc events
+  version: 1.0.0
+  description: >
+    Event contract for the Workflow Execution Service. Outbound: 18 workflow-
+    lifecycle events published to the SNS topic wf-workflow-events (SNS → SQS
+    fan-out), governed by platform-schemagov exactly as workflow-definition-svc
+    governs its own. Inbound: the events Execution consumes off the shared
+    Workflow-Events Consumer (POST /internal/events) — documented here as
+    `receive` operations for completeness, but their payload schemas are owned
+    and registered by the producing service (IAM / Definition), NOT
+    re-registered by Execution.
+  x-forward-compatibility:
+    open-schemas: >
+      Every governed <Name>Payload sets additionalProperties:true. Consumers MUST
+      decode leniently (ignore unknown fields) so an additive producer change never
+      breaks them. schema-gov's open-schema guard rejects additionalProperties:false.
+    rollout: additive-change-first — producers add optional fields before consumers rely on them.
+  x-version-governance:
+    backward-compatible: >
+      Added optional field, widened enum, required→optional → NEW Glue schema
+      version UUID, SAME `type`. Consumers stay forward-compatible.
+    breaking: >
+      Removed/renamed field, type change, enum narrowing, optional→required → bump
+      `type` to `<name>.v2`, register internal/eventschema/<name>.v2.json, add a new
+      message with x-lifecycle.status:active, mark the old one deprecated with
+      deprecated-by + retire-after, DUAL-PUBLISH both types for 30 days (a provisional
+      number covering a typical consumer-team deploy cadence, not yet measured against
+      a real breaking change), migrate consumers, then retire.
+
+servers:
+  production:
+    host: sns.us-east-1.amazonaws.com
+    protocol: sns
+    description: SNS producer endpoint for wf-workflow-events
+    security:
+      - $ref: '#/components/securitySchemes/iamRole'
+
+channels:
+  wf/workflow/events:
+    address: wf-workflow-events
+    bindings:
+      sns:
+        name: wf-workflow-events
+    messages:
+      WorkflowInstanceStarted:    { $ref: '#/components/messages/WorkflowInstanceStarted' }
+      WorkflowInstancePaused:     { $ref: '#/components/messages/WorkflowInstancePaused' }
+      WorkflowInstanceResumed:    { $ref: '#/components/messages/WorkflowInstanceResumed' }
+      WorkflowInstanceCancelled:  { $ref: '#/components/messages/WorkflowInstanceCancelled' }
+      WorkflowInstanceTerminated: { $ref: '#/components/messages/WorkflowInstanceTerminated' }
+      WorkflowInstanceDegraded:   { $ref: '#/components/messages/WorkflowInstanceDegraded' }
+      WorkflowInstanceFailed:     { $ref: '#/components/messages/WorkflowInstanceFailed' }
+      WorkflowInstanceFinished:   { $ref: '#/components/messages/WorkflowInstanceFinished' }
+      WorkflowInstanceForceRouted: { $ref: '#/components/messages/WorkflowInstanceForceRouted' }
+      WorkflowTaskCreated:        { $ref: '#/components/messages/WorkflowTaskCreated' }
+      WorkflowTaskClaimed:        { $ref: '#/components/messages/WorkflowTaskClaimed' }
+      WorkflowTaskCompleted:      { $ref: '#/components/messages/WorkflowTaskCompleted' }
+      WorkflowTaskDeferred:       { $ref: '#/components/messages/WorkflowTaskDeferred' }
+      WorkflowTaskReassigned:     { $ref: '#/components/messages/WorkflowTaskReassigned' }
+      WorkflowTaskSuperseded:     { $ref: '#/components/messages/WorkflowTaskSuperseded' }
+      WorkflowTaskFailed:         { $ref: '#/components/messages/WorkflowTaskFailed' }
+      WorkflowTaskSlaWarning:     { $ref: '#/components/messages/WorkflowTaskSlaWarning' }
+      WorkflowTaskSlaBreached:    { $ref: '#/components/messages/WorkflowTaskSlaBreached' }
+
+  # Schemas below are documentation-only (no "Payload" suffix → schema-gov skips them);
+  # the authoritative contracts are owned/registered by the producing service.
+  iam/membership/events:
+    address: iam-membership-events
+    description: Consumed off membership-workflow-q (dedup consumer `membership-execution`).
+    bindings:
+      sqs:
+        queue:
+          name: membership-workflow-q
+          fifoQueue: false
+          redrivePolicy:
+            deadLetterQueue: { name: membership-workflow-dlq }
+            maxReceiveCount: 5
+    messages:
+      DelegationStarted:  { $ref: '#/components/messages/DelegationStartedInbound' }
+      DelegationEnded:    { $ref: '#/components/messages/DelegationEndedInbound' }
+      TenantStateChanged: { $ref: '#/components/messages/TenantStateChangedInbound' }
+  iam/user/events:
+    address: iam-user-events
+    description: Consumed off user-wf-q (dedup consumer `user-execution`).
+    bindings:
+      sqs:
+        queue:
+          name: user-wf-q
+          fifoQueue: false
+          redrivePolicy:
+            deadLetterQueue: { name: user-wf-dlq }
+            maxReceiveCount: 5
+    messages:
+      UserDeleted:             { $ref: '#/components/messages/UserDeletedInbound' }
+      UserAvailabilityChanged: { $ref: '#/components/messages/UserAvailabilityChangedInbound' }
+  wf/template/events:
+    address: wf-template-events
+    description: Consumed off wf-execution-sync-q (dedup consumer `template-sync-execution`).
+    bindings:
+      sqs:
+        queue:
+          name: wf-execution-sync-q
+          fifoQueue: false
+          redrivePolicy:
+            deadLetterQueue: { name: wf-execution-sync-dlq }
+            maxReceiveCount: 5
+    messages:
+      WorkflowTemplatePublished: { $ref: '#/components/messages/WorkflowTemplatePublishedInbound' }
+
+operations:
+  publishWorkflowEvents:
+    action: send
+    channel: { $ref: '#/channels/wf~1workflow~1events' }
+    messages:
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowInstanceStarted'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowInstancePaused'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowInstanceResumed'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowInstanceCancelled'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowInstanceTerminated'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowInstanceDegraded'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowInstanceFailed'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowInstanceFinished'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowInstanceForceRouted'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowTaskCreated'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowTaskClaimed'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowTaskCompleted'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowTaskDeferred'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowTaskReassigned'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowTaskSuperseded'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowTaskFailed'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowTaskSlaWarning'
+      - $ref: '#/channels/wf~1workflow~1events/messages/WorkflowTaskSlaBreached'
+  receiveMembershipEvents:
+    action: receive
+    channel: { $ref: '#/channels/iam~1membership~1events' }
+    description: >
+      Delegation reroute (≤4s p99 SLO for DelegationStarted, LLD §6.7) and the
+      TenantStateChanged tenant-lifecycle relay. Dedup after side effects
+      (processed_event, consumer `membership-execution`).
+  receiveUserEvents:
+    action: receive
+    channel: { $ref: '#/channels/iam~1user~1events' }
+    description: UserDeleted safety-net pause + UserAvailabilityChanged OOO pause/resume.
+  receiveTemplateEvents:
+    action: receive
+    channel: { $ref: '#/channels/wf~1template~1events' }
+    description: Compiled-plan cache pre-warm (fail-open).
+
+components:
+  securitySchemes:
+    iamRole:
+      type: userPassword
+      description: IAM role / SigV4 for SNS publish and SQS consume (cluster-provisioned).
+
+  messageTraits:
+    glueWireFormat:
+      bindings:
+        sns:
+          messageAttributes:
+            type: object
+            description: >
+              Deviation from the platform's usual Glue wire format: execution_service's
+              real GlueCodec (internal/adapter/outbound/glue) deliberately does NOT
+              prepend the AWS Glue Schema Registry's 18-byte binary header
+              ([0x03][0x00][16-byte schema-version UUID]) to the published envelope.
+              Doing so would make the envelope's `data` field invalid JSON and break
+              the outbox insert itself (outbox.Enqueue's json.Marshal errors on
+              non-JSON bytes) — a defect confirmed present, unfixed, and masked by
+              AWS_USE_STUB=true in both definition_service and iam-user-profile today.
+              GlueCodec here still resolves each event's latest registered schema
+              version via GetSchemaVersion (failing closed if the schema is missing
+              from the registry) — Glue is used purely as a schema registry/
+              governance mechanism, not as a wire-serialization codec. See
+              internal/adapter/outbound/glue/codec.go's doc comment. SNS
+              MessageAttributes below carry the routing keys consumer filter
+              policies match on.
+            properties:
+              EventType:  { type: string, description: 'Dotted wire type, e.g. workflow.instance.started' }
+              TenantID:   { type: string, format: uuid }
+              Source:     { type: string, const: workflow-execution-svc }
+              EventID:    { type: string, format: uuid }
+              Subject:    { type: string, description: 'instances/{instanceID}[/tasks/{taskID}]' }
+
+  messages:
+    WorkflowInstanceStarted:
+      name: WorkflowInstanceStarted
+      title: Workflow instance started (wire type workflow.instance.started)
+      description: >
+        Fires when InstanceService.Start commits the new workflow_instance row (RUNNING)
+        and issues StartWorkflow. Consumed by Audit (instantiation record); not routed to
+        the Dashboard Stream Gateway — the creating client already knows synchronously via
+        the instantiation response.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowInstanceStartedEnvelope' }
+    WorkflowInstancePaused:
+      name: WorkflowInstancePaused
+      title: Workflow instance paused (workflow.instance.paused)
+      description: >
+        Fires when instance-pause is processed — an admin action, a TenantStateChanged
+        non-active dispatch, or a safety-net/OOO pause. Consumed by Audit, Notification,
+        and the Dashboard Stream Gateway to reflect the paused state live.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowInstancePausedEnvelope' }
+    WorkflowInstanceResumed:
+      name: WorkflowInstanceResumed
+      title: Workflow instance resumed (workflow.instance.resumed)
+      description: >
+        Fires when instance-resume is processed — an admin action, a TenantStateChanged
+        active-from-paused dispatch, an OOO-availability-restored dispatch, or a DEGRADED
+        instance's force-forward/force-back resolution exiting the park loop. Consumed by
+        Audit, Notification, and the Dashboard Stream Gateway.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowInstanceResumedEnvelope' }
+    WorkflowInstanceCancelled:
+      name: WorkflowInstanceCancelled
+      title: Workflow instance cancelled (workflow.instance.cancelled)
+      description: >
+        Fires when instance-cancel's graceful shutdown completes — every active task marked
+        FAILED and vacated, the instance transitioned to TERMINATED. Consumed by Audit,
+        Notification, and the Dashboard Stream Gateway.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowInstanceCancelledEnvelope' }
+    WorkflowInstanceTerminated:
+      name: WorkflowInstanceTerminated
+      title: Workflow instance terminated (workflow.instance.terminated)
+      description: >
+        Fires alongside instance-terminate's direct TerminateWorkflow call — a service-layer
+        transaction marks the instance TERMINATED and its open tasks FAILED before Temporal
+        is asked to stop the execution. Consumed by Audit, Notification, and the Dashboard
+        Stream Gateway.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowInstanceTerminatedEnvelope' }
+    WorkflowInstanceDegraded:
+      name: WorkflowInstanceDegraded
+      title: Workflow instance degraded — a parallel branch failed (workflow.instance.degraded)
+      description: >
+        Fires when a Parallel branch's activity exhausts retries on a non-retryable error and
+        the aggregation point parks the instance for admin resolution (force-forward,
+        force-back, or cancel). Consumed by Audit/ops alerting (instance_degraded_total,
+        tenant-labelled), Notification, and the Dashboard Stream Gateway.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowInstanceDegradedEnvelope' }
+    WorkflowInstanceFailed:
+      name: WorkflowInstanceFailed
+      title: Workflow instance failed on the main path (workflow.instance.failed)
+      description: >
+        Fires when a non-retryable activity failure on the main/Sequential path (outside any
+        Parallel branch, with no sibling work to preserve) transitions the instance to
+        FAILED — a clean terminal transition, distinct from DEGRADED's Parallel-only scope.
+        Consumed by Audit/ops alerting, Notification, and the Dashboard Stream Gateway.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowInstanceFailedEnvelope' }
+    WorkflowInstanceFinished:
+      name: WorkflowInstanceFinished
+      title: Workflow instance finished cleanly (workflow.instance.finished)
+      description: >
+        Fires when runSteps returns cleanly at the BPMN terminal node, writing completed_at
+        automatically. Consumed by Tender Service as a post-hoc finalization notification only
+        — the actual approval/signing already happened synchronously before Complete, never
+        gated by this event — by Audit to close the 7-year retention record, by Notification,
+        and by the Dashboard Stream Gateway.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowInstanceFinishedEnvelope' }
+    WorkflowInstanceForceRouted:
+      name: WorkflowInstanceForceRouted
+      title: Admin force-forward/force-back reroute (workflow.instance.force-routed)
+      description: >
+        Fires when an admin's instance-force-forward/-force-back signal completes, paired
+        with a WorkflowTaskSuperseded event per bypassed task. Consumed by Audit as the
+        admin-override trail; not routed to the Dashboard Stream Gateway (ops-facing).
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowInstanceForceRoutedEnvelope' }
+    WorkflowTaskCreated:
+      name: WorkflowTaskCreated
+      title: Task created (workflow.task.created)
+      description: >
+        Fires when CreateTaskActivity inserts a new workflow_task and its assignments.
+        Consumed by Notification (assignee alert), LLM Service (draft-context pre-warm),
+        and the Dashboard Stream Gateway.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowTaskCreatedEnvelope' }
+    WorkflowTaskClaimed:
+      name: WorkflowTaskClaimed
+      title: Task claimed by its lead assignee (workflow.task.claimed)
+      description: >
+        Fires when ClaimAssignmentActivity marks a multi-assignee task's claiming
+        assignment as lead (is_lead=true) — never fires for single-assignee tasks, since
+        claim is a no-op there. Consumed by Audit and the Dashboard Stream Gateway, so
+        other assignees see live that the task is already claimed.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowTaskClaimedEnvelope' }
+    WorkflowTaskCompleted:
+      name: WorkflowTaskCompleted
+      title: Task completed (workflow.task.completed)
+      description: >
+        Fires when CompleteAssignmentActivity records a stage-transition (including a
+        caller-agnostic Complete, e.g. BE-for-UI's approval/signing flow). Consumed by
+        Audit and by the Dashboard Stream Gateway for optimistic-UI reconciliation.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowTaskCompletedEnvelope' }
+    WorkflowTaskDeferred:
+      name: WorkflowTaskDeferred
+      title: Task deferred to an earlier node (workflow.task.deferred)
+      description: >
+        Fires when DeferTaskActivity regresses a task to an earlier node via stage-defer.
+        Consumed by Notification (tells the preparator a reviewer sent it back) and the
+        Dashboard Stream Gateway.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowTaskDeferredEnvelope' }
+    WorkflowTaskReassigned:
+      name: WorkflowTaskReassigned
+      title: Task reassigned — admin / node-override / delegation (workflow.task.reassigned)
+      description: >
+        Fires when ReassignAssignmentActivity vacates the old assignment and creates a new
+        one — an admin instance-reassign, a node-override, or a delegation reroute. Consumed
+        by Audit and the Dashboard Stream Gateway, which routes to both old_user_id (removed
+        from their list) and new_user_id (added to theirs).
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowTaskReassignedEnvelope' }
+    WorkflowTaskSuperseded:
+      name: WorkflowTaskSuperseded
+      title: Task superseded by a force-forward bypass (workflow.task.superseded)
+      description: >
+        Fires when RecordForceRouteActivity marks a bypassed task SUPERSEDED during an
+        instance-force-forward, paired with the instance-level WorkflowInstanceForceRouted
+        event. Consumed by Audit, Notification, and the Dashboard Stream Gateway.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowTaskSupersededEnvelope' }
+    WorkflowTaskFailed:
+      name: WorkflowTaskFailed
+      title: Task failed via a cancel/terminate/instance-fail cascade (workflow.task.failed)
+      description: >
+        Fires when a task is swept into FAILED as a side effect of an instance-cancel,
+        instance-terminate, or instance-FAILED cascade — never an independent per-task
+        failure of its own. Consumed by Audit, Notification, and the Dashboard Stream
+        Gateway.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowTaskFailedEnvelope' }
+    WorkflowTaskSlaWarning:
+      name: WorkflowTaskSlaWarning
+      title: Task follow-up SLA warning fired (workflow.task.sla-warning)
+      description: >
+        Fires when a task's FollowUpDate Temporal Timer elapses before the task resolves
+        (RecordSLAWarningActivity, audit-only, no status change). Consumed by Notification
+        (deadline nudge) and the Dashboard Stream Gateway.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowTaskSlaWarningEnvelope' }
+    WorkflowTaskSlaBreached:
+      name: WorkflowTaskSlaBreached
+      title: Task due-date SLA breached (workflow.task.sla-breached)
+      description: >
+        Fires when a task's DueDate Temporal Timer elapses before the task resolves
+        (RecordSLABreachActivity, audit-only, no status change). Consumed by Notification
+        (escalation to manager) and Audit (department KPI record), and the Dashboard Stream
+        Gateway.
+      x-lifecycle: { status: active }
+      x-owner: { team: platform-engineers, slack: "#workflow-engine" }
+      traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
+      payload: { $ref: '#/components/schemas/WorkflowTaskSlaBreachedEnvelope' }
+
+    DelegationStartedInbound:
+      name: DelegationStarted
+      x-lifecycle: { status: active }
+      title: Delegation started (owned by IAM Org & Membership)
+      description: >
+        Consumed to reroute the delegator's active assignments to the delegate,
+        scope-filtered and eligibility-rechecked. The one SLO-bearing inbound event
+        (≤4s p99, LLD §6.7).
+      x-schema-owner: iam-org-membership
+      payload: { $ref: '#/components/schemas/DelegationStartedInbound' }
+    DelegationEndedInbound:
+      name: DelegationEnded
+      x-lifecycle: { status: active }
+      title: Delegation ended (owned by IAM Org & Membership)
+      description: >
+        Consumed to restore the original assignee on every assignment row tagged with
+        this delegation_id, after the same batched eligibility re-check the forward
+        DelegationStarted reroute uses — a restored assignee who became ineligible during
+        the delegation window stays with the delegate instead, flagged for admin review.
+      x-schema-owner: iam-org-membership
+      payload: { $ref: '#/components/schemas/DelegationEndedInbound' }
+    TenantStateChangedInbound:
+      name: TenantStateChanged
+      x-lifecycle: { status: active }
+      title: Resolved tenant projection relay (owned by IAM Org & Membership)
+      description: >
+        Consumed to dispatch on status: offboarded terminates the tenant's instances; a
+        non-active status other than offboarded pauses them (initiator=tenant_state);
+        active-from-paused resumes them; a plan delta upserts the active_task_queues
+        registry. Recency-guarded against out-of-order redelivery via changed_at.
+      x-schema-owner: iam-org-membership
+      payload: { $ref: '#/components/schemas/TenantStateChangedInbound' }
+    UserDeletedInbound:
+      name: UserDeleted
+      x-lifecycle: { status: active }
+      title: User deleted (owned by IAM User Profile)
+      description: >
+        Consumed as a safety net: vacates every active assignment for the deleted user,
+        for the case where an explicit deletion bypassed the interactive reconciliation
+        flow (e.g. SCIM sync or API misuse). Scoped per-assignment, not instance-wide — a
+        multi-assignee task's instance keeps running if a co-assignee remains active.
+      x-schema-owner: iam-user-profile
+      payload: { $ref: '#/components/schemas/UserDeletedInbound' }
+    UserAvailabilityChangedInbound:
+      name: UserAvailabilityChanged
+      x-lifecycle: { status: active }
+      title: User availability changed (owned by IAM User Profile)
+      description: >
+        Consumed to pause the user's instances on status=ooo with no active delegation
+        (initiator=ooo), and resume them on status=available. Delegation events remain
+        the sole reroute mechanism — availability changes only pause/resume, never reroute.
+        Recency-guarded against out-of-order redelivery via the envelope's own time, the
+        same protection TenantStateChanged/WorkflowTemplatePublished already have.
+      x-schema-owner: iam-user-profile
+      payload: { $ref: '#/components/schemas/UserAvailabilityChangedInbound' }
+    WorkflowTemplatePublishedInbound:
+      name: WorkflowTemplatePublished
+      x-lifecycle: { status: active }
+      title: Template version published (owned by workflow-definition-svc)
+      description: >
+        Consumed to pre-warm the compiled-plan cache and the workflow_key→version_id map.
+        Fail-open on cache-population failure; recency-guarded against out-of-order
+        delivery.
+      x-schema-owner: workflow-definition-svc
+      payload: { $ref: '#/components/schemas/WorkflowTemplatePublishedInbound' }
+
+  schemas:
+    # Shared envelope — platform-events Envelope[T], CloudEvents-aligned JSON keys.
+    # Documentation/allOf-composition only; NOT extracted (no "Payload" suffix).
+    EventEnvelope:
+      type: object
+      required: [id, type, subject, source, tenant_id, time, specversion]
+      properties:
+        id:            { type: string, format: uuid, description: UUID v7 message id (consumer dedup) }
+        source:        { type: string, const: workflow-execution-svc }
+        tenant_id:     { type: string, format: uuid }
+        trace_id:      { type: string, description: OTel trace context when a valid span exists }
+        specversion:   { type: string, description: 'Schema version, WithSchemaVersion(1)' }
+        type:          { type: string, description: Dotted wire type; also the SNS EventType attribute }
+        time:          { type: string, format: date-time, description: UTC creation time (CloudEvents time) }
+        subject:       { type: string, description: 'instances/{instanceID}[/tasks/{taskID}]' }
+        actor:         { type: string, description: Identity that caused the event (user UUID); user-initiated events only }
+        correlation_id: { type: string, description: Optional cross-service correlation id }
+
+    WorkflowInstanceStartedEnvelope:    { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowInstanceStartedPayload' } } } ] }
+    WorkflowInstancePausedEnvelope:     { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowInstancePausedPayload' } } } ] }
+    WorkflowInstanceResumedEnvelope:    { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowInstanceResumedPayload' } } } ] }
+    WorkflowInstanceCancelledEnvelope:  { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowInstanceCancelledPayload' } } } ] }
+    WorkflowInstanceTerminatedEnvelope: { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowInstanceTerminatedPayload' } } } ] }
+    WorkflowInstanceDegradedEnvelope:   { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowInstanceDegradedPayload' } } } ] }
+    WorkflowInstanceFailedEnvelope:     { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowInstanceFailedPayload' } } } ] }
+    WorkflowInstanceFinishedEnvelope:   { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowInstanceFinishedPayload' } } } ] }
+    WorkflowInstanceForceRoutedEnvelope: { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowInstanceForceRoutedPayload' } } } ] }
+    WorkflowTaskCreatedEnvelope:        { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowTaskCreatedPayload' } } } ] }
+    WorkflowTaskClaimedEnvelope:        { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowTaskClaimedPayload' } } } ] }
+    WorkflowTaskCompletedEnvelope:      { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowTaskCompletedPayload' } } } ] }
+    WorkflowTaskDeferredEnvelope:       { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowTaskDeferredPayload' } } } ] }
+    WorkflowTaskReassignedEnvelope:     { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowTaskReassignedPayload' } } } ] }
+    WorkflowTaskSupersededEnvelope:     { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowTaskSupersededPayload' } } } ] }
+    WorkflowTaskFailedEnvelope:         { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowTaskFailedPayload' } } } ] }
+    WorkflowTaskSlaWarningEnvelope:     { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowTaskSlaWarningPayload' } } } ] }
+    WorkflowTaskSlaBreachedEnvelope:    { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowTaskSlaBreachedPayload' } } } ] }
+
+    # Every payload inlines the common core {workflow_instance_id, business_key,
+    # workflow_version_id}; task-scoped payloads also inline {task_id, node_key,
+    # department_id, assignee_user_ids}. Kept flat + additionalProperties:true because
+    # schema-gov extracts by "Payload" suffix and does NOT dereference $ref.
+    WorkflowInstanceStartedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, started_by_user_id]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string, description: opaque domain-scoped identifier }
+        workflow_version_id:  { type: string, format: uuid }
+        started_by_user_id:   { type: string, format: uuid }
+    WorkflowInstancePausedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, started_by_user_id, initiator]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        started_by_user_id:   { type: string, format: uuid, description: 'Dashboard Stream Gateway routing key' }
+        initiator:            { type: string, enum: [admin, tenant_state, safety_net, ooo] }
+        actor_user_id:        { type: ["string", "null"], format: uuid }
+    WorkflowInstanceResumedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, started_by_user_id, initiator]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        started_by_user_id:   { type: string, format: uuid, description: 'Dashboard Stream Gateway routing key' }
+        initiator:            { type: string, enum: [admin, tenant_state, ooo, degraded_recovery] }
+        actor_user_id:        { type: ["string", "null"], format: uuid }
+    WorkflowInstanceCancelledPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, started_by_user_id, actor_user_id]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        started_by_user_id:   { type: string, format: uuid, description: 'Dashboard Stream Gateway routing key' }
+        actor_user_id:        { type: string, format: uuid }
+        reason:               { type: ["string", "null"] }
+    WorkflowInstanceTerminatedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, started_by_user_id, initiator]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        started_by_user_id:   { type: string, format: uuid, description: 'Dashboard Stream Gateway routing key' }
+        initiator:            { type: string, enum: [admin, tenant_state] }
+        actor_user_id:        { type: ["string", "null"], format: uuid }
+    WorkflowInstanceDegradedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, failed_branches]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        failed_branches:
+          type: array
+          items:
+            type: object
+            required: [department_id, last_node_key]
+            properties:
+              department_id: { type: string, format: uuid }
+              last_node_key: { type: string }
+    WorkflowInstanceFailedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, error_class]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        error_class:          { type: string }
+    WorkflowInstanceFinishedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, started_by_user_id, completed_at]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        started_by_user_id:   { type: string, format: uuid, description: 'Dashboard Stream Gateway routing key' }
+        completed_at:         { type: string, format: date-time }
+    WorkflowInstanceForceRoutedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, actor_user_id, from_node_keys, to_node_key, direction]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        actor_user_id:        { type: string, format: uuid }
+        from_node_keys:       { type: array, items: { type: string } }
+        to_node_key:          { type: string }
+        direction:            { type: string, enum: [forward, back] }
+    WorkflowTaskCreatedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, stage_type]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        task_id:              { type: string, format: uuid }
+        node_key:             { type: string }
+        department_id:        { type: string, format: uuid }
+        assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
+        stage_type:           { type: string }
+        due_at:               { type: ["string", "null"], format: date-time }
+        follow_up_at:         { type: ["string", "null"], format: date-time }
+    WorkflowTaskClaimedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, claimed_by_user_id]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        task_id:              { type: string, format: uuid }
+        node_key:             { type: string }
+        department_id:        { type: string, format: uuid }
+        assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
+        claimed_by_user_id:   { type: string, format: uuid }
+    WorkflowTaskCompletedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, completed_by_user_id]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        task_id:              { type: string, format: uuid }
+        node_key:             { type: string }
+        department_id:        { type: string, format: uuid }
+        assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
+        completed_by_user_id: { type: string, format: uuid }
+    WorkflowTaskDeferredPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, deferred_to_node_key]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        task_id:              { type: string, format: uuid }
+        node_key:             { type: string }
+        department_id:        { type: string, format: uuid }
+        assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
+        deferred_to_node_key: { type: string }
+        reason:               { type: ["string", "null"] }
+        due_at:               { type: ["string", "null"], format: date-time }
+    WorkflowTaskReassignedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, old_user_id, new_user_id, initiator]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        task_id:              { type: string, format: uuid }
+        node_key:             { type: string }
+        department_id:        { type: string, format: uuid }
+        assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
+        old_user_id:          { type: string, format: uuid }
+        new_user_id:          { type: string, format: uuid }
+        initiator:            { type: string, enum: [admin, override, delegation] }
+        delegation_id:        { type: ["string", "null"], format: uuid }
+    WorkflowTaskSupersededPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, actor_user_id]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        task_id:              { type: string, format: uuid }
+        node_key:             { type: string }
+        department_id:        { type: string, format: uuid }
+        assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
+        actor_user_id:        { type: string, format: uuid }
+    WorkflowTaskFailedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, cascade_source]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        task_id:              { type: string, format: uuid }
+        node_key:             { type: string }
+        department_id:        { type: string, format: uuid }
+        assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
+        cascade_source:       { type: string, description: what cascade failed the task (cancel/terminate/instance-fail) }
+    WorkflowTaskSlaWarningPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, follow_up_at]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        task_id:              { type: string, format: uuid }
+        node_key:             { type: string }
+        department_id:        { type: string, format: uuid }
+        assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
+        follow_up_at:         { type: string, format: date-time }
+    WorkflowTaskSlaBreachedPayload:
+      type: object
+      additionalProperties: true
+      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, due_at]
+      properties:
+        workflow_instance_id: { type: string, format: uuid }
+        business_key:         { type: string }
+        workflow_version_id:  { type: string, format: uuid }
+        task_id:              { type: string, format: uuid }
+        node_key:             { type: string }
+        department_id:        { type: string, format: uuid }
+        assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
+        due_at:               { type: string, format: date-time }
+
+    # No "Payload" suffix → schema-gov never extracts or registers these. They record
+    # the fields Execution actually reads; the authoritative schema is the producer's.
+    DelegationStartedInbound:
+      type: object
+      additionalProperties: true
+      required: [delegation_id, delegator_id, delegate_id, scope, starts_at]
+      properties:
+        delegation_id: { type: string, format: uuid }
+        delegator_id:  { type: string, format: uuid }
+        delegate_id:   { type: string, format: uuid }
+        scope:         { type: string, enum: [all, department, tender] }
+        scope_id:      { type: ["string", "null"], format: uuid }
+        starts_at:     { type: string, format: date-time }
+        ends_at:       { type: ["string", "null"], format: date-time }
+    DelegationEndedInbound:
+      type: object
+      additionalProperties: true
+      required: [delegation_id, delegator_id, delegate_id, ended_reason]
+      properties:
+        delegation_id: { type: string, format: uuid }
+        delegator_id:  { type: string, format: uuid }
+        delegate_id:   { type: string, format: uuid }
+        ended_reason:  { type: string, enum: [expired, cancelled, delegate_removed] }
+    TenantStateChangedInbound:
+      type: object
+      additionalProperties: true
+      required: [tenant_id, status, previous_status, plan, previous_plan, changed_at, cause]
+      properties:
+        tenant_id:       { type: string, format: uuid }
+        status:          { type: string, enum: [trial, active, past_due, cancelled, suspended, trial_expired, offboarded] }
+        previous_status: { type: string }
+        plan:            { type: string }
+        previous_plan:   { type: string }
+        changed_at:      { type: string, format: date-time }
+        cause:           { type: string, description: 'source lifecycle event type, e.g. TenantSuspended' }
+    UserDeletedInbound:
+      type: object
+      additionalProperties: true
+      required: [user_id, deleted_at]
+      properties:
+        user_id:    { type: string, format: uuid }
+        deleted_at: { type: string, format: date-time }
+    UserAvailabilityChangedInbound:
+      type: object
+      additionalProperties: true
+      required: [user_id, status]
+      properties:
+        user_id:          { type: string, format: uuid }
+        status:           { type: string, enum: [available, ooo, busy] }
+        ooo_from:         { type: ["string", "null"], format: date-time }
+        ooo_until:        { type: ["string", "null"], format: date-time }
+        delegate_user_id: { type: ["string", "null"], format: uuid }
+    WorkflowTemplatePublishedInbound:
+      type: object
+      additionalProperties: true
+      required: [workflow_id, workflow_key, version_id, version_number, artifact_hash, published_by]
+      properties:
+        workflow_id:              { type: string, format: uuid }
+        workflow_key:             { type: string }
+        version_id:               { type: string, format: uuid }
+        version_number:           { type: integer }
+        artifact_hash:            { type: string }
+        published_by:             { type: string, format: uuid }
+        promoted_from_version_id: { type: ["string", "null"], format: uuid }

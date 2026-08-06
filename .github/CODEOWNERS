@@ -21,3 +21,8 @@ api/proto/ @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
 # The Temporal workflow function + Activities — the core execution logic,
 # a peer layer to adapter/ with its own arch-lint isolation rules.
 internal/workflow/ @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
+
+# Event contract — schema/lifecycle changes affect downstream consumers
+# (Audit, Notification, Tender, LLM, Dashboard Stream Gateway).
+api/asyncapi.yaml @BCBP-SOLUTIONS-FZC-LLC/platform-engineers @BCBP-SOLUTIONS-FZC-LLC/platform-team
+internal/eventschema/ @BCBP-SOLUTIONS-FZC-LLC/platform-engineers @BCBP-SOLUTIONS-FZC-LLC/platform-team

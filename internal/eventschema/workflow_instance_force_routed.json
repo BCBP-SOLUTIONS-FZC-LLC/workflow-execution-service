@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WorkflowInstanceForceRoutedPayload",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["workflow_instance_id", "business_key", "workflow_version_id", "actor_user_id", "from_node_keys", "to_node_key", "direction"],
+  "properties": {
+    "workflow_instance_id": { "type": "string", "format": "uuid" },
+    "business_key": { "type": "string" },
+    "workflow_version_id": { "type": "string", "format": "uuid" },
+    "actor_user_id": { "type": "string", "format": "uuid" },
+    "from_node_keys": { "type": "array", "items": { "type": "string" } },
+    "to_node_key": { "type": "string" },
+    "direction": { "type": "string", "enum": ["forward", "back"] }
+  }
+}

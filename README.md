@@ -75,12 +75,18 @@ cmd/server/, cmd/worker/       — composition roots (two independently deployed
 internal/core/{domain,port,service}/
 internal/workflow/             — Temporal workflow function + Activities
 internal/adapter/{inbound,outbound}/
+internal/eventschema/          — embedded JSON Schemas for the 18 outbound events (LLD §6.8)
 internal/config/
 db/migrations/, db/queries/    — workflow_execution schema (RLS via app_tenant_id()/rls_check_tenant())
 db/sqlc_schema_ref/            — non-migration DDL so sqlc can type-check queries against library-owned tables (outbox_events)
 api/proto/                     — execution_service.proto + definition.proto (buf)
+api/asyncapi.yaml              — outbound/inbound event contract (LLD §6)
 test/{fixtures,unit,integration,e2e,workflow}/
 ```
+
+## Event schema governance
+
+`make schema-validate` runs `platform-schemagov` (Docker) against `api/asyncapi.yaml` + `internal/eventschema/`. See `make help` for `extract-schemas`/`schema-diff`/`schema-register`/`schema-prune`.
 
 ## Common commands
 

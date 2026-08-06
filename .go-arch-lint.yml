@@ -33,6 +33,10 @@ components:
   # postgres/db is sqlc-generated code; declared separately so adapter can import it
   db:
     in: "internal/adapter/outbound/postgres/db/**"
+  # Embedded event JSON Schemas (go:embed only); declared separately, same
+  # reasoning as db, so adapter (eventbus.ValidatingCodec) can import it.
+  eventschema:
+    in: "internal/eventschema/**"
   adapter:
     in: "internal/adapter/**"
   # proto-generated code used by both adapter and cmd
@@ -61,9 +65,10 @@ deps:
     mayDependOn:
       - domain
       - port
-      - service   # handlers reference service request/response types
-      - db        # sqlc-generated types
-      - gen       # proto-generated types (grpc server + definition client)
+      - service     # handlers reference service request/response types
+      - db          # sqlc-generated types
+      - eventschema # eventbus.ValidatingCodec embeds the event JSON Schemas
+      - gen         # proto-generated types (grpc server + definition client)
   cmd:
     mayDependOn:
       - domain
