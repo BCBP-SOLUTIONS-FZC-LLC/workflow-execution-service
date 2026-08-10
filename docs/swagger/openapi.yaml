@@ -1,0 +1,2917 @@
+openapi: "3.0.3"
+info:
+  title: Workflow Execution Service
+  version: "1.0.0"
+  description: >
+    Runtime control plane for the BPMN-driven Workflow Engine. Manages workflow instances,
+    task projections for dashboard queries, and user signals (claim, complete, defer, reassign).
+    All identity and tenant context is injected by the Envoy API Gateway — callers never set
+    these headers directly.
+
+servers:
+  - url: https://api.internal/execution
+    description: Internal API gateway base (service prefix only; paths include /api/v1/)
+
+security:
+  - GatewayTenantContext: []
+    UserContext: []
+
+tags:
+  - name: Ops
+    description: Health, readiness, and metrics endpoints.
+  - name: Instances
+    description: >
+      Workflow instance lifecycle: start, list, detail, admin signals, node
+      overrides, and the activity event log.
+  - name: Tasks
+    description: >
+      Task list/detail and user/admin task actions (claim, complete, defer,
+      reassign), including the admin reconciliation query for a user's active
+      assignments.
+  - name: Internal (WorkflowClient)
+    description: >
+      Service-to-service endpoints called by the IAM Org & Membership service,
+      not routed through the gateway.
+  - name: Internal (Events)
+    description: >
+      Service-to-service ingestion endpoint called by the shared Workflow-Events
+      Consumer, not routed through the gateway.
+
+components:
+  securitySchemes:
+    GatewayTenantContext:
+      type: apiKey
+      in: header
+      name: x-tenant-id
+      description: Tenant UUID injected by the API Gateway.
+    UserContext:
+      type: apiKey
+      in: header
+      name: x-user-id
+      description: Authenticated user UUID injected by the API Gateway.
+    AdminRole:
+      type: apiKey
+      in: header
+      name: x-tenant-roles
+      description: >
+        Comma-separated tenant roles injected by the API Gateway. Admin-only endpoints
+        require at least one of: tenant_admin, tenant_owner.
+    InternalServiceAuth:
+      type: apiKey
+      in: header
+      name: x-internal-token
+      description: >
+        Service-to-service credential for the internal route group (RequireInternalToken,
+        INTERNAL_API_TOKEN) — the same convention Definition Service already ships. These
+        routes are NOT exposed through the Envoy public gateway and do NOT carry gateway
+        identity headers; they are restricted to in-mesh callers by a Kubernetes
+        NetworkPolicy AND authenticated by this shared secret — defense-in-depth, not either
+        control alone (§9.2). The tenant context for these routes is taken from the request
+        payload, not from x-tenant-id.
+
+  parameters:
+    TenantIdHeader:
+      name: x-tenant-id
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Tenant UUID (injected by gateway).
+    UserIdHeader:
+      name: x-user-id
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Authenticated user UUID (injected by gateway).
+    TenantRolesHeader:
+      name: x-tenant-roles
+      in: header
+      required: true
+      schema:
+        type: string
+      description: >
+        Comma-separated tenant roles. Must include tenant_admin or tenant_owner
+        for admin-only endpoints.
+    DepartmentsHeader:
+      name: x-departments
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Comma-separated department UUIDs the caller belongs to (gateway-injected).
+    PlanHeader:
+      name: x-plan
+      in: header
+      required: false
+      schema:
+        type: string
+        enum: [starter, pro, enterprise]
+      description: Tenant plan tier (gateway-injected).
+    FeatureFlagsHeader:
+      name: x-feature-flags
+      in: header
+      required: false
+      schema:
+        type: string
+      description: >
+        Encoded set of effective feature flags injected by Envoy, matching Definition
+        Service's own component (`FeatureFlags`). Defined for documentation parity with the
+        standard gateway header set (§1.2); no endpoint in this contract currently gates
+        behavior on it.
+    RequestIdHeader:
+      name: x-request-id
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: Optional client-generated request ID for distributed tracing correlation.
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: >
+        Optional client-supplied key for safe retry of this request. A replay with the same
+        key and an identical request body returns the original cached response. A replay with
+        the same key and a different body returns 409 IDEMPOTENCY_KEY_REPLAY.
+    InstanceIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Workflow instance UUID.
+    TaskIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Workflow task UUID.
+    NodeKeyPath:
+      name: node
+      in: path
+      required: true
+      schema:
+        type: string
+      description: BPMN node key in the compiled plan whose assignee is being overridden.
+      example: "review_stage_1"
+    CursorQuery:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: >
+        Opaque keyset cursor encoding the previous page's last (created_at|occurred_at, id)
+        pair (§5.9). Omit for the first page. An unparseable or tampered cursor returns 400
+        BAD_REQUEST rather than silently restarting.
+    LimitQuery:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+      description: >
+        Page size. Values above 100 are clamped, not rejected; values <= 0 are rejected
+        (§5.9).
+    TraceParentHeader:
+      name: traceparent
+      in: header
+      required: false
+      schema:
+        type: string
+      description: >
+        W3C Trace Context header (format: 00-{trace-id}-{span-id}-{flags}).
+        Injected by the gateway or client to propagate distributed traces.
+        Used by TracingMiddleware to link the incoming span to the existing trace.
+
+  schemas:
+    InstanceStatus:
+      type: string
+      enum: [RUNNING, PAUSED, COMPLETED, TERMINATED, FAILED, DEGRADED]
+      description: >
+        RUNNING: active execution. PAUSED: admin-paused or suspended.
+        COMPLETED: all steps finished normally. TERMINATED: admin-terminated or
+        graceful-cancelled (Cancel and Terminate share this value). FAILED: unrecoverable
+        Temporal error on the main/Sequential path. DEGRADED: a Parallel branch failed
+        unrecoverably; siblings keep running, admin resolution required (force-forward,
+        force-back, or cancel/terminate).
+
+    TaskStatus:
+      type: string
+      enum: [READY, IN_PROGRESS, COMPLETED, DEFERRED, FAILED, SUPERSEDED]
+      description: >
+        READY: no assignment has been claimed. IN_PROGRESS: at least one assignment claimed,
+        not all completed. COMPLETED: all active assignments completed (Temporal advances).
+        DEFERRED: reviewer sent task back; a regression task was created.
+        FAILED: swept up in an instance-cancel/-terminate/FAILED cascade — never an
+        independent per-task failure. SUPERSEDED: bypassed by an admin instance-force-forward.
+
+    AssigneeMode:
+      type: string
+      enum: [single, all]
+      description: >
+        single: the first user to claim and complete the task satisfies it.
+        all: every assigned user must complete their assignment before the task advances.
+
+    EventEnvelope:
+      type: object
+      description: >
+        The platform-events envelope forwarded verbatim by the shared Workflow-Events
+        Consumer to POST /internal/events — matches the shape published to SNS
+        (execution_service_rework/asyncapi.yaml's EventEnvelope schema), except payload is
+        opaque here since the consumer forwards any subscribed event type without
+        deserializing it.
+      required: [id, type, subject, source, tenant_id, time, specversion]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID v7 message id (consumer dedup key, paired with the consumer name).
+        type:
+          type: string
+          description: >
+            Dotted-lowercase or PascalCase wire type, dispatched by the switch in
+            internal_events.go (§6.2). One of: DelegationStarted, DelegationEnded,
+            TenantStateChanged, user.deleted, user.availability.changed,
+            workflow.template.published. Any other value is accepted and ignored with 200.
+          example: "DelegationStarted"
+        subject:
+          type: string
+          description: Producer-defined subject path for the affected resource.
+        source:
+          type: string
+          description: Producer service name.
+        tenant_id:
+          type: string
+          format: uuid
+        time:
+          type: string
+          format: date-time
+        specversion:
+          type: string
+          example: "1"
+        trace_id:
+          type: string
+          nullable: true
+        correlation_id:
+          type: string
+          nullable: true
+        actor:
+          type: string
+          nullable: true
+          description: User or service identity that caused the event (a user UUID or service account name).
+        ip_address:
+          type: string
+          nullable: true
+          description: Client IP at the time the event was triggered. Absent for background/system events.
+        user_agent:
+          type: string
+          nullable: true
+          description: HTTP User-Agent header value from the request that triggered the event. Absent for background/system events.
+        dataschema:
+          type: string
+          nullable: true
+          description: >
+            Schema registry version identifier for the encoded payload (platform-events'
+            Envelope[T].SchemaID, JSON tag `dataschema`). Absent for the NoopCodec (dev/test).
+        data:
+          type: object
+          additionalProperties: true
+          description: Producer-defined payload, dispatched by type (§6.2).
+
+
+    OverrideMap:
+      type: object
+      description: >
+        Maps BPMN node keys to user UUIDs to override the default assignee from the
+        compiled plan. For assignee_mode=all nodes, this replaces the slot at index 0 only.
+        Keys must match node keys in the compiled plan; values must be valid UUIDs.
+      additionalProperties:
+        type: string
+        format: uuid
+      example:
+        review_stage_1: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        approval_stage: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+
+    SignalAccepted:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: "signal accepted"
+
+    WorkflowEventType:
+      type: string
+      enum:
+        - INSTANCE_STARTED
+        - INSTANCE_PAUSED
+        - INSTANCE_RESUMED
+        - INSTANCE_COMPLETED
+        - INSTANCE_TERMINATED
+        - INSTANCE_FAILED
+        - TASK_CREATED
+        - TASK_ASSIGNED
+        - TASK_STARTED
+        - TASK_COMPLETED
+        - TASK_DEFERRED
+        - TASK_REJECTED
+        - TASK_REASSIGNED
+        # COMMENT_ADDED / RESOURCE_LINKED: currently unused — workflow_comment/workflow_resource_link
+        # are tentatively removed from scope pending confirmation (see open_questions.md). Kept here,
+        # not deleted, in case the removal is reversed.
+        - COMMENT_ADDED
+        - RESOURCE_LINKED
+      description: >
+        Activity event type. TASK_REJECTED is reserved for future explicit rejection workflows;
+        deferral emits TASK_DEFERRED. OUTBOX_SENT is an internal platform concern and is never
+        written to the workflow_event table.
+
+    WorkflowEvent:
+      type: object
+      required: [id, workflow_instance_id, tenant_id, event_type, occurred_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workflow_instance_id:
+          type: string
+          format: uuid
+        task_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set for task-scoped events; null for instance-level events.
+        tenant_id:
+          type: string
+          format: uuid
+        event_type:
+          $ref: "#/components/schemas/WorkflowEventType"
+        actor_user_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The user who triggered the event. Null for system/SQS-initiated transitions.
+        node_key:
+          type: string
+          nullable: true
+          description: BPMN node key for task-scoped events.
+          example: "review_stage_1"
+        payload_json:
+          type: object
+          additionalProperties: true
+          description: Event-specific context (e.g. reason, new_assignee_user_id).
+        occurred_at:
+          type: string
+          format: date-time
+
+    InstanceSummary:
+      type: object
+      required:
+        - id
+        - tenant_id
+        - workflow_id
+        - workflow_version_id
+        - business_key
+        - status
+        - started_by_user_id
+        - started_at
+        - record_version
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        workflow_id:
+          type: string
+          format: uuid
+          description: >
+            UUID of the parent workflow record in the Definition Service.
+            Snapshotted from the GetCompiledWorkflow response at instance creation; immutable.
+        business_key:
+          type: string
+          description: Caller-supplied unique key for this instance; unique among RUNNING/PAUSED instances per tenant.
+          example: "tender-abc-001"
+        workflow_version_id:
+          type: string
+          format: uuid
+          description: Pinned at instance creation; immutable.
+        temporal_workflow_id:
+          type: string
+          description: Temporal workflow execution ID (typically the instance UUID as a string).
+        current_node_keys:
+          type: array
+          items:
+            type: string
+          description: >
+            Active BPMN node keys. Contains more than one entry during parallel gateway steps.
+            Empty when the instance has reached a terminal state.
+          example: ["review_stage_1"]
+        saved_node_keys:
+          type: array
+          items:
+            type: string
+          description: >
+            Sibling branch(es) saved by a force-forward skip, restorable by force-back.
+            Empty when there is nothing to restore (FORCE_BACK_NO_SAVED_BRANCH).
+        status:
+          $ref: "#/components/schemas/InstanceStatus"
+        started_by_user_id:
+          type: string
+          format: uuid
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        record_version:
+          type: integer
+          format: int64
+          description: >
+            Optimistic-lock token. Required in every lifecycle-signal request body
+            (pause/resume/cancel/force-forward/force-back) — this is the only
+            documented way a client learns the current value.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    InstanceDetail:
+      allOf:
+        - $ref: "#/components/schemas/InstanceSummary"
+        - type: object
+          properties:
+            tasks:
+              type: array
+              items:
+                $ref: "#/components/schemas/TaskSummary"
+              description: All tasks created for this instance (current and historical).
+            has_context:
+              type: boolean
+              description: >
+                True if a context_json was provided at instance creation. The context
+                payload itself is not returned here to avoid leaking tender/document
+                data to callers who only need the workflow state.
+            override_map:
+              allOf:
+                - $ref: "#/components/schemas/OverrideMap"
+              nullable: true
+              description: Instantiation-time non-default-assignee map; null if none was supplied at start.
+
+    TaskSummary:
+      type: object
+      required:
+        - id
+        - workflow_instance_id
+        - tenant_id
+        - node_key
+        - task_type
+        - department_id
+        - status
+        - record_version
+        - assignee_mode
+        - assignee_count
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        workflow_instance_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        node_key:
+          type: string
+          description: BPMN node ID matching the compiled plan.
+          example: "review_stage_1"
+        task_type:
+          type: string
+          example: "userTask"
+        department_id:
+          type: string
+          format: uuid
+          description: Snapshotted from the compiled plan at task creation.
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        record_version:
+          type: integer
+          description: >
+            Optimistic lock counter. Incremented on every Claim or assignment change.
+            Clients must echo the record_version they last observed in mutation requests.
+          example: 2
+        assignee_mode:
+          $ref: "#/components/schemas/AssigneeMode"
+        assignee_count:
+          type: integer
+          description: Expected number of active assignments for this task.
+          example: 2
+        due_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: SLA deadline snapshotted from the compiled plan at task creation.
+        deferred_from_task_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: If this task is a regression created by a Defer signal, the ID of the parent task.
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    TaskDetail:
+      allOf:
+        - $ref: "#/components/schemas/TaskSummary"
+        - type: object
+          properties:
+            payload_json:
+              type: object
+              description: >
+                Runtime context passed from the instance start request at task creation.
+                Read-only; matches the context_json provided when the instance was started.
+              additionalProperties: true
+            assignments:
+              type: array
+              items:
+                $ref: "#/components/schemas/AssignmentRecord"
+              description: All assignment records for this task (active and historical).
+
+    AssignmentRecord:
+      type: object
+      required:
+        - id
+        - task_id
+        - user_id
+        - is_lead
+        - assigned_at
+        - is_active
+      properties:
+        id:
+          type: string
+          format: uuid
+        task_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        is_lead:
+          type: boolean
+          description: >
+            True for the assignment that established claim precedence under
+            assignee_mode=all — the one user whose claim/complete drives the task
+            forward among multiple assignees.
+        assigned_by:
+          type: string
+          format: uuid
+          nullable: true
+          description: User ID of the assigner. Null if the system auto-assigned from the compiled plan.
+        reason:
+          type: string
+          nullable: true
+          description: >
+            Human-readable reason for this assignment. Examples: "compiled plan default",
+            "admin reassignment", "delegation:uuid", "delegation_ended".
+          example: "compiled plan default"
+        assigned_at:
+          type: string
+          format: date-time
+        claimed_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        result_json:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Completion payload submitted by this assignee. Null until completed.
+        vacated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set when this assignment is superseded (reassignment, delegation shift).
+        is_active:
+          type: boolean
+          description: False once vacated. Historical rows are preserved for audit.
+
+    OverrideResult:
+      type: object
+      description: The persisted node-override record (rev 1.23 — matches overrideNodeAssignee's actual 200 response, not a SignalAccepted body).
+      required:
+        - workflow_instance_id
+        - node_key
+        - previous_user_id
+        - new_user_id
+        - actor_user_id
+        - record_version
+      properties:
+        workflow_instance_id:
+          type: string
+          format: uuid
+        node_key:
+          type: string
+          example: "review_stage_1"
+        previous_user_id:
+          type: string
+          format: uuid
+        new_user_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          nullable: true
+        actor_user_id:
+          type: string
+          format: uuid
+        record_version:
+          type: integer
+
+    ActiveUserTask:
+      type: object
+      required:
+        - workflow_instance_id
+        - task_id
+        - assignment_id
+        - node_key
+        - task_type
+        - business_key
+        - status
+        - version
+        - created_at
+      properties:
+        workflow_instance_id:
+          type: string
+          format: uuid
+        task_id:
+          type: string
+          format: uuid
+        assignment_id:
+          type: string
+          format: uuid
+        node_key:
+          type: string
+          example: "review_stage_1"
+        task_type:
+          type: string
+          example: "userTask"
+        department_id:
+          type: string
+          format: uuid
+          nullable: true
+        business_key:
+          type: string
+          example: "tender-abc-001"
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        record_version:
+          type: integer
+        due_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        claimed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ProblemDetails:
+      type: object
+      required: [type, title, status, detail, instance, code]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: >
+            URI reference identifying the problem type.
+            Format: https://errors.bcbp.io/execution/{kebab-code}
+          example: "https://errors.bcbp.io/execution/task-concurrency-violation"
+        title:
+          type: string
+          description: Short, human-readable problem title (invariant per error type).
+          example: "Task Concurrency Violation"
+        status:
+          type: integer
+          description: HTTP status code.
+          example: 409
+        detail:
+          type: string
+          description: Human-readable explanation of this specific occurrence.
+          example: "task record_version mismatch; refresh and retry"
+        instance:
+          type: string
+          format: uri-reference
+          description: URI reference identifying the specific request that produced the error.
+          example: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
+        code:
+          type: string
+          description: >
+            Machine-readable error code (stable across releases). One of:
+            BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_ASSIGNEE, NOT_AUTHORIZED_FOR_RESOURCE,
+            TENANT_MISMATCH, INSTANCE_NOT_FOUND, TASK_NOT_FOUND,
+            TARGET_NODE_NOT_FOUND, OVERRIDE_NO_OP, DUPLICATE_BUSINESS_KEY, TENANT_NOT_ACTIVE,
+            VERSION_NOT_PUBLISHED, VERSION_INVALID,
+            RECORD_VERSION_CONFLICT, INSTANCE_ALREADY_TERMINAL, INVALID_INSTANCE_STATE,
+            TASK_ALREADY_CLAIMED, CLAIM_NOT_APPLICABLE, INVALID_TASK_STATE,
+            FORCE_BACK_NO_SAVED_BRANCH, NODE_ALREADY_RESOLVED, IDEMPOTENCY_KEY_REPLAY,
+            ASSIGNEE_INELIGIBLE, OVERRIDE_MAP_INVALID, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE,
+            UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, INTERNAL_ERROR.
+          example: "RECORD_VERSION_CONFLICT"
+        invalid_params:
+          type: array
+          description: >
+            Present on validation errors carrying more than one offending field/node — one entry
+            per violation (e.g. ASSIGNEE_INELIGIBLE's bulk node-eligibility failures, §5.5).
+            Absent (omitted entirely, not null) on every other error.
+          items:
+            type: object
+            required: [name, reason]
+            properties:
+              name:
+                type: string
+                description: Name of the invalid field, query/path parameter, or node key.
+                example: "review_finance"
+              reason:
+                type: string
+                description: Human-readable explanation of why this entry is invalid.
+                example: "user no longer holds required_level=SENIOR in department_id=9b1c...finance"
+              code:
+                type: string
+                description: Optional machine-readable sub-code for this specific violation.
+
+  responses:
+    BadRequest:
+      description: Malformed JSON body or missing required fields.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/bad-request"
+            title: "Bad Request"
+            status: 400
+            detail: "field 'version' is required"
+            instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
+            code: "BAD_REQUEST"
+
+    Unauthorized:
+      description: Missing or invalid x-tenant-id / x-user-id gateway headers.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/unauthorized"
+            title: "Unauthorized"
+            status: 401
+            detail: "x-tenant-id header is required"
+            instance: "/api/v1/instances"
+            code: "UNAUTHORIZED"
+
+    Forbidden:
+      description: Caller lacks the required role or active assignment for this resource.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/forbidden"
+            title: "Forbidden"
+            status: 403
+            detail: "caller does not have an active assignment for this task"
+            instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
+            code: "NOT_ASSIGNEE"
+
+    InstanceNotFound:
+      description: Workflow instance not found or belongs to a different tenant.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/instance-not-found"
+            title: "Instance Not Found"
+            status: 404
+            detail: "workflow instance not found"
+            instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            code: "INSTANCE_NOT_FOUND"
+
+    TaskNotFound:
+      description: Workflow task not found or belongs to a different tenant.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/task-not-found"
+            title: "Task Not Found"
+            status: 404
+            detail: "workflow task not found"
+            instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            code: "TASK_NOT_FOUND"
+
+    PayloadTooLarge:
+      description: Request body exceeds the 10 MB limit (§5.10, §9.3 — same cap Definition Service applies).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/payload-too-large"
+            title: "Payload Too Large"
+            status: 413
+            detail: "request body exceeds 10 MB limit"
+            instance: "/api/v1/instances"
+            code: "PAYLOAD_TOO_LARGE"
+
+    UnsupportedMediaType:
+      description: Request Content-Type is not application/json.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/unsupported-media-type"
+            title: "Unsupported Media Type"
+            status: 415
+            detail: "request body must be application/json"
+            instance: "/api/v1/instances"
+            code: "UNSUPPORTED_MEDIA_TYPE"
+
+    InternalError:
+      description: Unhandled server error.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/internal-error"
+            title: "Internal Server Error"
+            status: 500
+            detail: "an unexpected error occurred"
+            instance: "/api/v1/instances"
+            code: "INTERNAL_ERROR"
+
+    ServiceUnavailable:
+      description: An upstream dependency (Temporal or Definition Service) is unavailable.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/temporal-unavailable"
+            title: "Service Unavailable"
+            status: 503
+            detail: "Temporal cluster is unreachable; retry after a short delay"
+            instance: "/api/v1/instances"
+            code: "UPSTREAM_UNAVAILABLE"
+
+    IdempotencyKeyReplay:
+      description: >
+        The supplied Idempotency-Key header was previously used with a different request
+        body. Replays with an identical body return the original cached response instead.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+            title: "Idempotency Key Replay"
+            status: 409
+            detail: "Idempotency-Key reused with a different request body"
+            instance: "/api/v1/instances"
+            code: "IDEMPOTENCY_KEY_REPLAY"
+
+paths:
+  /api/v1/healthz:
+    get:
+      tags: [Ops]
+      summary: Liveness probe
+      description: Returns 200 if the process is alive. No dependency checks.
+      security: []
+      responses:
+        "200":
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+
+  /api/v1/readyz:
+    get:
+      tags: [Ops]
+      summary: Readiness probe
+      description: Returns 200 if the service can serve traffic (DB + Temporal reachable).
+      security: []
+      responses:
+        "200":
+          description: Service is ready.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ready"
+        "503":
+          description: One or more dependencies are unavailable.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "not ready"
+                  checks:
+                    type: object
+                    additionalProperties:
+                      type: string
+
+  /api/v1/metrics:
+    get:
+      operationId: getMetrics
+      tags: [Ops]
+      summary: Prometheus metrics scrape
+      description: Returns Prometheus text-format metrics for scraping by the metrics collector.
+      security: []
+      responses:
+        "200":
+          description: Prometheus metrics in text/plain exposition format.
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /api/v1/instances:
+    post:
+      operationId: startInstance
+      tags: [Instances]
+      summary: Start a new workflow instance
+      description: >
+        Validates that the referenced version is PUBLISHED and is_valid=true, then starts
+        a Temporal workflow execution and inserts the instance record transactionally.
+        Returns 409 if an active instance (RUNNING or PAUSED) with the same business_key
+        already exists for this tenant.
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/PlanHeader"
+        - $ref: "#/components/parameters/RequestIdHeader"
+        - $ref: "#/components/parameters/TraceParentHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [business_key, workflow_version_id]
+              properties:
+                business_key:
+                  type: string
+                  minLength: 2
+                  maxLength: 64
+                  description: >
+                    Caller-supplied unique key for this run. Must be unique among
+                    RUNNING and PAUSED instances for this tenant.
+                  example: "tender-abc-001"
+                workflow_version_id:
+                  type: string
+                  format: uuid
+                  description: Must reference a PUBLISHED version with is_valid=true.
+                context_json:
+                  type: object
+                  additionalProperties: true
+                  description: >
+                    Optional runtime data attached to this instance (e.g. tender_id, document refs).
+                    Immutable after creation; passed to all tasks created for this instance.
+                override_map:
+                  $ref: "#/components/schemas/OverrideMap"
+      responses:
+        "201":
+          description: Instance created and Temporal workflow started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstanceSummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: >
+            State conflict. See code field:
+            IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body;
+            DUPLICATE_BUSINESS_KEY — an active instance for this business_key already exists;
+            VERSION_NOT_PUBLISHED — the referenced version is DRAFT or ARCHIVED;
+            VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked);
+            TENANT_NOT_ACTIVE — the tenant's current status is not active or trial.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                DuplicateBusinessKey:
+                  value:
+                    type: "https://errors.bcbp.io/execution/duplicate-business-key"
+                    title: "Duplicate Business Key"
+                    status: 409
+                    detail: "an active instance for business_key 'tender-abc-001' already exists"
+                    instance: "/api/v1/instances"
+                    code: "DUPLICATE_BUSINESS_KEY"
+                TenantNotActive:
+                  value:
+                    type: "https://errors.bcbp.io/execution/tenant-not-active"
+                    title: "Tenant Not Active"
+                    status: 409
+                    detail: "tenant status is 'suspended'; instantiation requires active or trial"
+                    instance: "/api/v1/instances"
+                    code: "TENANT_NOT_ACTIVE"
+                VersionNotPublished:
+                  value:
+                    type: "https://errors.bcbp.io/execution/version-not-published"
+                    title: "Version Not Published"
+                    status: 409
+                    detail: "workflow version is not PUBLISHED"
+                    instance: "/api/v1/instances"
+                    code: "VERSION_NOT_PUBLISHED"
+                VersionInvalid:
+                  value:
+                    type: "https://errors.bcbp.io/execution/version-invalid"
+                    title: "Version Invalid"
+                    status: 409
+                    detail: "workflow version is_valid=false; default assignee eligibility was revoked"
+                    instance: "/api/v1/instances"
+                    code: "VERSION_INVALID"
+                IdempotencyReplay:
+                  value:
+                    type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+                    title: "Idempotency Key Replay"
+                    status: 409
+                    detail: "Idempotency-Key reused with a different request body"
+                    instance: "/api/v1/instances"
+                    code: "IDEMPOTENCY_KEY_REPLAY"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          description: >
+            See code field: OVERRIDE_MAP_INVALID — override_map contains unknown node keys or
+            invalid UUIDs; ASSIGNEE_INELIGIBLE — a default assignee no longer satisfies their
+            node's (department, level) eligibility requirement (§5.5).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                OverrideMapInvalid:
+                  value:
+                    type: "https://errors.bcbp.io/execution/override-map-invalid"
+                    title: "Override Map Invalid"
+                    status: 422
+                    detail: "node key 'unknown_stage' does not exist in the compiled plan"
+                    instance: "/api/v1/instances"
+                    code: "OVERRIDE_MAP_INVALID"
+                AssigneeIneligible:
+                  value:
+                    type: "https://errors.bcbp.io/execution/assignee-ineligible"
+                    title: "Assignee Ineligible"
+                    status: 422
+                    detail: "one or more default assignees no longer satisfy their node's eligibility requirement"
+                    instance: "/api/v1/instances"
+                    code: "ASSIGNEE_INELIGIBLE"
+                    invalid_params:
+                      - name: "review_finance"
+                        reason: "user no longer holds required_level=SENIOR in department_id=9b1c...finance"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    get:
+      operationId: listInstances
+      tags: [Instances]
+      summary: List workflow instances
+      description: >
+        Returns a paginated list of instances for the caller's tenant, additionally scoped to
+        the same assignee/department/admin visibility rule as GET /instances/:id (§9.2) —
+        non-visible instances are simply absent from the page, not an error.
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/InstanceStatus"
+          description: Filter by instance status.
+        - name: workflow_version_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filter to a specific compiled version.
+        - name: started_after
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Include only instances started after this timestamp (inclusive).
+        - name: started_before
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Include only instances started before this timestamp (exclusive).
+      responses:
+        "200":
+          description: Keyset page of workflow instances (§5.9).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InstanceSummary"
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    description: Opaque cursor for the next page; omitted/null on the final page.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/instances/{id}:
+    get:
+      operationId: getInstance
+      tags: [Instances]
+      summary: Get workflow instance detail
+      description: >
+        Returns instance detail including all tasks created for this instance. Visible only
+        if the caller is (or was) an assignee on any task under this instance, the caller's
+        x-departments includes any currently-open task's department_id, or the caller holds
+        tenant_admin/tenant_owner (§9.2). Returns 403 NOT_AUTHORIZED_FOR_RESOURCE otherwise —
+        not 404, since the instance is already confirmed to exist in the caller's own tenant.
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - $ref: "#/components/parameters/DepartmentsHeader"
+        - $ref: "#/components/parameters/InstanceIdPath"
+      responses:
+        "200":
+          description: Workflow instance detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstanceDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            NOT_AUTHORIZED_FOR_RESOURCE — caller is not an assignee, not in the current
+            department, and not an admin.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/not-authorized-for-resource"
+                title: "Not Authorized For Resource"
+                status: 403
+                detail: "caller is not an assignee, department member, or admin for this instance"
+                instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                code: "NOT_AUTHORIZED_FOR_RESOURCE"
+        "404":
+          $ref: "#/components/responses/InstanceNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/instances/{id}/pause:
+    post:
+      operationId: pauseInstance
+      tags: [Instances]
+      summary: Pause a running workflow instance (admin)
+      description: >
+        Sends a pause signal to the Temporal workflow. The instance transitions from
+        RUNNING to PAUSED. Returns 409 if the instance is not RUNNING.
+      security:
+        - GatewayTenantContext: []
+          UserContext: []
+          AdminRole: []
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - $ref: "#/components/parameters/InstanceIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [record_version]
+              properties:
+                record_version:
+                  type: integer
+                  description: >
+                    The caller's current view of the instance's record_version, checked
+                    synchronously before the signal is forwarded (§5.10).
+                  example: 3
+                reason:
+                  type: string
+                  maxLength: 500
+                  nullable: true
+                  description: Optional human-readable reason for the pause.
+      responses:
+        "202":
+          description: Pause signal accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/InstanceNotFound"
+        "409":
+          description: >
+            State conflict. See code field: INVALID_INSTANCE_STATE — instance is not RUNNING;
+            RECORD_VERSION_CONFLICT — record_version is stale;
+            IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                InstanceStateInvalid:
+                  value:
+                    type: "https://errors.bcbp.io/execution/invalid-instance-state"
+                    title: "Invalid Instance State"
+                    status: 409
+                    detail: "instance is not RUNNING"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/pause"
+                    code: "INVALID_INSTANCE_STATE"
+                RecordVersionConflict:
+                  value:
+                    type: "https://errors.bcbp.io/execution/record-version-conflict"
+                    title: "Record Version Conflict"
+                    status: 409
+                    detail: "the instance has been modified since record_version=3 was read"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/pause"
+                    code: "RECORD_VERSION_CONFLICT"
+                IdempotencyReplay:
+                  value:
+                    type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+                    title: "Idempotency Key Replay"
+                    status: 409
+                    detail: "Idempotency-Key reused with a different request body"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/pause"
+                    code: "IDEMPOTENCY_KEY_REPLAY"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/instances/{id}/resume:
+    post:
+      operationId: resumeInstance
+      tags: [Instances]
+      summary: Resume a paused workflow instance (admin)
+      description: >
+        Sends a resume signal to the Temporal workflow. The instance transitions from
+        PAUSED to RUNNING. Returns 409 if the instance is not PAUSED.
+      security:
+        - GatewayTenantContext: []
+          UserContext: []
+          AdminRole: []
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - $ref: "#/components/parameters/InstanceIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [record_version]
+              properties:
+                record_version:
+                  type: integer
+                  description: >
+                    The caller's current view of the instance's record_version, checked
+                    synchronously before the signal is forwarded (§5.10).
+                  example: 4
+      responses:
+        "202":
+          description: Resume signal accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/InstanceNotFound"
+        "409":
+          description: >
+            State conflict. See code field: INVALID_INSTANCE_STATE — instance is not PAUSED;
+            RECORD_VERSION_CONFLICT — record_version is stale;
+            IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                InstanceStateInvalid:
+                  value:
+                    type: "https://errors.bcbp.io/execution/invalid-instance-state"
+                    title: "Invalid Instance State"
+                    status: 409
+                    detail: "instance is not PAUSED"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/resume"
+                    code: "INVALID_INSTANCE_STATE"
+                RecordVersionConflict:
+                  value:
+                    type: "https://errors.bcbp.io/execution/record-version-conflict"
+                    title: "Record Version Conflict"
+                    status: 409
+                    detail: "the instance has been modified since record_version=4 was read"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/resume"
+                    code: "RECORD_VERSION_CONFLICT"
+                IdempotencyReplay:
+                  value:
+                    type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+                    title: "Idempotency Key Replay"
+                    status: 409
+                    detail: "Idempotency-Key reused with a different request body"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/resume"
+                    code: "IDEMPOTENCY_KEY_REPLAY"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/instances/{id}/cancel:
+    post:
+      operationId: cancelInstance
+      tags: [Instances]
+      summary: Cancel a workflow instance (admin)
+      description: >
+        Sends a cancel signal to the Temporal workflow. Valid from RUNNING or PAUSED status.
+        The workflow function cleans up active tasks and transitions to TERMINATED.
+      security:
+        - GatewayTenantContext: []
+          UserContext: []
+          AdminRole: []
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - $ref: "#/components/parameters/InstanceIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, record_version]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  description: Human-readable reason for the cancellation; stored on the instance record.
+                  example: "Superseded by a corrected instance"
+                record_version:
+                  type: integer
+                  description: >
+                    The caller's current view of the instance's record_version, checked
+                    synchronously before the signal is forwarded (§5.10).
+                  example: 2
+      responses:
+        "202":
+          description: Cancel signal accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/InstanceNotFound"
+        "409":
+          description: >
+            State conflict. See code field: INSTANCE_ALREADY_TERMINAL — instance is already in a
+            terminal state (COMPLETED, TERMINATED, FAILED);
+            RECORD_VERSION_CONFLICT — record_version is stale;
+            IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                InstanceAlreadyTerminal:
+                  value:
+                    type: "https://errors.bcbp.io/execution/instance-already-terminal"
+                    title: "Instance Already Terminal"
+                    status: 409
+                    detail: "instance is already COMPLETED"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/cancel"
+                    code: "INSTANCE_ALREADY_TERMINAL"
+                RecordVersionConflict:
+                  value:
+                    type: "https://errors.bcbp.io/execution/record-version-conflict"
+                    title: "Record Version Conflict"
+                    status: 409
+                    detail: "the instance has been modified since record_version=2 was read"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/cancel"
+                    code: "RECORD_VERSION_CONFLICT"
+                IdempotencyReplay:
+                  value:
+                    type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+                    title: "Idempotency Key Replay"
+                    status: 409
+                    detail: "Idempotency-Key reused with a different request body"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/cancel"
+                    code: "IDEMPOTENCY_KEY_REPLAY"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/instances/{id}/terminate:
+    post:
+      operationId: terminateInstance
+      tags: [Instances]
+      summary: Hard-terminate a workflow instance (admin)
+      description: >
+        Calls TemporalClient.TerminateWorkflow immediately — does not wait for the current
+        activity to complete. Use this when cancel is insufficient (e.g. the workflow is stuck).
+        Emits WorkflowFinished(TERMINATED).
+      security:
+        - GatewayTenantContext: []
+          UserContext: []
+          AdminRole: []
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - $ref: "#/components/parameters/InstanceIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  description: Human-readable reason for termination; stored on the instance record.
+                  example: "Duplicate instance created in error"
+      responses:
+        "202":
+          description: Terminate signal accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/InstanceNotFound"
+        "409":
+          description: >
+            State conflict. See code field: INSTANCE_ALREADY_TERMINAL — instance is already in a
+            terminal state; IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                InstanceAlreadyTerminal:
+                  value:
+                    type: "https://errors.bcbp.io/execution/instance-already-terminal"
+                    title: "Instance Already Terminal"
+                    status: 409
+                    detail: "instance is already TERMINATED"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/terminate"
+                    code: "INSTANCE_ALREADY_TERMINAL"
+                IdempotencyReplay:
+                  value:
+                    type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+                    title: "Idempotency Key Replay"
+                    status: 409
+                    detail: "Idempotency-Key reused with a different request body"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/terminate"
+                    code: "IDEMPOTENCY_KEY_REPLAY"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/instances/{id}/force-forward:
+    post:
+      operationId: forceForward
+      tags: [Instances]
+      summary: Skip the current step and jump to a target node (admin)
+      description: >
+        Sends a force-forward signal to the Temporal workflow. Active tasks at the current
+        node(s) are marked FAILED and the workflow function jumps to target_node_key.
+        Use only when a step is legitimately blocked and cannot be resolved through normal
+        task operations.
+      security:
+        - GatewayTenantContext: []
+          UserContext: []
+          AdminRole: []
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - $ref: "#/components/parameters/InstanceIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_node_key, record_version]
+              properties:
+                target_node_key:
+                  type: string
+                  description: BPMN node key to advance to. Must exist in the compiled plan.
+                  example: "approval_stage"
+                record_version:
+                  type: integer
+                  description: >
+                    The caller's current view of the instance's record_version, checked
+                    synchronously before the signal is forwarded (§5.10).
+                  example: 5
+      responses:
+        "202":
+          description: Force-forward signal accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/InstanceNotFound"
+        "409":
+          description: >
+            State conflict. See code field: INVALID_INSTANCE_STATE — instance is not RUNNING;
+            TARGET_NODE_NOT_FOUND — target node is not reachable from current state;
+            RECORD_VERSION_CONFLICT — record_version is stale;
+            IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                InstanceStateInvalid:
+                  value:
+                    type: "https://errors.bcbp.io/execution/invalid-instance-state"
+                    title: "Invalid Instance State"
+                    status: 409
+                    detail: "instance is not RUNNING"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-forward"
+                    code: "INVALID_INSTANCE_STATE"
+                TargetNodeNotFound:
+                  value:
+                    type: "https://errors.bcbp.io/execution/target-node-not-found"
+                    title: "Target Node Not Found"
+                    status: 409
+                    detail: "target_node_key 'approval_stage' is not reachable from the current state"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-forward"
+                    code: "TARGET_NODE_NOT_FOUND"
+                RecordVersionConflict:
+                  value:
+                    type: "https://errors.bcbp.io/execution/record-version-conflict"
+                    title: "Record Version Conflict"
+                    status: 409
+                    detail: "the instance has been modified since record_version=5 was read"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-forward"
+                    code: "RECORD_VERSION_CONFLICT"
+                IdempotencyReplay:
+                  value:
+                    type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+                    title: "Idempotency Key Replay"
+                    status: 409
+                    detail: "Idempotency-Key reused with a different request body"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-forward"
+                    code: "IDEMPOTENCY_KEY_REPLAY"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/instances/{id}/force-back:
+    post:
+      operationId: forceBack
+      tags: [Instances]
+      summary: Regress the workflow to the previous completed step (admin)
+      description: >
+        Sends a force-back signal to the Temporal workflow. The workflow function pops
+        the completedNodes stack, cancels any currently active tasks, and re-creates the
+        task for the previous step. Returns 409 if there is no previous step to revert to
+        (the instance is at its first step).
+      security:
+        - GatewayTenantContext: []
+          UserContext: []
+          AdminRole: []
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - $ref: "#/components/parameters/InstanceIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [record_version]
+              properties:
+                record_version:
+                  type: integer
+                  description: >
+                    The caller's current view of the instance's record_version, checked
+                    synchronously before the signal is forwarded (§5.10).
+                  example: 6
+      responses:
+        "202":
+          description: Force-back signal accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/InstanceNotFound"
+        "409":
+          description: >
+            State conflict. See code field: FORCE_BACK_NO_SAVED_BRANCH — instance is not RUNNING,
+            or the completedNodes stack is empty (the instance has not yet advanced past the
+            first step); RECORD_VERSION_CONFLICT — record_version is stale;
+            IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                ForceBackNoSavedBranch:
+                  value:
+                    type: "https://errors.bcbp.io/execution/force-back-no-saved-branch"
+                    title: "Force Back No Saved Branch"
+                    status: 409
+                    detail: "no completed steps to revert to"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-back"
+                    code: "FORCE_BACK_NO_SAVED_BRANCH"
+                RecordVersionConflict:
+                  value:
+                    type: "https://errors.bcbp.io/execution/record-version-conflict"
+                    title: "Record Version Conflict"
+                    status: 409
+                    detail: "the instance has been modified since record_version=6 was read"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-back"
+                    code: "RECORD_VERSION_CONFLICT"
+                IdempotencyReplay:
+                  value:
+                    type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+                    title: "Idempotency Key Replay"
+                    status: 409
+                    detail: "Idempotency-Key reused with a different request body"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-back"
+                    code: "IDEMPOTENCY_KEY_REPLAY"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/instances/{id}/nodes/{node}/override:
+    post:
+      operationId: overrideNodeAssignee
+      tags: [Instances]
+      summary: Override the assignee for a specific node on a running instance (admin)
+      description: >
+        Admin override: replaces the default/current assignee for the given BPMN node with
+        new_user_id, independent of the compiled plan's default assignment. Applies only to
+        the node's current or future assignment; does not affect already-completed assignments.
+        Returns 400 OVERRIDE_NO_OP if new_user_id is already the effective assignee for this node.
+      security:
+        - GatewayTenantContext: []
+          UserContext: []
+          AdminRole: []
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - $ref: "#/components/parameters/InstanceIdPath"
+        - $ref: "#/components/parameters/NodeKeyPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_user_id, record_version]
+              properties:
+                new_user_id:
+                  type: string
+                  format: uuid
+                  description: UUID of the user to assign this node to.
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  nullable: true
+                  description: >
+                    Optional human-readable reason for the override; stored on the
+                    assignee_overrides audit record (§4.13).
+                  example: "Original default assignee left the department"
+                record_version:
+                  type: integer
+                  description: >
+                    The caller's current view of the task's record_version at this node,
+                    checked before the eligibility call and again before persisting (§5.4).
+                  example: 4
+      responses:
+        "200":
+          description: Override persisted and signaled; returns the override record (rev 1.23 — not a 202/SignalAccepted body).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OverrideResult"
+        "400":
+          description: >
+            Malformed request body, or code field OVERRIDE_NO_OP — new_user_id is already
+            the effective assignee for this node.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                BadRequest:
+                  value:
+                    type: "https://errors.bcbp.io/execution/bad-request"
+                    title: "Bad Request"
+                    status: 400
+                    detail: "field 'new_user_id' is required"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
+                    code: "BAD_REQUEST"
+                OverrideNoOp:
+                  value:
+                    type: "https://errors.bcbp.io/execution/override-no-op"
+                    title: "Override No-Op"
+                    status: 400
+                    detail: "new_user_id is already the effective assignee for node 'review_stage_1'"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
+                    code: "OVERRIDE_NO_OP"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/InstanceNotFound"
+        "409":
+          description: >
+            State conflict. See code field: NODE_ALREADY_RESOLVED — the node has already
+            completed or advanced past; RECORD_VERSION_CONFLICT — a concurrent change raced
+            this request; IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                NodeAlreadyResolved:
+                  value:
+                    type: "https://errors.bcbp.io/execution/node-already-resolved"
+                    title: "Node Already Resolved"
+                    status: 409
+                    detail: "node 'review_stage_1' has already been completed or advanced past"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
+                    code: "NODE_ALREADY_RESOLVED"
+                RecordVersionConflict:
+                  value:
+                    type: "https://errors.bcbp.io/execution/record-version-conflict"
+                    title: "Record Version Conflict"
+                    status: 409
+                    detail: "a concurrent change was applied to this node; refresh and retry"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
+                    code: "RECORD_VERSION_CONFLICT"
+                IdempotencyReplay:
+                  value:
+                    type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+                    title: "Idempotency Key Replay"
+                    status: 409
+                    detail: "Idempotency-Key reused with a different request body"
+                    instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
+                    code: "IDEMPOTENCY_KEY_REPLAY"
+        "422":
+          description: The specified new_user_id is not an eligible assignee for this node.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/assignee-ineligible"
+                title: "Assignee Ineligible"
+                status: 422
+                detail: "new_user_id is not eligible to be assigned to node 'review_stage_1'"
+                instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
+                code: "ASSIGNEE_INELIGIBLE"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/instances/{id}/events:
+    get:
+      operationId: listInstanceEvents
+      tags: [Instances]
+      summary: Get activity event log for a workflow instance
+      description: >
+        Returns the activity event log for a workflow instance ordered by occurred_at DESC,
+        indexed by (workflow_instance_id, occurred_at DESC, id DESC) (§4.9). Keyset pagination
+        (§5.9), same contract as every other list endpoint — cursor/limit in, items[] +
+        next_cursor out. Same intra-tenant visibility rule as GET /instances/:id (§9.2): visible
+        only if the caller is (or was) an assignee on any task under this instance, the caller's
+        x-departments includes any currently-open task's department_id, or the caller holds
+        tenant_admin/tenant_owner.
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - $ref: "#/components/parameters/DepartmentsHeader"
+        - $ref: "#/components/parameters/TraceParentHeader"
+        - $ref: "#/components/parameters/InstanceIdPath"
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: Keyset page of the instance's activity event log (§5.9).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkflowEvent"
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    description: Opaque cursor for the next (older) page; omitted/null on the final page.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            NOT_AUTHORIZED_FOR_RESOURCE — caller is not an assignee, not in the current
+            department, and not an admin.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/not-authorized-for-resource"
+                title: "Not Authorized For Resource"
+                status: 403
+                detail: "caller is not an assignee, department member, or admin for this instance"
+                instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/events"
+                code: "NOT_AUTHORIZED_FOR_RESOURCE"
+        "404":
+          $ref: "#/components/responses/InstanceNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/tasks:
+    get:
+      operationId: listTasks
+      tags: [Tasks]
+      summary: List workflow tasks
+      description: >
+        Returns a paginated list of tasks for the caller's tenant. Supports filtering by
+        status, assignee, department, instance, and due date. Used by task dashboards.
+        Additionally scoped to the same assignee/department/admin visibility rule as
+        GET /tasks/:id (§9.2) — non-visible tasks are simply absent from the page, not an error.
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/TaskStatus"
+          description: Filter by task status.
+        - name: assignee_user_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filter to tasks with an active assignment for this user.
+        - name: department_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filter to tasks belonging to this department.
+        - name: instance_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filter to tasks belonging to this workflow instance.
+        - name: due_before
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Include only tasks with due_at before this timestamp.
+      responses:
+        "200":
+          description: Keyset page of workflow tasks (§5.9).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TaskSummary"
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    description: Opaque cursor for the next page; omitted/null on the final page.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/tasks/{id}:
+    get:
+      operationId: getTask
+      tags: [Tasks]
+      summary: Get task detail
+      description: >
+        Returns task detail including payload_json and all assignment records (active and
+        historical). Visible only if the caller is (or was) an assignee, the caller's
+        x-departments includes the task's department_id, or the caller holds
+        tenant_admin/tenant_owner (§9.2). Returns 403 NOT_AUTHORIZED_FOR_RESOURCE otherwise —
+        not 404, since the task is already confirmed to exist in the caller's own tenant.
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - $ref: "#/components/parameters/DepartmentsHeader"
+        - $ref: "#/components/parameters/TaskIdPath"
+      responses:
+        "200":
+          description: Task detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            NOT_AUTHORIZED_FOR_RESOURCE — caller is not an assignee, not in the task's
+            department, and not an admin.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/not-authorized-for-resource"
+                title: "Not Authorized For Resource"
+                status: 403
+                detail: "caller is not the assignee, department member, or admin for this task"
+                instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                code: "NOT_AUTHORIZED_FOR_RESOURCE"
+        "404":
+          $ref: "#/components/responses/TaskNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/tasks/{id}/claim:
+    post:
+      operationId: claimTask
+      tags: [Tasks]
+      summary: Claim a task assignment
+      description: >
+        The calling user claims their active unclaimed assignment for this task.
+        Sets claimed_at on the assignment row and increments task.record_version.
+        Sends a task-claim signal to the Temporal workflow.
+        Returns 403 if the user has no active assignment.
+        Returns 409 TASK_ALREADY_CLAIMED if the user's assignment is already claimed.
+        Returns 409 RECORD_VERSION_CONFLICT if the supplied record_version is stale.
+        Returns 409 CLAIM_NOT_APPLICABLE if the task's assignee_mode is single — claim exists
+        only to establish a lead among multiple assignees (assignee_mode=all).
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TaskIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [record_version]
+              properties:
+                record_version:
+                  type: integer
+                  minimum: 0
+                  description: >
+                    The task record_version the client last observed. Must match the current
+                    task.record_version; mismatch returns RECORD_VERSION_CONFLICT.
+                  example: 0
+      responses:
+        "202":
+          description: Claim accepted; returns the task with its incremented record_version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskSummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller has no active assignment for this task.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/assignee-not-assigned"
+                title: "Not Assigned"
+                status: 403
+                detail: "caller does not have an active assignment for this task"
+                instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
+                code: "NOT_ASSIGNEE"
+        "404":
+          $ref: "#/components/responses/TaskNotFound"
+        "409":
+          description: >
+            State conflict. See code field:
+            TASK_ALREADY_CLAIMED — the caller's assignment is already claimed;
+            RECORD_VERSION_CONFLICT — the supplied version is stale (another claim beat you);
+            INVALID_TASK_STATE — the task is not in READY or IN_PROGRESS status;
+            CLAIM_NOT_APPLICABLE — the task's assignee_mode is single, so claim does not apply.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                AlreadyClaimed:
+                  value:
+                    type: "https://errors.bcbp.io/execution/task-already-claimed"
+                    title: "Task Already Claimed"
+                    status: 409
+                    detail: "this assignment has already been claimed"
+                    instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
+                    code: "TASK_ALREADY_CLAIMED"
+                ClaimNotApplicable:
+                  value:
+                    type: "https://errors.bcbp.io/execution/claim-not-applicable"
+                    title: "Claim Not Applicable"
+                    status: 409
+                    detail: "claim only applies to tasks with assignee_mode=all"
+                    instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
+                    code: "CLAIM_NOT_APPLICABLE"
+                ConcurrencyViolation:
+                  value:
+                    type: "https://errors.bcbp.io/execution/task-concurrency-violation"
+                    title: "Task Concurrency Violation"
+                    status: 409
+                    detail: "task record_version mismatch; refresh and retry"
+                    instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
+                    code: "RECORD_VERSION_CONFLICT"
+                IdempotencyReplay:
+                  value:
+                    type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+                    title: "Idempotency Key Replay"
+                    status: 409
+                    detail: "Idempotency-Key reused with a different request body"
+                    instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
+                    code: "IDEMPOTENCY_KEY_REPLAY"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/tasks/{id}/complete:
+    post:
+      operationId: completeTask
+      tags: [Tasks]
+      summary: Complete a task assignment
+      description: >
+        The calling user submits their completion payload for their active assignment.
+        Sets completed_at and result_json on the assignment. If all active assignments for
+        the task are now complete, the task status transitions to COMPLETED and a
+        task-complete signal is sent to Temporal (which then advances the workflow).
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TaskIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [record_version]
+              properties:
+                record_version:
+                  type: integer
+                  minimum: 0
+                  description: The task record_version the client last observed.
+                  example: 1
+                result_json:
+                  type: object
+                  additionalProperties: true
+                  description: >
+                    Completion payload from this assignee. Optional — not bound as
+                    required by the handler. Schema is workflow-defined; the service
+                    stores it opaquely. Included in the TaskCompleted event.
+                  example:
+                    approved: true
+                    notes: "All documents are in order."
+      responses:
+        "202":
+          description: >
+            Completion recorded; returns the task as of this write. The response does not
+            carry a separate all_done flag — check the returned status field instead (rev 1.23).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskSummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller has no active claimed assignment for this task.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/assignee-not-assigned"
+                title: "Not Assigned"
+                status: 403
+                detail: "caller does not have an active claimed assignment for this task"
+                instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/complete"
+                code: "NOT_ASSIGNEE"
+        "404":
+          $ref: "#/components/responses/TaskNotFound"
+        "409":
+          description: >
+            State conflict. See code field:
+            RECORD_VERSION_CONFLICT — version mismatch;
+            INVALID_TASK_STATE — task is not IN_PROGRESS;
+            IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                IdempotencyReplay:
+                  value:
+                    type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+                    title: "Idempotency Key Replay"
+                    status: 409
+                    detail: "Idempotency-Key reused with a different request body"
+                    instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/complete"
+                    code: "IDEMPOTENCY_KEY_REPLAY"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/tasks/{id}/defer:
+    post:
+      operationId: deferTask
+      tags: [Tasks]
+      summary: Defer a task (send it back)
+      description: >
+        The calling user defers their claimed assignment — indicating the task cannot
+        proceed as-is (e.g. missing documents, incomplete prior step). The task status
+        transitions to DEFERRED, a regression task is created at the previous step,
+        and a task-defer signal is sent to Temporal. The response returns the deferred
+        task itself (rev 1.23) — it does not currently carry the new regression task's ID;
+        a caller that needs it must look it up separately (accepted gap, not yet designed).
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TaskIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [record_version]
+              properties:
+                record_version:
+                  type: integer
+                  minimum: 0
+                  description: The task record_version the client last observed.
+                  example: 1
+                reason:
+                  type: string
+                  maxLength: 500
+                  description: >
+                    Human-readable reason for deferral. Optional — not bound as required
+                    by the handler. Stored on the TaskDeferred event and on the
+                    regression task's assignment reason field.
+                  example: "Supporting documents are missing from the tender package."
+      responses:
+        "202":
+          description: Defer accepted; returns the deferred task (now in DEFERRED status).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskSummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller has no active claimed assignment for this task.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/assignee-not-assigned"
+                title: "Not Assigned"
+                status: 403
+                detail: "caller does not have an active claimed assignment for this task"
+                instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/defer"
+                code: "NOT_ASSIGNEE"
+        "404":
+          $ref: "#/components/responses/TaskNotFound"
+        "409":
+          description: >
+            RECORD_VERSION_CONFLICT — version mismatch;
+            INVALID_TASK_STATE — task is not IN_PROGRESS or has no previous step to defer to;
+            IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                IdempotencyReplay:
+                  value:
+                    type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+                    title: "Idempotency Key Replay"
+                    status: 409
+                    detail: "Idempotency-Key reused with a different request body"
+                    instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/defer"
+                    code: "IDEMPOTENCY_KEY_REPLAY"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/tasks/{id}/reassign:
+    post:
+      operationId: reassignTask
+      tags: [Tasks]
+      summary: Reassign a task to a different user (admin)
+      description: >
+        Admin override: vacates the current active assignment(s) and creates a new assignment
+        for the specified user. Sends an instance-reassign signal to Temporal.
+        No eligibility check is performed — admin reassignment is an explicit override, unlike
+        node-override (§5.4), which does check eligibility.
+        Returns 400 OVERRIDE_NO_OP if new_assignee_user_id is already the current assignee.
+      security:
+        - GatewayTenantContext: []
+          UserContext: []
+          AdminRole: []
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - $ref: "#/components/parameters/TaskIdPath"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_assignee_user_id, record_version]
+              properties:
+                new_assignee_user_id:
+                  type: string
+                  format: uuid
+                  description: UUID of the user to assign this task to.
+                reason:
+                  type: string
+                  maxLength: 500
+                  nullable: true
+                  description: Optional human-readable reason for the reassignment.
+                  example: "Original assignee is on leave"
+                record_version:
+                  type: integer
+                  description: >
+                    The caller's current view of the task's record_version, checked
+                    synchronously before the signal is forwarded (§5.10).
+                  example: 2
+      responses:
+        "202":
+          description: Reassignment accepted; returns the task with its new assignment reflected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskSummary"
+        "400":
+          description: >
+            Malformed request body, or code field OVERRIDE_NO_OP — new_assignee_user_id is
+            already the current assignee.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                BadRequest:
+                  value:
+                    type: "https://errors.bcbp.io/execution/bad-request"
+                    title: "Bad Request"
+                    status: 400
+                    detail: "field 'new_assignee_user_id' is required"
+                    instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
+                    code: "BAD_REQUEST"
+                OverrideNoOp:
+                  value:
+                    type: "https://errors.bcbp.io/execution/override-no-op"
+                    title: "Override No-Op"
+                    status: 400
+                    detail: "new_assignee_user_id is already the current assignee"
+                    instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
+                    code: "OVERRIDE_NO_OP"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/TaskNotFound"
+        "409":
+          description: >
+            State conflict. See code field:
+            INVALID_TASK_STATE — task is already COMPLETED, DEFERRED, or FAILED;
+            RECORD_VERSION_CONFLICT — record_version is stale;
+            IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              examples:
+                RecordVersionConflict:
+                  value:
+                    type: "https://errors.bcbp.io/execution/record-version-conflict"
+                    title: "Record Version Conflict"
+                    status: 409
+                    detail: "the task has been modified since record_version=2 was read"
+                    instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
+                    code: "RECORD_VERSION_CONFLICT"
+                IdempotencyReplay:
+                  value:
+                    type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+                    title: "Idempotency Key Replay"
+                    status: 409
+                    detail: "Idempotency-Key reused with a different request body"
+                    instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
+                    code: "IDEMPOTENCY_KEY_REPLAY"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/workflows/active-by-user:
+    get:
+      operationId: getActiveTasksByUser
+      tags: [Tasks]
+      summary: Get active task assignments for a user (admin / IAM reconciliation)
+      description: >
+        Returns all READY and IN_PROGRESS task assignments for the specified user across
+        all workflow instances. Used by IAM SQS handlers (delegation, user deletion) to
+        determine which tasks need to be reassigned, and by admin UIs for user activity audits.
+      security:
+        - GatewayTenantContext: []
+          UserContext: []
+          AdminRole: []
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - name: user_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the user whose active assignments to retrieve.
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: Keyset page of active task assignments for the specified user (§5.9).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ActiveUserTask"
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    description: Opaque cursor for the next page; omitted/null on the final page.
+        "400":
+          description: Missing or invalid user_id query parameter.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/bad-request"
+                title: "Bad Request"
+                status: 400
+                detail: "user_id query parameter is required"
+                instance: "/api/v1/workflows/active-by-user"
+                code: "BAD_REQUEST"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # internal, service-to-service caller — shared Workflow-Events Consumer
+  /api/v1/internal/events:
+    post:
+      operationId: ingestInternalEvent
+      tags: [Internal (Events)]
+      summary: Ingest a forwarded domain-event envelope
+      description: >
+        Service-to-service ingest endpoint called by the shared Workflow-Events Consumer,
+        which subscribes Execution's inbound SNS topics (iam.membership.events,
+        iam.user.events, wf.template.events, §6.1) and forwards each envelope here over
+        HTTP, exactly as it does for Definition Service. Sets the RLS GUC from the
+        envelope's tenant_id and dispatches by type (§6.2). Idempotent: a repeated envelope
+        id (paired with a fixed per-subscription consumer name) returns 2xx with no side
+        effects. An unrecognized type is accepted and ignored with 200, never an error. Not
+        exposed on the public Envoy gateway; carries no gateway identity headers.
+      security:
+        - InternalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventEnvelope" }
+      responses:
+        "200":
+          description: >
+            Event processed, or an idempotent no-op for an already-seen envelope id, or an
+            unrecognized type accepted and ignored. No response body in any case.
+        "400":
+          description: Malformed envelope or payload — non-retryable, the consumer routes to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          description: >
+            Transient processing failure. The consumer retries until the queue's
+            maxReceiveCount (5) moves the message to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "502":
+          description: >
+            EVENT_DECODE_FAILED — the envelope carries a dataschema (schema-registry payload)
+            that could not be decoded: a missing/misconfigured decoder, or a schema-registry
+            decode failure. Retryable infra problem, never a malformed client payload — the
+            consumer must retry this rather than route it to its DLQ.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/event-decode-failed"
+                title: "Event Decode Failed"
+                status: 502
+                detail: "schema-registry payload decode failed"
+                instance: "/api/v1/internal/events"
+                code: "EVENT_DECODE_FAILED"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # internal, service-to-service caller
+  /api/v1/internal/workflows/delegate-impact:
+    get:
+      operationId: getDelegateImpact
+      tags: [Internal (WorkflowClient)]
+      summary: Preview the blast radius of an in-flight or proposed delegation (internal)
+      description: >
+        Internal, service-to-service endpoint called by the IAM service (not routed through
+        the gateway; no x-tenant-id / x-user-id headers). Returns how many active workflow
+        instances have at least one READY/IN_PROGRESS assignment currently held by
+        delegate_user_id, and the affected workflow instance IDs. Used by IAM to preview
+        the impact of ending or creating a delegation before committing to it.
+      security:
+        - InternalServiceAuth: []
+      parameters:
+        - name: tenant_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Tenant UUID to scope the impact query to.
+        - name: delegate_user_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the delegate user whose active assignments to inspect.
+        - name: delegation_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Optional delegation UUID to scope the query to a single delegation.
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: Delegation impact summary. workflow_ids is a keyset-paginated preview (§5.9); reassigned_count is the true total, a cheap COUNT independent of the page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reassigned_count, workflow_ids]
+                properties:
+                  reassigned_count:
+                    type: integer
+                    description: Number of active assignments currently held by delegate_user_id.
+                    example: 3
+                  workflow_ids:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
+                    description: UUIDs of the distinct workflow instances affected.
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    description: Opaque cursor for the next page of workflow_ids; omitted/null on the final page.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller's service identity is not authorized for the requested tenant_id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/tenant-mismatch"
+                title: "Tenant Mismatch"
+                status: 403
+                detail: "caller's service identity is not authorized for this tenant_id"
+                instance: "/api/v1/internal/workflows/delegate-impact"
+                code: "TENANT_MISMATCH"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # internal, service-to-service caller
+  /api/v1/internal/workflows/reassign-delegate:
+    post:
+      operationId: reassignDelegateWorkflows
+      tags: [Internal (WorkflowClient)]
+      summary: Bulk-reassign a delegate's active assignments to a new delegate (internal)
+      description: >
+        Internal, service-to-service endpoint called by the IAM service (not routed through
+        the gateway; no x-tenant-id / x-user-id headers) when a delegation is superseded or
+        transferred. Vacates old_delegate_id's active READY/IN_PROGRESS assignments and
+        creates equivalent assignments for new_delegate_id, scoped to tenant_id (and
+        optionally to a single delegation_id).
+      security:
+        - InternalServiceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, old_delegate_id, new_delegate_id]
+              properties:
+                tenant_id:
+                  type: string
+                  format: uuid
+                  description: Tenant UUID to scope the reassignment to.
+                old_delegate_id:
+                  type: string
+                  format: uuid
+                  description: UUID of the delegate whose active assignments are being superseded.
+                new_delegate_id:
+                  type: string
+                  format: uuid
+                  description: UUID of the delegate to receive the reassigned assignments.
+                delegation_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: Optional delegation UUID to scope the reassignment to a single delegation.
+      responses:
+        "200":
+          description: Reassignment completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reassigned]
+                properties:
+                  reassigned:
+                    type: integer
+                    description: Number of assignments reassigned from old_delegate_id to new_delegate_id.
+                    example: 3
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller's service identity is not authorized for the requested tenant_id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/tenant-mismatch"
+                title: "Tenant Mismatch"
+                status: 403
+                detail: "caller's service identity is not authorized for this tenant_id"
+                instance: "/api/v1/internal/workflows/reassign-delegate"
+                code: "TENANT_MISMATCH"
+        "409":
+          $ref: "#/components/responses/IdempotencyKeyReplay"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # internal, service-to-service caller
+  /api/v1/internal/workflows/cancel-by-delegate:
+    post:
+      operationId: cancelByDelegate
+      tags: [Internal (WorkflowClient)]
+      summary: Bulk-cancel a delegate's active assignments (internal)
+      description: >
+        Internal, service-to-service endpoint called by the IAM service (not routed through
+        the gateway; no x-tenant-id / x-user-id headers) when a delegation ends without a
+        replacement delegate. Vacates delegate_user_id's active READY/IN_PROGRESS assignments
+        for the given tenant (and optionally a single delegation_id) without creating
+        replacement assignments; the assignments revert to the compiled plan's default assignee.
+      security:
+        - InternalServiceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, delegate_user_id]
+              properties:
+                tenant_id:
+                  type: string
+                  format: uuid
+                  description: Tenant UUID to scope the cancellation to.
+                delegate_user_id:
+                  type: string
+                  format: uuid
+                  description: UUID of the delegate whose active assignments are being vacated.
+                delegation_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: Optional delegation UUID to scope the cancellation to a single delegation.
+      responses:
+        "200":
+          description: Cancellation completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cancelled]
+                properties:
+                  cancelled:
+                    type: integer
+                    description: Number of assignments vacated for delegate_user_id.
+                    example: 3
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller's service identity is not authorized for the requested tenant_id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/tenant-mismatch"
+                title: "Tenant Mismatch"
+                status: 403
+                detail: "caller's service identity is not authorized for this tenant_id"
+                instance: "/api/v1/internal/workflows/cancel-by-delegate"
+                code: "TENANT_MISMATCH"
+        "409":
+          $ref: "#/components/responses/IdempotencyKeyReplay"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"

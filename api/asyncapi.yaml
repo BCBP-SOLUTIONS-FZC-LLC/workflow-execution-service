@@ -31,7 +31,7 @@ info:
 
 servers:
   production:
-    host: sns.us-east-1.amazonaws.com
+    host: sns.ap-south-1.amazonaws.com
     protocol: sns
     description: SNS producer endpoint for wf-workflow-events
     security:
@@ -92,8 +92,8 @@ channels:
             deadLetterQueue: { name: user-wf-dlq }
             maxReceiveCount: 5
     messages:
-      UserDeleted:             { $ref: '#/components/messages/UserDeletedInbound' }
-      UserAvailabilityChanged: { $ref: '#/components/messages/UserAvailabilityChangedInbound' }
+      user.deleted:              { $ref: '#/components/messages/UserDeletedInbound' }
+      user.availability.changed: { $ref: '#/components/messages/UserAvailabilityChangedInbound' }
   wf/template/events:
     address: wf-template-events
     description: Consumed off wf-execution-sync-q (dedup consumer `template-sync-execution`).
@@ -106,7 +106,7 @@ channels:
             deadLetterQueue: { name: wf-execution-sync-dlq }
             maxReceiveCount: 5
     messages:
-      WorkflowTemplatePublished: { $ref: '#/components/messages/WorkflowTemplatePublishedInbound' }
+      workflow.template.published: { $ref: '#/components/messages/WorkflowTemplatePublishedInbound' }
 
 operations:
   publishWorkflowEvents:
@@ -425,7 +425,7 @@ components:
       x-schema-owner: iam-org-membership
       payload: { $ref: '#/components/schemas/TenantStateChangedInbound' }
     UserDeletedInbound:
-      name: UserDeleted
+      name: user.deleted
       x-lifecycle: { status: active }
       title: User deleted (owned by IAM User Profile)
       description: >
@@ -436,7 +436,7 @@ components:
       x-schema-owner: iam-user-profile
       payload: { $ref: '#/components/schemas/UserDeletedInbound' }
     UserAvailabilityChangedInbound:
-      name: UserAvailabilityChanged
+      name: user.availability.changed
       x-lifecycle: { status: active }
       title: User availability changed (owned by IAM User Profile)
       description: >
@@ -448,7 +448,7 @@ components:
       x-schema-owner: iam-user-profile
       payload: { $ref: '#/components/schemas/UserAvailabilityChangedInbound' }
     WorkflowTemplatePublishedInbound:
-      name: WorkflowTemplatePublished
+      name: workflow.template.published
       x-lifecycle: { status: active }
       title: Template version published (owned by workflow-definition-svc)
       description: >
