@@ -80,6 +80,8 @@ type TaskFilter struct {
 	Status             *TaskStatus
 	WorkflowInstanceID *uuid.UUID
 	DepartmentID       *uuid.UUID
+	AssigneeUserID     *uuid.UUID
+	DueBefore          *time.Time
 }
 
 // ReadScope is the intra-tenant read-scope check's input (LLD §9.2): a

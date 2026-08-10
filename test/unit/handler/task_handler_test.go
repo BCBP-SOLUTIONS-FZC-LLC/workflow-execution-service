@@ -27,6 +27,52 @@ func newTestTask() *port.Task {
 	}
 }
 
+// newFullyPopulatedTask returns a *port.Task with every field the handler's
+// response mapper knows how to surface set to a realistic non-zero value —
+// used to assert toTaskResp doesn't silently drop any of them.
+func newFullyPopulatedTask() *port.Task {
+	dueAt := time.Now().Add(24 * time.Hour)
+	deferredFrom := uuid.New()
+	return &port.Task{
+		ID:                 testTaskID,
+		TenantID:           testTenantID,
+		WorkflowInstanceID: testInstID,
+		NodeKey:            "review_finance",
+		TaskType:           "userTask",
+		DepartmentID:       uuid.New(),
+		Status:             port.TaskStatusReady,
+		RecordVersion:      4,
+		AssigneeMode:       "single",
+		AssigneeCount:      1,
+		DueAt:              &dueAt,
+		DeferredFromTaskID: &deferredFrom,
+		CreatedAt:          time.Now(),
+	}
+}
+
+// newFullyPopulatedAssignment returns a *port.TaskAssignment with every field
+// the handler's response mapper knows how to surface set to a realistic
+// non-zero value — used to assert toTaskAssignmentResp doesn't silently drop
+// any of them.
+func newFullyPopulatedAssignment() *port.TaskAssignment {
+	assignedBy := uuid.New()
+	assignedAt := time.Now().Add(-2 * time.Hour)
+	claimedAt := time.Now().Add(-1 * time.Hour)
+	completedAt := time.Now()
+	return &port.TaskAssignment{
+		ID:          uuid.New(),
+		UserID:      testUserID,
+		AssignedBy:  &assignedBy,
+		Reason:      "eligibility override",
+		IsLead:      true,
+		IsActive:    true,
+		AssignedAt:  &assignedAt,
+		ClaimedAt:   &claimedAt,
+		CompletedAt: &completedAt,
+		ResultJSON:  json.RawMessage(`{"decision":"approve"}`),
+	}
+}
+
 func TestListTasks(t *testing.T) {
 	var gotScope port.ReadScope
 	fake := &fakeTaskService{
@@ -54,6 +100,97 @@ func TestListTasks(t *testing.T) {
 	decodeJSON(t, w.Body, &body)
 	assert.Len(t, body.Items, 1)
 	assert.Equal(t, "next", body.NextCursor)
+}
+
+// TestListTasks_ParsesAssigneeAndDueBeforeFilters asserts the assignee_user_id
+// and due_before query parameters decode into port.TaskFilter correctly.
+func TestListTasks_ParsesAssigneeAndDueBeforeFilters(t *testing.T) {
+	assigneeID := uuid.New()
+	var gotFilter port.TaskFilter
+	fake := &fakeTaskService{
+		list: func(_ context.Context, _ uuid.UUID, _ port.ReadScope, filter port.TaskFilter, _ port.Page) (port.PageResult[*port.Task], error) {
+			gotFilter = filter
+			return port.PageResult[*port.Task]{}, nil
+		},
+	}
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
+
+	url := "/api/v1/tasks?assignee_user_id=" + assigneeID.String() + "&due_before=2026-08-01T00:00:00Z"
+	w := do(router, req(http.MethodGet, url, nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotNil(t, gotFilter.AssigneeUserID)
+	assert.Equal(t, assigneeID, *gotFilter.AssigneeUserID)
+	require.NotNil(t, gotFilter.DueBefore)
+	assert.Equal(t, "2026-08-01T00:00:00Z", gotFilter.DueBefore.Format(time.RFC3339))
+}
+
+// TestListTasks_InvalidAssigneeUserID asserts a malformed assignee_user_id
+// query parameter is rejected with 400, not silently ignored.
+func TestListTasks_InvalidAssigneeUserID(t *testing.T) {
+	fake := &fakeTaskService{}
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
+
+	w := do(router, req(http.MethodGet, "/api/v1/tasks?assignee_user_id=not-a-uuid", nil))
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestListTasks_InvalidDueBefore asserts a malformed due_before query
+// parameter is rejected with 400, not silently ignored.
+func TestListTasks_InvalidDueBefore(t *testing.T) {
+	fake := &fakeTaskService{}
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
+
+	w := do(router, req(http.MethodGet, "/api/v1/tasks?due_before=not-a-date", nil))
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestGetTask_PopulatesPayloadJSON asserts the detail endpoint surfaces the
+// task's ExtrasJSON as payload_json.
+func TestGetTask_PopulatesPayloadJSON(t *testing.T) {
+	task := newTestTask()
+	task.ExtrasJSON = json.RawMessage(`{"foo":"bar"}`)
+	fake := &fakeTaskService{
+		get: func(context.Context, uuid.UUID, uuid.UUID, port.ReadScope) (*port.Task, []*port.TaskAssignment, error) {
+			return task, nil, nil
+		},
+	}
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
+
+	w := do(router, req(http.MethodGet, "/api/v1/tasks/"+testTaskID.String(), nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body map[string]any
+	decodeJSON(t, w.Body, &body)
+	assert.Equal(t, map[string]any{"foo": "bar"}, body["payload_json"])
+}
+
+// TestListTasks_PopulatesWidenedFields asserts toTaskResp's tenant_id,
+// due_at and deferred_from_task_id fields — previously dropped by an
+// unfinished mapper — now appear in the list endpoint's JSON response.
+func TestListTasks_PopulatesWidenedFields(t *testing.T) {
+	task := newFullyPopulatedTask()
+	fake := &fakeTaskService{
+		list: func(context.Context, uuid.UUID, port.ReadScope, port.TaskFilter, port.Page) (port.PageResult[*port.Task], error) {
+			return port.PageResult[*port.Task]{Items: []*port.Task{task}}, nil
+		},
+	}
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
+
+	w := do(router, req(http.MethodGet, "/api/v1/tasks", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
+	decodeJSON(t, w.Body, &body)
+	require.Len(t, body.Items, 1)
+	item := body.Items[0]
+	assert.Equal(t, testTenantID.String(), item["tenant_id"])
+	assert.NotEmpty(t, item["due_at"])
+	assert.Equal(t, task.DeferredFromTaskID.String(), item["deferred_from_task_id"])
 }
 
 func TestListTasks_AdminRole(t *testing.T) {
@@ -94,6 +231,46 @@ func TestGetTask(t *testing.T) {
 	decodeJSON(t, w.Body, &body)
 	assert.Equal(t, testTaskID, body.ID)
 	assert.Len(t, body.Assignments, 1)
+}
+
+// TestGetTask_PopulatesWidenedFields asserts the detail endpoint's task and
+// assignment JSON carries every field toTaskResp/toTaskAssignmentResp were
+// previously dropping: tenant_id/due_at/deferred_from_task_id on the task,
+// and assigned_by/reason/assigned_at/claimed_at/completed_at/result_json/
+// is_lead on each assignment.
+func TestGetTask_PopulatesWidenedFields(t *testing.T) {
+	task := newFullyPopulatedTask()
+	assignment := newFullyPopulatedAssignment()
+	fake := &fakeTaskService{
+		get: func(context.Context, uuid.UUID, uuid.UUID, port.ReadScope) (*port.Task, []*port.TaskAssignment, error) {
+			return task, []*port.TaskAssignment{assignment}, nil
+		},
+	}
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
+
+	w := do(router, req(http.MethodGet, "/api/v1/tasks/"+testTaskID.String(), nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body map[string]any
+	decodeJSON(t, w.Body, &body)
+
+	assert.Equal(t, testTenantID.String(), body["tenant_id"])
+	assert.NotEmpty(t, body["due_at"])
+	assert.Equal(t, task.DeferredFromTaskID.String(), body["deferred_from_task_id"])
+
+	assignments, ok := body["assignments"].([]any)
+	require.True(t, ok)
+	require.Len(t, assignments, 1)
+	a, ok := assignments[0].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, assignment.AssignedBy.String(), a["assigned_by"])
+	assert.Equal(t, assignment.Reason, a["reason"])
+	assert.Equal(t, true, a["is_lead"])
+	assert.NotEmpty(t, a["assigned_at"])
+	assert.NotEmpty(t, a["claimed_at"])
+	assert.NotEmpty(t, a["completed_at"])
+	assert.Equal(t, map[string]any{"decision": "approve"}, a["result_json"])
 }
 
 func TestGetTask_NotAuthorized(t *testing.T) {
@@ -142,6 +319,29 @@ func TestClaimTask(t *testing.T) {
 	w := do(router, req(http.MethodPost, "/api/v1/tasks/"+testTaskID.String()+"/claim", map[string]any{"record_version": 4}))
 
 	assert.Equal(t, http.StatusAccepted, w.Code)
+}
+
+// TestClaimTask_PopulatesWidenedFields asserts a mutation endpoint's
+// toTaskResp-shaped response (shared by Claim/Complete/Defer/Reassign) also
+// carries the widened tenant_id/due_at/deferred_from_task_id fields, not just
+// the read endpoints.
+func TestClaimTask_PopulatesWidenedFields(t *testing.T) {
+	task := newFullyPopulatedTask()
+	fake := &fakeTaskService{
+		claim: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int64) (*port.Task, error) {
+			return task, nil
+		},
+	}
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
+
+	w := do(router, req(http.MethodPost, "/api/v1/tasks/"+testTaskID.String()+"/claim", map[string]any{"record_version": 4}))
+
+	require.Equal(t, http.StatusAccepted, w.Code)
+	var body map[string]any
+	decodeJSON(t, w.Body, &body)
+	assert.Equal(t, testTenantID.String(), body["tenant_id"])
+	assert.NotEmpty(t, body["due_at"])
+	assert.Equal(t, task.DeferredFromTaskID.String(), body["deferred_from_task_id"])
 }
 
 func TestClaimTask_RecordVersionConflict(t *testing.T) {

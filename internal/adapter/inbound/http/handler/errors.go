@@ -118,13 +118,20 @@ var problemTypes = map[ErrCode]string{
 	CodeOverrideMapInvalid:      errBase + "override-map-invalid",
 }
 
+type invalidParam struct {
+	Name   string  `json:"name"`
+	Reason string  `json:"reason"`
+	Code   ErrCode `json:"code,omitempty"`
+}
+
 type problemDetails struct {
-	Type     string  `json:"type"`
-	Title    string  `json:"title"`
-	Status   int     `json:"status"`
-	Detail   string  `json:"detail"`
-	Instance string  `json:"instance"`
-	Code     ErrCode `json:"code"`
+	Type          string         `json:"type"`
+	Title         string         `json:"title"`
+	Status        int            `json:"status"`
+	Detail        string         `json:"detail"`
+	Instance      string         `json:"instance"`
+	Code          ErrCode        `json:"code"`
+	InvalidParams []invalidParam `json:"invalid_params,omitempty"`
 }
 
 func writeProblem(c *gin.Context, status int, code ErrCode, detail string, _ any) {

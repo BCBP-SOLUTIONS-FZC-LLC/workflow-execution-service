@@ -14,6 +14,7 @@ import (
 type taskResp struct {
 	ID                 uuid.UUID  `json:"id"`
 	WorkflowInstanceID uuid.UUID  `json:"workflow_instance_id"`
+	TenantID           uuid.UUID  `json:"tenant_id"`
 	NodeKey            string     `json:"node_key"`
 	TaskType           string     `json:"task_type"`
 	DepartmentID       uuid.UUID  `json:"department_id"`
@@ -21,20 +22,29 @@ type taskResp struct {
 	RecordVersion      int64      `json:"record_version"`
 	AssigneeMode       string     `json:"assignee_mode"`
 	AssigneeCount      int        `json:"assignee_count"`
+	DueAt              *time.Time `json:"due_at,omitempty"`
+	DeferredFromTaskID *uuid.UUID `json:"deferred_from_task_id,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
 	CompletedAt        *time.Time `json:"completed_at,omitempty"`
 }
 
 type taskAssignmentResp struct {
-	ID        uuid.UUID  `json:"id"`
-	UserID    uuid.UUID  `json:"user_id"`
-	IsLead    bool       `json:"is_lead"`
-	IsActive  bool       `json:"is_active"`
-	VacatedAt *time.Time `json:"vacated_at,omitempty"`
+	ID          uuid.UUID       `json:"id"`
+	UserID      uuid.UUID       `json:"user_id"`
+	AssignedBy  *uuid.UUID      `json:"assigned_by,omitempty"`
+	Reason      string          `json:"reason,omitempty"`
+	IsLead      bool            `json:"is_lead"`
+	IsActive    bool            `json:"is_active"`
+	AssignedAt  *time.Time      `json:"assigned_at,omitempty"`
+	ClaimedAt   *time.Time      `json:"claimed_at,omitempty"`
+	CompletedAt *time.Time      `json:"completed_at,omitempty"`
+	ResultJSON  json.RawMessage `json:"result_json,omitempty"`
+	VacatedAt   *time.Time      `json:"vacated_at,omitempty"`
 }
 
 type taskDetailResp struct {
 	taskResp
+	PayloadJSON json.RawMessage      `json:"payload_json,omitempty"`
 	Assignments []taskAssignmentResp `json:"assignments"`
 }
 
@@ -62,6 +72,7 @@ func toTaskResp(t *port.Task) taskResp {
 	return taskResp{
 		ID:                 t.ID,
 		WorkflowInstanceID: t.WorkflowInstanceID,
+		TenantID:           t.TenantID,
 		NodeKey:            t.NodeKey,
 		TaskType:           t.TaskType,
 		DepartmentID:       t.DepartmentID,
@@ -69,13 +80,27 @@ func toTaskResp(t *port.Task) taskResp {
 		RecordVersion:      t.RecordVersion,
 		AssigneeMode:       t.AssigneeMode,
 		AssigneeCount:      t.AssigneeCount,
+		DueAt:              t.DueAt,
+		DeferredFromTaskID: t.DeferredFromTaskID,
 		CreatedAt:          t.CreatedAt,
 		CompletedAt:        t.CompletedAt,
 	}
 }
 
 func toTaskAssignmentResp(a *port.TaskAssignment) taskAssignmentResp {
-	return taskAssignmentResp{ID: a.ID, UserID: a.UserID, IsLead: a.IsLead, IsActive: a.IsActive, VacatedAt: a.VacatedAt}
+	return taskAssignmentResp{
+		ID:          a.ID,
+		UserID:      a.UserID,
+		AssignedBy:  a.AssignedBy,
+		Reason:      a.Reason,
+		IsLead:      a.IsLead,
+		IsActive:    a.IsActive,
+		AssignedAt:  a.AssignedAt,
+		ClaimedAt:   a.ClaimedAt,
+		CompletedAt: a.CompletedAt,
+		ResultJSON:  a.ResultJSON,
+		VacatedAt:   a.VacatedAt,
+	}
 }
 
 func toActiveUserTaskResp(t *port.ActiveUserTask) activeUserTaskResp {
@@ -98,12 +123,7 @@ func readScope(c *gin.Context, callerUserID uuid.UUID) port.ReadScope {
 	}
 }
 
-func (h *Handler) ListTasks(c *gin.Context) {
-	tenantID, userID, ok := callerIdentity(c)
-	if !ok {
-		return
-	}
-
+func parseTaskFilter(c *gin.Context) (port.TaskFilter, bool) {
 	var filter port.TaskFilter
 	if v := c.Query("status"); v != "" {
 		s := port.TaskStatus(v)
@@ -113,7 +133,7 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		id, err := uuid.Parse(v)
 		if err != nil {
 			writeProblem(c, http.StatusBadRequest, CodeBadRequest, "invalid instance_id query parameter", nil)
-			return
+			return filter, false
 		}
 		filter.WorkflowInstanceID = &id
 	}
@@ -121,9 +141,38 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		id, err := uuid.Parse(v)
 		if err != nil {
 			writeProblem(c, http.StatusBadRequest, CodeBadRequest, "invalid department_id query parameter", nil)
-			return
+			return filter, false
 		}
 		filter.DepartmentID = &id
+	}
+	if v := c.Query("assignee_user_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			writeProblem(c, http.StatusBadRequest, CodeBadRequest, "invalid assignee_user_id query parameter", nil)
+			return filter, false
+		}
+		filter.AssigneeUserID = &id
+	}
+	if v := c.Query("due_before"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			writeProblem(c, http.StatusBadRequest, CodeBadRequest, "invalid due_before query parameter", nil)
+			return filter, false
+		}
+		filter.DueBefore = &t
+	}
+	return filter, true
+}
+
+func (h *Handler) ListTasks(c *gin.Context) {
+	tenantID, userID, ok := callerIdentity(c)
+	if !ok {
+		return
+	}
+
+	filter, ok := parseTaskFilter(c)
+	if !ok {
+		return
 	}
 
 	page, ok := pageParams(c)
@@ -162,7 +211,7 @@ func (h *Handler) GetTask(c *gin.Context) {
 	for i, a := range assignments {
 		assignmentResps[i] = toTaskAssignmentResp(a)
 	}
-	c.JSON(http.StatusOK, taskDetailResp{taskResp: toTaskResp(task), Assignments: assignmentResps})
+	c.JSON(http.StatusOK, taskDetailResp{taskResp: toTaskResp(task), PayloadJSON: task.ExtrasJSON, Assignments: assignmentResps})
 }
 
 type claimReq struct {
