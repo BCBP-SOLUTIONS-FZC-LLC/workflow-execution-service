@@ -1,0 +1,164 @@
+image:
+  # Two images from one multi-target Dockerfile — repository is the shared
+  # base; each Deployment appends its own -server/-worker suffix and target.
+  repository: ghcr.io/bcbp-solutions-fzc-llc/workflow-execution-service
+  tag: ""
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+# replicas:2 on both is a stated LLD §7.5 precondition, not an arbitrary
+# choice: minAvailable:1 at replicas:1 would let the PDB block every
+# voluntary disruption including the rollout itself (maxSurge:0 requires the
+# old pod gone before the new one starts). Environments intentionally
+# running at replicas:1 must delete the PDB manually first.
+api:
+  replicas: 2
+  httpPort: 8080
+  grpcPort: 9090
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+worker:
+  replicas: 2
+  healthPort: 8081
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+    # Documented future hook, not wired by default: the LLD (§7.5, Appendix
+    # A.6 #4) commits the Worker's HPA to scaling on Temporal queue
+    # depth/task backlog rather than CPU, since Worker load is bursty
+    # per-task-queue — but no such metric exists anywhere in the LLD's own
+    # §7.6 catalogue (checked exhaustively; closest are worker_active_queues,
+    # a queue count, and worker_queue_last_poll_timestamp, a timestamp).
+    # Once a real backlog metric exists, set targetBacklogPerReplica to
+    # enable this block. PREREQUISITE: prometheus-adapter must be installed
+    # with a rule exposing that metric via the custom/external metrics API —
+    # without it this block is silently absent from the HPA and scaling
+    # falls back to CPU/memory alone (see hpa-worker.yaml).
+    targetBacklogPerReplica: ""
+
+podDisruptionBudget:
+  minAvailable: 1
+
+serviceAccount:
+  # Two separate ServiceAccounts (api, worker), not one shared — the API
+  # process needs SNS-publish/gRPC-egress permissions the Worker never does;
+  # least-privilege IRSA scoping is worth the extra manifest over one
+  # over-permissioned identity.
+  create: true
+  annotations: {}
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532 # distroless nonroot UID
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# Plain env vars — non-secret config only, matching internal/config's real
+# fields (checked against the current config.go; INTERNAL_API_TOKEN and the
+# Temporal TLS cert/key paths are LLD-documented but not yet read by any
+# config field, so they're deliberately not templated here yet).
+env:
+  appEnv: production
+  otelServiceName: execution-service
+  temporalNamespace: default
+  temporalTaskQueue: execution-default
+  awsRegion: us-east-1
+  awsUseStub: "false"
+  outboxPollInterval: 500ms
+  outboxBatchSize: "50"
+
+# Secret-backed env vars. existingSecretName takes precedence when set;
+# secretValues is for CI/values-overlay injection — never commit real
+# values here (mirrors definition_service's dual-mode secret.yaml).
+secret:
+  existingSecretName: ""
+  secretValues:
+    DATABASE_URL: ""
+    VALKEY_ADDR: ""
+    VALKEY_PASSWORD: ""
+    TEMPORAL_HOST_PORT: ""
+    SNS_TOPIC_ARN: ""
+    DEFINITION_SERVICE_ADDR: ""
+
+# LLD §7.5's mTLS/namespace-bootstrap note: registering the Temporal
+# namespace and provisioning mTLS material are cluster-operator actions this
+# chart doesn't perform — it only mounts an already-provisioned cert/key
+# pair when the cluster requires it.
+temporalMTLS:
+  enabled: false
+  secretName: ""
+
+networkPolicy:
+  # LLD §5.7/§9.2: /internal/* must be restricted to the Shared
+  # Workflow-Events Consumer and Definition Service. No dedicated internal
+  # port exists yet (cmd/server has one httpPort for every route, and its
+  # real listener isn't built), so this policy scopes all of port 8080 to
+  # these pod identities — coarse L3/L4 defense-in-depth alongside the
+  # x-internal-token app-layer check (LLD §5.7), not a replacement for it.
+  # Revisit once a dedicated internal port exists.
+  enabled: true
+  # Regular browser-gateway traffic (/api/v1/* routes) — the same port
+  # allowedCallers restricts for /internal/* traffic, since there's no
+  # dedicated internal port to split them onto (see the note above).
+  ingressControllerNamespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: gateway
+  allowedCallers:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: workflow-events-consumer
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: workflow-definition-service
+  metricsIngress:
+    enabled: true
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: monitoring
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: prometheus
+  additionalIngressRules: []
+  additionalEgressRules: []
+
+# Requires the Prometheus Operator CRDs (ServiceMonitor/PrometheusRule).
+# Left disabled by default since neither this repo nor either reference repo
+# assumes the Operator is installed in every target cluster.
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+migration:
+  enabled: true

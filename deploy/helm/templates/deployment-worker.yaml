@@ -1,0 +1,104 @@
+# NOTE: cmd/worker is still a stub main (logs "not implemented" and exits) —
+# no Temporal client/worker registration exists yet. Same caveat as
+# deployment-api.yaml: these probes document the LLD's real target
+# behavior; deployed today, the pod exits immediately and crash-loops.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "workflow-execution-service.workerFullname" . }}
+  labels:
+    {{- include "workflow-execution-service.workerSelectorLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "workflow-execution-service.workerSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "workflow-execution-service.workerSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "workflow-execution-service.workerFullname" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      # LLD §7.6: WorkerStopTimeout 25s (5s margin under the 30s SIGTERM
+      # budget) for worker.Worker.Stop()'s in-flight-Activity drain.
+      terminationGracePeriodSeconds: 30
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  {{- include "workflow-execution-service.workerSelectorLabels" . | nindent 18 }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}-worker:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.worker.healthPort }}
+          env:
+            - name: WORKER_HEALTH_PORT
+              value: {{ .Values.worker.healthPort | quote }}
+            - name: APP_ENV
+              value: {{ .Values.env.appEnv | quote }}
+            - name: BUILD_VERSION
+              value: {{ .Values.image.tag | default .Chart.AppVersion | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ printf "%s-worker" .Values.env.otelServiceName | quote }}
+            - name: TEMPORAL_NAMESPACE
+              value: {{ .Values.env.temporalNamespace | quote }}
+            - name: TEMPORAL_TASK_QUEUE
+              value: {{ .Values.env.temporalTaskQueue | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: DATABASE_URL
+            - name: TEMPORAL_HOST_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: TEMPORAL_HOST_PORT
+            {{- if .Values.temporalMTLS.enabled }}
+            - name: TEMPORAL_TLS_CERT_PATH
+              value: /etc/temporal-tls/tls.crt
+            - name: TEMPORAL_TLS_KEY_PATH
+              value: /etc/temporal-tls/tls.key
+            {{- end }}
+          {{- if .Values.temporalMTLS.enabled }}
+          volumeMounts:
+            - name: temporal-tls
+              mountPath: /etc/temporal-tls
+              readOnly: true
+          {{- end }}
+          # LLD §7.6: Worker's /healthz is always 200; /readyz checks DB
+          # pool + Temporal-frontend connectivity (no Valkey dependency).
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+      {{- if .Values.temporalMTLS.enabled }}
+      volumes:
+        - name: temporal-tls
+          secret:
+            secretName: {{ .Values.temporalMTLS.secretName }}
+      {{- end }}

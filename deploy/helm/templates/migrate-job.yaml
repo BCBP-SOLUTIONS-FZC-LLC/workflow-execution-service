@@ -1,0 +1,42 @@
+# One shared migration hook runs domain + outbox migrations before either
+# Deployment rolls (LLD §7.5) — pre-install/pre-upgrade, using cmd/server's
+# own `migrate` subcommand. A failed hook blocks the upgrade from reaching
+# the rollout at all; it does not auto-rollback a partially-applied
+# migration (Helm hook failure and a Deployment rollout failure are
+# distinct failure classes, per the LLD's own framing).
+{{- if .Values.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "workflow-execution-service.fullname" . }}-migrate
+  labels:
+    {{- include "workflow-execution-service.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        {{- include "workflow-execution-service.apiSelectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "workflow-execution-service.apiFullname" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}-server:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          args: ["migrate"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: DATABASE_URL
+{{- end }}

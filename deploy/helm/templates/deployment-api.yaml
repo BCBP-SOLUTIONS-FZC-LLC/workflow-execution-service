@@ -1,0 +1,141 @@
+# NOTE: cmd/server is still a stub main (logs "not implemented" and exits) —
+# a composition root is later Tier-2 work, not this chart's. The probes and
+# rolling-update strategy below document the LLD's real target behavior
+# (§7.5, §7.6) for once that lands; deployed against today's stub binary,
+# the pod exits immediately and crash-loops — expected, not a chart defect.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "workflow-execution-service.apiFullname" . }}
+  labels:
+    {{- include "workflow-execution-service.apiSelectorLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicas }}
+  # maxSurge:0 requires the hard pod anti-affinity below (old pod must be
+  # gone before the new one starts) — matches definition_service's API
+  # Deployment exactly (LLD §7.5).
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "workflow-execution-service.apiSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "workflow-execution-service.apiSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "workflow-execution-service.apiFullname" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  {{- include "workflow-execution-service.apiSelectorLabels" . | nindent 18 }}
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}-server:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.httpPort }}
+            - name: grpc
+              containerPort: {{ .Values.api.grpcPort }}
+          env:
+            - name: HTTP_PORT
+              value: {{ .Values.api.httpPort | quote }}
+            - name: GRPC_PORT
+              value: {{ .Values.api.grpcPort | quote }}
+            - name: APP_ENV
+              value: {{ .Values.env.appEnv | quote }}
+            - name: BUILD_VERSION
+              value: {{ .Values.image.tag | default .Chart.AppVersion | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ printf "%s-api" .Values.env.otelServiceName | quote }}
+            - name: TEMPORAL_NAMESPACE
+              value: {{ .Values.env.temporalNamespace | quote }}
+            - name: TEMPORAL_TASK_QUEUE
+              value: {{ .Values.env.temporalTaskQueue | quote }}
+            - name: AWS_REGION
+              value: {{ .Values.env.awsRegion | quote }}
+            - name: AWS_USE_STUB
+              value: {{ .Values.env.awsUseStub | quote }}
+            - name: OUTBOX_POLL_INTERVAL
+              value: {{ .Values.env.outboxPollInterval | quote }}
+            - name: OUTBOX_BATCH_SIZE
+              value: {{ .Values.env.outboxBatchSize | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: DATABASE_URL
+            - name: VALKEY_ADDR
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: VALKEY_ADDR
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: VALKEY_PASSWORD
+                  optional: true
+            - name: TEMPORAL_HOST_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: TEMPORAL_HOST_PORT
+            - name: SNS_TOPIC_ARN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: SNS_TOPIC_ARN
+                  optional: true
+            - name: DEFINITION_SERVICE_ADDR
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: DEFINITION_SERVICE_ADDR
+                  optional: true
+            {{- if .Values.temporalMTLS.enabled }}
+            - name: TEMPORAL_TLS_CERT_PATH
+              value: /etc/temporal-tls/tls.crt
+            - name: TEMPORAL_TLS_KEY_PATH
+              value: /etc/temporal-tls/tls.key
+            {{- end }}
+          {{- if .Values.temporalMTLS.enabled }}
+          volumeMounts:
+            - name: temporal-tls
+              mountPath: /etc/temporal-tls
+              readOnly: true
+          {{- end }}
+          # LLD §7.6: API's /healthz is always 200; /readyz checks DB pool +
+          # Valkey + a Temporal-frontend reachability check.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+      {{- if .Values.temporalMTLS.enabled }}
+      volumes:
+        - name: temporal-tls
+          secret:
+            secretName: {{ .Values.temporalMTLS.secretName }}
+      {{- end }}

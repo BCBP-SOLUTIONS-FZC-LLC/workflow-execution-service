@@ -1,0 +1,24 @@
+{{ include "workflow-execution-service.fullname" . }} deployed.
+
+API:    {{ include "workflow-execution-service.apiFullname" . }} — {{ .Values.api.replicas }} replica(s), :{{ .Values.api.httpPort }} HTTP + :{{ .Values.api.grpcPort }} gRPC
+Worker: {{ include "workflow-execution-service.workerFullname" . }} — {{ .Values.worker.replicas }} replica(s), :{{ .Values.worker.healthPort }} health/metrics
+
+IMPORTANT: cmd/server and cmd/worker are both still stub mains as of this
+chart's authoring (T1.12) — neither has a real listener, Temporal
+client/worker, or /healthz//readyz endpoint yet (composition-root wiring is
+later Tier-2 work). Deployed today, both Deployments' pods will exit
+immediately and crash-loop — expected, not a chart defect. This chart
+documents the LLD's real target deploy shape so it's ready the moment that
+composition root lands, per this task's own "easy to reuse" bar.
+
+{{- if not .Values.temporalMTLS.enabled }}
+
+Temporal mTLS is disabled (temporalMTLS.enabled=false) — set it and
+temporalMTLS.secretName once the target Temporal cluster requires it.
+{{- end }}
+
+{{- if not .Values.serviceMonitor.enabled }}
+
+Prometheus scraping/alerting (ServiceMonitor + PrometheusRule) is disabled
+(serviceMonitor.enabled=false) — requires the Prometheus Operator CRDs.
+{{- end }}

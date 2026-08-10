@@ -1,0 +1,141 @@
+# Encodes the LLD §7.6 alert catalogue's rows that give a concrete
+# threshold. Three rows are deliberately NOT encoded here since the LLD
+# gives no number to check against (not invented — a per-activity failure
+# baseline, an SLA-breach volume baseline, and a stuck-task age threshold
+# all say "above a baseline"/"a stated threshold" with no number attached):
+# per-activity-type failure rate, SLA-breach volume spike, stuck/abandoned
+# task age. Add these once real production data gives a number to tune
+# against. The "UserDeleted safety-net bypass" row is log-based (a
+# UserLifecycleBypass log occurrence), not a Prometheus metric — needs a
+# log-alerting mechanism (e.g. Loki), out of this file's scope.
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "workflow-execution-service.fullname" . }}
+  labels:
+    {{- include "workflow-execution-service.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: workflow-execution-service
+      rules:
+        - alert: InstanceDegraded
+          expr: increase(instance_degraded_total[5m]) > 0
+          labels:
+            severity: page
+          annotations:
+            summary: "Instance entered DEGRADED for tenant {{ "{{" }} $labels.tenant_id {{ "}}" }}"
+            description: "A parallel-branch failure parked an instance needing admin force-forward/force-back resolution (LLD §3.3, §7.6)."
+
+        - alert: OutboxDeadLettered
+          expr: increase(outbox_dead_letters_total[5m]) > 0
+          labels:
+            severity: page
+          annotations:
+            summary: "Outbound event dead-lettered for {{ "{{" }} $labels.event_type {{ "}}" }}"
+            description: "An event failed all publish retries; operable via the outbox runner's DLQ replay (LLD §6.6, §7.6)."
+
+        - alert: InboundEventIngestErrors
+          expr: rate(internal_events_ingest_total{result="error"}[5m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Sustained internal event ingest errors"
+            description: "Mirrors the outbound outbox_dead_letters_total pattern for inbound events (LLD §6.1, §7.6)."
+
+        - alert: SharedWorkflowEventsConsumerOutage
+          expr: time() - internal_events_last_received_timestamp{event_type=~"DelegationStarted|TenantStateChanged"} > 900
+          labels:
+            severity: page
+          annotations:
+            summary: "No {{ "{{" }} $labels.event_type {{ "}}" }} events received in 15 minutes"
+            description: "A live event type going quiet for 15 minutes is a consumer-side stall, not a legitimately idle tenant (LLD §10.2, §7.6)."
+
+        - alert: RLSViolation
+          expr: increase(rls_violations_total{type=~"missing_guc|cross_tenant"}[5m]) > 0
+          labels:
+            severity: page
+          annotations:
+            summary: "RLS violation recorded: {{ "{{" }} $labels.type {{ "}}" }}"
+            description: "Same severity as Definition Service's own RLSMissingGUC/RLSCrossTenantAccess alerts (LLD §9.2, §9.5, §7.6)."
+
+        - alert: TaskSignalSLOBreach
+          expr: histogram_quantile(0.99, rate(task_signal_duration_seconds_bucket[5m])) > 0.3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "task_signal_duration_seconds p99 > 300ms"
+            description: "Sustained breach of the claim/complete/defer SLO (LLD §10.3, §7.6)."
+
+        - alert: InstantiationSLOBreach
+          expr: histogram_quantile(0.99, rate(instance_start_duration_seconds_bucket[5m])) > 1.0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "instance_start_duration_seconds p99 > 1s"
+            description: "Sustained breach of the POST /instances SLO (LLD §10.3, §7.6)."
+
+        - alert: DelegationRerouteSLOBreach
+          expr: histogram_quantile(0.99, rate(delegation_reroute_duration_seconds_bucket[5m])) > 4
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "delegation_reroute_duration_seconds p99 > 4s"
+            description: "Sustained breach of the DelegationStarted reroute SLO — investigate the eligibility-check batch cost (LLD §6.7, §7.6)."
+
+        - alert: WorkflowReplayFailure
+          expr: increase(workflow_replay_failures_total[5m]) > 0
+          labels:
+            severity: page
+          annotations:
+            summary: "Temporal replay failure for {{ "{{" }} $labels.workflow_type {{ "}}" }}"
+            description: "Temporal non-determinism is fatal to the affected workflow execution — the highest-severity Worker failure mode (LLD §7.6)."
+
+        - alert: DegradedBacklogStale
+          expr: instance_degraded_oldest_age_seconds > 86400
+          labels:
+            severity: warning
+          annotations:
+            summary: "DEGRADED instance untouched for over a day, tenant {{ "{{" }} $labels.tenant_id {{ "}}" }}"
+            description: "instance_degraded_total only fires once on entry; this catches an instance nobody has actioned (LLD §7.6)."
+
+        - alert: WorkerQueuePollingStalled
+          expr: time() - worker_queue_last_poll_timestamp > 300
+          labels:
+            severity: page
+          annotations:
+            summary: "Queue {{ "{{" }} $labels.queue {{ "}}" }} has not been polled in 5 minutes"
+            description: "A Worker silently failing to poll one tenant-isolated queue is invisible to the aggregate worker_active_queues gauge alone (LLD §7.6)."
+
+        - alert: UpstreamDependencyErrors
+          expr: rate(upstream_dependency_errors_total[5m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Sustained errors calling {{ "{{" }} $labels.dependency {{ "}}" }}"
+            description: "Separates a GetCompiledWorkflow/IAM-eligibility outage from Execution's own generic 5xx rate (LLD §7.6)."
+
+        - alert: CompiledPlanCacheMissRatioHigh
+          expr: wf_cache_misses_total / (wf_cache_hits_total + wf_cache_misses_total) > 0.10
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Compiled-plan cache miss ratio above 10%"
+            description: "Execution's own equivalent of a cache-health alert Definition Service already ships (LLD §7.6)."
+
+        - alert: OutboxRelayWedged
+          # 10 minutes is the LLD's own worked example (well above the 5s poll
+          # cadence), not an invented number (LLD §7.6).
+          expr: outbox_oldest_unpublished_age_seconds > 600
+          labels:
+            severity: page
+          annotations:
+            summary: "Outbox relay has not published in 10 minutes"
+            description: "A relay that stops running entirely produces zero attempts and zero dead-letters, so nothing else in this catalogue would catch it (LLD §7.6)."
+{{- end }}
