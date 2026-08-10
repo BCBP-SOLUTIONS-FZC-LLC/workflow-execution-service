@@ -91,7 +91,9 @@ Run `make help` for the full target list. Most used: `make tools`, `make setup`,
 
 Two images, one multi-stage `Dockerfile` (`--target server` / `--target worker`), digest-pinned base images (`.docker-digests`, re-pin with `make pin-base-images`). `make docker-build` / `make docker-lint` / `make docker-trivy` / `make docker-check` build and check them locally.
 
-**Helm chart**: `deploy/helm/` — one chart, two Deployments (`-api`, `-worker`), each with its own PDB/HPA/ServiceAccount/NetworkPolicy. `make helm-lint` runs `helm lint` plus a `kubeconform -strict` validation of the rendered manifests.
+**Helm chart**: `deploy/helm/` — one chart, two Deployments (`-api`, `-worker`), each with its own PDB/HPA/ServiceAccount/NetworkPolicy, plus a `ServiceMonitor`+`PrometheusRule` (`serviceMonitor.enabled`, requires the Prometheus Operator CRDs). `make helm-lint` runs `helm lint` plus a `kubeconform -strict` validation of the rendered manifests.
+
+**`deploy/monitoring/`**: static, non-Helm-templated twins for clusters without the Prometheus Operator — `app-alerts.yml` (must stay in sync with `deploy/helm/templates/prometheusrule.yaml`) and `prometheus-adapter-rule.yaml` (the Custom Metrics API rule the API's optional RPS-based HPA scaling needs).
 
 ```bash
 helm lint deploy/helm

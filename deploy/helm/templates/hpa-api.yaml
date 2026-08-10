@@ -25,4 +25,14 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ .Values.api.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- if .Values.api.autoscaling.targetRPSPerReplica }}
+    # See values.yaml's own comment on this field for the prerequisite.
+    - type: Pods
+      pods:
+        metric:
+          name: http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.api.autoscaling.targetRPSPerReplica }}
+    {{- end }}
 {{- end }}

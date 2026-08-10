@@ -1,13 +1,27 @@
-# Encodes the LLD §7.6 alert catalogue's rows that give a concrete
-# threshold. Three rows are deliberately NOT encoded here since the LLD
-# gives no number to check against (not invented — a per-activity failure
-# baseline, an SLA-breach volume baseline, and a stuck-task age threshold
-# all say "above a baseline"/"a stated threshold" with no number attached):
-# per-activity-type failure rate, SLA-breach volume spike, stuck/abandoned
-# task age. Add these once real production data gives a number to tune
-# against. The "UserDeleted safety-net bypass" row is log-based (a
-# UserLifecycleBypass log occurrence), not a Prometheus metric — needs a
-# log-alerting mechanism (e.g. Loki), out of this file's scope.
+# Two categories of alert:
+#
+# 1. Golden-signal alerts (availability, HTTP/gRPC error-rate + latency,
+#    panics, DB error-rate) — derived from the shared platform-gincommon/
+#    platform-pgcommon libraries every instrumented service gets
+#    automatically, mirroring definition_service's own shipped
+#    prometheusrule.yaml exactly (job labels adjusted for this service's
+#    two-process shape: separate rules for -api and -worker, since the
+#    Worker has no business HTTP/gRPC surface to alert on).
+# 2. The LLD §7.6 alert catalogue's rows that give a concrete threshold.
+#    Three rows are deliberately NOT encoded since the LLD gives no number
+#    to check against (not invented — a per-activity failure baseline, an
+#    SLA-breach volume baseline, and a stuck-task age threshold all say
+#    "above a baseline"/"a stated threshold" with no number attached):
+#    per-activity-type failure rate, SLA-breach volume spike, stuck/
+#    abandoned task age. Add these once real production data gives a
+#    number to tune against. The "UserDeleted safety-net bypass" row is
+#    log-based (a UserLifecycleBypass log occurrence), not a Prometheus
+#    metric — needs a log-alerting mechanism (e.g. Loki), out of this
+#    file's scope.
+#
+# Static, non-Helm-templated copy of this file lives at
+# deploy/monitoring/app-alerts.yml, for tooling that consumes plain rule
+# files directly rather than the PrometheusRule CRD. Keep the two in sync.
 {{- if .Values.serviceMonitor.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -17,7 +31,173 @@ metadata:
     {{- include "workflow-execution-service.labels" . | nindent 4 }}
 spec:
   groups:
-    - name: workflow-execution-service
+    - name: workflow_execution_service_availability
+      rules:
+        - alert: ExecutionServiceAPIDown
+          expr: absent(up{job={{ include "workflow-execution-service.apiFullname" . | quote }}} == 1)
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: execution-service API has no healthy instances
+            description: >-
+              No execution-service API pods have been scraped as healthy for 2 minutes.
+              Check pod readiness: kubectl get pods -l app.kubernetes.io/component=api
+
+        - alert: ExecutionServiceAPIReplicasMissing
+          expr: sum(up{job={{ include "workflow-execution-service.apiFullname" . | quote }}}) < {{ .Values.api.replicas }}
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: execution-service API running below minimum replica count
+            description: "Current healthy count: {{ "{{" }} $value {{ "}}" }}. The PDB requires minAvailable:1 — a further disruption could take the API to zero."
+
+        - alert: ExecutionServiceWorkerDown
+          expr: absent(up{job={{ include "workflow-execution-service.workerFullname" . | quote }}} == 1)
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: execution-service Worker has no healthy instances
+            description: >-
+              No execution-service Worker pods have been scraped as healthy for 2 minutes —
+              no Temporal task queues are being polled.
+              Check pod readiness: kubectl get pods -l app.kubernetes.io/component=worker
+
+        - alert: ExecutionServiceWorkerReplicasMissing
+          expr: sum(up{job={{ include "workflow-execution-service.workerFullname" . | quote }}}) < {{ .Values.worker.replicas }}
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: execution-service Worker running below minimum replica count
+            description: "Current healthy count: {{ "{{" }} $value {{ "}}" }}."
+
+    - name: workflow_execution_service_errors
+      rules:
+        - alert: ExecutionServiceHighErrorRate
+          expr: |
+            sum(rate(http_requests_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}, status_class="5xx"}[5m]))
+              /
+            sum(rate(http_requests_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}}[5m]))
+            > 0.05
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: execution-service API 5xx error rate above 5%
+            description: "{{ "{{" }} $value | humanizePercentage {{ "}}" }} of requests are returning 5xx errors over the last 5 minutes."
+
+        - alert: ExecutionServiceCriticalErrorRate
+          expr: |
+            sum(rate(http_requests_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}, status_class="5xx"}[5m]))
+              /
+            sum(rate(http_requests_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}}[5m]))
+            > 0.20
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: execution-service API 5xx error rate above 20%
+            description: "{{ "{{" }} $value | humanizePercentage {{ "}}" }} of requests are returning 5xx errors. Escalate immediately."
+
+    - name: workflow_execution_service_latency
+      rules:
+        - alert: ExecutionServiceHighLatency
+          expr: |
+            histogram_quantile(0.99,
+              sum by (le) (
+                rate(http_request_duration_seconds_bucket{job={{ include "workflow-execution-service.apiFullname" . | quote }}}[5m])
+              )
+            ) > 2.0
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: execution-service API p99 latency above 2s
+            description: "p99 request duration is {{ "{{" }} $value | humanizeDuration {{ "}}" }}."
+
+    - name: workflow_execution_service_grpc
+      rules:
+        # Combined rather than split per-RPC: both CheckActiveInstances and
+        # PauseUserTasks (LLD §5.3/T1.4) are lightweight, similarly-critical
+        # admin-triggered RPCs called by Definition Service, not two
+        # independently-scaled hot paths worth separate alerts.
+        - alert: ExecutionServiceInboundRPCHighErrorRate
+          expr: |
+            sum(rate(grpc_server_handled_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}, method=~".*CheckActiveInstances.*|.*PauseUserTasks.*", status_class="5xx"}[5m]))
+              /
+            sum(rate(grpc_server_handled_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}, method=~".*CheckActiveInstances.*|.*PauseUserTasks.*"}[5m]))
+            > 0.05
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "execution-service inbound RPC error rate above 5%: {{ "{{" }} $labels.method {{ "}}" }}"
+            description: "Definition Service depends on these RPCs (LLD §5.3, §9.2) — check Postgres/Temporal-frontend health and recent deployments."
+
+    - name: workflow_execution_service_panics
+      rules:
+        - alert: ExecutionServiceHTTPPanic
+          expr: increase(http_panic_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}}[5m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: An execution-service API HTTP handler panicked
+            description: "http_panic_total increased — recovered by platform-gincommon's middleware. Check logs for the stack trace immediately."
+
+        - alert: ExecutionServiceGRPCPanic
+          expr: increase(grpc_panic_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}}[5m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: An execution-service gRPC handler panicked
+            description: "grpc_panic_total increased — recovered by platform-gincommon's grpccommon interceptor. Check logs for the stack trace immediately."
+
+    - name: workflow_execution_service_database
+      rules:
+        - alert: ExecutionServiceAPIDBErrorRate
+          expr: |
+            sum(rate(pgcommon_query_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}, status="error"}[5m]))
+              /
+            sum(rate(pgcommon_query_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}}[5m]))
+            > 0.05
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: Elevated Postgres query error rate (API)
+            description: "{{ "{{" }} $value | humanizePercentage {{ "}}" }} of queries are erroring over the last 5 minutes. Check Postgres/PgBouncer health."
+
+        - alert: ExecutionServiceWorkerDBErrorRate
+          expr: |
+            sum(rate(pgcommon_query_total{job={{ include "workflow-execution-service.workerFullname" . | quote }}, status="error"}[5m]))
+              /
+            sum(rate(pgcommon_query_total{job={{ include "workflow-execution-service.workerFullname" . | quote }}}[5m]))
+            > 0.05
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: Elevated Postgres query error rate (Worker)
+            description: "{{ "{{" }} $value | humanizePercentage {{ "}}" }} of queries are erroring over the last 5 minutes. Check Postgres/PgBouncer health."
+
+    - name: workflow_execution_service_lld
       rules:
         - alert: InstanceDegraded
           expr: increase(instance_degraded_total[5m]) > 0

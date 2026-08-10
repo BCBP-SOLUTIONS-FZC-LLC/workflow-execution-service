@@ -32,6 +32,10 @@ spec:
     {{- if .Values.worker.autoscaling.targetBacklogPerReplica }}
     # Documented future hook — see values.yaml's own comment on this field
     # for the prerequisite (a prometheus-adapter rule exposing this metric).
+    # deploy/monitoring/prometheus-adapter-rule.yaml is the pattern to
+    # extend once a real backlog metric exists — not pre-written here since
+    # worker_queue_backlog itself doesn't exist yet (inventing its adapter
+    # config would be inventing the metric by another name).
     - type: Pods
       pods:
         metric:

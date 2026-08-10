@@ -30,6 +30,14 @@ api:
     maxReplicas: 6
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80
+    # Documented optional hook, disabled by default — RPS-based scaling is
+    # more accurate than CPU for an I/O-bound HTTP service, mirroring
+    # definition_service's own API HPA. PREREQUISITE: the prometheus-adapter
+    # must be installed and configured with the rule at
+    # deploy/monitoring/prometheus-adapter-rule.yaml. Without it this metric
+    # is silently absent from the custom metrics API and HPA falls back to
+    # CPU/memory only.
+    targetRPSPerReplica: ""
 
 worker:
   replicas: 2
