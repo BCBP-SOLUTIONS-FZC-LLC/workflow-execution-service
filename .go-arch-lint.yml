@@ -30,6 +30,12 @@ components:
     in: "internal/workflow/**"
   config:
     in: "internal/config/**"
+  # Metric vars, tracing-init helpers, and Search-Attribute constants/helpers
+  # (execution LLD §7.6, §3.6). A peer-level leaf like domain/port, not nested
+  # under adapter, since workflow-context code (Search Attributes) must be
+  # able to import it without depending on adapter.
+  observability:
+    in: "internal/observability/**"
   # postgres/db is sqlc-generated code; declared separately so adapter can import it
   db:
     in: "internal/adapter/outbound/postgres/db/**"
@@ -49,6 +55,11 @@ deps:
     mayDependOn:
       - domain
       - port
+  observability:
+    # external test files (package observability_test) import observability
+    # itself (self-reference), same as port/mocks above
+    mayDependOn:
+      - observability
   service:
     mayDependOn:
       - domain

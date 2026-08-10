@@ -69,12 +69,13 @@ Temporal's Web UI is available at <http://localhost:8233> once `make docker-up` 
 
 ## Project layout
 
-Clean Architecture, dependency direction `domain ← port ← service ← adapter`, plus a new peer layer `internal/workflow` for the Temporal workflow function and Activities (never imported by `adapter/`, never imports it back — the two connect only via runtime registration in `cmd/worker/main.go`). See `.go-arch-lint.yml` for the enforced import graph.
+Clean Architecture, dependency direction `domain ← port ← service ← adapter`, plus two peer layers that sit alongside `adapter` rather than under it: `internal/workflow` for the Temporal workflow function and Activities (never imported by `adapter/`, never imports it back — the two connect only via runtime registration in `cmd/worker/main.go`), and `internal/observability` for centralized Prometheus metrics, OTel tracing-init helpers, and Temporal Search-Attribute helpers (execution LLD §7.6, §3.6) — a leaf package importable by any layer, including `workflow`, since Search Attributes can only be upserted from inside workflow-context code. See `.go-arch-lint.yml` for the enforced import graph.
 
 ```
 cmd/server/, cmd/worker/       — composition roots (two independently deployed binaries)
 internal/core/{domain,port,service}/
 internal/workflow/             — Temporal workflow function + Activities
+internal/observability/        — metrics, tracing init, Search-Attribute helpers
 internal/adapter/{inbound,outbound}/
 internal/config/
 db/migrations/, db/queries/    — workflow_execution schema (RLS via app_tenant_id())
