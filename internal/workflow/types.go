@@ -13,6 +13,12 @@ type ExecuteInput struct {
 	InstanceID  string
 	VersionID   string
 	ContextJSON string
+	// OverrideMap is POST /instances' node-key -> user-ID override map
+	// (already persisted to workflow_instance.override_map by the HTTP/DB
+	// layer). Threaded through, unmodified, to every CreateTaskActivity call
+	// so the Activity itself can apply whichever entry (if any) matches the
+	// node being dispatched.
+	OverrideMap map[string]string
 }
 
 // ExecuteOutput is the terminal output of the Execute workflow function.
@@ -50,6 +56,11 @@ type interpreter struct {
 	contextJSON    string
 	lastResultJSON string
 
+	// overrideMap is ExecuteInput.OverrideMap, carried as-is for the
+	// instance's entire lifetime and passed whole to every CreateTaskInput
+	// (LLD §5.4's node-key -> user-ID override).
+	overrideMap map[string]string
+
 	// pending: node key -> the channel a runTaskStage call is blocked on.
 	pending map[domain.NodeKey]wf.Channel
 
@@ -74,7 +85,7 @@ type interpreter struct {
 	parallelDepth int
 }
 
-func newInterpreter(tenantID, instanceID, initialContextJSON string, collab *dsl.CompiledCollaboration) *interpreter {
+func newInterpreter(tenantID, instanceID, initialContextJSON string, collab *dsl.CompiledCollaboration, overrideMap map[string]string) *interpreter {
 	return &interpreter{
 		tenantID:       tenantID,
 		instanceID:     instanceID,
@@ -82,6 +93,7 @@ func newInterpreter(tenantID, instanceID, initialContextJSON string, collab *dsl
 		history:        newNodeHistory(),
 		msgBuf:         newMessageBuffer(),
 		contextJSON:    initialContextJSON,
+		overrideMap:    overrideMap,
 		pending:        make(map[domain.NodeKey]wf.Channel),
 		pendingSignals: make(map[domain.NodeKey]stageTransitionSignal),
 		pauseGates:     make(map[string]wf.Channel),

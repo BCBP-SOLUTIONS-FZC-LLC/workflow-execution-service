@@ -107,3 +107,23 @@ func recordSLABreach(ctx wf.Context, in port.RecordSLABreachInput) error {
 	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityRecordSLABreach, in).Get(ctx, nil)
 	return wrapActivityErr(port.ActivityRecordSLABreach, err)
 }
+
+func pauseInstance(ctx wf.Context, in port.PauseInstanceInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityPauseInstance, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityPauseInstance, err)
+}
+
+func resumeInstance(ctx wf.Context, in port.ResumeInstanceInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityResumeInstance, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityResumeInstance, err)
+}
+
+func cancelInstance(ctx wf.Context, in port.CancelInstanceInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityCancelInstance, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityCancelInstance, err)
+}
+
+func reassignAssignment(ctx wf.Context, in port.ReassignAssignmentInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityReassignAssignment, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityReassignAssignment, err)
+}

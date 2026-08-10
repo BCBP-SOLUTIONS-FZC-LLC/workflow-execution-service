@@ -88,7 +88,7 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 		}
 		switch envelope.Kind {
 		case SignalInstanceCancel:
-			return stepOutcome{Terminated: true}, nil
+			return stepOutcome{Terminated: true}, in.cancelInstanceOnSignal(ctx, envelope.Signal)
 
 		case SignalInstanceForceFwd:
 			sig := envelope.Signal
@@ -173,6 +173,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 	for len(failed) > 0 || respawning > 0 {
 		sel := wf.NewSelector(ctx)
 		var terminated bool
+		var cancelErr error
 
 		sel.AddReceive(admin, func(c wf.ReceiveChannel, more bool) {
 			var envelope adminSignalEnvelope
@@ -182,6 +183,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 			switch envelope.Kind {
 			case SignalInstanceCancel:
 				terminated = true
+				cancelErr = in.cancelInstanceOnSignal(ctx, sig)
 
 			case SignalInstanceForceFwd:
 				idx := indexOfFailedBranch(failed, sig.TargetDeptID)
@@ -239,7 +241,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 
 		sel.Select(ctx)
 		if terminated {
-			return stepOutcome{Terminated: true}, nil
+			return stepOutcome{Terminated: true}, cancelErr
 		}
 	}
 

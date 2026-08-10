@@ -164,7 +164,7 @@ func TestCheckPausedBlocksUntilResumed(t *testing.T) {
 
 	var resumedBeforeReturn bool
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", "", nil)
+		in := newInterpreter("tenant", "instance", "", nil, nil)
 		in.pauseDept(ctx, "deptA")
 
 		var resumed bool
@@ -190,7 +190,7 @@ func TestCheckPausedWithoutAGateIsANoOp(t *testing.T) {
 	env := suite.NewTestWorkflowEnvironment()
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", "", nil)
+		in := newInterpreter("tenant", "instance", "", nil, nil)
 		in.checkPaused(ctx, "deptA") // no gate armed — must return immediately
 		return nil
 	})

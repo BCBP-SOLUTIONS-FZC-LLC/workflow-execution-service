@@ -44,7 +44,7 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 	}
 	collab := strategy.normalize(&planOut.Collaboration)
 
-	in := newInterpreter(input.TenantID, input.InstanceID, input.ContextJSON, collab)
+	in := newInterpreter(input.TenantID, input.InstanceID, input.ContextJSON, collab, input.OverrideMap)
 
 	mainPlan := findPlan(in.collab, in.collab.MainPlan)
 	if mainPlan == nil {
@@ -73,11 +73,18 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 		finalStatus = domain.InstanceStatusTerminated
 	}
 	in.status = finalStatus
-	now := wf.Now(ctx)
-	if err := updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
-		InstanceID: in.instanceID, TenantID: in.tenantID, Status: finalStatus, CompletedAt: &now,
-	}); err != nil && runErr == nil {
-		runErr = err
+	// A Terminated outcome already went through cancelInstance (at whichever
+	// of runTopLevel/runParallel/enterDegraded received the signal), which
+	// writes TERMINATED + the task-FAILED cascade + both event classes in one
+	// Activity — calling the generic update again here would be a redundant,
+	// spurious status-update event on top of an already-complete write.
+	if finalStatus != domain.InstanceStatusTerminated {
+		now := wf.Now(ctx)
+		if err := updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
+			InstanceID: in.instanceID, TenantID: in.tenantID, Status: finalStatus, CompletedAt: &now,
+		}); err != nil && runErr == nil {
+			runErr = err
+		}
 	}
 
 	return ExecuteOutput{Status: finalStatus}, runErr
@@ -124,7 +131,7 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 		sig := envelope.Signal
 		switch envelope.Kind {
 		case SignalInstanceCancel:
-			return stepOutcome{Terminated: true}, nil
+			return stepOutcome{Terminated: true}, in.cancelInstanceOnSignal(ctx, sig)
 
 		case SignalInstanceForceFwd:
 			// Unlike force-back, force-forward jumps to a node that hasn't

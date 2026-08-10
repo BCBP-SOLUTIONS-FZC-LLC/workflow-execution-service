@@ -46,6 +46,10 @@ type activityHooks struct {
 	recordSLABreach      func(port.RecordSLABreachInput)
 	recordForceRoute     func(port.RecordForceRouteInput)
 	updateInstanceStatus func(port.UpdateInstanceStatusInput)
+	pauseInstance        func(port.PauseInstanceInput)
+	resumeInstance       func(port.ResumeInstanceInput)
+	cancelInstance       func(port.CancelInstanceInput) error
+	reassignAssignment   func(port.ReassignAssignmentInput) error
 }
 
 // registerFakeActivities registers minimal, real (not testify-mocked)
@@ -136,6 +140,49 @@ func registerFakeActivities(env *testsuite.TestWorkflowEnvironment, collab *dsl.
 		},
 		activity.RegisterOptions{Name: port.ActivityDeferTask},
 	)
+	registerFakeAdminInstanceActivities(env, hooks)
+}
+
+// registerFakeAdminInstanceActivities registers the pause/resume/cancel
+// Activities — split out of registerFakeActivities to keep both under the
+// cognitive-complexity lint budget.
+func registerFakeAdminInstanceActivities(env *testsuite.TestWorkflowEnvironment, hooks *activityHooks) {
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.PauseInstanceInput) error {
+			if hooks.pauseInstance != nil {
+				hooks.pauseInstance(in)
+			}
+			return nil
+		},
+		activity.RegisterOptions{Name: port.ActivityPauseInstance},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.ResumeInstanceInput) error {
+			if hooks.resumeInstance != nil {
+				hooks.resumeInstance(in)
+			}
+			return nil
+		},
+		activity.RegisterOptions{Name: port.ActivityResumeInstance},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.CancelInstanceInput) error {
+			if hooks.cancelInstance != nil {
+				return hooks.cancelInstance(in)
+			}
+			return nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCancelInstance},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.ReassignAssignmentInput) error {
+			if hooks.reassignAssignment != nil {
+				return hooks.reassignAssignment(in)
+			}
+			return nil
+		},
+		activity.RegisterOptions{Name: port.ActivityReassignAssignment},
+	)
 }
 
 // stageTransitionWire mirrors internal/workflow's unexported
@@ -157,5 +204,15 @@ type adminSignalWire struct {
 	Reason        string
 	TargetDeptID  string
 	TargetNodeKey string
+	RecordVersion int64
+}
+
+// reassignSignalWire mirrors internal/workflow's unexported reassignSignal
+// payload.
+type reassignSignalWire struct {
+	TaskID        string
+	OldUserID     string
+	NewUserID     string
+	AdminUserID   string
 	RecordVersion int64
 }
