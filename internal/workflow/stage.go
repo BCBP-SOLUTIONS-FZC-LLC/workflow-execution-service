@@ -65,6 +65,7 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, stag
 		NodeKey:      nodeKey,
 		CompiledNode: compiledNode,
 		ContextJSON:  in.contextJSON,
+		OverrideMap:  in.overrideMap,
 	})
 	if err != nil {
 		return nodeKey, err

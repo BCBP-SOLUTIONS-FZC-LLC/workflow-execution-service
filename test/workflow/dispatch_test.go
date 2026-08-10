@@ -1,12 +1,14 @@
 package workflow_test
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
 	"go.temporal.io/sdk/testsuite"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
@@ -102,5 +104,43 @@ func TestExecute_ExclusiveGatewayRoutesOnCondition(t *testing.T) {
 	}
 	if out.Status != domain.InstanceStatusCompleted {
 		t.Errorf("Status = %v, want COMPLETED", out.Status)
+	}
+}
+
+// TestExecute_OverrideMapReachesCreateTask asserts POST /instances'
+// override_map (already persisted at the HTTP/DB layer, unrelated to this
+// test) actually reaches CreateTaskActivity via ExecuteInput.OverrideMap —
+// previously ExecuteInput carried no such field, so CreateTaskInput.
+// OverrideMap was always empty regardless of what was persisted.
+func TestExecute_OverrideMapReachesCreateTask(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := singleStageCollaboration(dsl.StageDef{Type: "approve", Activity: "approve_order", Role: "sales_rep"})
+	var got port.CreateTaskInput
+	registerFakeActivities(env, collab, &activityHooks{
+		createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			got = in
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		},
+	})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "sales", ToStage: "approve", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1,
+		})
+	}, time.Millisecond)
+
+	overrideMap := map[string]string{"sales/approve": "user-42"}
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+		OverrideMap: overrideMap,
+	})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	if !reflect.DeepEqual(got.OverrideMap, overrideMap) {
+		t.Errorf("CreateTaskInput.OverrideMap = %+v, want %+v", got.OverrideMap, overrideMap)
 	}
 }

@@ -44,7 +44,7 @@ func TestRunStageSendReceiveTask(t *testing.T) {
 
 	var sendKey, recvKey domain.NodeKey
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", "", nil)
+		in := newInterpreter("tenant", "instance", "", nil, nil)
 		plan := &dsl.CompiledPlan{Name: "main"}
 
 		k, err := in.runStage(ctx, plan, "sales", &dsl.StageDef{Type: "send_task", Extras: map[string]string{"message": "m"}})
@@ -82,7 +82,7 @@ func TestRunStageLogsEngineNoteForUnrecognizedType(t *testing.T) {
 	}, time.Millisecond)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", "", nil)
+		in := newInterpreter("tenant", "instance", "", nil, nil)
 		admin := wf.NewBufferedChannel(ctx, 1)
 		baseAdmin := wf.NewBufferedChannel(ctx, 1)
 		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
@@ -105,7 +105,7 @@ func TestRunExclusiveTerminates(t *testing.T) {
 
 	var terminated bool
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", "", nil)
+		in := newInterpreter("tenant", "instance", "", nil, nil)
 		in.lastResultJSON = `{"decision":"reject"}`
 		plan := &dsl.CompiledPlan{Name: "main"}
 		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
@@ -151,7 +151,7 @@ func TestRunExclusiveRevertPopsHistory(t *testing.T) {
 	}, time.Millisecond)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", `{"decision":"rejected"}`, nil)
+		in := newInterpreter("tenant", "instance", `{"decision":"rejected"}`, nil, nil)
 		in.lastResultJSON = `{"decision":"rejected"}`
 		in.history.Push("rework/prep")
 		admin := wf.NewBufferedChannel(ctx, 1)
@@ -189,7 +189,7 @@ func TestRunExclusiveForwardFallsBackToTargetFromTop(t *testing.T) {
 
 	var lastNode domain.NodeKey
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", "", nil)
+		in := newInterpreter("tenant", "instance", "", nil, nil)
 		in.lastResultJSON = `{"decision":"approved"}`
 		admin := wf.NewBufferedChannel(ctx, 1)
 		baseAdmin := wf.NewBufferedChannel(ctx, 1)
@@ -253,7 +253,7 @@ func TestRunExclusiveUsesTargetNodeIDToAvoidReRunningEarlierStage(t *testing.T) 
 
 	var lastNode domain.NodeKey
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", "", nil)
+		in := newInterpreter("tenant", "instance", "", nil, nil)
 		in.lastResultJSON = `{"notify":"true"}`
 		admin := wf.NewBufferedChannel(ctx, 1)
 		baseAdmin := wf.NewBufferedChannel(ctx, 1)
@@ -323,7 +323,7 @@ func TestRunExclusiveRevertUsesRevertToNodeID(t *testing.T) {
 	}, 2*time.Millisecond)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", "", nil)
+		in := newInterpreter("tenant", "instance", "", nil, nil)
 		in.lastResultJSON = `{"decision":"rejected"}`
 		in.history.Push("rework/Task_prep")
 		in.history.Push("rework/Task_approve")
@@ -408,7 +408,7 @@ func TestRunStepsUnpopulatedVariantErrors(t *testing.T) {
 	env := suite.NewTestWorkflowEnvironment()
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", "", nil)
+		in := newInterpreter("tenant", "instance", "", nil, nil)
 		admin := wf.NewBufferedChannel(ctx, 1)
 		plan := &dsl.CompiledPlan{Name: "main"}
 		_, err := in.runSteps(ctx, plan, []dsl.ExecutionStep{{}}, admin)
@@ -453,7 +453,7 @@ func TestEnterDegradedUnknownTargetDeptIsANoOp(t *testing.T) {
 	}, 3*time.Millisecond)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", "", nil)
+		in := newInterpreter("tenant", "instance", "", nil, nil)
 		admin := wf.NewBufferedChannel(ctx, 1)
 		baseAdmin := wf.NewBufferedChannel(ctx, 1)
 		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
@@ -526,7 +526,7 @@ func TestRunTaskStageInterruptingBoundaryTransfers(t *testing.T) {
 	}, 2*time.Hour)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", "", nil)
+		in := newInterpreter("tenant", "instance", "", nil, nil)
 		admin := wf.NewBufferedChannel(ctx, 1)
 		baseAdmin := wf.NewBufferedChannel(ctx, 1)
 		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
@@ -560,7 +560,7 @@ func TestRunTaskStageNonInterruptingBoundaryContinuesBoth(t *testing.T) {
 	}, 2*time.Hour)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", "", nil)
+		in := newInterpreter("tenant", "instance", "", nil, nil)
 		admin := wf.NewBufferedChannel(ctx, 1)
 		baseAdmin := wf.NewBufferedChannel(ctx, 1)
 		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
@@ -598,7 +598,7 @@ func TestRunCallPoolRecursesInlineWhenNotIgnored(t *testing.T) {
 			Execution:   dsl.ExecutionPlan{Steps: []dsl.ExecutionStep{{Sequential: []string{"vendor"}}}},
 		}
 		collab := &dsl.CompiledCollaboration{MainPlan: "main", Plans: []*dsl.CompiledPlan{{Name: "main"}, target}}
-		in := newInterpreter("tenant", "instance", "", collab)
+		in := newInterpreter("tenant", "instance", "", collab, nil)
 		admin := wf.NewBufferedChannel(ctx, 1)
 		baseAdmin := wf.NewBufferedChannel(ctx, 1)
 		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
@@ -620,7 +620,7 @@ func TestRunCallPoolTargetNotFound(t *testing.T) {
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		collab := &dsl.CompiledCollaboration{MainPlan: "main", Plans: []*dsl.CompiledPlan{{Name: "main"}}}
-		in := newInterpreter("tenant", "instance", "", collab)
+		in := newInterpreter("tenant", "instance", "", collab, nil)
 		admin := wf.NewBufferedChannel(ctx, 1)
 		callerPlan := &dsl.CompiledPlan{Name: "main"}
 		_, err := in.runCallPool(ctx, callerPlan, &dsl.CallPoolStep{Pool: "does-not-exist"}, admin)

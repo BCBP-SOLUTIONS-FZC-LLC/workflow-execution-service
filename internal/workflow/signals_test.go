@@ -36,6 +36,9 @@ func TestValidateSignal(t *testing.T) {
 		{name: "instance-force-forward while DEGRADED is allowed", status: domain.InstanceStatusDegraded, signal: SignalInstanceForceFwd, wantErr: false},
 		{name: "instance-force-forward while paused is rejected", status: domain.InstanceStatusPaused, signal: SignalInstanceForceFwd, wantErr: true},
 		{name: "instance-force-back while running is allowed", status: domain.InstanceStatusRunning, signal: SignalInstanceForceBack, wantErr: false},
+		{name: "instance-reassign while running is allowed", status: domain.InstanceStatusRunning, signal: SignalInstanceReassign, wantErr: false},
+		{name: "instance-reassign while DEGRADED is allowed", status: domain.InstanceStatusDegraded, signal: SignalInstanceReassign, wantErr: false},
+		{name: "instance-reassign while paused is rejected", status: domain.InstanceStatusPaused, signal: SignalInstanceReassign, wantErr: true},
 		{name: "unknown signal is rejected", status: domain.InstanceStatusRunning, signal: "not-a-real-signal", wantErr: true},
 	}
 	for _, tt := range tests {
