@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -16,8 +17,18 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
+
+// TestMain registers the centralized metrics once for the whole package —
+// internal_events.go's ingest/reroute/last-received counters are nil-guarded
+// and silently no-op otherwise, which would make internal_events_test.go's
+// sample-count assertions read zero forever.
+func TestMain(m *testing.M) {
+	observability.Register()
+	os.Exit(m.Run())
+}
 
 var (
 	testTenantID = uuid.MustParse("11111111-1111-1111-1111-111111111111")

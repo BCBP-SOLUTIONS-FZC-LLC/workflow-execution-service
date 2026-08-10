@@ -9,35 +9,38 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/pkg/events"
 	pgdomain "github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
-var (
-	internalEventsIngestTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "internal_events_ingest_total",
-		Help: "Total internal event ingest calls, labelled by event_type and result.",
-	}, []string{"event_type", "result"})
+// The three metric vars this file used to self-register via promauto
+// (internal_events_ingest_total, delegation_reroute_duration_seconds,
+// internal_events_last_received_timestamp) now live in internal/observability
+// — nil until Register() runs at real process boot, hence the nil-guards
+// below rather than a direct package-level var block here.
 
-	// delegationRerouteDuration buckets are tuned around the LLD §6.7 4s p99
-	// SLO boundary, not prometheus.DefBuckets.
-	delegationRerouteDuration = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "delegation_reroute_duration_seconds",
-		Help:    "DelegationStarted envelope-time to reroute-commit latency (LLD §6.7, p99 <= 4s SLO).",
-		Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 8, 12, 20},
-	})
+func incIngestTotal(eventType, result string) {
+	if observability.InternalEventsIngestTotal != nil {
+		observability.InternalEventsIngestTotal.WithLabelValues(eventType, result).Inc()
+	}
+}
 
-	internalEventsLastReceived = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "internal_events_last_received_timestamp",
-		Help: "Unix timestamp of the last successfully dispatched event, per event_type.",
-	}, []string{"event_type"})
-)
+func markLastReceived(eventType string) {
+	if observability.InternalEventsLastReceivedTimestamp != nil {
+		observability.InternalEventsLastReceivedTimestamp.WithLabelValues(eventType).SetToCurrentTime()
+	}
+}
+
+func observeDelegationReroute(seconds float64) {
+	if observability.DelegationRerouteDurationSeconds != nil {
+		observability.DelegationRerouteDurationSeconds.Observe(seconds)
+	}
+}
 
 const (
 	consumerMembership = "membership-execution"
@@ -69,7 +72,7 @@ func (h *Handler) parseTenantID(c *gin.Context, eventType, raw string) (uuid.UUI
 func (h *Handler) HandleInternalEvent(c *gin.Context) {
 	var env events.Envelope[json.RawMessage]
 	if !bindJSON(c, &env) {
-		internalEventsIngestTotal.WithLabelValues("unknown", "bad_payload").Inc()
+		incIngestTotal("unknown", "bad_payload")
 		return
 	}
 	if env.Type == "" {
@@ -106,17 +109,17 @@ func (h *Handler) HandleInternalEvent(c *gin.Context) {
 }
 
 func (h *Handler) markOK(eventType string) {
-	internalEventsIngestTotal.WithLabelValues(eventType, "ok").Inc()
-	internalEventsLastReceived.WithLabelValues(eventType).SetToCurrentTime()
+	incIngestTotal(eventType, "ok")
+	markLastReceived(eventType)
 }
 
 func (h *Handler) badPayload(c *gin.Context, eventType, detail string) {
-	internalEventsIngestTotal.WithLabelValues(eventType, "bad_payload").Inc()
+	incIngestTotal(eventType, "bad_payload")
 	writeProblem(c, http.StatusBadRequest, CodeBadRequest, detail, nil)
 }
 
 func (h *Handler) reconcilerError(c *gin.Context, eventType string, err error) {
-	internalEventsIngestTotal.WithLabelValues(eventType, "error").Inc()
+	incIngestTotal(eventType, "error")
 	h.logError("internal events: reconciler call failed", map[string]any{"event_type": eventType, "error": err.Error()})
 	writeProblem(c, http.StatusInternalServerError, CodeInternal, "failed to process event", nil)
 }
@@ -128,7 +131,7 @@ func (h *Handler) reconcilerError(c *gin.Context, eventType string, err error) {
 // requests must retry it rather than treat it as permanently rejected like
 // badPayload's 400 does.
 func (h *Handler) decodeFailed(c *gin.Context, eventType, detail string) {
-	internalEventsIngestTotal.WithLabelValues(eventType, "decode_failed").Inc()
+	incIngestTotal(eventType, "decode_failed")
 	writeProblem(c, http.StatusBadGateway, CodeEventDecodeFailed, detail, nil)
 }
 
@@ -275,7 +278,7 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 		h.reconcilerError(c, eventType, err)
 		return
 	}
-	delegationRerouteDuration.Observe(time.Since(start).Seconds())
+	observeDelegationReroute(time.Since(start).Seconds())
 
 	h.respondOK(c, eventID, consumerMembership, eventType)
 }
