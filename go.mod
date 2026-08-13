@@ -6,7 +6,7 @@ require (
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events v1.4.0
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon v1.2.1
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon v1.1.1
-	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models v1.1.0
+	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models v1.2.0-rc.1
 	github.com/aws/aws-sdk-go-v2 v1.43.3
 	github.com/aws/aws-sdk-go-v2/service/glue v1.151.1
 	github.com/gin-gonic/gin v1.12.0

@@ -17,6 +17,7 @@ type Task struct {
 	Status             TaskStatus
 	RecordVersion      int64
 	AssigneeMode       string
+	ConnectorType      *string
 	ExtrasJSON         json.RawMessage
 	DeferredFromTaskID *uuid.UUID
 	DueAt              *time.Time

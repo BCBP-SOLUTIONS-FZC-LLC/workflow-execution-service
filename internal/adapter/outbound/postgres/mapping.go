@@ -39,6 +39,20 @@ func toPgtypeTimestamptz(t *time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: *t, Valid: true}
 }
 
+func fromPgtypeTextPtr(t pgtype.Text) *string {
+	if !t.Valid {
+		return nil
+	}
+	return &t.String
+}
+
+func toPgtypeTextPtr(s *string) pgtype.Text {
+	if s == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: *s, Valid: true}
+}
+
 func fromPgtypeUUID(u pgtype.UUID) *uuid.UUID {
 	if !u.Valid {
 		return nil
@@ -88,6 +102,7 @@ func taskFromDB(row db.WorkflowTask) *domain.Task {
 		Status:             domain.TaskStatus(row.Status),
 		RecordVersion:      row.RecordVersion,
 		AssigneeMode:       row.AssigneeMode,
+		ConnectorType:      fromPgtypeTextPtr(row.ConnectorType),
 		ExtrasJSON:         row.ExtrasJson,
 		DeferredFromTaskID: fromPgtypeUUID(row.DeferredFromTaskID),
 		DueAt:              fromPgtypeTimestamptz(row.DueAt),

@@ -12,6 +12,8 @@ github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon v1.1.1 h1:VSEMjeFlRu+l77Qi8r
 github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon v1.1.1/go.mod h1:7HPlQMeL5itv4l/4jBKwZBl9KkD40vbZHwpGc0gt/6s=
 github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models v1.1.0 h1:7R5ceY5SmGWS4EvLSYjxKlR3pdeP2VdeEtZzSyZSpPc=
 github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models v1.1.0/go.mod h1:5qVCsQ5Alfeux8OJj+cMoBOpXeaL2e4ZF1K5Swyq7Xo=
+github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models v1.2.0-rc.1 h1:wc0ONZzlk3iNBiFOlHu+H4Ft7Ht5JafRSswB6HfPjA0=
+github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models v1.2.0-rc.1/go.mod h1:5qVCsQ5Alfeux8OJj+cMoBOpXeaL2e4ZF1K5Swyq7Xo=
 github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/aws/aws-sdk-go-v2 v1.43.3 h1:XJIcfv8uDs2ukdQsoAC8/Ebu1ejxwzlayl2ZsiFns2A=

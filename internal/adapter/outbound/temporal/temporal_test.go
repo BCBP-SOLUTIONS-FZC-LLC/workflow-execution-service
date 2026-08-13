@@ -1,0 +1,271 @@
+package temporal_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+
+	"github.com/google/uuid"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/pkg/events"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+)
+
+// fakeInstanceRepo is an in-memory port.InstanceRepository — no real
+// Postgres involved, this package's own tests exercise Activity logic only.
+type fakeInstanceRepo struct {
+	byID            map[uuid.UUID]*domain.Instance
+	updateStatusErr error
+}
+
+func newFakeInstanceRepo(instances ...*domain.Instance) *fakeInstanceRepo {
+	m := make(map[uuid.UUID]*domain.Instance, len(instances))
+	for _, inst := range instances {
+		m[inst.ID] = inst
+	}
+	return &fakeInstanceRepo{byID: m}
+}
+
+func (r *fakeInstanceRepo) Create(_ context.Context, inst *domain.Instance) error {
+	r.byID[inst.ID] = inst
+	return nil
+}
+
+func (r *fakeInstanceRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domain.Instance, error) {
+	inst, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return inst, nil
+}
+
+func (r *fakeInstanceRepo) UpdateStatus(_ context.Context, _, id uuid.UUID, status domain.InstanceStatus, recordVersion int64) (*domain.Instance, error) {
+	if r.updateStatusErr != nil {
+		return nil, r.updateStatusErr
+	}
+	inst, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	if inst.RecordVersion != recordVersion {
+		return nil, domain.ErrRecordVersionConflict
+	}
+	inst.Status = status
+	inst.RecordVersion++
+	return inst, nil
+}
+
+func (r *fakeInstanceRepo) ListByTenant(_ context.Context, _ uuid.UUID, _ port.PageRequest) ([]*domain.Instance, *port.Cursor, error) {
+	return nil, nil, nil
+}
+
+func (r *fakeInstanceRepo) UpdateCurrentNodeKeys(_ context.Context, _, id uuid.UUID, keys []string, recordVersion int64) (*domain.Instance, error) {
+	inst, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	if inst.RecordVersion != recordVersion {
+		return nil, domain.ErrRecordVersionConflict
+	}
+	inst.CurrentNodeKeys = keys
+	inst.RecordVersion++
+	return inst, nil
+}
+
+// fakeTaskRepo is an in-memory port.TaskRepository. createErr, when set,
+// makes Create fail without touching byID — used to exercise callers'
+// DB-failure branches.
+type fakeTaskRepo struct {
+	byID            map[uuid.UUID]*domain.Task
+	createErr       error
+	updateStatusErr error
+	listErr         error
+}
+
+func newFakeTaskRepo(tasks ...*domain.Task) *fakeTaskRepo {
+	m := make(map[uuid.UUID]*domain.Task, len(tasks))
+	for _, task := range tasks {
+		m[task.ID] = task
+	}
+	return &fakeTaskRepo{byID: m}
+}
+
+func (r *fakeTaskRepo) Create(_ context.Context, task *domain.Task) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
+	if task.AssigneeMode == "" {
+		task.AssigneeMode = "single"
+	}
+	task.RecordVersion = 1
+	r.byID[task.ID] = task
+	return nil
+}
+
+func (r *fakeTaskRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domain.Task, error) {
+	task, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return task, nil
+}
+
+func (r *fakeTaskRepo) UpdateStatus(_ context.Context, _, id uuid.UUID, status domain.TaskStatus, recordVersion int64) (*domain.Task, error) {
+	if r.updateStatusErr != nil {
+		return nil, r.updateStatusErr
+	}
+	task, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	if task.RecordVersion != recordVersion {
+		return nil, domain.ErrRecordVersionConflict
+	}
+	task.Status = status
+	task.RecordVersion++
+	return task, nil
+}
+
+func (r *fakeTaskRepo) ListByInstance(_ context.Context, _, instanceID uuid.UUID, _ port.PageRequest) ([]*domain.Task, *port.Cursor, error) {
+	if r.listErr != nil {
+		return nil, nil, r.listErr
+	}
+	var out []*domain.Task
+	for _, task := range r.byID {
+		if task.WorkflowInstanceID == instanceID {
+			out = append(out, task)
+		}
+	}
+	return out, nil, nil
+}
+
+// fakeAssignmentRepo is an in-memory port.TaskAssignmentRepository. createErr,
+// when set, makes Create fail — used to exercise callers' DB-failure branches.
+type fakeAssignmentRepo struct {
+	byID       map[uuid.UUID]*domain.TaskAssignment
+	createErr  error
+	setLeadErr error
+	vacateErr  error
+}
+
+func newFakeAssignmentRepo(assignments ...*domain.TaskAssignment) *fakeAssignmentRepo {
+	m := make(map[uuid.UUID]*domain.TaskAssignment, len(assignments))
+	for _, a := range assignments {
+		a.IsActive = true
+		m[a.ID] = a
+	}
+	return &fakeAssignmentRepo{byID: m}
+}
+
+func (r *fakeAssignmentRepo) Create(_ context.Context, a *domain.TaskAssignment) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
+	a.IsActive = true
+	r.byID[a.ID] = a
+	return nil
+}
+
+func (r *fakeAssignmentRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domain.TaskAssignment, error) {
+	a, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return a, nil
+}
+
+func (r *fakeAssignmentRepo) ListActiveByTask(_ context.Context, _, taskID uuid.UUID) ([]*domain.TaskAssignment, error) {
+	var out []*domain.TaskAssignment
+	for _, a := range r.byID {
+		if a.TaskID == taskID && a.IsActive {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeAssignmentRepo) ListActiveByUser(_ context.Context, _, userID uuid.UUID) ([]*domain.TaskAssignment, error) {
+	var out []*domain.TaskAssignment
+	for _, a := range r.byID {
+		if a.UserID == userID && a.IsActive {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeAssignmentRepo) Vacate(_ context.Context, _, id uuid.UUID) (*domain.TaskAssignment, error) {
+	if r.vacateErr != nil {
+		return nil, r.vacateErr
+	}
+	a, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	a.IsActive = false
+	return a, nil
+}
+
+func (r *fakeAssignmentRepo) Complete(_ context.Context, _, id uuid.UUID, resultJSON json.RawMessage) (*domain.TaskAssignment, error) {
+	a, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	a.IsActive = false
+	a.ResultJSON = resultJSON
+	return a, nil
+}
+
+func (r *fakeAssignmentRepo) SetLead(_ context.Context, _, _, id uuid.UUID) (*domain.TaskAssignment, error) {
+	if r.setLeadErr != nil {
+		return nil, r.setLeadErr
+	}
+	a, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	a.IsLead = true
+	return a, nil
+}
+
+// fakeOutbox is an in-memory port.OutboxRepository — Enqueue just records
+// every envelope it receives for assertions, no real transaction required.
+type fakeOutbox struct {
+	enqueued   []events.Envelope[json.RawMessage]
+	enqueueErr error
+}
+
+func (o *fakeOutbox) Enqueue(_ context.Context, env events.Envelope[json.RawMessage]) error {
+	if o.enqueueErr != nil {
+		return o.enqueueErr
+	}
+	o.enqueued = append(o.enqueued, env)
+	return nil
+}
+
+func (o *fakeOutbox) ListByInstance(_ context.Context, _, _ uuid.UUID, _ port.PageRequest) ([]*domain.OutboxEventRecord, *port.Cursor, error) {
+	return nil, nil, nil
+}
+
+// fakeTransactor just runs fn directly against the given ctx — this
+// package's fakes have no real transaction/connection to acquire.
+type fakeTransactor struct{}
+
+func (fakeTransactor) RunInTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func (fakeTransactor) RunInTxWithRetry(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+// noopValidator always accepts — this package's tests assert on repo/outbox
+// state and payload construction, not schema validation itself (already
+// covered by test/unit/eventbus).
+type noopValidator struct{}
+
+func (noopValidator) Validate(context.Context, string, json.RawMessage) error { return nil }
+
+var errBoom = errors.New("boom")

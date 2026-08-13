@@ -28,7 +28,7 @@ func TestBuildEnvelope_SetsCoreFields(t *testing.T) {
 	instID := uuid.New()
 	payload := stubPayload{WorkflowInstanceID: instID}
 
-	env, err := buildEnvelope(context.Background(), noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "instances/"+instID.String(), "user-1", payload)
+	env, err := BuildEnvelope(context.Background(), noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "instances/"+instID.String(), "user-1", payload)
 	require.NoError(t, err)
 
 	assert.Equal(t, domain.EventWorkflowInstanceStarted, env.Type)
@@ -41,7 +41,7 @@ func TestBuildEnvelope_SetsCoreFields(t *testing.T) {
 }
 
 func TestBuildEnvelope_OmitsEmptySubjectAndActor(t *testing.T) {
-	env, err := buildEnvelope(context.Background(), noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{})
+	env, err := BuildEnvelope(context.Background(), noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{})
 	require.NoError(t, err)
 
 	assert.Empty(t, env.Subject)
@@ -60,28 +60,28 @@ func TestBuildEnvelope_SetsTraceIDWhenSpanValid(t *testing.T) {
 	})
 	ctx := trace.ContextWithSpanContext(context.Background(), sc)
 
-	env, err := buildEnvelope(ctx, noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{})
+	env, err := BuildEnvelope(ctx, noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{})
 	require.NoError(t, err)
 
 	assert.Equal(t, traceID.String(), env.TraceID)
 }
 
 // unmarshalablePayload has a chan field, which encoding/json can never
-// marshal - used to exercise buildEnvelope's own json.Marshal error branch,
+// marshal - used to exercise BuildEnvelope's own json.Marshal error branch,
 // distinct from a validator rejection.
 type unmarshalablePayload struct {
 	Ch chan int `json:"ch"`
 }
 
 func TestBuildEnvelope_MarshalError(t *testing.T) {
-	_, err := buildEnvelope(context.Background(), noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", unmarshalablePayload{Ch: make(chan int)})
+	_, err := BuildEnvelope(context.Background(), noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", unmarshalablePayload{Ch: make(chan int)})
 
 	require.Error(t, err)
 }
 
 func TestBuildEnvelope_ValidationError(t *testing.T) {
 	wantErr := errors.New("payload violates schema")
-	_, err := buildEnvelope(context.Background(), erroringValidator{err: wantErr}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{})
+	_, err := BuildEnvelope(context.Background(), erroringValidator{err: wantErr}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{})
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, wantErr)
@@ -92,7 +92,7 @@ func TestBuildEnvelope_ValidationError(t *testing.T) {
 // trust events.NewEnvelope's nesting implicitly, assert it directly.
 func TestBuildEnvelope_NestsPayloadUnderDataKey(t *testing.T) {
 	instID := uuid.New()
-	env, err := buildEnvelope(context.Background(), noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{WorkflowInstanceID: instID})
+	env, err := BuildEnvelope(context.Background(), noopValidator{}, domain.EventWorkflowInstanceStarted, "tenant-1", "", "", stubPayload{WorkflowInstanceID: instID})
 	require.NoError(t, err)
 
 	marshaled, err := json.Marshal(env)
