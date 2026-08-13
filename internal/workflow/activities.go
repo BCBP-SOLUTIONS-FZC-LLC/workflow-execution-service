@@ -127,3 +127,8 @@ func reassignAssignment(ctx wf.Context, in port.ReassignAssignmentInput) error {
 	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityReassignAssignment, in).Get(ctx, nil)
 	return wrapActivityErr(port.ActivityReassignAssignment, err)
 }
+
+func updateTaskStatus(ctx wf.Context, in port.UpdateTaskStatusInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityUpdateTaskStatus, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityUpdateTaskStatus, err)
+}

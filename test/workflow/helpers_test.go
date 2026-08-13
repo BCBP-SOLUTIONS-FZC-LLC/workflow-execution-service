@@ -42,6 +42,8 @@ func singleStageCollaboration(stage dsl.StageDef) *dsl.CompiledCollaboration {
 // signature. Nil fields fall back to a harmless default.
 type activityHooks struct {
 	createTask           func(port.CreateTaskInput) (port.CreateTaskOutput, error)
+	completeAssignment   func(port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error)
+	updateTaskStatus     func(port.UpdateTaskStatusInput) error
 	recordSLAWarn        func(port.RecordSLAWarningInput)
 	recordSLABreach      func(port.RecordSLABreachInput)
 	recordForceRoute     func(port.RecordForceRouteInput)
@@ -92,12 +94,7 @@ func registerFakeActivities(env *testsuite.TestWorkflowEnvironment, collab *dsl.
 		func(_ context.Context, _ port.UpdateInstanceNodesInput) error { return nil },
 		activity.RegisterOptions{Name: port.ActivityUpdateInstanceNodes},
 	)
-	env.RegisterActivityWithOptions(
-		func(_ context.Context, _ port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
-			return port.CompleteAssignmentOutput{AllDone: true}, nil
-		},
-		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
-	)
+	registerFakeTaskActivities(env, hooks)
 	env.RegisterActivityWithOptions(
 		func(_ context.Context, in port.UpdateInstanceStatusInput) error {
 			if hooks.updateInstanceStatus != nil {
@@ -141,6 +138,30 @@ func registerFakeActivities(env *testsuite.TestWorkflowEnvironment, collab *dsl.
 		activity.RegisterOptions{Name: port.ActivityDeferTask},
 	)
 	registerFakeAdminInstanceActivities(env, hooks)
+}
+
+// registerFakeTaskActivities registers the completeAssignment/
+// updateTaskStatus Activities — split out of registerFakeActivities to keep
+// both under the cognitive-complexity lint budget.
+func registerFakeTaskActivities(env *testsuite.TestWorkflowEnvironment, hooks *activityHooks) {
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
+			if hooks.completeAssignment != nil {
+				return hooks.completeAssignment(in)
+			}
+			return port.CompleteAssignmentOutput{AllDone: true}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.UpdateTaskStatusInput) error {
+			if hooks.updateTaskStatus != nil {
+				return hooks.updateTaskStatus(in)
+			}
+			return nil
+		},
+		activity.RegisterOptions{Name: port.ActivityUpdateTaskStatus},
+	)
 }
 
 // registerFakeAdminInstanceActivities registers the pause/resume/cancel
@@ -196,6 +217,8 @@ type stageTransitionWire struct {
 	UserID        string
 	ResultJSON    string
 	RecordVersion int64
+	Failed        bool
+	Reason        string
 }
 
 // adminSignalWire mirrors internal/workflow's unexported adminSignal payload.
