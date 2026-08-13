@@ -26,3 +26,9 @@ UPDATE workflow_instance
 SET status = $2, updated_at = now(), record_version = record_version + 1
 WHERE id = $1 AND record_version = $3
 RETURNING *;
+
+-- name: UpdateWorkflowInstanceCurrentNodeKeys :one
+UPDATE workflow_instance
+SET current_node_keys = $2, updated_at = now(), record_version = record_version + 1
+WHERE id = $1 AND record_version = $3
+RETURNING *;

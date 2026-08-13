@@ -22,3 +22,20 @@ UPDATE workflow_task_assignment
 SET is_active = false, vacated_at = now(), updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: CompleteWorkflowTaskAssignment :one
+UPDATE workflow_task_assignment
+SET completed_at = now(), result_json = $2, is_active = false, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearOtherTaskAssignmentLeads :exec
+UPDATE workflow_task_assignment
+SET is_lead = false, updated_at = now()
+WHERE task_id = $1 AND id != $2 AND is_lead;
+
+-- name: SetTaskAssignmentLead :one
+UPDATE workflow_task_assignment
+SET is_lead = true, updated_at = now()
+WHERE id = $1
+RETURNING *;

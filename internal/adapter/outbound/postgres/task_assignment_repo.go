@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
 	"github.com/google/uuid"
@@ -40,6 +41,20 @@ func (r *TaskAssignmentRepo) Create(ctx context.Context, a *domain.TaskAssignmen
 		*a = *taskAssignmentFromDB(row)
 		return nil
 	})
+}
+
+func (r *TaskAssignmentRepo) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var assignment *domain.TaskAssignment
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		row, err := db.New(dbtx).GetWorkflowTaskAssignment(ctx, id)
+		if err != nil {
+			return mapErr(err)
+		}
+		assignment = taskAssignmentFromDB(row)
+		return nil
+	})
+	return assignment, err
 }
 
 func (r *TaskAssignmentRepo) ListActiveByTask(
@@ -90,6 +105,48 @@ func (r *TaskAssignmentRepo) Vacate(ctx context.Context, tenantID, id uuid.UUID)
 	var assignment *domain.TaskAssignment
 	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
 		row, err := db.New(dbtx).VacateWorkflowTaskAssignment(ctx, id)
+		if err != nil {
+			return mapErr(err)
+		}
+		assignment = taskAssignmentFromDB(row)
+		return nil
+	})
+	return assignment, err
+}
+
+func (r *TaskAssignmentRepo) Complete(
+	ctx context.Context,
+	tenantID, id uuid.UUID,
+	resultJSON json.RawMessage,
+) (*domain.TaskAssignment, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var assignment *domain.TaskAssignment
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		row, err := db.New(dbtx).CompleteWorkflowTaskAssignment(ctx, db.CompleteWorkflowTaskAssignmentParams{
+			ID:         id,
+			ResultJson: resultJSON,
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		assignment = taskAssignmentFromDB(row)
+		return nil
+	})
+	return assignment, err
+}
+
+func (r *TaskAssignmentRepo) SetLead(ctx context.Context, tenantID, taskID, id uuid.UUID) (*domain.TaskAssignment, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var assignment *domain.TaskAssignment
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		q := db.New(dbtx)
+		if err := q.ClearOtherTaskAssignmentLeads(ctx, db.ClearOtherTaskAssignmentLeadsParams{
+			TaskID: taskID,
+			ID:     id,
+		}); err != nil {
+			return mapErr(err)
+		}
+		row, err := q.SetTaskAssignmentLead(ctx, id)
 		if err != nil {
 			return mapErr(err)
 		}

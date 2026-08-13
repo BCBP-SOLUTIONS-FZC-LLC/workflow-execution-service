@@ -128,6 +128,34 @@ func TestInstanceRepo_UpdateStatus_InvalidEnumSurfacesError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestInstanceRepo_UpdateCurrentNodeKeys(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, repo.Create(ctx, inst))
+
+	t.Run("correct record_version succeeds, bumps it, and replaces current_node_keys", func(t *testing.T) {
+		updated, err := repo.UpdateCurrentNodeKeys(ctx, tenantA, inst.ID, []string{"approve", "ops"}, inst.RecordVersion)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"approve", "ops"}, updated.CurrentNodeKeys)
+		assert.Equal(t, inst.RecordVersion+1, updated.RecordVersion)
+	})
+
+	t.Run("stale record_version returns a conflict, not not-found", func(t *testing.T) {
+		_, err := repo.UpdateCurrentNodeKeys(ctx, tenantA, inst.ID, []string{"stale"}, inst.RecordVersion)
+		assert.ErrorIs(t, err, domain.ErrRecordVersionConflict)
+	})
+
+	t.Run("nonexistent id returns not-found", func(t *testing.T) {
+		_, err := repo.UpdateCurrentNodeKeys(ctx, tenantA, uuid.New(), []string{"x"}, 1)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+}
+
 func TestInstanceRepo_ListByTenant_KeysetPagination(t *testing.T) {
 	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
 	appPool := newAppRolePool(t, superPool, superDSN)
