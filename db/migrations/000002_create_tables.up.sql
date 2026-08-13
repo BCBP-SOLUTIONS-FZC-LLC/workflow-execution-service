@@ -23,7 +23,7 @@ CREATE TABLE workflow_instance (
 );
 
 -- One row per dispatched stage/task (prep/review/approve, unrecognized-Type
--- passthrough, call_pool admin-stub) (LLD §4.3).
+-- passthrough, call_pool admin-stub, connector) (LLD §4.3).
 CREATE TABLE workflow_task (
     id                    UUID                 PRIMARY KEY,
     tenant_id             UUID                 NOT NULL,
@@ -34,6 +34,10 @@ CREATE TABLE workflow_task (
     status                workflow_task_status NOT NULL,
     record_version        BIGINT               NOT NULL DEFAULT 1 CHECK (record_version > 0),
     assignee_mode         TEXT                 NOT NULL,  -- 'single' | 'all'
+    -- Connector name for a connector-typed task (design/LLD/workflow_connectors.md
+    -- §5.2) — a real column, not extras_json, for the same query-efficiency
+    -- reason department_id is already a real column.
+    connector_type        TEXT,
     extras_json           JSONB,
     deferred_from_task_id UUID                 REFERENCES workflow_task(id) ON DELETE RESTRICT,
     due_at                TIMESTAMPTZ,
