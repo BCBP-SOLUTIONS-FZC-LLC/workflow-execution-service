@@ -119,19 +119,38 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, stag
 		cancelBoundaries()
 	}
 
-	// Simplification: CreateTaskOutput carries only TaskID, not a
-	// per-assignee AssignmentID — this interpreter uses TaskID as the
-	// single-assignee AssignmentID reference. Multi-assignee claim/lead
-	// bookkeeping (ClaimAssignmentActivity) is a separate, additive path
-	// this task does not need to invoke for the common single-assignee
-	// case. Reconcile with whichever sibling task owns the real assignment
-	// ID convention if this proves wrong.
+	return in.resolveTaskStage(ctx, nodeKey, out, sig)
+}
+
+// resolveTaskStage applies a settled runTaskStage signal: the pre-stage-fail
+// behavior (unconditional completeAssignment) for histories recorded before
+// stageFailChangeID, else completeAssignment for a normal resolution or
+// updateTaskStatus(FAILED) + a non-retryable error for sig.Failed.
+//
+// Simplification: CreateTaskOutput carries only TaskID, not a per-assignee
+// AssignmentID — this interpreter uses TaskID as the single-assignee
+// AssignmentID reference. Multi-assignee claim/lead bookkeeping
+// (ClaimAssignmentActivity) is a separate, additive path this task does not
+// need to invoke for the common single-assignee case. Reconcile with
+// whichever sibling task owns the real assignment ID convention if this
+// proves wrong.
+func (in *interpreter) resolveTaskStage(
+	ctx wf.Context, nodeKey domain.NodeKey, out port.CreateTaskOutput, sig stageTransitionSignal,
+) (domain.NodeKey, error) {
+	if getVersion(ctx, stageFailChangeID) != wf.DefaultVersion && sig.Failed {
+		if err := updateTaskStatus(ctx, port.UpdateTaskStatusInput{
+			TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusFailed, RecordVersion: sig.RecordVersion,
+		}); err != nil {
+			return nodeKey, err
+		}
+		return nodeKey, fmt.Errorf("workflow: stage %q failed: %s", nodeKey, sig.Reason)
+	}
+
 	if _, err := completeAssignment(ctx, port.CompleteAssignmentInput{
 		AssignmentID: out.TaskID, TenantID: in.tenantID, ResultJSON: sig.ResultJSON, RecordVersion: sig.RecordVersion,
 	}); err != nil {
 		return nodeKey, err
 	}
-
 	in.lastResultJSON = sig.ResultJSON
 	in.history.Push(nodeKey)
 	return nodeKey, nil

@@ -34,6 +34,7 @@ const (
 	ActivityResumeInstance       = "ResumeInstanceActivity"
 	ActivityCancelInstance       = "CancelInstanceActivity"
 	ActivityReassignAssignment   = "ReassignAssignmentActivity"
+	ActivityUpdateTaskStatus     = "UpdateTaskStatusActivity"
 )
 
 type GetCompiledPlanInput struct {
@@ -171,5 +172,15 @@ type ReassignAssignmentInput struct {
 	OldUserID     string
 	NewUserID     string
 	AdminUserID   string
+	RecordVersion int64
+}
+
+// UpdateTaskStatusInput drives a task-status-only transition — stage-fail is
+// its only caller today, marking a workflow_task row FAILED without
+// touching any assignment row.
+type UpdateTaskStatusInput struct {
+	TaskID        string
+	TenantID      string
+	Status        domain.TaskStatus
 	RecordVersion int64
 }

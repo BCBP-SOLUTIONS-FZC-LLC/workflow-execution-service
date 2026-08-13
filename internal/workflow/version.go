@@ -17,3 +17,9 @@ func getVersion(ctx wf.Context, changeID string) wf.Version {
 // (test/workflow/replay/initial_interpreter_test.go) only proves the
 // plumbing works, not that the pattern protects a real divergence.
 const initialInterpreterChangeID = "initial-interpreter"
+
+// stageFailChangeID guards runTaskStage's branch on a resolved signal's
+// Failed field (stage.go): wf.DefaultVersion replays histories recorded
+// before SignalStageFail existed, which never set Failed, so the old
+// unconditional completeAssignment call stays correct for them.
+const stageFailChangeID = "stage-fail-signal"
