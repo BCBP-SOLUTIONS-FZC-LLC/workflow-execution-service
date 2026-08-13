@@ -4,6 +4,7 @@ package postgres_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -62,6 +63,15 @@ func TestTaskAssignmentRepo_CreateListVacate(t *testing.T) {
 		assert.ErrorIs(t, err, domain.ErrDuplicateActiveAssignment)
 	})
 
+	t.Run("GetByID reads it back, cross-tenant sees not-found", func(t *testing.T) {
+		got, err := assignmentRepo.GetByID(ctx, tenantA, assignment.ID)
+		require.NoError(t, err)
+		assert.Equal(t, assignment.ID, got.ID)
+
+		_, err = assignmentRepo.GetByID(ctx, uuid.New(), assignment.ID)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+
 	t.Run("vacate deactivates and drops it from active lists", func(t *testing.T) {
 		vacated, err := assignmentRepo.Vacate(ctx, tenantA, assignment.ID)
 		require.NoError(t, err)
@@ -76,4 +86,60 @@ func TestTaskAssignmentRepo_CreateListVacate(t *testing.T) {
 		fresh := newTaskAssignment(tenantA, task.ID, userID)
 		require.NoError(t, assignmentRepo.Create(ctx, fresh))
 	})
+}
+
+func TestTaskAssignmentRepo_Complete(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	instanceRepo := postgres.NewInstanceRepo(appPool)
+	taskRepo := postgres.NewTaskRepo(appPool)
+	assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, instanceRepo.Create(ctx, inst))
+	task := newTask(tenantA, inst.ID)
+	require.NoError(t, taskRepo.Create(ctx, task))
+	assignment := newTaskAssignment(tenantA, task.ID, uuid.New())
+	require.NoError(t, assignmentRepo.Create(ctx, assignment))
+
+	completed, err := assignmentRepo.Complete(ctx, tenantA, assignment.ID, json.RawMessage(`{"outcome":"approved"}`))
+	require.NoError(t, err)
+	assert.False(t, completed.IsActive)
+	assert.NotNil(t, completed.CompletedAt)
+	assert.JSONEq(t, `{"outcome":"approved"}`, string(completed.ResultJSON))
+
+	byTask, err := assignmentRepo.ListActiveByTask(ctx, tenantA, task.ID)
+	require.NoError(t, err)
+	assert.Empty(t, byTask, "a completed assignment is no longer active")
+}
+
+func TestTaskAssignmentRepo_SetLead(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	instanceRepo := postgres.NewInstanceRepo(appPool)
+	taskRepo := postgres.NewTaskRepo(appPool)
+	assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, instanceRepo.Create(ctx, inst))
+	task := newTask(tenantA, inst.ID)
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	first := newTaskAssignment(tenantA, task.ID, uuid.New())
+	first.IsLead = true
+	require.NoError(t, assignmentRepo.Create(ctx, first))
+	second := newTaskAssignment(tenantA, task.ID, uuid.New())
+	require.NoError(t, assignmentRepo.Create(ctx, second))
+
+	promoted, err := assignmentRepo.SetLead(ctx, tenantA, task.ID, second.ID)
+	require.NoError(t, err)
+	assert.True(t, promoted.IsLead)
+
+	demoted, err := assignmentRepo.GetByID(ctx, tenantA, first.ID)
+	require.NoError(t, err)
+	assert.False(t, demoted.IsLead, "promoting a new lead must demote the previous one")
 }

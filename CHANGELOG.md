@@ -18,6 +18,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 ### Fixed
 
 - `make test` now includes `test/workflow/` in its coverage run — previously omitted, invisible until now since this is the first PR to populate that directory with real tests.
+- `TaskAssignmentRepository`/`InstanceRepository` gained `GetByID`/`Complete`/`SetLead` and `UpdateCurrentNodeKeys` — the 4 repository methods T1.3's activity catalogue (`CompleteAssignmentActivity`, `ClaimAssignmentActivity`, `UpdateInstanceNodesActivity`) structurally needs; previously missing, blocking that work.
 
 ---
 

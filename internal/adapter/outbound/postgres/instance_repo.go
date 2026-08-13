@@ -127,3 +127,31 @@ func (r *InstanceRepo) ListByTenant(
 	})
 	return instances, next, err
 }
+
+func (r *InstanceRepo) UpdateCurrentNodeKeys(
+	ctx context.Context,
+	tenantID, id uuid.UUID,
+	currentNodeKeys []string,
+	recordVersion int64,
+) (*domain.Instance, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var inst *domain.Instance
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		q := db.New(dbtx)
+		row, err := q.UpdateWorkflowInstanceCurrentNodeKeys(ctx, db.UpdateWorkflowInstanceCurrentNodeKeysParams{
+			ID:              id,
+			CurrentNodeKeys: currentNodeKeys,
+			RecordVersion:   recordVersion,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			_, probeErr := q.GetWorkflowInstance(ctx, id)
+			return notFoundOrVersionConflict(probeErr)
+		}
+		if err != nil {
+			return mapErr(err)
+		}
+		inst = instanceFromDB(row)
+		return nil
+	})
+	return inst, err
+}

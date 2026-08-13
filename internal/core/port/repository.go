@@ -2,6 +2,7 @@ package port
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,6 +36,12 @@ type InstanceRepository interface {
 		recordVersion int64,
 	) (*domain.Instance, error)
 	ListByTenant(ctx context.Context, tenantID uuid.UUID, page PageRequest) ([]*domain.Instance, *Cursor, error)
+	UpdateCurrentNodeKeys(
+		ctx context.Context,
+		tenantID, id uuid.UUID,
+		currentNodeKeys []string,
+		recordVersion int64,
+	) (*domain.Instance, error)
 }
 
 type TaskRepository interface {
@@ -55,7 +62,10 @@ type TaskRepository interface {
 
 type TaskAssignmentRepository interface {
 	Create(ctx context.Context, assignment *domain.TaskAssignment) error
+	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error)
 	ListActiveByTask(ctx context.Context, tenantID, taskID uuid.UUID) ([]*domain.TaskAssignment, error)
 	ListActiveByUser(ctx context.Context, tenantID, userID uuid.UUID) ([]*domain.TaskAssignment, error)
 	Vacate(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error)
+	Complete(ctx context.Context, tenantID, id uuid.UUID, resultJSON json.RawMessage) (*domain.TaskAssignment, error)
+	SetLead(ctx context.Context, tenantID, taskID, id uuid.UUID) (*domain.TaskAssignment, error)
 }
