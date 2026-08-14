@@ -23,4 +23,9 @@ type OutboxRepository interface {
 		tenantID, instanceID uuid.UUID,
 		page PageRequest,
 	) ([]*domain.OutboxEventRecord, *Cursor, error)
+
+	// ExistsForTask reports whether an event of eventType has already been
+	// enqueued for taskID — RecordSLAWarning/RecordSLABreachActivity's own
+	// idempotency check, since they mutate no status a retry could gate on.
+	ExistsForTask(ctx context.Context, eventType string, taskID uuid.UUID) (bool, error)
 }

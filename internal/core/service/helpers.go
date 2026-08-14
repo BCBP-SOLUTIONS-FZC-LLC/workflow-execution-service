@@ -15,7 +15,11 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-func buildEnvelope[T any](
+// BuildEnvelope marshals payload, validates it against its registered JSON
+// Schema, and wraps it in an outbound events.Envelope — the shared plumbing
+// every outbound-event-producing call site (T1.5-T1.8, internal/adapter/outbound/temporal)
+// builds on top of.
+func BuildEnvelope[T any](
 	ctx context.Context,
 	validator port.EventValidator,
 	eventType, tenantID, subject, actor string,

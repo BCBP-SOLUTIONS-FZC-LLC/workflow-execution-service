@@ -96,6 +96,55 @@ func TestStartInstance_MalformedOverrideMapValue(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+// TestStartInstance_ContextJSONNotAnObject is the regression test for the
+// unvalidated-ContextJSON finding: json.RawMessage's own bind only requires
+// context_json be some valid JSON value — a bare string or number passes —
+// not specifically an object. This must be rejected at the HTTP boundary,
+// not left to fail later inside a live workflow's first connector stage.
+func TestStartInstance_ContextJSONNotAnObject(t *testing.T) {
+	fake := &fakeInstanceService{
+		start: func(context.Context, port.StartInstanceInput) (*port.Instance, error) {
+			t.Fatal("must not call the service when context_json isn't an object")
+			return nil, nil
+		},
+	}
+	router := newRouter(newInstanceHandler(fake))
+
+	cases := []struct {
+		name        string
+		contextJSON string
+	}{
+		{"bare string", `"just a string"`},
+		{"bare number", `42`},
+		{"array", `["a","b"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{"business_key":"TND-001","workflow_version_id":"` + uuid.New().String() + `","context_json":` + tc.contextJSON + `}`)
+			w := do(router, req(http.MethodPost, instancesPath(), json.RawMessage(body)))
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+		})
+	}
+}
+
+func TestStartInstance_ContextJSONObject_Accepted(t *testing.T) {
+	var gotInput port.StartInstanceInput
+	fake := &fakeInstanceService{
+		start: func(_ context.Context, in port.StartInstanceInput) (*port.Instance, error) {
+			gotInput = in
+			return &port.Instance{ID: testInstID, TenantID: testTenantID, RecordVersion: 1}, nil
+		},
+	}
+	router := newRouter(newInstanceHandler(fake))
+
+	w := do(router, req(http.MethodPost, instancesPath(), map[string]any{
+		"business_key": "TND-001", "workflow_version_id": uuid.New(),
+		"context_json": map[string]any{"applicant_email": "a@example.com"},
+	}))
+	require.Equal(t, http.StatusCreated, w.Code)
+	assert.Contains(t, string(gotInput.ContextJSON), "applicant_email")
+}
+
 func TestStartInstance_ErrorCodes(t *testing.T) {
 	cases := []struct {
 		name   string

@@ -234,13 +234,21 @@ func NewWorkflowInstanceForceRoutedPayload(core CommonCore, actorUserID uuid.UUI
 type WorkflowTaskCreatedPayload struct {
 	CommonCore
 	TaskScopedCore
-	DueAt      *time.Time `json:"due_at,omitempty"`
-	FollowUpAt *time.Time `json:"follow_up_at,omitempty"`
-	StageType  string     `json:"stage_type"`
+	DueAt          *time.Time     `json:"due_at,omitempty"`
+	FollowUpAt     *time.Time     `json:"follow_up_at,omitempty"`
+	StageType      string         `json:"stage_type"`
+	ConnectorType  *string        `json:"connector_type,omitempty"`
+	ResolvedInputs map[string]any `json:"resolved_inputs,omitempty"`
 }
 
-func NewWorkflowTaskCreatedPayload(core CommonCore, task TaskScopedCore, stageType string, dueAt, followUpAt *time.Time) WorkflowTaskCreatedPayload {
-	return WorkflowTaskCreatedPayload{CommonCore: core, TaskScopedCore: task, StageType: stageType, DueAt: dueAt, FollowUpAt: followUpAt}
+func NewWorkflowTaskCreatedPayload(
+	core CommonCore, task TaskScopedCore, stageType string, dueAt, followUpAt *time.Time,
+	connectorType *string, resolvedInputs map[string]any,
+) WorkflowTaskCreatedPayload {
+	return WorkflowTaskCreatedPayload{
+		CommonCore: core, TaskScopedCore: task, StageType: stageType, DueAt: dueAt, FollowUpAt: followUpAt,
+		ConnectorType: connectorType, ResolvedInputs: resolvedInputs,
+	}
 }
 
 type WorkflowTaskClaimedPayload struct {

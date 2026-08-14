@@ -3,9 +3,11 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres/db"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
@@ -118,16 +120,21 @@ func (r *TaskAssignmentRepo) Complete(
 	ctx context.Context,
 	tenantID, id uuid.UUID,
 	resultJSON json.RawMessage,
+	taskRecordVersion int64,
 ) (*domain.TaskAssignment, error) {
 	ctx = withTenantGUC(ctx, tenantID)
 	var assignment *domain.TaskAssignment
 	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
-		row, err := db.New(dbtx).CompleteWorkflowTaskAssignment(ctx, db.CompleteWorkflowTaskAssignmentParams{
+		q := db.New(dbtx)
+		row, err := q.CompleteWorkflowTaskAssignment(ctx, db.CompleteWorkflowTaskAssignmentParams{
 			ID:         id,
 			ResultJson: resultJSON,
 		})
 		if err != nil {
 			return mapErr(err)
+		}
+		if err := bumpTaskRecordVersion(ctx, q, row.TaskID, taskRecordVersion); err != nil {
+			return err
 		}
 		assignment = taskAssignmentFromDB(row)
 		return nil
@@ -135,11 +142,14 @@ func (r *TaskAssignmentRepo) Complete(
 	return assignment, err
 }
 
-func (r *TaskAssignmentRepo) SetLead(ctx context.Context, tenantID, taskID, id uuid.UUID) (*domain.TaskAssignment, error) {
+func (r *TaskAssignmentRepo) SetLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {
 	ctx = withTenantGUC(ctx, tenantID)
 	var assignment *domain.TaskAssignment
 	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
 		q := db.New(dbtx)
+		if err := bumpTaskRecordVersion(ctx, q, taskID, taskRecordVersion); err != nil {
+			return err
+		}
 		if err := q.ClearOtherTaskAssignmentLeads(ctx, db.ClearOtherTaskAssignmentLeadsParams{
 			TaskID: taskID,
 			ID:     id,
@@ -154,4 +164,24 @@ func (r *TaskAssignmentRepo) SetLead(ctx context.Context, tenantID, taskID, id u
 		return nil
 	})
 	return assignment, err
+}
+
+// bumpTaskRecordVersion is Complete/SetLead's optimistic-concurrency guard:
+// the LLD frames workflow_task.record_version, not the assignment (which has
+// no version column of its own), as claim/complete's contested resource. A
+// zero-row result is disambiguated the same way UpdateWorkflowTaskStatus's
+// own conflict path already does (notFoundOrVersionConflict).
+func bumpTaskRecordVersion(ctx context.Context, q *db.Queries, taskID uuid.UUID, recordVersion int64) error {
+	_, err := q.BumpWorkflowTaskRecordVersion(ctx, db.BumpWorkflowTaskRecordVersionParams{
+		ID:            taskID,
+		RecordVersion: recordVersion,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		_, probeErr := q.GetWorkflowTask(ctx, taskID)
+		return notFoundOrVersionConflict(probeErr)
+	}
+	if err != nil {
+		return mapErr(err)
+	}
+	return nil
 }

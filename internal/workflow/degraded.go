@@ -161,8 +161,13 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 // force-forward, or exiting on cancel. No cap on repeated respawn cycles.
 func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, preFork domain.NodeKey, completed []completedBranch, failed []failedBranch, admin wf.Channel) (stepOutcome, error) {
 	in.status = domain.InstanceStatusDegraded
+	failedBranches := make([]domain.FailedBranch, len(failed))
+	for i, fb := range failed {
+		failedBranches[i] = domain.FailedBranch{DepartmentID: deptUUID(fb.DeptID), LastNodeKey: string(fb.LastCompletedNode)}
+	}
 	if err := updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusDegraded,
+		FailedBranches: failedBranches,
 	}); err != nil {
 		return stepOutcome{}, err
 	}

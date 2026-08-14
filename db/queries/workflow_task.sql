@@ -14,9 +14,10 @@ LIMIT $2;
 -- name: CreateWorkflowTask :one
 INSERT INTO workflow_task (
     id, tenant_id, workflow_instance_id, node_key, department_id,
-    status, assignee_mode, due_at
+    status, assignee_mode, connector_type, extras_json, deferred_from_task_id,
+    due_at, follow_up_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 RETURNING *;
 
@@ -24,4 +25,13 @@ RETURNING *;
 UPDATE workflow_task
 SET status = $2, updated_at = now(), record_version = record_version + 1
 WHERE id = $1 AND record_version = $3
+RETURNING *;
+
+-- name: BumpWorkflowTaskRecordVersion :one
+-- Optimistic-concurrency guard for TaskAssignmentRepository.Complete/SetLead:
+-- the LLD frames the task, not the assignment (which carries no
+-- record_version of its own), as claim/complete's contested resource.
+UPDATE workflow_task
+SET updated_at = now(), record_version = record_version + 1
+WHERE id = $1 AND record_version = $2
 RETURNING *;

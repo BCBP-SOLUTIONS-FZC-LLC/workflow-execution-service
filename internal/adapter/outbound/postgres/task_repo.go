@@ -35,7 +35,11 @@ func (r *TaskRepo) Create(ctx context.Context, task *domain.Task) error {
 			DepartmentID:       task.DepartmentID,
 			Status:             db.WorkflowTaskStatus(task.Status),
 			AssigneeMode:       task.AssigneeMode,
+			ConnectorType:      toPgtypeTextPtr(task.ConnectorType),
+			ExtrasJson:         task.ExtrasJSON,
+			DeferredFromTaskID: toPgtypeUUID(task.DeferredFromTaskID),
 			DueAt:              toPgtypeTimestamptz(task.DueAt),
+			FollowUpAt:         toPgtypeTimestamptz(task.FollowUpAt),
 		})
 		if err != nil {
 			return mapErr(err)

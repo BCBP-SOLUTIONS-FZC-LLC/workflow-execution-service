@@ -103,11 +103,15 @@ type DeferTaskOutput struct {
 }
 
 // UpdateInstanceStatusInput.CompletedAt is nil for a non-terminal status.
+// FailedBranches is set only for a Degraded transition (workflow.instance.
+// degraded's own payload) — the parallel-aggregation join is the only
+// caller with this data available (internal/workflow/degraded.go).
 type UpdateInstanceStatusInput struct {
-	InstanceID  string
-	TenantID    string
-	Status      domain.InstanceStatus
-	CompletedAt *time.Time
+	InstanceID     string
+	TenantID       string
+	Status         domain.InstanceStatus
+	CompletedAt    *time.Time
+	FailedBranches []domain.FailedBranch
 }
 
 // RecordForceRouteInput.OldNodeKeys must be captured before

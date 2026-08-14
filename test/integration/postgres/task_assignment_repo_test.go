@@ -104,7 +104,7 @@ func TestTaskAssignmentRepo_Complete(t *testing.T) {
 	assignment := newTaskAssignment(tenantA, task.ID, uuid.New())
 	require.NoError(t, assignmentRepo.Create(ctx, assignment))
 
-	completed, err := assignmentRepo.Complete(ctx, tenantA, assignment.ID, json.RawMessage(`{"outcome":"approved"}`))
+	completed, err := assignmentRepo.Complete(ctx, tenantA, assignment.ID, json.RawMessage(`{"outcome":"approved"}`), task.RecordVersion)
 	require.NoError(t, err)
 	assert.False(t, completed.IsActive)
 	assert.NotNil(t, completed.CompletedAt)
@@ -113,6 +113,35 @@ func TestTaskAssignmentRepo_Complete(t *testing.T) {
 	byTask, err := assignmentRepo.ListActiveByTask(ctx, tenantA, task.ID)
 	require.NoError(t, err)
 	assert.Empty(t, byTask, "a completed assignment is no longer active")
+}
+
+// TestTaskAssignmentRepo_Complete_StaleTaskRecordVersion is the regression
+// test for the missing-record-version-guard finding: Complete now bumps
+// workflow_task.record_version as its optimistic-concurrency guard (the LLD
+// frames the task, not the assignment, as claim/complete's contested
+// resource), so a stale version must be rejected as a real conflict.
+func TestTaskAssignmentRepo_Complete_StaleTaskRecordVersion(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	instanceRepo := postgres.NewInstanceRepo(appPool)
+	taskRepo := postgres.NewTaskRepo(appPool)
+	assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, instanceRepo.Create(ctx, inst))
+	task := newTask(tenantA, inst.ID)
+	require.NoError(t, taskRepo.Create(ctx, task))
+	assignment := newTaskAssignment(tenantA, task.ID, uuid.New())
+	require.NoError(t, assignmentRepo.Create(ctx, assignment))
+
+	staleVersion := task.RecordVersion
+	_, err := taskRepo.UpdateStatus(ctx, tenantA, task.ID, domain.TaskStatusInProgress, task.RecordVersion)
+	require.NoError(t, err, "bump the task's own record_version out from under Complete's upcoming call")
+
+	_, err = assignmentRepo.Complete(ctx, tenantA, assignment.ID, json.RawMessage(`{}`), staleVersion)
+	assert.ErrorIs(t, err, domain.ErrRecordVersionConflict)
 }
 
 func TestTaskAssignmentRepo_SetLead(t *testing.T) {
@@ -135,7 +164,7 @@ func TestTaskAssignmentRepo_SetLead(t *testing.T) {
 	second := newTaskAssignment(tenantA, task.ID, uuid.New())
 	require.NoError(t, assignmentRepo.Create(ctx, second))
 
-	promoted, err := assignmentRepo.SetLead(ctx, tenantA, task.ID, second.ID)
+	promoted, err := assignmentRepo.SetLead(ctx, tenantA, task.ID, second.ID, task.RecordVersion)
 	require.NoError(t, err)
 	assert.True(t, promoted.IsLead)
 

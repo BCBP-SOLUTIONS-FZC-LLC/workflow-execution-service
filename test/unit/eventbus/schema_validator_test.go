@@ -111,7 +111,7 @@ var allEvents = []eventCase{
 		name:      "workflow.task.created",
 		eventType: domain.EventWorkflowTaskCreated,
 		payload: func() any {
-			return domain.NewWorkflowTaskCreatedPayload(testCore(), testTaskCore(), "review", nil, nil)
+			return domain.NewWorkflowTaskCreatedPayload(testCore(), testTaskCore(), "review", nil, nil, nil, nil)
 		},
 		dropField: "stage_type",
 	},

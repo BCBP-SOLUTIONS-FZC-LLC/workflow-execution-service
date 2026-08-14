@@ -221,6 +221,17 @@ type stageTransitionWire struct {
 	Reason        string
 }
 
+// stageFailWire mirrors internal/workflow's unexported stageFailSignal
+// payload shape — its snake_case json tags, specifically, since that struct
+// (unlike stageTransitionSignal above) has real tags to match by.
+type stageFailWire struct {
+	DeptID        string `json:"dept_id"`
+	NodeID        string `json:"node_id"`
+	ConnectorType string `json:"connector_type"`
+	ErrorClass    string `json:"error_class"`
+	RecordVersion int64  `json:"record_version"`
+}
+
 // adminSignalWire mirrors internal/workflow's unexported adminSignal payload.
 type adminSignalWire struct {
 	AdminUserID   string

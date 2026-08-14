@@ -65,9 +65,6 @@ func validateSignal(status domain.InstanceStatus, signal string) error {
 }
 
 // stageTransitionSignal is the payload of SignalStageTransition (LLD §3.1).
-// SignalStageFail reuses this same shape (Failed/Reason set, ResultJSON
-// left empty) rather than a parallel struct, since both resolve against the
-// same resolveCh in runTaskStage.
 type stageTransitionSignal struct {
 	DeptID        string
 	ToStage       string
@@ -77,6 +74,24 @@ type stageTransitionSignal struct {
 	RecordVersion int64
 	Failed        bool
 	Reason        string
+}
+
+// stageFailSignal is the wire payload of SignalStageFail — execution_service.md
+// §3.1's documented shape, snake_case json tags included. A dedicated struct
+// rather than reusing stageTransitionSignal: no sender exists anywhere yet
+// (cmd/connector-worker, this signal's only intended caller, isn't built),
+// so there is no wire format to preserve here — unlike
+// SignalStageTransition, which has real replay history and must not have
+// its own wire encoding touched. handleStageFail converts this into a
+// stageTransitionSignal internally so runTaskStage's resolution/pending-map
+// machinery (typed against stageTransitionSignal, with real replay history
+// of its own) needs no changes at all.
+type stageFailSignal struct {
+	DeptID        string `json:"dept_id"`
+	NodeID        string `json:"node_id"`
+	ConnectorType string `json:"connector_type"`
+	ErrorClass    string `json:"error_class"`
+	RecordVersion int64  `json:"record_version"`
 }
 
 // stageDeferSignal is the payload of SignalStageDefer (LLD §3.1).
@@ -138,7 +153,7 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 
 	failCh := wf.GetSignalChannel(ctx, SignalStageFail+":"+in.instanceID)
 	sel.AddReceive(failCh, func(c wf.ReceiveChannel, more bool) {
-		var sig stageTransitionSignal
+		var sig stageFailSignal
 		c.Receive(ctx, &sig)
 		in.handleStageFail(ctx, sig)
 	})
@@ -207,21 +222,25 @@ func (in *interpreter) handleStageTransition(ctx wf.Context, sig stageTransition
 // runTaskStage call is (or isn't yet) waiting on this node — the same
 // task-level correlation pattern handleStageTransition uses above, not the
 // instance-wide adminSignal pattern pause/resume/cancel use, since a
-// stage-fail signal always targets one specific in-flight task.
-func (in *interpreter) handleStageFail(ctx wf.Context, sig stageTransitionSignal) {
+// stage-fail signal always targets one specific in-flight task. Converts the
+// wire-shaped stageFailSignal into a stageTransitionSignal (Failed=true,
+// Reason=sig.ErrorClass) so runTaskStage's resolution/pending-map machinery
+// — typed against stageTransitionSignal, with real replay history of its
+// own — needs no changes for this. ConnectorType isn't consumed here:
+// runTaskStage's resolution doesn't need it, only the sender did.
+func (in *interpreter) handleStageFail(ctx wf.Context, sig stageFailSignal) {
 	if err := validateSignal(in.status, SignalStageFail); err != nil {
 		wf.GetLogger(ctx).Warn("dropping stage-fail signal", "error", err)
 		return
 	}
-	sig.Failed = true
-	key := domain.NodeKey(sig.DeptID + "/" + sig.NodeID)
-	if sig.NodeID == "" {
-		key = domain.NodeKey(sig.DeptID + "/" + sig.ToStage)
+	transition := stageTransitionSignal{
+		DeptID: sig.DeptID, NodeID: sig.NodeID, Failed: true, Reason: sig.ErrorClass, RecordVersion: sig.RecordVersion,
 	}
+	key := domain.NodeKey(sig.DeptID + "/" + sig.NodeID)
 	if ch, ok := in.pending[key]; ok {
-		ch.Send(ctx, sig)
+		ch.Send(ctx, transition)
 	} else {
-		in.pendingSignals[key] = sig
+		in.pendingSignals[key] = transition
 	}
 }
 
