@@ -25,16 +25,17 @@ import (
 // pre-existing "="-prefix gap here, out of scope for this activity).
 //
 // Idempotent under Temporal's at-least-once activity retry: task.ID is
-// deterministic (derived from instanceID+NodeKey, the standard
-// idempotent-side-effect pattern for a Temporal Activity), so a retried
-// attempt after a lost ack re-derives the same ID and its INSERT hits its
-// own primary key — mapErr classifies that as domain.ErrAlreadyExists, and
-// this activity treats it as "already created" by fetching and returning
-// the existing row, rather than a real conflict. A business-key unique
-// constraint (instance+NodeKey) was considered and rejected: DeferTask's
-// regression task deliberately reuses its original task's own NodeKey
-// (assignment.go's createRegressionTask), which a business-key constraint
-// would incorrectly reject as a duplicate.
+// deterministic (derived from instanceID+NodeKey+VisitCount — see
+// deterministicTaskID's own doc comment for why VisitCount is needed
+// alongside NodeKey, not NodeKey alone), so a retried attempt after a lost
+// ack re-derives the same ID and its INSERT hits its own primary key —
+// mapErr classifies that as domain.ErrAlreadyExists, and this activity
+// treats it as "already created" by fetching and returning the existing
+// row, rather than a real conflict. A business-key unique constraint
+// (instance+NodeKey) was considered and rejected: DeferTask's regression
+// task deliberately reuses its original task's own NodeKey (assignment.go's
+// createRegressionTask), which a business-key constraint would incorrectly
+// reject as a duplicate.
 func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
@@ -50,7 +51,7 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 		return port.CreateTaskOutput{}, nonRetryable("ValidationError", fmt.Errorf("unmarshal compiled node: %w", err))
 	}
 
-	taskID := deterministicTaskID(instanceID, string(in.NodeKey))
+	taskID := deterministicTaskID(instanceID, string(in.NodeKey), in.VisitCount)
 	task := &domain.Task{
 		ID:                 taskID,
 		TenantID:           tenantID,

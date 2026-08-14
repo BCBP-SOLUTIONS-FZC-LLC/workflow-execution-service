@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	pgdomain "github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/domain"
@@ -48,13 +49,20 @@ func deptIDFromNodeKey(nodeKey string) string {
 }
 
 // deterministicTaskID derives CreateTask's workflow_task.id from stable,
-// replay-safe inputs (instanceID+NodeKey), the standard idempotent-side-effect
-// pattern for a Temporal Activity: a retried attempt after a lost ack
-// re-derives the exact same ID, so its INSERT hits its own primary key
-// instead of creating a second real task row (mapErr classifies that
-// conflict as domain.ErrAlreadyExists — see CreateTask's own doc comment).
-func deterministicTaskID(instanceID uuid.UUID, nodeKey string) uuid.UUID {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:task:"+instanceID.String()+"/"+nodeKey))
+// replay-safe inputs: instanceID+NodeKey+visitCount. visitCount (the
+// interpreter's own per-NodeKey counter, internal/workflow/stage.go)
+// disambiguates a legitimate revisit of the same node from a Temporal
+// retry of the same CreateTask call: a retried attempt after a lost ack
+// replays the identical visitCount (workflow code hasn't advanced), so its
+// INSERT hits its own primary key and is treated as "already created" (see
+// this file's mapErr classification of domain.ErrAlreadyExists); a genuine
+// revisit — an exclusive gateway's back-edge (dispatch.go's
+// runExclusiveRevert) or an admin instance-force-back signal re-running
+// runTaskStage for a NodeKey already seen earlier in this instance — is a
+// distinct call with visitCount incremented, so it derives a different ID
+// and creates a real second task instead of silently no-oping.
+func deterministicTaskID(instanceID uuid.UUID, nodeKey string, visitCount int64) uuid.UUID {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:task:"+instanceID.String()+"/"+nodeKey+"/"+strconv.FormatInt(visitCount, 10)))
 }
 
 // deterministicAssignmentID derives a task assignment's id from its (already
@@ -67,9 +75,11 @@ func deterministicAssignmentID(taskID, userID uuid.UUID) uuid.UUID {
 // deterministicRegressionTaskID derives DeferTask's regression task's id
 // from the deferred task's own ID — same idempotent-retry rationale as
 // deterministicTaskID, but keyed off the source task rather than
-// instance+NodeKey, since a regression task deliberately reuses its
-// original task's own NodeKey (createRegressionTask), which
-// deterministicTaskID would collide on.
+// instance+NodeKey+visitCount: a given node can legitimately be deferred
+// more than once across a workflow's lifetime, but each defer operates on
+// a distinct predecessor task ID (the previous regression task created by
+// the prior defer), so deferred.ID is already unique per defer-lineage
+// step without needing its own visit counter.
 func deterministicRegressionTaskID(deferredTaskID uuid.UUID) uuid.UUID {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:regression-task:"+deferredTaskID.String()))
 }

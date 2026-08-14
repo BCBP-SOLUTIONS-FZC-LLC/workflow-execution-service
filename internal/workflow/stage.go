@@ -59,6 +59,7 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, stag
 	if err != nil {
 		return nodeKey, fmt.Errorf("workflow: marshaling stage %q: %w", nodeKey, err)
 	}
+	in.taskVisits[nodeKey]++
 	out, err := createTask(ctx, port.CreateTaskInput{
 		InstanceID:   in.instanceID,
 		TenantID:     in.tenantID,
@@ -66,6 +67,7 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, stag
 		CompiledNode: compiledNode,
 		ContextJSON:  in.contextJSON,
 		OverrideMap:  in.overrideMap,
+		VisitCount:   in.taskVisits[nodeKey],
 	})
 	if err != nil {
 		return nodeKey, err

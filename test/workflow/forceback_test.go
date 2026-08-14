@@ -87,6 +87,69 @@ func TestExecute_BaseForceBackRegressesAndContinues(t *testing.T) {
 	}
 }
 
+// TestExecute_ForceBackRevisit_GetsDistinctTaskID is the regression test for
+// a real bug found in the deterministic-task-ID idempotency fix's own
+// review: CreateTaskActivity derives workflow_task.id from
+// instanceID+NodeKey+VisitCount specifically so that a legitimate revisit
+// of an already-seen node (this force-back scenario) gets a genuinely new
+// ID, distinct from the first visit — not the same one, which would make
+// the second CreateTask call silently a no-op (ErrAlreadyExists) and hang
+// the workflow waiting on a task that was never actually created.
+func TestExecute_ForceBackRevisit_GetsDistinctTaskID(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := twoDeptCollaboration()
+	var visitCounts []int64
+	registerFakeActivities(env, collab, &activityHooks{
+		createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			if in.NodeKey == "deptA/prep" {
+				visitCounts = append(visitCounts, in.VisitCount)
+			}
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		},
+	})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+		})
+	}, time.Millisecond)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetDeptID: "deptA", TargetNodeKey: "deptA/prep", RecordVersion: 1,
+		})
+	}, 5*time.Millisecond)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+		})
+	}, 10*time.Millisecond)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+		})
+	}, 15*time.Millisecond)
+
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+	})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+
+	if len(visitCounts) != 2 {
+		t.Fatalf("deptA/prep's CreateTask was called %d times; want 2 (original + force-back revisit)", len(visitCounts))
+	}
+	if visitCounts[0] == visitCounts[1] {
+		t.Fatalf("both deptA/prep visits got the same VisitCount (%d) — a real revisit must be distinguishable from a retry", visitCounts[0])
+	}
+}
+
 func threeDeptCollaboration() *dsl.CompiledCollaboration {
 	return &dsl.CompiledCollaboration{
 		MainPlan: "main",

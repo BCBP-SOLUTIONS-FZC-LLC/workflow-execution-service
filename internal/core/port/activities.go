@@ -48,6 +48,12 @@ type GetCompiledPlanOutput struct {
 	Collaboration dsl.CompiledCollaboration
 }
 
+// CreateTaskInput.VisitCount is the interpreter's own per-NodeKey counter
+// (internal/workflow/stage.go), incremented once per runTaskStage call for
+// that NodeKey — disambiguates a legitimate revisit of an already-seen node
+// (an exclusive-gateway back-edge or admin force-back) from a Temporal
+// at-least-once retry of the same call, both of which would otherwise
+// derive the identical task ID from InstanceID+NodeKey alone.
 type CreateTaskInput struct {
 	InstanceID   string
 	TenantID     string
@@ -55,6 +61,7 @@ type CreateTaskInput struct {
 	CompiledNode json.RawMessage
 	ContextJSON  string
 	OverrideMap  map[string]string
+	VisitCount   int64
 }
 
 type CreateTaskOutput struct {

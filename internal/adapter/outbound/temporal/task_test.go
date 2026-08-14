@@ -143,6 +143,35 @@ func TestCreateTask_RetriedCall_IsIdempotent(t *testing.T) {
 	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.created")
 }
 
+// TestCreateTask_DifferentVisitCount_CreatesDistinctTask is the regression
+// test for a real bug found reviewing the retry-idempotency fix above: a
+// legitimate revisit of the same NodeKey (an exclusive-gateway back-edge or
+// admin force-back, internal/workflow's own VisitCount counter incrementing)
+// must NOT be treated as a retry of the same call — it needs its own real
+// task, not a silent no-op against the first visit's row.
+func TestCreateTask_DifferentVisitCount_CreatesDistinctTask(t *testing.T) {
+	deps, tasks, _, outbox := newTestDeps()
+	stage := dsl.StageDef{Type: "review", DefaultAssignees: []string{uuid.New().String()}}
+	compiled, err := json.Marshal(stage)
+	require.NoError(t, err)
+
+	instanceID := uuid.New().String()
+	firstVisit := port.CreateTaskInput{
+		InstanceID: instanceID, TenantID: uuid.New().String(), NodeKey: "sales/review", CompiledNode: compiled, VisitCount: 1,
+	}
+	secondVisit := firstVisit
+	secondVisit.VisitCount = 2
+
+	out1, err := deps.CreateTask(context.Background(), firstVisit)
+	require.NoError(t, err)
+	out2, err := deps.CreateTask(context.Background(), secondVisit)
+	require.NoError(t, err, "a genuine revisit (different VisitCount) must succeed, not be swallowed as an idempotent retry")
+
+	assert.NotEqual(t, out1.TaskID, out2.TaskID, "a revisit must get its own distinct task ID, not collide with the first visit's")
+	assert.Len(t, tasks.byID, 2, "a revisit must create a second real workflow_task row")
+	assert.Len(t, outbox.enqueued, 2, "a revisit must enqueue its own workflow.task.created, not be silently dropped")
+}
+
 func TestCreateTask_InvalidTenantID_IsNonRetryable(t *testing.T) {
 	deps, _, _, _ := newTestDeps()
 	compiled, err := json.Marshal(dsl.StageDef{Type: "review"})

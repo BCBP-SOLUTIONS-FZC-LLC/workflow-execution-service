@@ -68,6 +68,16 @@ type interpreter struct {
 	// its runTaskStage call has registered in pending.
 	pendingSignals map[domain.NodeKey]stageTransitionSignal
 
+	// taskVisits counts runTaskStage calls per NodeKey within this
+	// instance's lifetime — CreateTaskInput.VisitCount's source. A node
+	// revisited via an exclusive-gateway back-edge (dispatch.go's
+	// runExclusiveRevert) or an admin instance-force-back signal gets a
+	// fresh count, so CreateTaskActivity's deterministic task ID
+	// (instanceID+NodeKey+VisitCount) distinguishes that legitimate second
+	// task from a Temporal at-least-once retry of the same runTaskStage
+	// call, which always replays the same count.
+	taskVisits map[domain.NodeKey]int64
+
 	// pauseGates: department -> one-shot resume channel for a branch paused
 	// by an active-parallel-gateway force-back (LLD §2.7).
 	pauseGates map[string]wf.Channel
@@ -96,6 +106,7 @@ func newInterpreter(tenantID, instanceID, initialContextJSON string, collab *dsl
 		overrideMap:    overrideMap,
 		pending:        make(map[domain.NodeKey]wf.Channel),
 		pendingSignals: make(map[domain.NodeKey]stageTransitionSignal),
+		taskVisits:     make(map[domain.NodeKey]int64),
 		pauseGates:     make(map[string]wf.Channel),
 		status:         domain.InstanceStatusRunning,
 	}
