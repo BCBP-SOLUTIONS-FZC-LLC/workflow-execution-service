@@ -46,3 +46,30 @@ func deptIDFromNodeKey(nodeKey string) string {
 	deptID, _, _ := strings.Cut(nodeKey, "/")
 	return deptID
 }
+
+// deterministicTaskID derives CreateTask's workflow_task.id from stable,
+// replay-safe inputs (instanceID+NodeKey), the standard idempotent-side-effect
+// pattern for a Temporal Activity: a retried attempt after a lost ack
+// re-derives the exact same ID, so its INSERT hits its own primary key
+// instead of creating a second real task row (mapErr classifies that
+// conflict as domain.ErrAlreadyExists — see CreateTask's own doc comment).
+func deterministicTaskID(instanceID uuid.UUID, nodeKey string) uuid.UUID {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:task:"+instanceID.String()+"/"+nodeKey))
+}
+
+// deterministicAssignmentID derives a task assignment's id from its (already
+// deterministic) task ID and the assignee — same idempotent-retry rationale
+// as deterministicTaskID.
+func deterministicAssignmentID(taskID, userID uuid.UUID) uuid.UUID {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:assignment:"+taskID.String()+"/"+userID.String()))
+}
+
+// deterministicRegressionTaskID derives DeferTask's regression task's id
+// from the deferred task's own ID — same idempotent-retry rationale as
+// deterministicTaskID, but keyed off the source task rather than
+// instance+NodeKey, since a regression task deliberately reuses its
+// original task's own NodeKey (createRegressionTask), which
+// deterministicTaskID would collide on.
+func deterministicRegressionTaskID(deferredTaskID uuid.UUID) uuid.UUID {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:regression-task:"+deferredTaskID.String()))
+}

@@ -14,12 +14,13 @@ import (
 // UpdateInstanceStatus is UpdateInstanceStatusActivity (LLD §3.1). Completed
 // enqueues workflow.instance.finished; Failed also cascades every still-open
 // task to FAILED (vacating their assignments) before enqueuing
-// workflow.instance.failed. Degraded and a Degraded->Running recovery update
-// the status column only, with no event: UpdateInstanceStatusInput carries
-// neither FailedBranches (workflow.instance.degraded's own payload) nor an
-// error class, and inventing either here would fabricate data the
-// interpreter never actually captured — a real gap in that input's shape,
-// not something to paper over unilaterally in this activity.
+// workflow.instance.failed. Degraded enqueues workflow.instance.degraded
+// (FailedBranches — internal/workflow/degraded.go is this activity's only
+// caller with that data available). A Degraded->Running recovery — the only
+// path that ever reaches this activity with Status=Running, since a plain
+// resume goes through the dedicated ResumeInstanceActivity instead — reuses
+// workflow.instance.resumed with initiator=degraded_recovery (LLD §8.2.6),
+// not a bespoke event.
 func (d *Deps) UpdateInstanceStatus(ctx context.Context, in port.UpdateInstanceStatusInput) error {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
@@ -35,6 +36,12 @@ func (d *Deps) UpdateInstanceStatus(ctx context.Context, in port.UpdateInstanceS
 		inst, err := d.Instances.GetByID(ctx, tenantID, instanceID)
 		if err != nil {
 			return fmt.Errorf("get instance: %w", err)
+		}
+		if (in.Status == domain.InstanceStatusDegraded || in.Status == domain.InstanceStatusRunning) && inst.Status == in.Status {
+			// Retry after a lost ack: a prior attempt already applied this
+			// transition and enqueued its event. No-op rather than
+			// re-enqueuing a duplicate workflow.instance.degraded/resumed.
+			return nil
 		}
 		updated, err := d.Instances.UpdateStatus(ctx, tenantID, instanceID, in.Status, inst.RecordVersion)
 		if err != nil {
@@ -58,11 +65,17 @@ func (d *Deps) UpdateInstanceStatus(ctx context.Context, in port.UpdateInstanceS
 			payload := domain.NewWorkflowInstanceFailedPayload(core, "workflow_error")
 			return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowInstanceFailed, payload)
 
-		case domain.InstanceStatusRunning, domain.InstanceStatusPaused, domain.InstanceStatusTerminated, domain.InstanceStatusDegraded:
-			// No event: Degraded/Running-from-Degraded have no input data to
-			// build a real payload from (see this method's own doc comment);
-			// Paused/Terminated/Running are never reached through this
-			// activity (they have their own dedicated activities below).
+		case domain.InstanceStatusDegraded:
+			payload := domain.NewWorkflowInstanceDegradedPayload(core, in.FailedBranches)
+			return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowInstanceDegraded, payload)
+
+		case domain.InstanceStatusRunning:
+			payload := domain.NewWorkflowInstanceResumedPayload(core, updated.StartedByUserID, domain.InitiatorDegradedRecovery, nil)
+			return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowInstanceResumed, payload)
+
+		case domain.InstanceStatusPaused, domain.InstanceStatusTerminated:
+			// No event: never reached through this activity — Paused/
+			// Terminated each have their own dedicated activity below.
 			return nil
 		default:
 			return nil
@@ -90,6 +103,15 @@ func (d *Deps) ResumeInstance(ctx context.Context, in port.ResumeInstanceInput) 
 // task FAILED (vacating their assignments), updates status to TERMINATED,
 // and writes both event classes — the per-task workflow.task.failed cascade,
 // then workflow.instance.terminated.
+//
+// Idempotent under Temporal's at-least-once activity retry: refetches the
+// instance and no-ops if it's already Terminated, rather than reusing
+// in.RecordVersion (captured once at signal-send time) for the write — a
+// retried attempt after a lost ack would otherwise replay that now-stale
+// version, hit an unclassified ErrRecordVersionConflict, and retry forever
+// (dbWriteActivityOptions has no attempt cap and doesn't match this error
+// type as non-retryable). Mirrors UpdateInstanceStatus's own existing
+// refetch-first pattern below.
 func (d *Deps) CancelInstance(ctx context.Context, in port.CancelInstanceInput) error {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
@@ -106,10 +128,17 @@ func (d *Deps) CancelInstance(ctx context.Context, in port.CancelInstanceInput) 
 
 	ctx = withTenantGUC(ctx, tenantID)
 	return d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
+		inst, err := d.Instances.GetByID(ctx, tenantID, instanceID)
+		if err != nil {
+			return fmt.Errorf("get instance: %w", err)
+		}
+		if inst.Status == domain.InstanceStatusTerminated {
+			return nil
+		}
 		if err := d.failActiveTasks(ctx, tenantID, instanceID, "instance_cancel"); err != nil {
 			return err
 		}
-		updated, err := d.Instances.UpdateStatus(ctx, tenantID, instanceID, domain.InstanceStatusTerminated, in.RecordVersion)
+		updated, err := d.Instances.UpdateStatus(ctx, tenantID, instanceID, domain.InstanceStatusTerminated, inst.RecordVersion)
 		if err != nil {
 			return fmt.Errorf("update instance status: %w", err)
 		}
@@ -121,8 +150,15 @@ func (d *Deps) CancelInstance(ctx context.Context, in port.CancelInstanceInput) 
 
 // instanceLifecycleEvent is Pause/ResumeInstanceActivity's shared shape: a
 // version-checked status update followed by one instance-lifecycle event.
+//
+// recordVersion is accepted but no longer used to guard the write — see
+// CancelInstance's doc comment above for why: refetching and no-oping on an
+// already-applied transition is what makes this idempotent under ordinary
+// Temporal retry, exactly matching UpdateInstanceStatus's own established
+// pattern in this same file. Kept as a parameter so PauseInstanceInput/
+// ResumeInstanceInput's shape doesn't need to change for this fix.
 func (d *Deps) instanceLifecycleEvent(
-	ctx context.Context, instanceIDStr, tenantIDStr string, recordVersion int64, status domain.InstanceStatus,
+	ctx context.Context, instanceIDStr, tenantIDStr string, _ int64, status domain.InstanceStatus,
 	buildPayload func(core domain.CommonCore, startedByUserID uuid.UUID) any, eventType string,
 ) error {
 	tenantID, err := uuid.Parse(tenantIDStr)
@@ -136,7 +172,14 @@ func (d *Deps) instanceLifecycleEvent(
 
 	ctx = withTenantGUC(ctx, tenantID)
 	return d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
-		updated, err := d.Instances.UpdateStatus(ctx, tenantID, instanceID, status, recordVersion)
+		inst, err := d.Instances.GetByID(ctx, tenantID, instanceID)
+		if err != nil {
+			return fmt.Errorf("get instance: %w", err)
+		}
+		if inst.Status == status {
+			return nil
+		}
+		updated, err := d.Instances.UpdateStatus(ctx, tenantID, instanceID, status, inst.RecordVersion)
 		if err != nil {
 			return fmt.Errorf("update instance status: %w", err)
 		}
@@ -206,6 +249,13 @@ func (d *Deps) enqueueInstanceEvent(ctx context.Context, tenantID, instanceID uu
 	return nil
 }
 
+// adminUserIDPtr resolves a Pause/ResumeInstancePayload's actor. Unlike
+// every ID field this package validates strictly (invalid → nonRetryable
+// ValidationError), an unparseable AdminUserID here deliberately degrades
+// to a nil actor rather than failing the pause/resume — recording "no
+// specific admin identified" is preferable to blocking an otherwise-valid
+// operational pause/resume over an ID-formatting issue in an audit field.
+// Asserted directly by TestPauseInstance_InvalidAdminUserID_TreatedAsNilActor.
 func adminUserIDPtr(s string) *uuid.UUID {
 	id, err := uuid.Parse(s)
 	if err != nil {

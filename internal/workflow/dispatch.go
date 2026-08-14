@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	wf "go.temporal.io/sdk/workflow"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
@@ -165,6 +166,19 @@ func deptFromNodeKey(key domain.NodeKey) string {
 		return s[:i]
 	}
 	return s
+}
+
+// deptUUID derives a stable, deterministic UUID from a compiled plan's
+// DepartmentDef.ID — today a display-slug lane name, never a real IAM
+// department UUID (a still-open item in definition_service's own compiler,
+// documented in execution_service LLD §4.3). Mirrors
+// internal/adapter/outbound/temporal/helpers.go's own deptUUID
+// byte-for-byte — this package cannot import that one, and the two must
+// derive identically so the same department slug always yields the same
+// UUID regardless of which package computes it. Used only for
+// FailedBranch.DepartmentID (workflow.instance.degraded).
+func deptUUID(deptID string) uuid.UUID {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:department:"+deptID))
 }
 
 // currentPendingNode returns deptID's currently in-flight task-stage node

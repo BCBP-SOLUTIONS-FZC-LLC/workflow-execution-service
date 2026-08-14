@@ -2,6 +2,7 @@ package temporal_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -87,6 +88,25 @@ func TestPauseInstance_UpdatesStatusAndEnqueuesPaused(t *testing.T) {
 	assert.Equal(t, domain.EventWorkflowInstancePaused, outbox.enqueued[0].Type)
 }
 
+// TestPauseInstance_RetriedCall_NoOp is the regression test for the
+// retry-forever finding: PauseInstance no longer trusts in.RecordVersion —
+// a retry (instance already Paused from a prior attempt, current
+// RecordVersion now past the stale input value) must no-op rather than
+// hit a version conflict and retry forever.
+func TestPauseInstance_RetriedCall_NoOp(t *testing.T) {
+	instanceID, tenantID := uuid.New(), uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1, Status: domain.InstanceStatusRunning}
+	deps, outbox := newInstanceTestDeps(inst, nil, nil)
+
+	in := port.PauseInstanceInput{InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), RecordVersion: 1}
+
+	require.NoError(t, deps.PauseInstance(context.Background(), in))
+	require.NoError(t, deps.PauseInstance(context.Background(), in), "a retried PauseInstance must succeed idempotently, not error")
+
+	assert.Equal(t, domain.InstanceStatusPaused, inst.Status)
+	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.instance.paused")
+}
+
 func TestResumeInstance_UpdatesStatusAndEnqueuesResumed(t *testing.T) {
 	instanceID, tenantID := uuid.New(), uuid.New()
 	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1, Status: domain.InstanceStatusPaused}
@@ -119,15 +139,70 @@ func TestCancelInstance_CascadesAndTerminates(t *testing.T) {
 	assert.Equal(t, domain.EventWorkflowInstanceTerminated, outbox.enqueued[1].Type)
 }
 
-func TestUpdateInstanceStatus_Degraded_NoEventWritten(t *testing.T) {
+// TestUpdateInstanceStatus_Degraded_EnqueuesDegradedEvent is the regression
+// test for the missing-DEGRADED-event finding: this transition must now
+// build and enqueue workflow.instance.degraded, carrying the FailedBranches
+// internal/workflow/degraded.go passes in.
+func TestUpdateInstanceStatus_Degraded_EnqueuesDegradedEvent(t *testing.T) {
 	instanceID, tenantID := uuid.New(), uuid.New()
 	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1}
+	deps, outbox := newInstanceTestDeps(inst, nil, nil)
+	deptID := uuid.New()
+
+	err := deps.UpdateInstanceStatus(context.Background(), port.UpdateInstanceStatusInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), Status: domain.InstanceStatusDegraded,
+		FailedBranches: []domain.FailedBranch{{DepartmentID: deptID, LastNodeKey: "legal_review/approve"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, domain.InstanceStatusDegraded, inst.Status)
+	require.Len(t, outbox.enqueued, 1)
+	assert.Equal(t, domain.EventWorkflowInstanceDegraded, outbox.enqueued[0].Type)
+
+	var payload domain.WorkflowInstanceDegradedPayload
+	require.NoError(t, json.Unmarshal(outbox.enqueued[0].Payload, &payload))
+	require.Len(t, payload.FailedBranches, 1)
+	assert.Equal(t, deptID, payload.FailedBranches[0].DepartmentID)
+	assert.Equal(t, "legal_review/approve", payload.FailedBranches[0].LastNodeKey)
+}
+
+// TestUpdateInstanceStatus_Degraded_RetriedCall_NoOp is the idempotency
+// regression test for the same fix: a retried call after the instance is
+// already Degraded must no-op rather than re-enqueuing a duplicate event.
+func TestUpdateInstanceStatus_Degraded_RetriedCall_NoOp(t *testing.T) {
+	instanceID, tenantID := uuid.New(), uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1, Status: domain.InstanceStatusDegraded}
 	deps, outbox := newInstanceTestDeps(inst, nil, nil)
 
 	err := deps.UpdateInstanceStatus(context.Background(), port.UpdateInstanceStatusInput{
 		InstanceID: instanceID.String(), TenantID: tenantID.String(), Status: domain.InstanceStatusDegraded,
 	})
 	require.NoError(t, err)
-	assert.Equal(t, domain.InstanceStatusDegraded, inst.Status)
-	assert.Empty(t, outbox.enqueued, "Degraded has no input data to build a real payload from")
+	assert.Empty(t, outbox.enqueued, "retry must not re-enqueue workflow.instance.degraded")
+}
+
+// TestUpdateInstanceStatus_Running_EnqueuesDegradedRecoveryResumed is the
+// regression test for the Degraded->Running recovery half of the same
+// finding: this is the only path that ever reaches this activity with
+// Status=Running (a plain resume goes through ResumeInstanceActivity
+// instead), and must now reuse workflow.instance.resumed with
+// initiator=degraded_recovery rather than staying silent.
+func TestUpdateInstanceStatus_Running_EnqueuesDegradedRecoveryResumed(t *testing.T) {
+	instanceID, tenantID := uuid.New(), uuid.New()
+	startedBy := uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1, Status: domain.InstanceStatusDegraded, StartedByUserID: startedBy}
+	deps, outbox := newInstanceTestDeps(inst, nil, nil)
+
+	err := deps.UpdateInstanceStatus(context.Background(), port.UpdateInstanceStatusInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), Status: domain.InstanceStatusRunning,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, domain.InstanceStatusRunning, inst.Status)
+	require.Len(t, outbox.enqueued, 1)
+	assert.Equal(t, domain.EventWorkflowInstanceResumed, outbox.enqueued[0].Type)
+
+	var payload domain.WorkflowInstanceResumedPayload
+	require.NoError(t, json.Unmarshal(outbox.enqueued[0].Payload, &payload))
+	assert.Equal(t, domain.InitiatorDegradedRecovery, payload.Initiator)
+	assert.Equal(t, startedBy, payload.StartedByUserID)
+	assert.Nil(t, payload.ActorUserID)
 }

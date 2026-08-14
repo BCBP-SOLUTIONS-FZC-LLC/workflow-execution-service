@@ -26,3 +26,12 @@ UPDATE workflow_task
 SET status = $2, updated_at = now(), record_version = record_version + 1
 WHERE id = $1 AND record_version = $3
 RETURNING *;
+
+-- name: BumpWorkflowTaskRecordVersion :one
+-- Optimistic-concurrency guard for TaskAssignmentRepository.Complete/SetLead:
+-- the LLD frames the task, not the assignment (which carries no
+-- record_version of its own), as claim/complete's contested resource.
+UPDATE workflow_task
+SET updated_at = now(), record_version = record_version + 1
+WHERE id = $1 AND record_version = $2
+RETURNING *;

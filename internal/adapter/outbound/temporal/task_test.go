@@ -115,6 +115,34 @@ func TestCreateTask_OverrideMapReplacesDefaultAssignee(t *testing.T) {
 	assert.Equal(t, []uuid.UUID{overrideUser}, gotUserIDs)
 }
 
+// TestCreateTask_RetriedCall_IsIdempotent is the regression test for the
+// missing-idempotency-key finding: task.ID is now deterministic
+// (instanceID+NodeKey), so an at-least-once Temporal retry of the exact same
+// input — simulating a lost ack after the first attempt's commit succeeded —
+// must resolve to the same task, not a second real row and a duplicate
+// workflow.task.created event.
+func TestCreateTask_RetriedCall_IsIdempotent(t *testing.T) {
+	deps, tasks, assignments, outbox := newTestDeps()
+	stage := dsl.StageDef{Type: "review", DefaultAssignees: []string{uuid.New().String()}}
+	compiled, err := json.Marshal(stage)
+	require.NoError(t, err)
+
+	in := port.CreateTaskInput{
+		InstanceID: uuid.New().String(), TenantID: uuid.New().String(), NodeKey: "sales/review", CompiledNode: compiled,
+	}
+
+	out1, err := deps.CreateTask(context.Background(), in)
+	require.NoError(t, err)
+
+	out2, err := deps.CreateTask(context.Background(), in)
+	require.NoError(t, err, "a retried CreateTask must succeed idempotently, not error")
+
+	assert.Equal(t, out1.TaskID, out2.TaskID, "retry must resolve to the same deterministic task ID")
+	assert.Len(t, tasks.byID, 1, "retry must not create a second workflow_task row")
+	assert.Len(t, assignments.byID, 1, "retry must not create a second assignment row")
+	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.created")
+}
+
 func TestCreateTask_InvalidTenantID_IsNonRetryable(t *testing.T) {
 	deps, _, _, _ := newTestDeps()
 	compiled, err := json.Marshal(dsl.StageDef{Type: "review"})

@@ -3,6 +3,7 @@ package temporal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -22,6 +23,18 @@ import (
 // ContextJSON, mirroring internal/workflow/iomapping.go's applyIOMapping
 // literal-key-copy convention (deliberately not fixing that convention's
 // pre-existing "="-prefix gap here, out of scope for this activity).
+//
+// Idempotent under Temporal's at-least-once activity retry: task.ID is
+// deterministic (derived from instanceID+NodeKey, the standard
+// idempotent-side-effect pattern for a Temporal Activity), so a retried
+// attempt after a lost ack re-derives the same ID and its INSERT hits its
+// own primary key — mapErr classifies that as domain.ErrAlreadyExists, and
+// this activity treats it as "already created" by fetching and returning
+// the existing row, rather than a real conflict. A business-key unique
+// constraint (instance+NodeKey) was considered and rejected: DeferTask's
+// regression task deliberately reuses its original task's own NodeKey
+// (assignment.go's createRegressionTask), which a business-key constraint
+// would incorrectly reject as a duplicate.
 func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
@@ -37,8 +50,9 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 		return port.CreateTaskOutput{}, nonRetryable("ValidationError", fmt.Errorf("unmarshal compiled node: %w", err))
 	}
 
+	taskID := deterministicTaskID(instanceID, string(in.NodeKey))
 	task := &domain.Task{
-		ID:                 uuid.New(),
+		ID:                 taskID,
 		TenantID:           tenantID,
 		WorkflowInstanceID: instanceID,
 		NodeKey:            string(in.NodeKey),
@@ -78,10 +92,18 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 	ctx = withTenantGUC(ctx, tenantID)
 	err = d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
 		if err := d.Tasks.Create(ctx, task); err != nil {
+			if errors.Is(err, domain.ErrAlreadyExists) {
+				// A prior attempt already created this task (and its
+				// assignments/event) before its ack was lost — task.ID is
+				// deterministic, so this retry reproduces the exact same
+				// row. Nothing left to do; CreateTaskOutput below already
+				// carries the right (identical) TaskID.
+				return nil
+			}
 			return fmt.Errorf("create workflow_task: %w", err)
 		}
 		for _, userID := range assigneeUserIDs {
-			assignment := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID}
+			assignment := &domain.TaskAssignment{ID: deterministicAssignmentID(task.ID, userID), TenantID: tenantID, TaskID: task.ID, UserID: userID}
 			if err := d.Assignments.Create(ctx, assignment); err != nil {
 				return fmt.Errorf("create workflow_task_assignment: %w", err)
 			}
@@ -105,9 +127,13 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 }
 
 // resolveConnectorInputs resolves m.Inputs against contextJSON via a literal
-// source->target key copy — the same convention
+// source->target key copy — the same copy convention
 // internal/workflow/iomapping.go's applyIOMapping already uses for
-// callActivity inlining, deliberately not invented anew here.
+// callActivity inlining (including sharing its pre-existing "="-prefix gap,
+// deliberately not fixed here). Unlike applyIOMapping, which merges results
+// back into the full context map, this builds an isolated map containing
+// only the resolved keys — connector stages get a discrete
+// resolved_inputs blob, not a mutated context.
 func resolveConnectorInputs(contextJSON string, m *dsl.IOMapping) (map[string]any, error) {
 	vars := map[string]any{}
 	if contextJSON != "" {

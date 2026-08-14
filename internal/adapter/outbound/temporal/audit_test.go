@@ -60,6 +60,27 @@ func TestRecordSLAWarning_EnqueuesAuditEventOnly(t *testing.T) {
 	assert.Equal(t, domain.EventWorkflowTaskSLAWarning, outbox.enqueued[0].Type)
 }
 
+// TestRecordSLAWarning_RetriedCall_NoOp is the regression test for the
+// duplicate-audit-event finding: RecordSLAWarning/Breach are audit-only, so
+// nothing gates a retry on status — a retried activity (e.g. after a
+// worker restart following a successful first attempt) must not
+// double-emit workflow.task.sla-warning.
+func TestRecordSLAWarning_RetriedCall_NoOp(t *testing.T) {
+	taskID, instanceID := uuid.New(), uuid.New()
+	followUp := time.Now().UTC()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady, FollowUpAt: &followUp}
+	outbox := &fakeOutbox{}
+	deps := &outboundtemporal.Deps{
+		Tasks: newFakeTaskRepo(task), Outbox: outbox, Transactor: fakeTransactor{}, Validator: noopValidator{},
+	}
+
+	in := port.RecordSLAWarningInput{InstanceID: instanceID.String(), TenantID: uuid.New().String(), TaskID: taskID.String(), NodeKey: "sales/review"}
+
+	require.NoError(t, deps.RecordSLAWarning(context.Background(), in))
+	require.NoError(t, deps.RecordSLAWarning(context.Background(), in), "a retried RecordSLAWarning must succeed idempotently, not error")
+	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.sla-warning")
+}
+
 func TestRecordSLABreach_EnqueuesAuditEventOnly(t *testing.T) {
 	taskID, instanceID := uuid.New(), uuid.New()
 	due := time.Now().UTC()

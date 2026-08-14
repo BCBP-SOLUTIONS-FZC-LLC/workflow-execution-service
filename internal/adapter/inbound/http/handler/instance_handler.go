@@ -174,6 +174,19 @@ func (h *Handler) StartInstance(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
+	// json.RawMessage's own decode only requires context_json be some valid
+	// JSON value (a bare string or number would already pass) — it doesn't
+	// require an object. Reject early rather than letting a malformed shape
+	// reach a live workflow instance's first connector stage days later,
+	// where it would only surface as a ValidationError deep inside
+	// CreateTaskActivity's resolveConnectorInputs.
+	if len(req.ContextJSON) > 0 {
+		var obj map[string]any
+		if err := json.Unmarshal(req.ContextJSON, &obj); err != nil {
+			writeProblem(c, http.StatusBadRequest, CodeBadRequest, "context_json must be a JSON object", nil)
+			return
+		}
+	}
 
 	instance, err := h.instances.Start(c.Request.Context(), port.StartInstanceInput{
 		TenantID:          tenantID,

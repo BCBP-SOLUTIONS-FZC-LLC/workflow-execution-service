@@ -66,6 +66,9 @@ type TaskAssignmentRepository interface {
 	ListActiveByTask(ctx context.Context, tenantID, taskID uuid.UUID) ([]*domain.TaskAssignment, error)
 	ListActiveByUser(ctx context.Context, tenantID, userID uuid.UUID) ([]*domain.TaskAssignment, error)
 	Vacate(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error)
-	Complete(ctx context.Context, tenantID, id uuid.UUID, resultJSON json.RawMessage) (*domain.TaskAssignment, error)
-	SetLead(ctx context.Context, tenantID, taskID, id uuid.UUID) (*domain.TaskAssignment, error)
+	// Complete and SetLead both take taskRecordVersion — the LLD frames the
+	// task (workflow_task.record_version), not the assignment (which carries
+	// no version column of its own), as claim/complete's contested resource.
+	Complete(ctx context.Context, tenantID, id uuid.UUID, resultJSON json.RawMessage, taskRecordVersion int64) (*domain.TaskAssignment, error)
+	SetLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error)
 }

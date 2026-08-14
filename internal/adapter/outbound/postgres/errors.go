@@ -12,6 +12,8 @@ import (
 const (
 	constraintInstanceBusinessKey  = "uq_workflow_instance_business_key"
 	constraintTaskAssignmentActive = "uq_workflow_task_assignment_active"
+	constraintTaskPK               = "workflow_task_pkey"
+	constraintTaskAssignmentPK     = "workflow_task_assignment_pkey"
 )
 
 // notFoundOrVersionConflict disambiguates a zero-row optimistic-lock UPDATE
@@ -40,6 +42,13 @@ func mapErr(err error) error {
 			return domain.ErrDuplicateBusinessKey
 		case constraintTaskAssignmentActive:
 			return domain.ErrDuplicateActiveAssignment
+		case constraintTaskPK, constraintTaskAssignmentPK:
+			// A retried CreateTask/DeferTask activity (deterministic ID,
+			// derived from stable inputs so a retry reproduces it exactly)
+			// hits its own primary key on the second attempt — the intended
+			// idempotency signal, not a real conflict. Callers treat this as
+			// "already created," not an error.
+			return domain.ErrAlreadyExists
 		}
 	}
 	return err

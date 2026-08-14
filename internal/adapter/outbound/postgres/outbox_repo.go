@@ -38,6 +38,24 @@ func (r *OutboxRepo) Enqueue(ctx context.Context, env events.Envelope[json.RawMe
 	return outbox.Enqueue(ctx, tx, env) //nolint:wrapcheck
 }
 
+// ExistsForTask reports whether eventType has already been enqueued for
+// taskID — see the port.OutboxRepository doc comment for why this exists.
+func (r *OutboxRepo) ExistsForTask(ctx context.Context, eventType string, taskID uuid.UUID) (bool, error) {
+	var exists bool
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		var err error
+		exists, err = db.New(dbtx).OutboxEventExistsForTask(ctx, db.OutboxEventExistsForTaskParams{
+			EventType: eventType,
+			TaskID:    taskID.String(),
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		return nil
+	})
+	return exists, err
+}
+
 // ListByInstance reads the instance-timeline audit trail (LLD §4.5, §4.10).
 func (r *OutboxRepo) ListByInstance(
 	ctx context.Context,

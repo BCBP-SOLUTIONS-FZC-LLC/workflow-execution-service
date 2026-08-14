@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -214,13 +215,21 @@ func TestCancelInstance_InvalidIDs(t *testing.T) {
 	require.Error(t, deps.CancelInstance(context.Background(), bad))
 }
 
-func TestCancelInstance_VersionConflict(t *testing.T) {
+// TestCancelInstance_AlreadyTerminated_NoOp is the regression test for the
+// retry-forever fix: CancelInstance no longer trusts in.RecordVersion (stale
+// by the time an at-least-once Temporal retry replays it) — it refetches the
+// instance and, finding it already Terminated, no-ops instead of attempting
+// a version-guarded write that would now spuriously conflict.
+func TestCancelInstance_AlreadyTerminated_NoOp(t *testing.T) {
 	instanceID := uuid.New()
-	deps, _ := newInstanceTestDeps(&domain.Instance{ID: instanceID, RecordVersion: 5}, nil, nil)
+	inst := &domain.Instance{ID: instanceID, RecordVersion: 5, Status: domain.InstanceStatusTerminated}
+	deps, outbox := newInstanceTestDeps(inst, nil, nil)
+
 	err := deps.CancelInstance(context.Background(), port.CancelInstanceInput{
 		InstanceID: instanceID.String(), TenantID: uuid.New().String(), AdminUserID: uuid.New().String(), RecordVersion: 1,
 	})
-	require.Error(t, err)
+	require.NoError(t, err)
+	assert.Empty(t, outbox.enqueued, "no-op retry must not re-enqueue workflow.instance.terminated")
 }
 
 func TestRecordForceRoute_InvalidIDs(t *testing.T) {
@@ -346,6 +355,98 @@ func TestCompleteAssignment_AssignmentNotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestCompleteAssignment_TaskNotFound(t *testing.T) {
+	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: uuid.New(), UserID: uuid.New()}
+	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(), newFakeAssignmentRepo(assignment))
+	_, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
+		AssignmentID: assignment.ID.String(), TenantID: uuid.New().String(),
+	})
+	require.Error(t, err)
+}
+
+func TestCompleteAssignment_ListActiveByTaskFails_AlreadyCompletedNoOp(t *testing.T) {
+	task := &domain.Task{ID: uuid.New(), RecordVersion: 1}
+	now := time.Now()
+	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: task.ID, UserID: uuid.New(), CompletedAt: &now}
+	assignments := newFakeAssignmentRepo(assignment)
+	assignments.listActiveErr = errBoom
+	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
+
+	_, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
+		AssignmentID: assignment.ID.String(), TenantID: uuid.New().String(),
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errBoom))
+}
+
+func TestCompleteAssignment_ListActiveByTaskFails_AfterComplete(t *testing.T) {
+	task := &domain.Task{ID: uuid.New(), RecordVersion: 1}
+	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: task.ID, UserID: uuid.New()}
+	assignments := newFakeAssignmentRepo(assignment)
+	assignments.listActiveErr = errBoom
+	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
+
+	_, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
+		AssignmentID: assignment.ID.String(), TenantID: uuid.New().String(), ResultJSON: `{}`,
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errBoom))
+}
+
+func TestReassignAssignment_ListActiveByTaskFails(t *testing.T) {
+	task := &domain.Task{ID: uuid.New(), RecordVersion: 1}
+	assignments := newFakeAssignmentRepo()
+	assignments.listActiveErr = errBoom
+	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
+
+	err := deps.ReassignAssignment(context.Background(), port.ReassignAssignmentInput{
+		TaskID: task.ID.String(), TenantID: uuid.New().String(), OldUserID: uuid.New().String(),
+		NewUserID: uuid.New().String(), AdminUserID: uuid.New().String(),
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errBoom))
+}
+
+func TestReassignAssignment_VacateFails(t *testing.T) {
+	taskID, oldUser := uuid.New(), uuid.New()
+	task := &domain.Task{ID: taskID, RecordVersion: 1}
+	oldAssignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: oldUser}
+	assignments := newFakeAssignmentRepo(oldAssignment)
+	assignments.vacateErr = errBoom
+	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
+
+	err := deps.ReassignAssignment(context.Background(), port.ReassignAssignmentInput{
+		TaskID: taskID.String(), TenantID: uuid.New().String(), OldUserID: oldUser.String(),
+		NewUserID: uuid.New().String(), AdminUserID: uuid.New().String(),
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errBoom))
+}
+
+// TestDeferTask_RegressionAssignmentAlreadyExists_NoOp is the coverage
+// regression test for createRegressionTask's own idempotent-retry path: the
+// regression task is created fresh, but its assignment insert already
+// exists (a retry landing between the two inserts, or simply a second
+// concurrent attempt) — must return the newly-created task, not error.
+func TestDeferTask_RegressionAssignmentAlreadyExists_NoOp(t *testing.T) {
+	tenantID, deferrerID := uuid.New(), uuid.New()
+	taskID := uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), NodeKey: "sales/review", AssigneeMode: "single", RecordVersion: 1}
+	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: deferrerID}
+	tasks := newFakeTaskRepo(task)
+	assignments := newFakeAssignmentRepo(assignment)
+	assignments.createErr = domain.ErrAlreadyExists
+	deps, _ := newAssignmentTestDeps(tasks, assignments)
+
+	out, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
+		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet",
+	})
+	require.NoError(t, err)
+	_, parseErr := uuid.Parse(out.NewTaskID)
+	require.NoError(t, parseErr)
+}
+
 func TestGetCompiledPlan_InvalidVersionID_IsNonRetryable(t *testing.T) {
 	deps := &outboundtemporal.Deps{}
 	_, err := deps.GetCompiledPlan(context.Background(), port.GetCompiledPlanInput{TenantID: uuid.New().String(), VersionID: "not-a-uuid"})
@@ -386,10 +487,11 @@ func TestFailActiveTasks_UpdateStatusFails(t *testing.T) {
 }
 
 func TestClaimAssignment_SetLeadFails(t *testing.T) {
-	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: uuid.New(), UserID: uuid.New()}
+	task := &domain.Task{ID: uuid.New(), RecordVersion: 1}
+	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: task.ID, UserID: uuid.New()}
 	assignments := newFakeAssignmentRepo(assignment)
 	assignments.setLeadErr = errBoom
-	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(), assignments)
+	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
 
 	err := deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{
 		AssignmentID: assignment.ID.String(), TenantID: uuid.New().String(), UserID: assignment.UserID.String(),

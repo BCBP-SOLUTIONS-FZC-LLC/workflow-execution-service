@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -96,6 +97,12 @@ func (r *fakeTaskRepo) Create(_ context.Context, task *domain.Task) error {
 	if r.createErr != nil {
 		return r.createErr
 	}
+	if _, exists := r.byID[task.ID]; exists {
+		// Mirrors mapErr's real primary-key-conflict classification — a
+		// retried CreateTask/DeferTask activity (deterministic ID) hits its
+		// own row on a second attempt.
+		return domain.ErrAlreadyExists
+	}
 	if task.AssigneeMode == "" {
 		task.AssigneeMode = "single"
 	}
@@ -144,10 +151,18 @@ func (r *fakeTaskRepo) ListByInstance(_ context.Context, _, instanceID uuid.UUID
 // fakeAssignmentRepo is an in-memory port.TaskAssignmentRepository. createErr,
 // when set, makes Create fail — used to exercise callers' DB-failure branches.
 type fakeAssignmentRepo struct {
-	byID       map[uuid.UUID]*domain.TaskAssignment
-	createErr  error
-	setLeadErr error
-	vacateErr  error
+	byID          map[uuid.UUID]*domain.TaskAssignment
+	createErr     error
+	setLeadErr    error
+	vacateErr     error
+	completeErr   error
+	listActiveErr error
+
+	// lastCompleteVersion/lastSetLeadVersion record the taskRecordVersion
+	// each call received, for tests asserting the caller passes the freshly
+	// fetched version rather than a stale one.
+	lastCompleteVersion int64
+	lastSetLeadVersion  int64
 }
 
 func newFakeAssignmentRepo(assignments ...*domain.TaskAssignment) *fakeAssignmentRepo {
@@ -163,6 +178,9 @@ func (r *fakeAssignmentRepo) Create(_ context.Context, a *domain.TaskAssignment)
 	if r.createErr != nil {
 		return r.createErr
 	}
+	if _, exists := r.byID[a.ID]; exists {
+		return domain.ErrAlreadyExists
+	}
 	a.IsActive = true
 	r.byID[a.ID] = a
 	return nil
@@ -177,6 +195,9 @@ func (r *fakeAssignmentRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domai
 }
 
 func (r *fakeAssignmentRepo) ListActiveByTask(_ context.Context, _, taskID uuid.UUID) ([]*domain.TaskAssignment, error) {
+	if r.listActiveErr != nil {
+		return nil, r.listActiveErr
+	}
 	var out []*domain.TaskAssignment
 	for _, a := range r.byID {
 		if a.TaskID == taskID && a.IsActive {
@@ -208,17 +229,24 @@ func (r *fakeAssignmentRepo) Vacate(_ context.Context, _, id uuid.UUID) (*domain
 	return a, nil
 }
 
-func (r *fakeAssignmentRepo) Complete(_ context.Context, _, id uuid.UUID, resultJSON json.RawMessage) (*domain.TaskAssignment, error) {
+func (r *fakeAssignmentRepo) Complete(_ context.Context, _, id uuid.UUID, resultJSON json.RawMessage, taskRecordVersion int64) (*domain.TaskAssignment, error) {
+	r.lastCompleteVersion = taskRecordVersion
+	if r.completeErr != nil {
+		return nil, r.completeErr
+	}
 	a, ok := r.byID[id]
 	if !ok {
 		return nil, domain.ErrNotFound
 	}
+	now := time.Now()
 	a.IsActive = false
 	a.ResultJSON = resultJSON
+	a.CompletedAt = &now
 	return a, nil
 }
 
-func (r *fakeAssignmentRepo) SetLead(_ context.Context, _, _, id uuid.UUID) (*domain.TaskAssignment, error) {
+func (r *fakeAssignmentRepo) SetLead(_ context.Context, _, _, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {
+	r.lastSetLeadVersion = taskRecordVersion
 	if r.setLeadErr != nil {
 		return nil, r.setLeadErr
 	}
@@ -247,6 +275,21 @@ func (o *fakeOutbox) Enqueue(_ context.Context, env events.Envelope[json.RawMess
 
 func (o *fakeOutbox) ListByInstance(_ context.Context, _, _ uuid.UUID, _ port.PageRequest) ([]*domain.OutboxEventRecord, *port.Cursor, error) {
 	return nil, nil, nil
+}
+
+func (o *fakeOutbox) ExistsForTask(_ context.Context, eventType string, taskID uuid.UUID) (bool, error) {
+	for _, env := range o.enqueued {
+		if env.Type != eventType {
+			continue
+		}
+		var data struct {
+			TaskID string `json:"task_id"`
+		}
+		if err := json.Unmarshal(env.Payload, &data); err == nil && data.TaskID == taskID.String() {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // fakeTransactor just runs fn directly against the given ctx — this

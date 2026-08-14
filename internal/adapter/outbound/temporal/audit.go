@@ -147,6 +147,17 @@ func (d *Deps) recordSLAEvent(
 		if err != nil {
 			return fmt.Errorf("get task: %w", err)
 		}
+		// Audit-only: no status mutation this retry could gate on, so a
+		// retried attempt checks the outbox itself for whether it already
+		// recorded this exact event for this task, rather than
+		// double-emitting workflow.task.sla-warning/sla-breached.
+		exists, err := d.Outbox.ExistsForTask(ctx, eventType, taskID)
+		if err != nil {
+			return fmt.Errorf("check existing sla event: %w", err)
+		}
+		if exists {
+			return nil
+		}
 		core := domain.CommonCore{WorkflowInstanceID: instanceID}
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID}
 		return d.enqueueInstanceEvent(ctx, tenantID, instanceID, eventType, buildPayload(core, taskCore, task))
