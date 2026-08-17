@@ -7,6 +7,7 @@ import (
 
 func setValidEnv(t *testing.T) {
 	t.Helper()
+	t.Setenv("APP_ENV", "dev")
 	t.Setenv("DATABASE_URL", "postgres://wfexec:wfexec@localhost:5432/workflow_execution?sslmode=disable")
 	t.Setenv("HTTP_PORT", "8080")
 	t.Setenv("GRPC_PORT", "9090")
@@ -65,22 +66,41 @@ func TestValidate(t *testing.T) {
 		{"aws not stubbed without sns topic", func(c *Config) { c.AWSUseStub = false; c.SNSTopicARN = "" }, true},
 		{"aws not stubbed with sns topic", func(c *Config) { c.AWSUseStub = false; c.SNSTopicARN = "arn:aws:sns:x" }, false},
 		{"definition client timeout zero", func(c *Config) { c.DefinitionClientTimeout = 0 }, true},
+		{"eligibility client timeout zero", func(c *Config) { c.EligibilityClientTimeout = 0 }, true},
+		{"iam client timeout zero", func(c *Config) { c.IAMClientTimeout = 0 }, true},
+		{"queue topology poll interval zero", func(c *Config) { c.QueueTopologyPollInterval = 0 }, true},
+		{"internal api token required in prod", func(c *Config) { c.AppEnv = "prod" }, true},
+		{"internal api token set in prod", func(c *Config) {
+			c.AppEnv = "prod"
+			c.InternalAPIToken = "tok"
+			c.OutboxRelayDatabaseURL = "postgres://relay"
+		}, false},
+		{"outbox relay database url required outside dev", func(c *Config) { c.AppEnv = "staging" }, true},
+		{"outbox relay database url set outside dev", func(c *Config) {
+			c.AppEnv = "staging"
+			c.OutboxRelayDatabaseURL = "postgres://relay"
+		}, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{
-				DatabaseURL:             "postgres://x",
-				HTTPPort:                8080,
-				GRPCPort:                9090,
-				WorkerHealthPort:        8081,
-				PGMaxConns:              10,
-				PGMinConns:              2,
-				OTELTracesSamplerRatio:  1.0,
-				OutboxBatchSize:         50,
-				OutboxPollInterval:      time.Second,
-				AWSUseStub:              true,
-				DefinitionClientTimeout: 5 * time.Second,
+				AppEnv:                    "dev",
+				DatabaseURL:               "postgres://x",
+				HTTPPort:                  8080,
+				GRPCPort:                  9090,
+				WorkerHealthPort:          8081,
+				PGMaxConns:                10,
+				PGMinConns:                2,
+				OTELTracesSamplerRatio:    1.0,
+				OutboxBatchSize:           50,
+				OutboxPollInterval:        time.Second,
+				AWSUseStub:                true,
+				GlueRegistryName:          "wf-workflow-events",
+				DefinitionClientTimeout:   5 * time.Second,
+				EligibilityClientTimeout:  5 * time.Second,
+				IAMClientTimeout:          5 * time.Second,
+				QueueTopologyPollInterval: 60 * time.Second,
 			}
 			tt.mutate(cfg)
 
@@ -101,6 +121,18 @@ func TestMigrationDSN(t *testing.T) {
 	cfg.MigrationDatabaseURL = "postgres://direct"
 	if got := cfg.MigrationDSN(); got != "postgres://direct" {
 		t.Errorf("MigrationDSN() = %q, want MigrationDatabaseURL", got)
+	}
+}
+
+func TestOutboxRelayDSN(t *testing.T) {
+	cfg := &Config{DatabaseURL: "postgres://primary"}
+	if got := cfg.OutboxRelayDSN(); got != "postgres://primary" {
+		t.Errorf("OutboxRelayDSN() = %q, want fallback to DatabaseURL", got)
+	}
+
+	cfg.OutboxRelayDatabaseURL = "postgres://relay"
+	if got := cfg.OutboxRelayDSN(); got != "postgres://relay" {
+		t.Errorf("OutboxRelayDSN() = %q, want OutboxRelayDatabaseURL", got)
 	}
 }
 
