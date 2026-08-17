@@ -49,7 +49,7 @@ func TestRepositoryMethods_SurfaceUnderlyingErrors(t *testing.T) {
 
 	t.Run("InstanceRepo.ListByTenant", func(t *testing.T) {
 		err := withCancelledTx(func(ctx context.Context) error {
-			_, _, err := instanceRepo.ListByTenant(ctx, tenantA, port.PageRequest{})
+			_, _, err := instanceRepo.ListByTenant(ctx, tenantA, port.InstanceListFilter{}, port.PageRequest{})
 			return err
 		})
 		assert.Error(t, err)

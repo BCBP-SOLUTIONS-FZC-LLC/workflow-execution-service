@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	outboundgrpc "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/grpc"
 	adapterhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
@@ -46,6 +47,8 @@ const (
 	CodeInvalidInstanceState    ErrCode = "INVALID_INSTANCE_STATE"
 	CodeForceBackNoSavedBranch  ErrCode = "FORCE_BACK_NO_SAVED_BRANCH"
 	CodeOverrideMapInvalid      ErrCode = "OVERRIDE_MAP_INVALID"
+	CodeTaskNotHumanActionable  ErrCode = "TASK_NOT_HUMAN_ACTIONABLE"
+	CodeAssigneeUnavailable     ErrCode = "ASSIGNEE_UNAVAILABLE"
 )
 
 var codeTitles = map[ErrCode]string{
@@ -80,6 +83,8 @@ var codeTitles = map[ErrCode]string{
 	CodeInvalidInstanceState:    "Invalid Instance State",
 	CodeForceBackNoSavedBranch:  "Force Back No Saved Branch",
 	CodeOverrideMapInvalid:      "Override Map Invalid",
+	CodeTaskNotHumanActionable:  "Task Not Human Actionable",
+	CodeAssigneeUnavailable:     "Assignee Unavailable",
 }
 
 const errBase = "https://errors.bcbp.io/execution/"
@@ -116,6 +121,8 @@ var problemTypes = map[ErrCode]string{
 	CodeInvalidInstanceState:    errBase + "invalid-instance-state",
 	CodeForceBackNoSavedBranch:  errBase + "force-back-no-saved-branch",
 	CodeOverrideMapInvalid:      errBase + "override-map-invalid",
+	CodeTaskNotHumanActionable:  errBase + "task-not-human-actionable",
+	CodeAssigneeUnavailable:     errBase + "assignee-unavailable",
 }
 
 type invalidParam struct {
@@ -134,19 +141,20 @@ type problemDetails struct {
 	InvalidParams []invalidParam `json:"invalid_params,omitempty"`
 }
 
-func writeProblem(c *gin.Context, status int, code ErrCode, detail string, _ any) {
+func writeProblem(c *gin.Context, status int, code ErrCode, detail string, invalidParams []invalidParam) {
 	typeURI, ok := problemTypes[code]
 	if !ok {
 		typeURI = errBase + "internal-error"
 	}
 	c.Header("Content-Type", "application/problem+json")
 	c.JSON(status, problemDetails{
-		Type:     typeURI,
-		Title:    codeTitles[code],
-		Status:   status,
-		Detail:   detail,
-		Instance: c.Request.URL.Path,
-		Code:     code,
+		Type:          typeURI,
+		Title:         codeTitles[code],
+		Status:        status,
+		Detail:        detail,
+		Instance:      c.Request.URL.Path,
+		Code:          code,
+		InvalidParams: invalidParams,
 	})
 }
 
@@ -160,7 +168,23 @@ func bindErrResponse(c *gin.Context, err error) {
 
 func errResponse(c *gin.Context, err error) {
 	status, code, detail := mapErr(err)
-	writeProblem(c, status, code, detail, nil)
+	writeProblem(c, status, code, detail, invalidParamsFor(err))
+}
+
+// invalidParamsFor extracts the invalid_params list (LLD §5.5 step 3: "naming
+// every offending node in one payload") from error types that carry one —
+// today, only *port.AssigneeIneligibleError. Every other error returns nil,
+// which problemDetails.InvalidParams (omitempty) simply omits.
+func invalidParamsFor(err error) []invalidParam {
+	var ineligible *port.AssigneeIneligibleError
+	if errors.As(err, &ineligible) {
+		params := make([]invalidParam, len(ineligible.Nodes))
+		for i, node := range ineligible.Nodes {
+			params[i] = invalidParam{Name: node, Reason: "assignee ineligible", Code: CodeAssigneeIneligible}
+		}
+		return params
+	}
+	return nil
 }
 
 func mapErr(err error) (status int, code ErrCode, detail string) {
@@ -209,7 +233,21 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusUnprocessableEntity, CodeOverrideMapInvalid, err.Error()
 	case errors.Is(err, port.ErrAssigneeIneligible):
 		return http.StatusUnprocessableEntity, CodeAssigneeIneligible, err.Error()
+	case errors.Is(err, port.ErrTaskNotHumanActionable):
+		return http.StatusConflict, CodeTaskNotHumanActionable, err.Error()
+	case errors.Is(err, port.ErrAssigneeUnavailable):
+		return http.StatusConflict, CodeAssigneeUnavailable, err.Error()
 	case errors.Is(err, adapterhttp.ErrUpstreamUnavailable):
+		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, err.Error()
+	// The Definition Service gRPC client's own two sentinels (retries-
+	// exhausted vs. a non-retryable rejection on the first attempt) are
+	// distinct in outboundgrpc's own doc comment, but this catalogue has no
+	// narrower code for "upstream actively rejected the call" than
+	// UPSTREAM_UNAVAILABLE (LLD §5.10) — mapping both here is strictly
+	// better than the 500 either previously fell through to.
+	case errors.Is(err, outboundgrpc.ErrUpstreamUnavailable):
+		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, err.Error()
+	case errors.Is(err, outboundgrpc.ErrUpstreamRejected):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, err.Error()
 	case errors.Is(err, context.DeadlineExceeded):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "request timed out"

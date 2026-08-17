@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	definitionv1 "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/gen/proto/workflow/definition/v1"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
 // ErrUpstreamUnavailable is retries-exhausted-or-cancelled-during-backoff —
@@ -32,14 +33,7 @@ const maxCallAttempts = 3
 // maxMessageSizeBytes matches the platform's HTTP body-size cap (LLD §5.10, §9.3).
 const maxMessageSizeBytes = 10 << 20 // 10 MiB
 
-type CompiledWorkflow struct {
-	WorkflowID       uuid.UUID
-	VersionID        uuid.UUID
-	VersionNumber    int32
-	Status           string
-	IsValid          bool
-	CompiledPlanJSON string
-}
+var _ port.DefinitionServiceClient = (*DefinitionClient)(nil)
 
 type DefinitionClient struct {
 	client      definitionv1.DefinitionServiceClient
@@ -77,7 +71,7 @@ func (c *DefinitionClient) Close() error {
 func (c *DefinitionClient) GetCompiledWorkflow(
 	ctx context.Context,
 	tenantID, workflowVersionID uuid.UUID,
-) (*CompiledWorkflow, error) {
+) (*port.CompiledWorkflow, error) {
 	req := &definitionv1.GetCompiledWorkflowRequest{
 		TenantId:          tenantID.String(),
 		WorkflowVersionId: workflowVersionID.String(),
@@ -111,7 +105,7 @@ func (c *DefinitionClient) GetCompiledWorkflow(
 	return nil, fmt.Errorf("%w: get compiled workflow: %w", ErrUpstreamUnavailable, lastErr)
 }
 
-func parseCompiledWorkflow(resp *definitionv1.GetCompiledWorkflowResponse) (*CompiledWorkflow, error) {
+func parseCompiledWorkflow(resp *definitionv1.GetCompiledWorkflowResponse) (*port.CompiledWorkflow, error) {
 	wfID, err := uuid.Parse(resp.GetWorkflowId())
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse workflow_id: %w", ErrUpstreamRejected, err)
@@ -120,7 +114,7 @@ func parseCompiledWorkflow(resp *definitionv1.GetCompiledWorkflowResponse) (*Com
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse version_id: %w", ErrUpstreamRejected, err)
 	}
-	return &CompiledWorkflow{
+	return &port.CompiledWorkflow{
 		WorkflowID:       wfID,
 		VersionID:        verID,
 		VersionNumber:    resp.GetVersionNumber(),

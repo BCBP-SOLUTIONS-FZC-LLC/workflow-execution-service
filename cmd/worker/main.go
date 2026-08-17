@@ -4,10 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/logger"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
-	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 
@@ -17,7 +22,7 @@ import (
 	outboundtemporal "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
-	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
 func main() {
@@ -31,49 +36,98 @@ func main() {
 		os.Exit(1)
 	}
 
-	deps, cleanup, err := buildDeps(cfg)
+	observability.Register()
+	tracingShutdown := observability.InitTracing()
+	defer tracingShutdown()
+
+	deps, queueRepo, pool, wlog, cleanup, err := buildDeps(cfg)
 	if err != nil {
 		log.Fatalf("cmd/worker: %v", err)
 	}
 	defer cleanup()
 
-	c, err := client.Dial(client.Options{HostPort: cfg.TemporalHostPort, Namespace: cfg.TemporalNamespace})
+	sdk, err := client.Dial(client.Options{HostPort: cfg.TemporalHostPort, Namespace: cfg.TemporalNamespace})
 	if err != nil {
 		log.Fatalf("cmd/worker: dial temporal: %v", err)
 	}
-	defer c.Close()
+	defer sdk.Close()
 
-	w := worker.New(c, cfg.TemporalTaskQueue, worker.Options{})
-	w.RegisterWorkflow(wfengine.Execute)
-	registerActivities(w, deps)
-
-	if err := w.Run(worker.InterruptCh()); err != nil {
-		log.Fatalf("cmd/worker: worker run: %v", err)
+	registry := newWorkerRegistry()
+	defaultWorker, err := startWorkerForQueue(sdk, deps, cfg.TemporalTaskQueue, worker.Options{WorkerStopTimeout: 25 * time.Second})
+	if err != nil {
+		log.Fatalf("cmd/worker: start default worker: %v", err)
 	}
+	registry.add(cfg.TemporalTaskQueue, defaultWorker)
+
+	pollCtx, cancelPoll := context.WithCancel(context.Background())
+	go pollQueueTopology(pollCtx, sdk, deps, queueRepo, cfg.TemporalTaskQueue, cfg.QueueTopologyPollInterval, registry, wlog)
+
+	healthSrv := newHealthServer(fmt.Sprintf(":%d", cfg.WorkerHealthPort), pool, sdk)
+	go func() {
+		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			wlog.Error("health server exited", map[string]any{"error": err.Error()})
+		}
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	cancelPoll()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := healthSrv.Shutdown(shutdownCtx); err != nil {
+		wlog.Warn("health server shutdown error", map[string]any{"error": err.Error()})
+	}
+
+	var wg sync.WaitGroup
+	for _, w := range registry.all() {
+		wg.Add(1)
+		go func(w worker.Worker) {
+			defer wg.Done()
+			w.Stop()
+		}(w)
+	}
+	wg.Wait()
 }
 
 // buildDeps is cmd/worker's composition root (LLD §1.7): the only place this
 // binary wires concrete adapters to internal/adapter/outbound/temporal's
-// Deps struct. cleanup closes the Postgres pool and the Definition Service
-// gRPC connection.
-func buildDeps(cfg *config.Config) (*outboundtemporal.Deps, func(), error) {
+// Deps struct. GUCProvider is required here (not just cmd/server's app
+// pool) — every tenant-scoped repo call an Activity makes depends on the
+// GUC being set on the connection; without it RLS silently returns zero
+// rows against a non-superuser role. cleanup drains the pool and closes the
+// Definition Service gRPC connection.
+func buildDeps(cfg *config.Config) (*outboundtemporal.Deps, port.ActiveTaskQueueRepository, *pgcommon.Pool, port.Logger, func(), error) {
+	wlog, err := logger.NewLogger(cfg.AppEnv)
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("new logger: %w", err)
+	}
+
 	pool, err := pgcommon.NewPool(context.Background(), pgcommon.Config{
-		DSN: cfg.DatabaseURL, MaxConns: cfg.PGMaxConns, MinConns: cfg.PGMinConns, PGBouncerMode: cfg.PGBouncerMode,
+		DSN:                cfg.DatabaseURL,
+		MaxConns:           cfg.PGMaxConns,
+		MinConns:           cfg.PGMinConns,
+		PGBouncerMode:      cfg.PGBouncerMode,
+		SlowQueryThreshold: time.Duration(cfg.PGSlowQueryThresholdMS) * time.Millisecond,
+		GUCProvider:        pgcommon.GUCSetFromContext,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("new postgres pool: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("new postgres pool: %w", err)
 	}
 
 	validator, err := eventbus.NewSchemaValidator()
 	if err != nil {
 		pool.Close()
-		return nil, nil, fmt.Errorf("new schema validator: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("new schema validator: %w", err)
 	}
 
 	definitions, err := outboundgrpc.NewDefinitionClient(cfg.DefinitionServiceAddr, cfg.DefinitionClientTimeout)
 	if err != nil {
 		pool.Close()
-		return nil, nil, fmt.Errorf("new definition client: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("new definition client: %w", err)
 	}
 
 	deps := &outboundtemporal.Deps{
@@ -85,31 +139,13 @@ func buildDeps(cfg *config.Config) (*outboundtemporal.Deps, func(), error) {
 		Validator:   validator,
 		Definitions: definitions,
 	}
+	queueRepo := postgres.NewActiveTaskQueueRepo(pool)
+
 	cleanup := func() {
 		_ = definitions.Close()
-		pool.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = pool.DrainAndClose(ctx)
 	}
-	return deps, cleanup, nil
-}
-
-// registerActivities registers every Activity constant in
-// internal/core/port/activities.go against its implementation in deps —
-// the two must stay in lockstep, checked by test/workflow's fake-activity
-// registration mirroring the same name list.
-func registerActivities(w worker.Worker, deps *outboundtemporal.Deps) {
-	w.RegisterActivityWithOptions(deps.GetCompiledPlan, activity.RegisterOptions{Name: port.ActivityGetCompiledPlan})
-	w.RegisterActivityWithOptions(deps.CreateTask, activity.RegisterOptions{Name: port.ActivityCreateTask})
-	w.RegisterActivityWithOptions(deps.UpdateInstanceNodes, activity.RegisterOptions{Name: port.ActivityUpdateInstanceNodes})
-	w.RegisterActivityWithOptions(deps.ClaimAssignment, activity.RegisterOptions{Name: port.ActivityClaimAssignment})
-	w.RegisterActivityWithOptions(deps.CompleteAssignment, activity.RegisterOptions{Name: port.ActivityCompleteAssignment})
-	w.RegisterActivityWithOptions(deps.DeferTask, activity.RegisterOptions{Name: port.ActivityDeferTask})
-	w.RegisterActivityWithOptions(deps.UpdateInstanceStatus, activity.RegisterOptions{Name: port.ActivityUpdateInstanceStatus})
-	w.RegisterActivityWithOptions(deps.RecordForceRoute, activity.RegisterOptions{Name: port.ActivityRecordForceRoute})
-	w.RegisterActivityWithOptions(deps.RecordSLAWarning, activity.RegisterOptions{Name: port.ActivityRecordSLAWarning})
-	w.RegisterActivityWithOptions(deps.RecordSLABreach, activity.RegisterOptions{Name: port.ActivityRecordSLABreach})
-	w.RegisterActivityWithOptions(deps.PauseInstance, activity.RegisterOptions{Name: port.ActivityPauseInstance})
-	w.RegisterActivityWithOptions(deps.ResumeInstance, activity.RegisterOptions{Name: port.ActivityResumeInstance})
-	w.RegisterActivityWithOptions(deps.CancelInstance, activity.RegisterOptions{Name: port.ActivityCancelInstance})
-	w.RegisterActivityWithOptions(deps.ReassignAssignment, activity.RegisterOptions{Name: port.ActivityReassignAssignment})
-	w.RegisterActivityWithOptions(deps.UpdateTaskStatus, activity.RegisterOptions{Name: port.ActivityUpdateTaskStatus})
+	return deps, queueRepo, pool, wlog, cleanup, nil
 }

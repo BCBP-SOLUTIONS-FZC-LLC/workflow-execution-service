@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	httpadapter "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
 func TestCheckEligibility(t *testing.T) {
@@ -194,4 +196,53 @@ func TestCheckEligibility(t *testing.T) {
 func TestNewEligibilityClient(t *testing.T) {
 	client := httpadapter.NewEligibilityClient("http://example.invalid", 5*time.Second)
 	require.NotNil(t, client)
+}
+
+func TestCheckEligibilityBatch(t *testing.T) {
+	t.Run("all eligible, one real call per request", func(t *testing.T) {
+		var calls int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&calls, 1)
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]bool{"eligible": true})
+		}))
+		defer srv.Close()
+
+		client := httpadapter.NewEligibilityClient(srv.URL, 5*time.Second)
+		requests := []port.EligibilityCheckRequest{
+			{NewUserID: uuid.New(), DepartmentID: uuid.New(), RequiredLevel: "reviewer"},
+			{NewUserID: uuid.New(), DepartmentID: uuid.New(), RequiredLevel: "approver"},
+			{NewUserID: uuid.New(), DepartmentID: uuid.New(), RequiredLevel: "reviewer"},
+		}
+
+		results, err := client.CheckEligibilityBatch(context.Background(), requests, uuid.New())
+		require.NoError(t, err)
+		require.Len(t, results, 3)
+		for _, eligible := range results {
+			assert.True(t, eligible)
+		}
+		assert.Equal(t, int32(3), atomic.LoadInt32(&calls))
+	})
+
+	t.Run("one request failing fails the whole batch", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer srv.Close()
+
+		client := httpadapter.NewEligibilityClient(srv.URL, 200*time.Millisecond)
+		requests := []port.EligibilityCheckRequest{
+			{NewUserID: uuid.New(), DepartmentID: uuid.New(), RequiredLevel: "reviewer"},
+		}
+
+		_, err := client.CheckEligibilityBatch(context.Background(), requests, uuid.New())
+		assert.Error(t, err)
+	})
+
+	t.Run("empty request list returns an empty, non-nil-error result", func(t *testing.T) {
+		client := httpadapter.NewEligibilityClient("http://example.invalid", 5*time.Second)
+		results, err := client.CheckEligibilityBatch(context.Background(), nil, uuid.New())
+		require.NoError(t, err)
+		assert.Empty(t, results)
+	})
 }

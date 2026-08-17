@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	outboundgrpc "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/grpc"
 	adapterhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
@@ -28,7 +29,11 @@ func asAdmin(r *http.Request) *http.Request {
 }
 
 type problemBody struct {
-	Code string `json:"code"`
+	Code          string `json:"code"`
+	InvalidParams []struct {
+		Name   string `json:"name"`
+		Reason string `json:"reason"`
+	} `json:"invalid_params"`
 }
 
 // --- StartInstance ---
@@ -159,6 +164,8 @@ func TestStartInstance_ErrorCodes(t *testing.T) {
 		{"OverrideMapInvalid", port.ErrOverrideMapInvalid, http.StatusUnprocessableEntity, "OVERRIDE_MAP_INVALID"},
 		{"AssigneeIneligible", port.ErrAssigneeIneligible, http.StatusUnprocessableEntity, "ASSIGNEE_INELIGIBLE"},
 		{"UpstreamUnavailable", adapterhttp.ErrUpstreamUnavailable, http.StatusServiceUnavailable, "UPSTREAM_UNAVAILABLE"},
+		{"DefinitionServiceUnavailable", outboundgrpc.ErrUpstreamUnavailable, http.StatusServiceUnavailable, "UPSTREAM_UNAVAILABLE"},
+		{"DefinitionServiceRejected", outboundgrpc.ErrUpstreamRejected, http.StatusServiceUnavailable, "UPSTREAM_UNAVAILABLE"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -177,6 +184,26 @@ func TestStartInstance_ErrorCodes(t *testing.T) {
 			assert.Equal(t, tc.code, body.Code)
 		})
 	}
+}
+
+func TestStartInstance_AssigneeIneligible_PopulatesInvalidParams(t *testing.T) {
+	fake := &fakeInstanceService{
+		start: func(context.Context, port.StartInstanceInput) (*port.Instance, error) {
+			return nil, &port.AssigneeIneligibleError{Nodes: []string{"finance/review", "legal/review"}}
+		},
+	}
+	router := newRouter(newInstanceHandler(fake))
+	w := do(router, req(http.MethodPost, instancesPath(), map[string]any{
+		"business_key": "TND-001", "workflow_version_id": uuid.New(),
+	}))
+
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code)
+	var body problemBody
+	decodeJSON(t, w.Body, &body)
+	assert.Equal(t, "ASSIGNEE_INELIGIBLE", body.Code)
+	require.Len(t, body.InvalidParams, 2)
+	assert.Equal(t, "finance/review", body.InvalidParams[0].Name)
+	assert.Equal(t, "legal/review", body.InvalidParams[1].Name)
 }
 
 func TestStartInstance_IdempotencyReplay_SameBody(t *testing.T) {

@@ -13,7 +13,7 @@ DROP INDEX IF EXISTS idx_workflow_task_tenant_keyset;
 DROP INDEX IF EXISTS idx_workflow_task_instance_status;
 DROP INDEX IF EXISTS idx_workflow_task_tenant_dept_status;
 
-DROP INDEX IF EXISTS idx_workflow_instance_version_active;
+DROP INDEX IF EXISTS idx_workflow_instance_workflow_active;
 DROP INDEX IF EXISTS idx_workflow_instance_task_queue_active;
 DROP INDEX IF EXISTS idx_workflow_instance_tenant_status;
 DROP INDEX IF EXISTS uq_workflow_instance_business_key;

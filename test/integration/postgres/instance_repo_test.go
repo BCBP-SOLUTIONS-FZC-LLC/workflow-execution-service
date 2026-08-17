@@ -101,6 +101,7 @@ func TestInstanceRepo_UpdateStatus(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, domain.InstanceStatusPaused, updated.Status)
 		assert.Equal(t, inst.RecordVersion+1, updated.RecordVersion)
+		assert.Nil(t, updated.CompletedAt, "a non-terminal transition must not set completed_at")
 	})
 
 	t.Run("stale record_version returns a conflict, not not-found", func(t *testing.T) {
@@ -112,6 +113,46 @@ func TestInstanceRepo_UpdateStatus(t *testing.T) {
 		_, err := repo.UpdateStatus(ctx, tenantA, uuid.New(), domain.InstanceStatusPaused, 1)
 		assert.ErrorIs(t, err, domain.ErrNotFound)
 	})
+}
+
+func TestInstanceRepo_UpdateStatus_SetsCompletedAtOnlyForTerminalStatuses(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	for _, status := range []domain.InstanceStatus{
+		domain.InstanceStatusCompleted, domain.InstanceStatusTerminated, domain.InstanceStatusFailed,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			tenantA := uuid.New()
+			inst := newInstance(tenantA, time.Now().UTC())
+			require.NoError(t, repo.Create(ctx, inst))
+
+			updated, err := repo.UpdateStatus(ctx, tenantA, inst.ID, status, inst.RecordVersion)
+			require.NoError(t, err)
+			require.NotNil(t, updated.CompletedAt)
+			assert.WithinDuration(t, time.Now().UTC(), *updated.CompletedAt, 5*time.Second)
+		})
+	}
+}
+
+func TestInstanceRepo_Create_PersistsContextJSONAndOverrideMap(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	inst.ContextJSON = []byte(`{"tender_id":"TND-2026-04471"}`)
+	inst.OverrideMap = []byte(`{"review_finance":"4da18bde-7244-47ac-986c-665cd42caaaa"}`)
+	require.NoError(t, repo.Create(ctx, inst))
+
+	got, err := repo.GetByID(ctx, tenantA, inst.ID)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"tender_id":"TND-2026-04471"}`, string(got.ContextJSON))
+	assert.JSONEq(t, `{"review_finance":"4da18bde-7244-47ac-986c-665cd42caaaa"}`, string(got.OverrideMap))
 }
 
 func TestInstanceRepo_UpdateStatus_InvalidEnumSurfacesError(t *testing.T) {
@@ -175,7 +216,7 @@ func TestInstanceRepo_ListByTenant_KeysetPagination(t *testing.T) {
 	var collected []uuid.UUID
 	var cursor *port.Cursor
 	for {
-		page, next, err := repo.ListByTenant(ctx, tenantA, port.PageRequest{After: cursor, Limit: 2})
+		page, next, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{}, port.PageRequest{After: cursor, Limit: 2})
 		require.NoError(t, err)
 		for _, inst := range page {
 			collected = append(collected, inst.ID)
@@ -192,7 +233,7 @@ func TestInstanceRepo_ListByTenant_KeysetPagination(t *testing.T) {
 	}
 
 	t.Run("concurrent insert of a newer row doesn't shift an already-fetched page", func(t *testing.T) {
-		firstPage, next, err := repo.ListByTenant(ctx, tenantA, port.PageRequest{Limit: 2})
+		firstPage, next, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{}, port.PageRequest{Limit: 2})
 		require.NoError(t, err)
 		require.Len(t, firstPage, 2)
 		require.NotNil(t, next)
@@ -201,7 +242,7 @@ func TestInstanceRepo_ListByTenant_KeysetPagination(t *testing.T) {
 		require.NoError(t, repo.Create(ctx, fresh))
 		seedInstanceAt(t, superPool, ctx, fresh.ID, base.Add(10*time.Minute))
 
-		secondPage, _, err := repo.ListByTenant(ctx, tenantA, port.PageRequest{After: next, Limit: 2})
+		secondPage, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{}, port.PageRequest{After: next, Limit: 2})
 		require.NoError(t, err)
 		for _, inst := range secondPage {
 			assert.NotEqual(t, fresh.ID, inst.ID, "the newer concurrently-inserted row must not leak into an older page")
@@ -210,4 +251,105 @@ func TestInstanceRepo_ListByTenant_KeysetPagination(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestInstanceRepo_ListByTenant_Filters(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	versionA, versionB := uuid.New(), uuid.New()
+
+	running := newInstance(tenantA, time.Now().UTC())
+	running.WorkflowVersionID = versionA
+	require.NoError(t, repo.Create(ctx, running))
+
+	paused := newInstance(tenantA, time.Now().UTC())
+	paused.WorkflowVersionID = versionB
+	require.NoError(t, repo.Create(ctx, paused))
+	_, err := repo.UpdateStatus(ctx, tenantA, paused.ID, domain.InstanceStatusPaused, paused.RecordVersion)
+	require.NoError(t, err)
+
+	t.Run("status filter", func(t *testing.T) {
+		status := domain.InstanceStatusPaused
+		items, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{Status: &status}, port.PageRequest{Limit: 10})
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		assert.Equal(t, paused.ID, items[0].ID)
+	})
+
+	t.Run("workflow_version_id filter", func(t *testing.T) {
+		items, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{WorkflowVersionID: &versionA}, port.PageRequest{Limit: 10})
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		assert.Equal(t, running.ID, items[0].ID)
+	})
+
+	t.Run("started_after/started_before filters", func(t *testing.T) {
+		cutoff := time.Now().UTC().Add(-time.Minute)
+		items, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{StartedAfter: &cutoff}, port.PageRequest{Limit: 10})
+		require.NoError(t, err)
+		assert.Len(t, items, 2, "both instances started after the cutoff")
+
+		future := time.Now().UTC().Add(time.Hour)
+		items, _, err = repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{StartedBefore: &future}, port.PageRequest{Limit: 10})
+		require.NoError(t, err)
+		assert.Len(t, items, 2, "both instances started before a future cutoff")
+	})
+}
+
+func TestInstanceRepo_CountActiveByWorkflow(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	workflowID := uuid.New()
+
+	active := newInstance(tenantA, time.Now().UTC())
+	active.WorkflowID = workflowID
+	require.NoError(t, repo.Create(ctx, active))
+
+	completed := newInstance(tenantA, time.Now().UTC())
+	completed.WorkflowID = workflowID
+	require.NoError(t, repo.Create(ctx, completed))
+	_, err := repo.UpdateStatus(ctx, tenantA, completed.ID, domain.InstanceStatusCompleted, completed.RecordVersion)
+	require.NoError(t, err)
+
+	otherWorkflow := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, repo.Create(ctx, otherWorkflow))
+
+	count, err := repo.CountActiveByWorkflow(ctx, tenantA, workflowID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count, "only the RUNNING instance of this workflow_id counts, not the COMPLETED one or a different workflow_id")
+}
+
+func TestInstanceRepo_CountActiveByTaskQueue(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	isolatedQueue := "wf-queue-" + tenantA.String()
+
+	active := newInstance(tenantA, time.Now().UTC())
+	active.TaskQueue = isolatedQueue
+	require.NoError(t, repo.Create(ctx, active))
+
+	completed := newInstance(tenantA, time.Now().UTC())
+	completed.TaskQueue = isolatedQueue
+	require.NoError(t, repo.Create(ctx, completed))
+	_, err := repo.UpdateStatus(ctx, tenantA, completed.ID, domain.InstanceStatusCompleted, completed.RecordVersion)
+	require.NoError(t, err)
+
+	onDefaultQueue := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, repo.Create(ctx, onDefaultQueue))
+
+	count, err := repo.CountActiveByTaskQueue(ctx, tenantA, isolatedQueue)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count, "only the RUNNING instance on this task queue counts, not the COMPLETED one or one on a different queue")
 }

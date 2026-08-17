@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,6 +42,38 @@ type eligibilityReq struct {
 	DepartmentID  uuid.UUID `json:"department_id"`
 	RequiredLevel string    `json:"required_level"`
 	ActorID       uuid.UUID `json:"actor_id"`
+}
+
+// CheckEligibilityBatch fans out concurrently over CheckEligibility, one real
+// HTTP call per request — a correct, working implementation today, but not
+// yet the round-trip reduction LLD §5.5/§6.7 actually wants (Org & Membership
+// has no confirmed real batch endpoint yet). Swapping in a true server-side
+// batch call later needs no port.EligibilityChecker change, only this
+// method's body.
+func (c *EligibilityClient) CheckEligibilityBatch(
+	ctx context.Context,
+	requests []port.EligibilityCheckRequest,
+	actorID uuid.UUID,
+) ([]bool, error) {
+	results := make([]bool, len(requests))
+	errs := make([]error, len(requests))
+	var wg sync.WaitGroup
+	for i, req := range requests {
+		wg.Add(1)
+		go func(i int, req port.EligibilityCheckRequest) {
+			defer wg.Done()
+			eligible, err := c.CheckEligibility(ctx, req.NewUserID, req.DepartmentID, req.RequiredLevel, actorID)
+			results[i], errs[i] = eligible, err
+		}(i, req)
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return results, nil
 }
 
 func (c *EligibilityClient) CheckEligibility(

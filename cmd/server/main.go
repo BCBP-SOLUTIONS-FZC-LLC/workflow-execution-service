@@ -27,5 +27,9 @@ func main() {
 		return
 	}
 
-	log.Println("cmd/server: not implemented")
+	a, err := newApp(cfg)
+	if err != nil {
+		log.Fatalf("cmd/server: %v", err)
+	}
+	a.run()
 }

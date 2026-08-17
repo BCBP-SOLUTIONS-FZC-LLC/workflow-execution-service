@@ -14,6 +14,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
 )
 
@@ -171,4 +172,116 @@ func TestTaskAssignmentRepo_SetLead(t *testing.T) {
 	demoted, err := assignmentRepo.GetByID(ctx, tenantA, first.ID)
 	require.NoError(t, err)
 	assert.False(t, demoted.IsLead, "promoting a new lead must demote the previous one")
+}
+
+func TestTaskAssignmentRepo_ListActiveByUserPaginated(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	instanceRepo := postgres.NewInstanceRepo(appPool)
+	taskRepo := postgres.NewTaskRepo(appPool)
+	assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	userID := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, instanceRepo.Create(ctx, inst))
+
+	activeTask := newTask(tenantA, inst.ID)
+	require.NoError(t, taskRepo.Create(ctx, activeTask))
+	require.NoError(t, assignmentRepo.Create(ctx, newTaskAssignment(tenantA, activeTask.ID, userID)))
+
+	// A vacated assignment for the same user must not appear.
+	vacatedTask := newTask(tenantA, inst.ID)
+	require.NoError(t, taskRepo.Create(ctx, vacatedTask))
+	vacated := newTaskAssignment(tenantA, vacatedTask.ID, userID)
+	require.NoError(t, assignmentRepo.Create(ctx, vacated))
+	_, err := assignmentRepo.Vacate(ctx, tenantA, vacated.ID)
+	require.NoError(t, err)
+
+	rows, _, err := assignmentRepo.ListActiveByUserPaginated(ctx, tenantA, userID, port.PageRequest{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, activeTask.ID, rows[0].TaskID)
+	assert.Equal(t, activeTask.WorkflowInstanceID, rows[0].WorkflowInstanceID)
+	assert.Equal(t, userID, rows[0].UserID)
+	assert.Equal(t, domain.TaskStatusReady, rows[0].Status)
+}
+
+func TestTaskAssignmentRepo_ListActiveByUserPaginated_KeysetPagination(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	instanceRepo := postgres.NewInstanceRepo(appPool)
+	taskRepo := postgres.NewTaskRepo(appPool)
+	assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	userID := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, instanceRepo.Create(ctx, inst))
+
+	base := time.Now().UTC().Add(-time.Hour)
+	var seeded []uuid.UUID
+	for i := 0; i < 3; i++ {
+		task := newTask(tenantA, inst.ID)
+		require.NoError(t, taskRepo.Create(ctx, task))
+		seedTaskAt(t, superPool, ctx, task.ID, base.Add(time.Duration(i)*time.Minute))
+		require.NoError(t, assignmentRepo.Create(ctx, newTaskAssignment(tenantA, task.ID, userID)))
+		seeded = append(seeded, task.ID)
+	}
+
+	firstPage, next, err := assignmentRepo.ListActiveByUserPaginated(ctx, tenantA, userID, port.PageRequest{Limit: 2})
+	require.NoError(t, err)
+	require.Len(t, firstPage, 2)
+	require.NotNil(t, next)
+	assert.Equal(t, seeded[2], firstPage[0].TaskID)
+	assert.Equal(t, seeded[1], firstPage[1].TaskID)
+
+	secondPage, next2, err := assignmentRepo.ListActiveByUserPaginated(ctx, tenantA, userID, port.PageRequest{After: next, Limit: 2})
+	require.NoError(t, err)
+	require.Len(t, secondPage, 1)
+	assert.Nil(t, next2)
+	assert.Equal(t, seeded[0], secondPage[0].TaskID)
+}
+
+func TestTaskAssignmentRepo_VacateAllActiveByUser(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	instanceRepo := postgres.NewInstanceRepo(appPool)
+	taskRepo := postgres.NewTaskRepo(appPool)
+	assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	userID := uuid.New()
+	otherUserID := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, instanceRepo.Create(ctx, inst))
+
+	taskOne := newTask(tenantA, inst.ID)
+	require.NoError(t, taskRepo.Create(ctx, taskOne))
+	require.NoError(t, assignmentRepo.Create(ctx, newTaskAssignment(tenantA, taskOne.ID, userID)))
+
+	taskTwo := newTask(tenantA, inst.ID)
+	require.NoError(t, taskRepo.Create(ctx, taskTwo))
+	require.NoError(t, assignmentRepo.Create(ctx, newTaskAssignment(tenantA, taskTwo.ID, userID)))
+
+	// A different user's assignment must survive untouched.
+	taskThree := newTask(tenantA, inst.ID)
+	require.NoError(t, taskRepo.Create(ctx, taskThree))
+	untouched := newTaskAssignment(tenantA, taskThree.ID, otherUserID)
+	require.NoError(t, assignmentRepo.Create(ctx, untouched))
+
+	vacated, err := assignmentRepo.VacateAllActiveByUser(ctx, tenantA, userID)
+	require.NoError(t, err)
+	assert.Len(t, vacated, 2)
+
+	remaining, err := assignmentRepo.ListActiveByUser(ctx, tenantA, userID)
+	require.NoError(t, err)
+	assert.Empty(t, remaining)
+
+	stillActive, err := assignmentRepo.GetByID(ctx, tenantA, untouched.ID)
+	require.NoError(t, err)
+	assert.True(t, stillActive.IsActive)
 }

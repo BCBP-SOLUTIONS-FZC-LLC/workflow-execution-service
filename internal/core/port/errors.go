@@ -39,4 +39,35 @@ var (
 	// ErrAssigneeIneligible is Start's own §5.5 bulk eligibility re-check
 	// failure; maps to the existing CodeAssigneeIneligible.
 	ErrAssigneeIneligible = errors.New("one or more default assignees no longer satisfy their node's eligibility requirement")
+
+	// ErrTaskNotHumanActionable rejects a human-action method (Claim/
+	// Complete/Defer/Reassign/OverrideAssignee) called against a
+	// connector-typed task — one with zero assignments, ever, whose only
+	// legitimate completion path is the stage-transition/stage-fail signal
+	// path cmd/connector-worker will eventually use.
+	ErrTaskNotHumanActionable = errors.New("task is connector-typed and has no human assignee to act on")
+
+	// ErrAssigneeUnavailable closes LLD Appendix B's own documented gap
+	// ("Task actions never re-verify the assignee's live OOO/delegation/
+	// deleted status at the moment of the action") — a live IAM status
+	// check confirming the assignee is deleted or currently OOO, not merely
+	// an inability to check (which fails open, see IAMClient's own doc
+	// comment).
+	ErrAssigneeUnavailable = errors.New("assignee is no longer available (deleted or out-of-office)")
 )
+
+// AssigneeIneligibleError is ErrAssigneeIneligible's node-carrying form (LLD
+// §5.5 step 3: "naming every offending node in one payload so the caller
+// resolves all of them before a single retry"). errors.Is(err,
+// ErrAssigneeIneligible) still matches, via Unwrap.
+type AssigneeIneligibleError struct {
+	Nodes []string
+}
+
+func (e *AssigneeIneligibleError) Error() string {
+	return ErrAssigneeIneligible.Error()
+}
+
+func (e *AssigneeIneligibleError) Unwrap() error {
+	return ErrAssigneeIneligible
+}

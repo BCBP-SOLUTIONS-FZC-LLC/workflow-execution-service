@@ -58,8 +58,16 @@ func (r *fakeInstanceRepo) UpdateStatus(_ context.Context, _, id uuid.UUID, stat
 	return inst, nil
 }
 
-func (r *fakeInstanceRepo) ListByTenant(_ context.Context, _ uuid.UUID, _ port.PageRequest) ([]*domain.Instance, *port.Cursor, error) {
+func (r *fakeInstanceRepo) ListByTenant(_ context.Context, _ uuid.UUID, _ port.InstanceListFilter, _ port.PageRequest) ([]*domain.Instance, *port.Cursor, error) {
 	return nil, nil, nil
+}
+
+func (r *fakeInstanceRepo) CountActiveByWorkflow(_ context.Context, _, _ uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (r *fakeInstanceRepo) CountActiveByTaskQueue(_ context.Context, _ uuid.UUID, _ string) (int64, error) {
+	return 0, nil
 }
 
 func (r *fakeInstanceRepo) UpdateCurrentNodeKeys(_ context.Context, _, id uuid.UUID, keys []string, recordVersion int64) (*domain.Instance, error) {
@@ -148,6 +156,22 @@ func (r *fakeTaskRepo) ListByInstance(_ context.Context, _, instanceID uuid.UUID
 	return out, nil, nil
 }
 
+func (r *fakeTaskRepo) ListByTenant(_ context.Context, _ uuid.UUID, _ port.TaskListFilter, _ port.PageRequest) ([]*domain.Task, *port.Cursor, error) {
+	if r.listErr != nil {
+		return nil, nil, r.listErr
+	}
+	return nil, nil, nil
+}
+
+func (r *fakeTaskRepo) GetByInstanceAndNode(_ context.Context, _, instanceID uuid.UUID, nodeKey string) (*domain.Task, error) {
+	for _, task := range r.byID {
+		if task.WorkflowInstanceID == instanceID && task.NodeKey == nodeKey {
+			return task, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
 // fakeAssignmentRepo is an in-memory port.TaskAssignmentRepository. createErr,
 // when set, makes Create fail — used to exercise callers' DB-failure branches.
 type fakeAssignmentRepo struct {
@@ -211,6 +235,27 @@ func (r *fakeAssignmentRepo) ListActiveByUser(_ context.Context, _, userID uuid.
 	var out []*domain.TaskAssignment
 	for _, a := range r.byID {
 		if a.UserID == userID && a.IsActive {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeAssignmentRepo) ListActiveByUserPaginated(_ context.Context, _, userID uuid.UUID, _ port.PageRequest) ([]port.ActiveUserTaskRow, *port.Cursor, error) {
+	var out []port.ActiveUserTaskRow
+	for _, a := range r.byID {
+		if a.UserID == userID && a.IsActive {
+			out = append(out, port.ActiveUserTaskRow{TaskID: a.TaskID, UserID: a.UserID})
+		}
+	}
+	return out, nil, nil
+}
+
+func (r *fakeAssignmentRepo) VacateAllActiveByUser(_ context.Context, _, userID uuid.UUID) ([]*domain.TaskAssignment, error) {
+	var out []*domain.TaskAssignment
+	for _, a := range r.byID {
+		if a.UserID == userID && a.IsActive {
+			a.IsActive = false
 			out = append(out, a)
 		}
 	}

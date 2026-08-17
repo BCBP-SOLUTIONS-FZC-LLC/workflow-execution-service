@@ -39,7 +39,16 @@ type Task struct {
 	// AssigneeCount is the expected number of active assignments for this
 	// task, zero-valued until multi-assignee counting (LLD Appendix B,
 	// "multi-assignee claim-release mechanics undesigned") is built.
-	AssigneeCount      int
+	AssigneeCount int
+	// ConnectorType is non-nil only for a connector-typed automatic task
+	// (workflow_connectors.md) — such a task has zero human assignments,
+	// ever, and every human-action TaskService method rejects it with
+	// ErrTaskNotHumanActionable rather than silently no-op on an
+	// assignment-less task.
+	ConnectorType *string
+	// ExtrasJSON carries {"resolved_inputs": {...}} for a connector-typed
+	// task (CreateTaskActivity's own convention) — surfaced here purely for
+	// admin/observability visibility, never consumed by TaskService itself.
 	ExtrasJSON         json.RawMessage
 	DeferredFromTaskID *uuid.UUID
 	DueAt              *time.Time
