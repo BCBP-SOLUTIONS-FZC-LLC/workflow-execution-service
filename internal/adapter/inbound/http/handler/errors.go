@@ -49,6 +49,7 @@ const (
 	CodeOverrideMapInvalid      ErrCode = "OVERRIDE_MAP_INVALID"
 	CodeTaskNotHumanActionable  ErrCode = "TASK_NOT_HUMAN_ACTIONABLE"
 	CodeAssigneeUnavailable     ErrCode = "ASSIGNEE_UNAVAILABLE"
+	CodeTaskNotConnectorTyped   ErrCode = "TASK_NOT_CONNECTOR_TYPED"
 )
 
 var codeTitles = map[ErrCode]string{
@@ -85,6 +86,7 @@ var codeTitles = map[ErrCode]string{
 	CodeOverrideMapInvalid:      "Override Map Invalid",
 	CodeTaskNotHumanActionable:  "Task Not Human Actionable",
 	CodeAssigneeUnavailable:     "Assignee Unavailable",
+	CodeTaskNotConnectorTyped:   "Task Not Connector Typed",
 }
 
 const errBase = "https://errors.bcbp.io/execution/"
@@ -123,6 +125,7 @@ var problemTypes = map[ErrCode]string{
 	CodeOverrideMapInvalid:      errBase + "override-map-invalid",
 	CodeTaskNotHumanActionable:  errBase + "task-not-human-actionable",
 	CodeAssigneeUnavailable:     errBase + "assignee-unavailable",
+	CodeTaskNotConnectorTyped:   errBase + "task-not-connector-typed",
 }
 
 type invalidParam struct {
@@ -237,6 +240,8 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusConflict, CodeTaskNotHumanActionable, err.Error()
 	case errors.Is(err, port.ErrAssigneeUnavailable):
 		return http.StatusConflict, CodeAssigneeUnavailable, err.Error()
+	case errors.Is(err, port.ErrTaskNotConnectorTyped):
+		return http.StatusConflict, CodeTaskNotConnectorTyped, err.Error()
 	case errors.Is(err, adapterhttp.ErrUpstreamUnavailable):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, err.Error()
 	// The Definition Service gRPC client's own two sentinels (retries-

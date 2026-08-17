@@ -65,6 +65,7 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 
 	var connectorType *string
 	var resolvedInputs map[string]any
+	var outputMapping []dsl.IOVar
 	var assigneeUserIDs []uuid.UUID
 	if stage.ConnectorType != "" {
 		connectorType = &stage.ConnectorType
@@ -74,7 +75,10 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 		if err != nil {
 			return port.CreateTaskOutput{}, nonRetryable("ValidationError", err)
 		}
-		extras, err := json.Marshal(map[string]any{"resolved_inputs": resolvedInputs})
+		if stage.IOMapping != nil {
+			outputMapping = stage.IOMapping.Outputs
+		}
+		extras, err := json.Marshal(map[string]any{"resolved_inputs": resolvedInputs, "output_mapping": outputMapping})
 		if err != nil {
 			return port.CreateTaskOutput{}, nonRetryable("ValidationError", fmt.Errorf("marshal extras_json: %w", err))
 		}
@@ -114,7 +118,7 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 		taskCore := domain.TaskScopedCore{
 			TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs,
 		}
-		payload := domain.NewWorkflowTaskCreatedPayload(core, taskCore, stage.Type, task.DueAt, task.FollowUpAt, connectorType, resolvedInputs)
+		payload := domain.NewWorkflowTaskCreatedPayload(core, taskCore, stage.Type, task.DueAt, task.FollowUpAt, connectorType, resolvedInputs, outputMapping)
 		env, err := service.BuildEnvelope(ctx, d.Validator, domain.EventWorkflowTaskCreated, tenantID.String(), "tasks/"+task.ID.String(), "", payload)
 		if err != nil {
 			return fmt.Errorf("build workflow.task.created envelope: %w", err)

@@ -54,6 +54,8 @@ type Handler struct {
 	oooAvailability port.OOOAvailabilityReconciler
 	templateCache   port.TemplateCachePrewarmer
 	eventDecoder    port.EventDecoder
+	connectorTasks  port.ConnectorTaskService
+	connectorEvents port.ConnectorEventPublisher
 	log             port.Logger
 }
 
@@ -80,6 +82,14 @@ type Services struct {
 	// until a real events.Codec is wired up in cmd/server, no producer sets
 	// SchemaID, so this stays unused in practice today.
 	EventDecoder port.EventDecoder
+	// ConnectorTasks backs the new POST /internal/connector-tasks/:id/{complete,fail}
+	// endpoints cmd/connector-worker calls.
+	ConnectorTasks port.ConnectorTaskService
+	// ConnectorEvents is nil-safe: handleWorkflowTaskCreated logs and drops a
+	// connector-typed event rather than failing the request when unset —
+	// matches this package's established nil-safe-dependency convention
+	// (Cache, Log, etc.).
+	ConnectorEvents port.ConnectorEventPublisher
 	// Log is nil-safe throughout this package — every call site guards it.
 	Log port.Logger
 }
@@ -105,6 +115,8 @@ func New(s Services) *Handler {
 		oooAvailability: s.OOOAvailability,
 		templateCache:   s.TemplateCache,
 		eventDecoder:    s.EventDecoder,
+		connectorTasks:  s.ConnectorTasks,
+		connectorEvents: s.ConnectorEvents,
 		log:             s.Log,
 	}
 }

@@ -53,3 +53,20 @@ func RegisterInternalRoutes(rg *gin.RouterGroup, h *Handler) {
 func RegisterInternalEventsRoutes(rg *gin.RouterGroup, h *Handler) {
 	rg.POST("/events", h.HandleInternalEvent)
 }
+
+// RegisterInternalConnectorRoutes mounts POST /internal/connector-tasks/:id/
+// {complete,fail} onto rg — the same /internal-rooted group the other
+// Register*Routes functions use. cmd/connector-worker calls these instead of
+// touching the Temporal SDK directly (LLD workflow_connectors.md §6.1
+// Decision #2); the human /tasks/:id/complete path explicitly rejects
+// connector-typed tasks (checkHumanActionable), so this is their only
+// completion path. No WithIdempotency wrapper: connector-worker's own retry
+// model is Stream-redelivery-driven, not header-driven, and
+// ConnectorTaskService already carries its own state+dedup idempotency
+// guard — wrapping it in WithIdempotency on top would be redundant, not a
+// safety net.
+func RegisterInternalConnectorRoutes(rg *gin.RouterGroup, h *Handler) {
+	ct := rg.Group("/connector-tasks")
+	ct.POST("/:id/complete", h.CompleteConnectorTask)
+	ct.POST("/:id/fail", h.FailConnectorTask)
+}

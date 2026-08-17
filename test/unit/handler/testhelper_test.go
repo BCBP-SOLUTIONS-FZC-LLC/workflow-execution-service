@@ -676,7 +676,12 @@ func newInternalRouter(h *handler.Handler) *gin.Engine {
 	rg := r.Group("/api/v1/internal")
 	handler.RegisterInternalRoutes(rg, h)
 	handler.RegisterInternalEventsRoutes(rg, h)
+	handler.RegisterInternalConnectorRoutes(rg, h)
 	return r
+}
+
+func newConnectorTaskHandler(tasks *fakeConnectorTaskService) *handler.Handler {
+	return handler.New(handler.Services{ConnectorTasks: tasks})
 }
 
 // internalReq is like req() but WITHOUT gateway identity headers — these

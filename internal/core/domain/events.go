@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
 const EventSource = "workflow-execution-svc"
@@ -239,15 +241,16 @@ type WorkflowTaskCreatedPayload struct {
 	StageType      string         `json:"stage_type"`
 	ConnectorType  *string        `json:"connector_type,omitempty"`
 	ResolvedInputs map[string]any `json:"resolved_inputs,omitempty"`
+	OutputMapping  []dsl.IOVar    `json:"output_mapping,omitempty"`
 }
 
 func NewWorkflowTaskCreatedPayload(
 	core CommonCore, task TaskScopedCore, stageType string, dueAt, followUpAt *time.Time,
-	connectorType *string, resolvedInputs map[string]any,
+	connectorType *string, resolvedInputs map[string]any, outputMapping []dsl.IOVar,
 ) WorkflowTaskCreatedPayload {
 	return WorkflowTaskCreatedPayload{
 		CommonCore: core, TaskScopedCore: task, StageType: stageType, DueAt: dueAt, FollowUpAt: followUpAt,
-		ConnectorType: connectorType, ResolvedInputs: resolvedInputs,
+		ConnectorType: connectorType, ResolvedInputs: resolvedInputs, OutputMapping: outputMapping,
 	}
 }
 

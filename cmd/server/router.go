@@ -36,6 +36,7 @@ func newRouter(cfg *config.Config, pool *pgcommon.Pool, cache port.CacheStore, s
 	internal.Use(middleware.RequireInternalToken(cfg.InternalAPIToken))
 	handler.RegisterInternalRoutes(internal, h)
 	handler.RegisterInternalEventsRoutes(internal, h)
+	handler.RegisterInternalConnectorRoutes(internal, h)
 
 	api := r.Group("/api/v1")
 	for _, mw := range gincommon.ProtectedMiddlewares(mwCfg) {

@@ -134,12 +134,13 @@ mock:
 		$(MODULE)/internal/core/port Transactor
 
 
-## build: Compile the server and worker binaries to bin/
+## build: Compile the server, worker, and connector-worker binaries to bin/
 build:
 	@mkdir -p $(BIN_DIR)
 	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/server ./cmd/server
 	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/worker ./cmd/worker
-	@echo "✓ binaries: $(BIN_DIR)/server, $(BIN_DIR)/worker"
+	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/connector-worker ./cmd/connector-worker
+	@echo "✓ binaries: $(BIN_DIR)/server, $(BIN_DIR)/worker, $(BIN_DIR)/connector-worker"
 
 ## migrate: Apply DB schema migrations (outbox + domain) and exit. Run before the server/worker.
 migrate:
