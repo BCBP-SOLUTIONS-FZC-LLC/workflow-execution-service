@@ -19,6 +19,7 @@ import (
 
 	definitionv1 "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/gen/proto/workflow/definition/v1"
 	grpcadapter "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/grpc"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
 const defaultTimeout = 5 * time.Second
@@ -110,7 +111,7 @@ func TestDefinitionClient_GetCompiledWorkflow(t *testing.T) {
 		makeCtx       func(t *testing.T) context.Context
 		wantErr       bool
 		wantSentinel  error
-		want          *grpcadapter.CompiledWorkflow
+		want          *port.CompiledWorkflow
 		checkServer   func(t *testing.T, srv definitionv1.DefinitionServiceServer)
 		checkElapsed  func(t *testing.T, elapsed time.Duration)
 	}{
@@ -124,7 +125,7 @@ func TestDefinitionClient_GetCompiledWorkflow(t *testing.T) {
 				IsValid:          true,
 				CompiledPlanJson: `{"nodes":[]}`,
 			}},
-			want: &grpcadapter.CompiledWorkflow{
+			want: &port.CompiledWorkflow{
 				WorkflowID:       wfID,
 				VersionID:        verID,
 				VersionNumber:    3,
@@ -140,7 +141,7 @@ func TestDefinitionClient_GetCompiledWorkflow(t *testing.T) {
 				VersionId:  verID.String(),
 				Status:     "DRAFT",
 			}},
-			want: &grpcadapter.CompiledWorkflow{
+			want: &port.CompiledWorkflow{
 				WorkflowID: wfID,
 				VersionID:  verID,
 				Status:     "DRAFT",
@@ -171,7 +172,7 @@ func TestDefinitionClient_GetCompiledWorkflow(t *testing.T) {
 					VersionId:  verID.String(),
 				},
 			},
-			want: &grpcadapter.CompiledWorkflow{WorkflowID: wfID, VersionID: verID},
+			want: &port.CompiledWorkflow{WorkflowID: wfID, VersionID: verID},
 			checkServer: func(t *testing.T, srv definitionv1.DefinitionServiceServer) {
 				assert.Equal(t, 3, srv.(*flakyDefinitionServer).calls)
 			},

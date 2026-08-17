@@ -113,6 +113,30 @@ func taskFromDB(row db.WorkflowTask) *domain.Task {
 	}
 }
 
+func assigneeOverrideFromDB(row db.AssigneeOverride) *domain.AssigneeOverride {
+	return &domain.AssigneeOverride{
+		ID:                 row.ID,
+		TenantID:           row.TenantID,
+		WorkflowInstanceID: row.WorkflowInstanceID,
+		NodeKey:            row.NodeKey,
+		PreviousUserID:     row.PreviousUserID,
+		NewUserID:          row.NewUserID,
+		Reason:             fromPgtypeText(row.Reason),
+		ActorUserID:        row.ActorUserID,
+		CreatedAt:          row.CreatedAt,
+	}
+}
+
+func activeTaskQueueFromDB(row db.ActiveTaskQueue) *domain.ActiveTaskQueue {
+	return &domain.ActiveTaskQueue{
+		ID:           row.ID,
+		TenantID:     row.TenantID,
+		QueueName:    row.QueueName,
+		RegisteredAt: row.RegisteredAt,
+		UpdatedAt:    row.UpdatedAt,
+	}
+}
+
 func outboxEventRecordFromDB(row db.OutboxEvent) *domain.OutboxEventRecord {
 	return &domain.OutboxEventRecord{
 		ID:        row.ID,

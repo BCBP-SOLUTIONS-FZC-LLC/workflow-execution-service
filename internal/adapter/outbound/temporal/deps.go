@@ -11,7 +11,6 @@
 package temporal
 
 import (
-	outboundgrpc "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/grpc"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
@@ -25,5 +24,5 @@ type Deps struct {
 	Outbox      port.OutboxRepository
 	Transactor  port.Transactor
 	Validator   port.EventValidator
-	Definitions *outboundgrpc.DefinitionClient
+	Definitions port.DefinitionServiceClient
 }

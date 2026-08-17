@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
 	"github.com/google/uuid"
@@ -89,6 +90,72 @@ func (r *TaskAssignmentRepo) ListActiveByUser(
 		rows, err := db.New(dbtx).ListActiveAssignmentsByUser(ctx, db.ListActiveAssignmentsByUserParams{
 			TenantID: tenantID,
 			UserID:   userID,
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		assignments = make([]*domain.TaskAssignment, len(rows))
+		for i, row := range rows {
+			assignments[i] = taskAssignmentFromDB(row)
+		}
+		return nil
+	})
+	return assignments, err
+}
+
+func (r *TaskAssignmentRepo) ListActiveByUserPaginated(
+	ctx context.Context,
+	tenantID, userID uuid.UUID,
+	page port.PageRequest,
+) ([]port.ActiveUserTaskRow, *port.Cursor, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	limit := clampLimit(page.Limit)
+
+	params := db.ListActiveTasksByUserParams{
+		TenantID: tenantID,
+		UserID:   userID,
+		Limit:    int32(limit + 1), //nolint:gosec
+	}
+	if page.After != nil {
+		params.CursorCreatedAt = toPgtypeTimestamptz(&page.After.CreatedAt)
+		params.CursorID = toPgtypeUUID(&page.After.ID)
+	}
+
+	var out []port.ActiveUserTaskRow
+	var next *port.Cursor
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		rows, err := db.New(dbtx).ListActiveTasksByUser(ctx, params)
+		if err != nil {
+			return mapErr(err)
+		}
+		trimmed, cursor := paginate(rows, limit, func(row db.ListActiveTasksByUserRow) (time.Time, uuid.UUID) {
+			return row.CreatedAt, row.TaskID
+		})
+		next = cursor
+		out = make([]port.ActiveUserTaskRow, len(trimmed))
+		for i, row := range trimmed {
+			out[i] = port.ActiveUserTaskRow{
+				TaskID:             row.TaskID,
+				WorkflowInstanceID: row.WorkflowInstanceID,
+				NodeKey:            row.NodeKey,
+				UserID:             row.UserID,
+				DepartmentID:       row.DepartmentID,
+				Status:             domain.TaskStatus(row.Status),
+				RecordVersion:      row.RecordVersion,
+				CreatedAt:          row.CreatedAt,
+			}
+		}
+		return nil
+	})
+	return out, next, err
+}
+
+func (r *TaskAssignmentRepo) VacateAllActiveByUser(ctx context.Context, tenantID, userID uuid.UUID) ([]*domain.TaskAssignment, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var assignments []*domain.TaskAssignment
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		rows, err := db.New(dbtx).VacateAllActiveAssignmentsByUser(ctx, db.VacateAllActiveAssignmentsByUserParams{
+			TenantID: tenantID, UserID: userID,
 		})
 		if err != nil {
 			return mapErr(err)

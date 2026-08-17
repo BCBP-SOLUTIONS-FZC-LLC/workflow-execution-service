@@ -37,6 +37,8 @@ func (r *InstanceRepo) Create(ctx context.Context, inst *domain.Instance) error 
 			TemporalRunID:      toNullableText(inst.TemporalRunID),
 			Status:             db.WorkflowInstanceStatus(inst.Status),
 			CurrentNodeKeys:    inst.CurrentNodeKeys,
+			ContextJson:        inst.ContextJSON,
+			OverrideMap:        inst.OverrideMap,
 			TaskQueue:          inst.TaskQueue,
 			StartedByUserID:    inst.StartedByUserID,
 			StartedAt:          toPgtypeTimestamptz(inst.StartedAt),
@@ -94,6 +96,7 @@ func (r *InstanceRepo) UpdateStatus(
 func (r *InstanceRepo) ListByTenant(
 	ctx context.Context,
 	tenantID uuid.UUID,
+	filter port.InstanceListFilter,
 	page port.PageRequest,
 ) ([]*domain.Instance, *port.Cursor, error) {
 	ctx = withTenantGUC(ctx, tenantID)
@@ -102,6 +105,18 @@ func (r *InstanceRepo) ListByTenant(
 	params := db.ListWorkflowInstancesByTenantParams{
 		TenantID: tenantID,
 		Limit:    int32(limit + 1), //nolint:gosec
+	}
+	if filter.Status != nil {
+		params.Status = db.NullWorkflowInstanceStatus{WorkflowInstanceStatus: db.WorkflowInstanceStatus(*filter.Status), Valid: true}
+	}
+	if filter.WorkflowVersionID != nil {
+		params.WorkflowVersionID = toPgtypeUUID(filter.WorkflowVersionID)
+	}
+	if filter.StartedAfter != nil {
+		params.StartedAfter = toPgtypeTimestamptz(filter.StartedAfter)
+	}
+	if filter.StartedBefore != nil {
+		params.StartedBefore = toPgtypeTimestamptz(filter.StartedBefore)
 	}
 	if page.After != nil {
 		params.CursorCreatedAt = toPgtypeTimestamptz(&page.After.CreatedAt)
@@ -126,6 +141,38 @@ func (r *InstanceRepo) ListByTenant(
 		return nil
 	})
 	return instances, next, err
+}
+
+func (r *InstanceRepo) CountActiveByWorkflow(ctx context.Context, tenantID, workflowID uuid.UUID) (int64, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var count int64
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		var err error
+		count, err = db.New(dbtx).CountActiveInstancesByWorkflow(ctx, db.CountActiveInstancesByWorkflowParams{
+			TenantID: tenantID, WorkflowID: workflowID,
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		return nil
+	})
+	return count, err
+}
+
+func (r *InstanceRepo) CountActiveByTaskQueue(ctx context.Context, tenantID uuid.UUID, taskQueue string) (int64, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var count int64
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		var err error
+		count, err = db.New(dbtx).CountActiveInstancesByTaskQueue(ctx, db.CountActiveInstancesByTaskQueueParams{
+			TenantID: tenantID, TaskQueue: taskQueue,
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		return nil
+	})
+	return count, err
 }
 
 func (r *InstanceRepo) UpdateCurrentNodeKeys(

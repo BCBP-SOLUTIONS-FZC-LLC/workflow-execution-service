@@ -127,3 +127,72 @@ func (r *TaskRepo) ListByInstance(
 	})
 	return tasks, next, err
 }
+
+func (r *TaskRepo) ListByTenant(
+	ctx context.Context,
+	tenantID uuid.UUID,
+	filter port.TaskListFilter,
+	page port.PageRequest,
+) ([]*domain.Task, *port.Cursor, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	limit := clampLimit(page.Limit)
+
+	params := db.ListWorkflowTasksByTenantParams{
+		TenantID: tenantID,
+		Limit:    int32(limit + 1), //nolint:gosec
+	}
+	if filter.Status != nil {
+		params.Status = db.NullWorkflowTaskStatus{WorkflowTaskStatus: db.WorkflowTaskStatus(*filter.Status), Valid: true}
+	}
+	if filter.WorkflowInstanceID != nil {
+		params.WorkflowInstanceID = toPgtypeUUID(filter.WorkflowInstanceID)
+	}
+	if filter.DepartmentID != nil {
+		params.DepartmentID = toPgtypeUUID(filter.DepartmentID)
+	}
+	if filter.AssigneeUserID != nil {
+		params.AssigneeUserID = toPgtypeUUID(filter.AssigneeUserID)
+	}
+	if filter.DueBefore != nil {
+		params.DueBefore = toPgtypeTimestamptz(filter.DueBefore)
+	}
+	if page.After != nil {
+		params.CursorCreatedAt = toPgtypeTimestamptz(&page.After.CreatedAt)
+		params.CursorID = toPgtypeUUID(&page.After.ID)
+	}
+
+	var tasks []*domain.Task
+	var next *port.Cursor
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		rows, err := db.New(dbtx).ListWorkflowTasksByTenant(ctx, params)
+		if err != nil {
+			return mapErr(err)
+		}
+		trimmed, cursor := paginate(rows, limit, func(row db.WorkflowTask) (time.Time, uuid.UUID) {
+			return row.CreatedAt, row.ID
+		})
+		next = cursor
+		tasks = make([]*domain.Task, len(trimmed))
+		for i, row := range trimmed {
+			tasks[i] = taskFromDB(row)
+		}
+		return nil
+	})
+	return tasks, next, err
+}
+
+func (r *TaskRepo) GetByInstanceAndNode(ctx context.Context, tenantID, instanceID uuid.UUID, nodeKey string) (*domain.Task, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var task *domain.Task
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		row, err := db.New(dbtx).GetWorkflowTaskByInstanceAndNode(ctx, db.GetWorkflowTaskByInstanceAndNodeParams{
+			WorkflowInstanceID: instanceID, NodeKey: nodeKey,
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		task = taskFromDB(row)
+		return nil
+	})
+	return task, err
+}

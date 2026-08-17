@@ -68,6 +68,7 @@ deps:
     mayDependOn:
       - domain
       - port
+      - observability # instance_service.go logs eligibility-call-volume via the centralized metrics
   workflow:
     mayDependOn:
       - domain
@@ -92,3 +93,4 @@ deps:
       - config
       - gen
       - db_migrations
+      - observability # both binaries call Register()/InitTracing() at boot

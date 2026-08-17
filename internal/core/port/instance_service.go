@@ -87,6 +87,21 @@ const (
 	// the OpenAPI spec's WorkflowEventType schema; never emitted.
 	EventCommentAdded   WorkflowEventType = "COMMENT_ADDED"
 	EventResourceLinked WorkflowEventType = "RESOURCE_LINKED"
+
+	// The 8 constants below complete this enum against the real 18-event
+	// domain.Event* outbound catalogue (internal/core/domain/events.go) —
+	// the original enum above predates that full catalogue and only covered
+	// a subset. Added when ListEvents' domain-event-type -> WorkflowEventType
+	// mapping (internal/core/service/mapping.go) was actually implemented,
+	// so every real wire type this schema emits has somewhere to map to.
+	EventInstanceCancelled   WorkflowEventType = "INSTANCE_CANCELLED"
+	EventInstanceDegraded    WorkflowEventType = "INSTANCE_DEGRADED"
+	EventInstanceForceRouted WorkflowEventType = "INSTANCE_FORCE_ROUTED"
+	EventTaskClaimed         WorkflowEventType = "TASK_CLAIMED"
+	EventTaskSuperseded      WorkflowEventType = "TASK_SUPERSEDED"
+	EventTaskFailed          WorkflowEventType = "TASK_FAILED"
+	EventTaskSLAWarning      WorkflowEventType = "TASK_SLA_WARNING"
+	EventTaskSLABreached     WorkflowEventType = "TASK_SLA_BREACHED"
 )
 
 // WorkflowEvent is a single outbox_events row projected for the activity-log

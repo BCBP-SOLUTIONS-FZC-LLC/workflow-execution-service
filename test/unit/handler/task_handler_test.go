@@ -357,6 +357,22 @@ func TestClaimTask_RecordVersionConflict(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, w.Code)
 }
 
+func TestClaimTask_ConnectorTypedTask_NotHumanActionable(t *testing.T) {
+	fake := &fakeTaskService{
+		claim: func(_ context.Context, _, _, _ uuid.UUID, _ int64) (*port.Task, error) {
+			return nil, port.ErrTaskNotHumanActionable
+		},
+	}
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
+
+	w := do(router, req(http.MethodPost, "/api/v1/tasks/"+testTaskID.String()+"/claim", map[string]any{"record_version": 1}))
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	var body problemBody
+	decodeJSON(t, w.Body, &body)
+	assert.Equal(t, "TASK_NOT_HUMAN_ACTIONABLE", body.Code)
+}
+
 func TestClaimTask_MissingRecordVersion(t *testing.T) {
 	router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
 

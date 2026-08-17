@@ -16,9 +16,10 @@ CREATE INDEX idx_workflow_instance_task_queue_active
     ON workflow_instance (task_queue)
     WHERE status IN ('RUNNING', 'PAUSED', 'DEGRADED');
 
--- The archive-guard query behind Definition Service's CheckActiveInstances call.
-CREATE INDEX idx_workflow_instance_version_active
-    ON workflow_instance (workflow_version_id)
+-- The archive-guard query behind Definition Service's CheckActiveInstances(tenant_id, workflow_id)
+-- call — keyed on workflow_id, not workflow_version_id, matching the RPC's own contract.
+CREATE INDEX idx_workflow_instance_workflow_active
+    ON workflow_instance (workflow_id)
     WHERE status IN ('RUNNING', 'PAUSED', 'DEGRADED');
 
 -- workflow_task -----------------------------------------------------------
