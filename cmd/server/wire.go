@@ -21,6 +21,7 @@ import (
 	outboundhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporalclient"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkeystream"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
@@ -74,6 +75,12 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, err
 	}
 	cleanups = append(cleanups, func() { _ = cacheClient.Close() })
+
+	// connectorEvents reuses cacheClient's own Valkey connection — the same
+	// instance backs both the plain KV cache above and the connector-task
+	// Stream cmd/connector-worker consumes; no separate client needed for a
+	// producer-only role.
+	connectorEvents := valkeystream.NewEventPublisher(valkeystream.NewProducer(cacheClient), cfg.ConnectorStreamKey)
 
 	glueCodec, err := newGlueCodec(ctx, cfg)
 	if err != nil {
@@ -164,6 +171,9 @@ func newApp(cfg *config.Config) (*app, error) {
 		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides,
 		Temporal: temporal, IAM: iam, Log: log,
 	}
+	connectorTaskService := &service.ConnectorTaskService{
+		Instances: instances, Tasks: tasks, Temporal: temporal, Cache: cache, Log: log,
+	}
 	workflowClient := &service.WorkflowClient{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Temporal: temporal, Log: log,
 	}
@@ -191,7 +201,8 @@ func newApp(cfg *config.Config) (*app, error) {
 		Cache: cache, IdempotencyTTL: cfg.IdempotencyTTL, ProcessedEvents: processedEvents, Recency: recency,
 		Delegation: delegationReconciler, TenantLifecycle: tenantLifecycleReconciler,
 		UserSafetyNet: userSafetyNetReconciler, OOOAvailability: oooAvailabilityReconciler,
-		TemplateCache: templateCachePrewarmer, Log: log,
+		TemplateCache: templateCachePrewarmer, ConnectorTasks: connectorTaskService,
+		ConnectorEvents: connectorEvents, Log: log,
 	})
 
 	grpcSrv := grpc.NewGRPCServer(cfg.OTELServiceName, cfg.BuildVersion, cfg.InternalAPIToken, log, guard, pauser)

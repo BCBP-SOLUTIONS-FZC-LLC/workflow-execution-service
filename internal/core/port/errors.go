@@ -54,6 +54,11 @@ var (
 	// an inability to check (which fails open, see IAMClient's own doc
 	// comment).
 	ErrAssigneeUnavailable = errors.New("assignee is no longer available (deleted or out-of-office)")
+
+	// ErrTaskNotConnectorTyped rejects ConnectorTaskService's Complete/Fail
+	// called against a task with no connector_type — the inverse gate of
+	// ErrTaskNotHumanActionable, closing the same seam from the other side.
+	ErrTaskNotConnectorTyped = errors.New("task is not connector-typed")
 )
 
 // AssigneeIneligibleError is ErrAssigneeIneligible's node-carrying form (LLD

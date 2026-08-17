@@ -100,6 +100,65 @@ type Config struct {
 	// codec — only meaningful when AWSUseStub is false.
 	GlueRegistryName   string
 	GlueSchemaCacheTTL time.Duration
+
+	// ConnectorStreamKey/Group are shared between cmd/server (which
+	// publishes onto the Stream via internal_events.go's workflow.task.created
+	// handler) and cmd/connector-worker (which consumes it) — both need
+	// sensible defaults, unlike the connector-worker-only fields below.
+	ConnectorStreamKey   string
+	ConnectorStreamGroup string
+	// ConnectorStreamConsumerName is cmd/connector-worker-only; left empty
+	// here on purpose — main.go resolves an os.Hostname() fallback when
+	// unset, since config.go itself does no such host-environment lookups
+	// elsewhere.
+	ConnectorStreamConsumerName string
+	ConnectorStreamBlockTimeout time.Duration
+	// ConnectorStreamClaimMinIdle is XAUTOCLAIM's eligibility threshold —
+	// how long an entry must sit unacked before another consumer may
+	// reclaim it (LLD workflow_connectors.md §6.5 step 0 / Decision #10).
+	ConnectorStreamClaimMinIdle time.Duration
+	ConnectorStreamBatchSize    int64
+
+	// OpenBao KV-v2 read side — cmd/connector-worker only. Deliberately NOT
+	// validated below (see validate()'s own doc comment on why
+	// connector-worker-only fields skip that): cmd/connector-worker checks
+	// these itself at startup, mirroring DefinitionServiceAddr's precedent.
+	OpenBaoAddr    string
+	OpenBaoToken   string
+	OpenBaoMount   string
+	OpenBaoTimeout time.Duration
+
+	// ConnectorAliasRegistryPath is the static endpointAlias/queryAlias
+	// registry file cmd/connector-worker loads at startup via
+	// workflow-connectors' own aliasconfig.Load (LLD Decision #12) —
+	// connector-worker-only, not validated here.
+	ConnectorAliasRegistryPath string
+
+	// Per-connector-type dispatch pool sizing + internal execution timeout
+	// (LLD §6.5 step 2 — one bounded pool + one timeout per connector type).
+	// A flat field-per-type list, not a nested structure: config.Load() has
+	// no existing convention for parsing a map from env, and six types is
+	// small enough this doesn't need one. connector-worker-only.
+	ConnectorPoolSizeStorage         int
+	ConnectorPoolSizeSendEmail       int
+	ConnectorPoolSizeDocumentExtract int
+	ConnectorPoolSizeRestCall        int
+	ConnectorPoolSizeSQLQuery        int
+	ConnectorPoolSizeChatNotify      int
+	ConnectorTimeoutStorage          time.Duration
+	ConnectorTimeoutSendEmail        time.Duration
+	ConnectorTimeoutDocumentExtract  time.Duration
+	ConnectorTimeoutRestCall         time.Duration
+	ConnectorTimeoutSQLQuery         time.Duration
+	ConnectorTimeoutChatNotify       time.Duration
+
+	// ExecutionServiceInternalAddr/ConnectorCompletionTimeout: where
+	// cmd/connector-worker calls the new
+	// POST /internal/connector-tasks/:id/{complete,fail} endpoints.
+	// Reuses the existing InternalAPIToken field as the shared secret those
+	// endpoints already check — connector-worker-only, not validated here.
+	ExecutionServiceInternalAddr string
+	ConnectorCompletionTimeout   time.Duration
 }
 
 func Load() (*Config, error) {
@@ -160,6 +219,37 @@ func Load() (*Config, error) {
 
 		GlueRegistryName:   getEnvOrDefault("GLUE_REGISTRY_NAME", ""),
 		GlueSchemaCacheTTL: getEnvDurationOrDefault("GLUE_SCHEMA_CACHE_TTL", 5*time.Minute),
+
+		ConnectorStreamKey:          getEnvOrDefault("CONNECTOR_STREAM_KEY", "connector-tasks"),
+		ConnectorStreamGroup:        getEnvOrDefault("CONNECTOR_STREAM_GROUP", "connector-worker"),
+		ConnectorStreamConsumerName: getEnvOrDefault("CONNECTOR_STREAM_CONSUMER_NAME", ""),
+		ConnectorStreamBlockTimeout: getEnvDurationOrDefault("CONNECTOR_STREAM_BLOCK_TIMEOUT", 5*time.Second),
+		ConnectorStreamClaimMinIdle: getEnvDurationOrDefault("CONNECTOR_STREAM_CLAIM_MIN_IDLE", 30*time.Second),
+		ConnectorStreamBatchSize:    int64(getEnvIntOrDefault("CONNECTOR_STREAM_BATCH_SIZE", 10)),
+
+		OpenBaoAddr:    getEnvOrDefault("OPENBAO_ADDR", ""),
+		OpenBaoToken:   getEnvOrDefault("OPENBAO_TOKEN", ""),
+		OpenBaoMount:   getEnvOrDefault("OPENBAO_MOUNT", "secret"),
+		OpenBaoTimeout: getEnvDurationOrDefault("OPENBAO_TIMEOUT", 5*time.Second),
+
+		ConnectorAliasRegistryPath: getEnvOrDefault("CONNECTOR_ALIAS_REGISTRY_PATH", ""),
+
+		ConnectorPoolSizeStorage:         getEnvIntOrDefault("CONNECTOR_POOL_SIZE_STORAGE", 10),
+		ConnectorPoolSizeSendEmail:       getEnvIntOrDefault("CONNECTOR_POOL_SIZE_SEND_EMAIL", 5),
+		ConnectorPoolSizeDocumentExtract: getEnvIntOrDefault("CONNECTOR_POOL_SIZE_DOCUMENT_EXTRACT", 10),
+		ConnectorPoolSizeRestCall:        getEnvIntOrDefault("CONNECTOR_POOL_SIZE_REST_CALL", 20),
+		ConnectorPoolSizeSQLQuery:        getEnvIntOrDefault("CONNECTOR_POOL_SIZE_SQL_QUERY", 15),
+		ConnectorPoolSizeChatNotify:      getEnvIntOrDefault("CONNECTOR_POOL_SIZE_CHAT_NOTIFY", 5),
+
+		ConnectorTimeoutStorage:         getEnvDurationOrDefault("CONNECTOR_TIMEOUT_STORAGE", 60*time.Second),
+		ConnectorTimeoutSendEmail:       getEnvDurationOrDefault("CONNECTOR_TIMEOUT_SEND_EMAIL", 10*time.Second),
+		ConnectorTimeoutDocumentExtract: getEnvDurationOrDefault("CONNECTOR_TIMEOUT_DOCUMENT_EXTRACT", 60*time.Second),
+		ConnectorTimeoutRestCall:        getEnvDurationOrDefault("CONNECTOR_TIMEOUT_REST_CALL", 30*time.Second),
+		ConnectorTimeoutSQLQuery:        getEnvDurationOrDefault("CONNECTOR_TIMEOUT_SQL_QUERY", 15*time.Second),
+		ConnectorTimeoutChatNotify:      getEnvDurationOrDefault("CONNECTOR_TIMEOUT_CHAT_NOTIFY", 10*time.Second),
+
+		ExecutionServiceInternalAddr: getEnvOrDefault("EXECUTION_SERVICE_INTERNAL_ADDR", ""),
+		ConnectorCompletionTimeout:   getEnvDurationOrDefault("CONNECTOR_COMPLETION_TIMEOUT", 5*time.Second),
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -226,6 +316,13 @@ func (c *Config) validate() error {
 	if c.AppEnv != "dev" && c.OutboxRelayDatabaseURL == "" {
 		return fmt.Errorf("OUTBOX_RELAY_DATABASE_URL is required when APP_ENV != dev — a missing relay DSN would silently fall back to the RLS-enforced app role and see zero rows forever")
 	}
+	// Connector-worker-only fields (OpenBao*, ConnectorAliasRegistryPath,
+	// ConnectorPoolSize*/ConnectorTimeout*, ExecutionServiceInternalAddr)
+	// are deliberately NOT validated here, mirroring DefinitionServiceAddr's
+	// own precedent above: this Config is shared by cmd/server and
+	// cmd/worker too, and a hard requirement here would break their boot
+	// for fields only cmd/connector-worker actually needs.
+	// cmd/connector-worker's own main.go checks its required fields itself.
 	return nil
 }
 

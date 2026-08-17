@@ -46,6 +46,7 @@ const (
 	consumerMembership = "membership-execution"
 	consumerUser       = "user-execution"
 	consumerTemplate   = "template-sync-execution"
+	consumerConnector  = "connector-stream-execution"
 )
 
 // parseEventID and parseTenantID share the "invalid event id"/"invalid
@@ -101,6 +102,8 @@ func (h *Handler) HandleInternalEvent(c *gin.Context) {
 		h.handleTenantStateChanged(c, env)
 	case "workflow.template.published":
 		h.handleTemplatePublished(c, env)
+	case "workflow.task.created":
+		h.handleWorkflowTaskCreated(c, env)
 	default:
 		h.logInfo("internal events: ignoring unhandled type", map[string]any{"event_type": env.Type})
 		h.markOK(env.Type)

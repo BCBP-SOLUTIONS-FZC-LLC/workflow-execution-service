@@ -1,0 +1,27 @@
+# Static endpointAlias/queryAlias registry cmd/connector-worker loads at
+# startup (design/LLD/workflow_connectors.md §6.4.4/§6.4.5, Decision #12) —
+# not a DB table, no admin CRUD API in v1. Schema owned by
+# workflow-connectors' pkg/connectors/aliasconfig package.
+#
+# Copy this file, fill in real internal-service endpoints, and point
+# CONNECTOR_ALIAS_REGISTRY_PATH at it. No secrets belong in this file — an
+# alias only ever carries a target internal service's own base URL/path;
+# rest-call/sql-query attach x-internal-token/x-departments to every request
+# at dispatch time, not from anything stored here.
+
+version: 1
+
+restCall:
+  - alias: tender-get-application
+    method: GET
+    baseURL: http://tender-service.internal
+    pathTemplate: /api/v1/applications/{applicationId}
+    timeout: 5s
+
+sqlQuery:
+  - alias: get-active-tenants
+    baseURL: http://tender-service.internal
+    path: /internal/queries/execute
+    queryId: get-active-tenants
+    paramCount: 1
+    timeout: 5s

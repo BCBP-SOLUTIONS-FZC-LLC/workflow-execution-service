@@ -2,14 +2,15 @@
 
 The Temporal-backed execution control plane for the BPMN Workflow Engine platform. Starts, tracks, and drives workflow instances to completion; dispatches tasks to human assignees and other services. Execution-time counterpart to `definition_service` (design-time authoring/compilation of workflow templates).
 
-Two independently deployed binaries, one Go module:
+Three independently deployed binaries, one Go module:
 
 - `cmd/server` — HTTP API (`:8080`) + gRPC (`:9090`) + the outbox relay + the Temporal client (`StartWorkflow`/`SignalWorkflow`/`QueryWorkflow`).
 - `cmd/worker` — the Temporal Worker process: polls task queues, hosts the workflow function and Activities. Minimal `:8081` health/metrics surface, no business HTTP/gRPC surface of its own.
+- `cmd/connector-worker` — executes connector-typed tasks (automatic REST/SQL/storage/email/document-extract/chat-notify dispatch, `design/LLD/workflow_connectors.md`). Consumes a Valkey Stream `cmd/server` publishes onto, dispatches to a real `workflow-connectors.Connector`, and reports the outcome back via `cmd/server`'s own `/internal/connector-tasks` HTTP endpoints — it never touches the Temporal SDK directly. Its own new dependencies (Valkey Streams, OpenBao) are separate from `cmd/server`'s KV cache and `cmd/worker`'s (still zero) Valkey usage.
 
 ## Private Module Access
 
-This service consumes private Go modules from the `github.com/BCBP-SOLUTIONS-FZC-LLC/*` organization (`platform-events`, `platform-pgcommon`, `platform-gincommon`, `workflow-models`).
+This service consumes private Go modules from the `github.com/BCBP-SOLUTIONS-FZC-LLC/*` organization (`platform-events`, `platform-pgcommon`, `platform-gincommon`, `workflow-models`, `workflow-connectors`).
 
 Before running Go commands or compiling the app, configure Go to bypass the public proxy and checksum database:
 
@@ -59,10 +60,13 @@ make migrate
 # 6. Generate proto + sqlc code
 make generate
 
-# 7. Start the server or worker (AWS stubs active by default)
+# 7. Start the server, worker, or connector-worker (AWS stubs active by default)
 go run ./cmd/server
 go run ./cmd/worker
+go run ./cmd/connector-worker
 ```
+
+`cmd/connector-worker` additionally requires `OPENBAO_ADDR`, `CONNECTOR_ALIAS_REGISTRY_PATH` (see `config/connector-aliases.example.yaml`), and `EXECUTION_SERVICE_INTERNAL_ADDR` — see `.env.example` for the full list.
 
 Temporal's Web UI is available at <http://localhost:8233> once `make docker-up` is running.
 
@@ -71,7 +75,7 @@ Temporal's Web UI is available at <http://localhost:8233> once `make docker-up` 
 Clean Architecture, dependency direction `domain ← port ← service ← adapter`, plus two peer layers that sit alongside `adapter` rather than under it: `internal/workflow` for the Temporal workflow function and Activities (never imported by `adapter/`, never imports it back — the two connect only via runtime registration in `cmd/worker/main.go`), and `internal/observability` for centralized Prometheus metrics, OTel tracing-init helpers, and Temporal Search-Attribute helpers (execution LLD §7.6, §3.6) — a leaf package importable by any layer, including `workflow`, since Search Attributes can only be upserted from inside workflow-context code. See `.go-arch-lint.yml` for the enforced import graph.
 
 ```sh
-cmd/server/, cmd/worker/       — composition roots (two independently deployed binaries)
+cmd/server/, cmd/worker/, cmd/connector-worker/ — composition roots (three independently deployed binaries)
 internal/core/{domain,port,service}/
 internal/workflow/             — Temporal workflow function + Activities
 internal/observability/        — metrics, tracing init, Search-Attribute helpers
@@ -100,7 +104,7 @@ Run `make help` for the full target list.
 | `make docker-up` / `make docker-down` | Start/stop local infra (Postgres, Valkey, LocalStack, PgBouncer, Temporal dev server) |
 | `make migrate` | Apply schema migrations (outbox + domain) |
 | `make generate` | Regenerate proto (buf) + sqlc code |
-| `make build` | Compile `cmd/server` and `cmd/worker` |
+| `make build` | Compile `cmd/server`, `cmd/worker`, and `cmd/connector-worker` |
 | `make test` | Unit tests — `internal/...`, `test/unit/...`, `test/workflow/...` — race detector, coverage |
 | `make test-integration` | Integration tests (testcontainers, real Postgres) |
 | `make test-ci` | Unit + integration, merged coverage — what CI runs |
