@@ -2,6 +2,7 @@ package temporal_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -207,7 +208,8 @@ func TestReassignAssignment_RetriedCall_NoOp(t *testing.T) {
 func TestUpdateTaskStatus_Failed_EnqueuesTaskFailed(t *testing.T) {
 	taskID := uuid.New()
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
-	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo())
+	assignee := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
+	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(assignee))
 
 	err := deps.UpdateTaskStatus(context.Background(), port.UpdateTaskStatusInput{
 		TaskID: taskID.String(), TenantID: uuid.New().String(), Status: domain.TaskStatusFailed, RecordVersion: 1,
@@ -216,6 +218,10 @@ func TestUpdateTaskStatus_Failed_EnqueuesTaskFailed(t *testing.T) {
 	assert.Equal(t, domain.TaskStatusFailed, task.Status)
 	require.Len(t, outbox.enqueued, 1)
 	assert.Equal(t, domain.EventWorkflowTaskFailed, outbox.enqueued[0].Type)
+
+	var payload domain.WorkflowTaskFailedPayload
+	require.NoError(t, json.Unmarshal(outbox.enqueued[0].Payload, &payload))
+	assert.Equal(t, []uuid.UUID{assignee.UserID}, payload.AssigneeUserIDs, "assignee_user_ids must not be omitted — the schema requires it non-null")
 }
 
 func TestUpdateTaskStatus_NonFailed_NoEvent(t *testing.T) {
@@ -228,4 +234,22 @@ func TestUpdateTaskStatus_NonFailed_NoEvent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Empty(t, outbox.enqueued)
+}
+
+// TestUpdateTaskStatus_RetriedCall_NoOp is the regression test for the
+// idempotency finding: a lost-ack Temporal retry replays the same
+// (stale-by-then) in.RecordVersion. UpdateTaskStatus must refetch and no-op
+// once the task is already in the target status, not reuse in.RecordVersion
+// for the write and hit an unclassified, retried-forever version conflict.
+func TestUpdateTaskStatus_RetriedCall_NoOp(t *testing.T) {
+	taskID := uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
+	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo())
+
+	in := port.UpdateTaskStatusInput{
+		TaskID: taskID.String(), TenantID: uuid.New().String(), Status: domain.TaskStatusFailed, RecordVersion: 1,
+	}
+	require.NoError(t, deps.UpdateTaskStatus(context.Background(), in))
+	require.NoError(t, deps.UpdateTaskStatus(context.Background(), in), "a retried UpdateTaskStatus must succeed idempotently, not error on the now-stale RecordVersion")
+	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.failed")
 }

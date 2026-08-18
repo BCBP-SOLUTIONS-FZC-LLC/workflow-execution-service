@@ -334,15 +334,30 @@ func (d *Deps) UpdateTaskStatus(ctx context.Context, in port.UpdateTaskStatusInp
 
 	ctx = withTenantGUC(ctx, tenantID)
 	return d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
-		task, err := d.Tasks.UpdateStatus(ctx, tenantID, taskID, in.Status, in.RecordVersion)
+		existing, err := d.Tasks.GetByID(ctx, tenantID, taskID)
+		if err != nil {
+			return fmt.Errorf("get task: %w", err)
+		}
+		if existing.Status == in.Status {
+			return nil
+		}
+		task, err := d.Tasks.UpdateStatus(ctx, tenantID, taskID, in.Status, existing.RecordVersion)
 		if err != nil {
 			return fmt.Errorf("update task status: %w", err)
 		}
 		if in.Status != domain.TaskStatusFailed {
 			return nil
 		}
+		active, err := d.Assignments.ListActiveByTask(ctx, tenantID, task.ID)
+		if err != nil {
+			return fmt.Errorf("list active assignments for task %s: %w", task.ID, err)
+		}
+		var assigneeUserIDs []uuid.UUID
+		for _, a := range active {
+			assigneeUserIDs = append(assigneeUserIDs, a.UserID)
+		}
 		core := domain.CommonCore{WorkflowInstanceID: task.WorkflowInstanceID}
-		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID}
+		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
 		payload := domain.NewWorkflowTaskFailedPayload(core, taskCore, "stage_fail")
 		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskFailed, payload)
 	})

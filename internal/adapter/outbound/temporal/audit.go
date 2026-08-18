@@ -158,8 +158,16 @@ func (d *Deps) recordSLAEvent(
 		if exists {
 			return nil
 		}
+		active, err := d.Assignments.ListActiveByTask(ctx, tenantID, task.ID)
+		if err != nil {
+			return fmt.Errorf("list active assignments for task %s: %w", task.ID, err)
+		}
+		var assigneeUserIDs []uuid.UUID
+		for _, a := range active {
+			assigneeUserIDs = append(assigneeUserIDs, a.UserID)
+		}
 		core := domain.CommonCore{WorkflowInstanceID: instanceID}
-		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID}
+		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
 		return d.enqueueInstanceEvent(ctx, tenantID, instanceID, eventType, buildPayload(core, taskCore, task))
 	})
 }

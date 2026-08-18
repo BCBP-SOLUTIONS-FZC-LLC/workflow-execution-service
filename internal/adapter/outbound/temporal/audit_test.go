@@ -2,6 +2,7 @@ package temporal_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -46,9 +47,11 @@ func TestRecordSLAWarning_EnqueuesAuditEventOnly(t *testing.T) {
 	taskID, instanceID := uuid.New(), uuid.New()
 	followUp := time.Now().UTC()
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady, FollowUpAt: &followUp}
+	assignee := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
 	outbox := &fakeOutbox{}
 	deps := &outboundtemporal.Deps{
-		Tasks: newFakeTaskRepo(task), Outbox: outbox, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(assignee),
+		Outbox: outbox, Transactor: fakeTransactor{}, Validator: noopValidator{},
 	}
 
 	err := deps.RecordSLAWarning(context.Background(), port.RecordSLAWarningInput{
@@ -58,6 +61,10 @@ func TestRecordSLAWarning_EnqueuesAuditEventOnly(t *testing.T) {
 	assert.Equal(t, domain.TaskStatusReady, task.Status, "audit-only: no status change")
 	require.Len(t, outbox.enqueued, 1)
 	assert.Equal(t, domain.EventWorkflowTaskSLAWarning, outbox.enqueued[0].Type)
+
+	var payload domain.WorkflowTaskSLAWarningPayload
+	require.NoError(t, json.Unmarshal(outbox.enqueued[0].Payload, &payload))
+	assert.Equal(t, []uuid.UUID{assignee.UserID}, payload.AssigneeUserIDs, "assignee_user_ids must not be omitted — the schema requires it non-null")
 }
 
 // TestRecordSLAWarning_RetriedCall_NoOp is the regression test for the
@@ -71,7 +78,8 @@ func TestRecordSLAWarning_RetriedCall_NoOp(t *testing.T) {
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady, FollowUpAt: &followUp}
 	outbox := &fakeOutbox{}
 	deps := &outboundtemporal.Deps{
-		Tasks: newFakeTaskRepo(task), Outbox: outbox, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(),
+		Outbox: outbox, Transactor: fakeTransactor{}, Validator: noopValidator{},
 	}
 
 	in := port.RecordSLAWarningInput{InstanceID: instanceID.String(), TenantID: uuid.New().String(), TaskID: taskID.String(), NodeKey: "sales/review"}
@@ -87,7 +95,8 @@ func TestRecordSLABreach_EnqueuesAuditEventOnly(t *testing.T) {
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, DueAt: &due}
 	outbox := &fakeOutbox{}
 	deps := &outboundtemporal.Deps{
-		Tasks: newFakeTaskRepo(task), Outbox: outbox, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(),
+		Outbox: outbox, Transactor: fakeTransactor{}, Validator: noopValidator{},
 	}
 
 	err := deps.RecordSLABreach(context.Background(), port.RecordSLABreachInput{

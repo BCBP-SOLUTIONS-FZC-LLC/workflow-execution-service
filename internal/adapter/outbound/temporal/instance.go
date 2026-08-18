@@ -87,7 +87,7 @@ func (d *Deps) UpdateInstanceStatus(ctx context.Context, in port.UpdateInstanceS
 func (d *Deps) PauseInstance(ctx context.Context, in port.PauseInstanceInput) error {
 	return d.instanceLifecycleEvent(ctx, in.InstanceID, in.TenantID, in.RecordVersion, domain.InstanceStatusPaused,
 		func(core domain.CommonCore, startedByUserID uuid.UUID) any {
-			return domain.NewWorkflowInstancePausedPayload(core, startedByUserID, domain.InitiatorAdmin, adminUserIDPtr(in.AdminUserID))
+			return domain.NewWorkflowInstancePausedPayload(core, startedByUserID, in.Initiator, adminUserIDPtr(in.AdminUserID))
 		}, domain.EventWorkflowInstancePaused)
 }
 
@@ -95,7 +95,7 @@ func (d *Deps) PauseInstance(ctx context.Context, in port.PauseInstanceInput) er
 func (d *Deps) ResumeInstance(ctx context.Context, in port.ResumeInstanceInput) error {
 	return d.instanceLifecycleEvent(ctx, in.InstanceID, in.TenantID, in.RecordVersion, domain.InstanceStatusRunning,
 		func(core domain.CommonCore, startedByUserID uuid.UUID) any {
-			return domain.NewWorkflowInstanceResumedPayload(core, startedByUserID, domain.InitiatorAdmin, adminUserIDPtr(in.AdminUserID))
+			return domain.NewWorkflowInstanceResumedPayload(core, startedByUserID, in.Initiator, adminUserIDPtr(in.AdminUserID))
 		}, domain.EventWorkflowInstanceResumed)
 }
 
@@ -143,8 +143,8 @@ func (d *Deps) CancelInstance(ctx context.Context, in port.CancelInstanceInput) 
 			return fmt.Errorf("update instance status: %w", err)
 		}
 		core := domain.CommonCore{WorkflowInstanceID: instanceID, BusinessKey: updated.BusinessKey, WorkflowVersionID: updated.WorkflowVersionID}
-		payload := domain.NewWorkflowInstanceTerminatedPayload(core, updated.StartedByUserID, domain.TerminatedInitiatorAdmin, &adminUserID)
-		return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowInstanceTerminated, payload)
+		payload := domain.NewWorkflowInstanceCancelledPayload(core, updated.StartedByUserID, adminUserID, in.Reason)
+		return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowInstanceCancelled, payload)
 	})
 }
 

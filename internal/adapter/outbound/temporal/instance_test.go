@@ -88,6 +88,26 @@ func TestPauseInstance_UpdatesStatusAndEnqueuesPaused(t *testing.T) {
 	assert.Equal(t, domain.EventWorkflowInstancePaused, outbox.enqueued[0].Type)
 }
 
+// TestPauseInstance_NonAdminInitiator_CarriesThrough is the regression test
+// for the initiator finding: a reconciler-triggered pause (tenant
+// suspension, OOO, safety-net) must report its real initiator on the wire,
+// not a hardcoded "admin".
+func TestPauseInstance_NonAdminInitiator_CarriesThrough(t *testing.T) {
+	instanceID, tenantID := uuid.New(), uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1, Status: domain.InstanceStatusRunning}
+	deps, outbox := newInstanceTestDeps(inst, nil, nil)
+
+	err := deps.PauseInstance(context.Background(), port.PauseInstanceInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), Initiator: domain.InitiatorTenantState, RecordVersion: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, outbox.enqueued, 1)
+
+	var payload domain.WorkflowInstancePausedPayload
+	require.NoError(t, json.Unmarshal(outbox.enqueued[0].Payload, &payload))
+	assert.Equal(t, domain.InitiatorTenantState, payload.Initiator)
+}
+
 // TestPauseInstance_RetriedCall_NoOp is the regression test for the
 // retry-forever finding: PauseInstance no longer trusts in.RecordVersion —
 // a retry (instance already Paused from a prior attempt, current
@@ -121,22 +141,32 @@ func TestResumeInstance_UpdatesStatusAndEnqueuesResumed(t *testing.T) {
 	assert.Equal(t, domain.EventWorkflowInstanceResumed, outbox.enqueued[0].Type)
 }
 
-func TestCancelInstance_CascadesAndTerminates(t *testing.T) {
+// TestCancelInstance_CascadesAndEmitsCancelled is the regression test for
+// the dead-event finding: cancel must emit workflow.instance.cancelled, not
+// workflow.instance.terminated — the LLD documents these as distinct
+// events — and must carry the caller-supplied reason through, not drop it.
+func TestCancelInstance_CascadesAndEmitsCancelled(t *testing.T) {
 	instanceID, tenantID := uuid.New(), uuid.New()
 	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1}
 	openTask := &domain.Task{ID: uuid.New(), WorkflowInstanceID: instanceID, Status: domain.TaskStatusInProgress, RecordVersion: 1}
 	tasks := newFakeTaskRepo(openTask)
 	deps, outbox := newInstanceTestDeps(inst, tasks, newFakeAssignmentRepo())
 
+	reason := "no longer needed"
 	err := deps.CancelInstance(context.Background(), port.CancelInstanceInput{
-		InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), RecordVersion: 1,
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), Reason: &reason, RecordVersion: 1,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, domain.TaskStatusFailed, openTask.Status)
-	assert.Equal(t, domain.InstanceStatusTerminated, inst.Status)
+	assert.Equal(t, domain.InstanceStatusTerminated, inst.Status, "the DB status stays TERMINATED - cancel/terminate diverge only at the event layer")
 	require.Len(t, outbox.enqueued, 2)
 	assert.Equal(t, domain.EventWorkflowTaskFailed, outbox.enqueued[0].Type)
-	assert.Equal(t, domain.EventWorkflowInstanceTerminated, outbox.enqueued[1].Type)
+	assert.Equal(t, domain.EventWorkflowInstanceCancelled, outbox.enqueued[1].Type)
+
+	var payload domain.WorkflowInstanceCancelledPayload
+	require.NoError(t, json.Unmarshal(outbox.enqueued[1].Payload, &payload))
+	require.NotNil(t, payload.Reason)
+	assert.Equal(t, reason, *payload.Reason)
 }
 
 // TestUpdateInstanceStatus_Degraded_EnqueuesDegradedEvent is the regression
