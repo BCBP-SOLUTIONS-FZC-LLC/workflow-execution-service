@@ -162,7 +162,7 @@ func TestCodec_Encode_RequestsUnderscoredSchemaName(t *testing.T) {
 		cacheTTL:     0,
 	}
 
-	_, err := c.Encode(context.Background(), "workflow.task.created", []byte(`{}`))
+	_, _, err := c.Encode(context.Background(), "workflow.task.created", json.RawMessage(`{}`))
 
 	require.NoError(t, err)
 	require.NotNil(t, getter.gotSchemaName)

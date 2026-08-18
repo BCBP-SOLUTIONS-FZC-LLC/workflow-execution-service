@@ -45,12 +45,12 @@ type cacheEntry struct {
 // actually exists in the registry, and real framing for downstream
 // Glue-aware consumers.
 //
-// This type is meant to be injected via events.WithCodec(...) into a real
-// events.NewSNSPublisher(...) call once that composition-root wiring exists
-// in cmd/server (it doesn't yet) - platform-events' publisher base64-wraps
-// Encode's returned bytes before assigning them to Envelope.Payload, so the
-// envelope's "data" field stays valid JSON regardless of what Codec.Encode
-// returns.
+// This type is injected via events.WithCodec(...) into the real
+// events.NewSNSPublisher(...) call in cmd/server's composition root
+// (cmd/server/infra.go's newPublisher) - platform-events' publisher
+// base64-wraps Encode's returned bytes before assigning them to
+// Envelope.Payload, so the envelope's "data" field stays valid JSON
+// regardless of what Codec.Encode returns.
 type Codec struct {
 	client       schemaVersionGetter
 	registryName string
