@@ -148,6 +148,7 @@ type PauseInstanceInput struct {
 	InstanceID    string
 	TenantID      string
 	AdminUserID   string
+	Initiator     string
 	RecordVersion int64
 }
 
@@ -155,6 +156,7 @@ type ResumeInstanceInput struct {
 	InstanceID    string
 	TenantID      string
 	AdminUserID   string
+	Initiator     string
 	RecordVersion int64
 }
 
@@ -165,6 +167,7 @@ type CancelInstanceInput struct {
 	InstanceID    string
 	TenantID      string
 	AdminUserID   string
+	Reason        *string
 	RecordVersion int64
 }
 

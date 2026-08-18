@@ -125,6 +125,7 @@ type reassignSignal struct {
 type adminSignal struct {
 	AdminUserID   string
 	Reason        string
+	Initiator     string // set only for instance-pause/instance-resume
 	TargetDeptID  string
 	TargetNodeKey domain.NodeKey // set only for instance-force-forward
 	RecordVersion int64
@@ -290,7 +291,7 @@ func (in *interpreter) handleInstancePause(ctx wf.Context, sig adminSignal) {
 	in.status = domain.InstanceStatusPaused
 	if err := pauseInstance(ctx, port.PauseInstanceInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID,
-		AdminUserID: sig.AdminUserID, RecordVersion: sig.RecordVersion,
+		AdminUserID: sig.AdminUserID, Initiator: sig.Initiator, RecordVersion: sig.RecordVersion,
 	}); err != nil {
 		wf.GetLogger(ctx).Warn("pauseInstance failed", "error", err)
 	}
@@ -301,7 +302,7 @@ func (in *interpreter) handleInstanceResume(ctx wf.Context, sig adminSignal) {
 	in.status = domain.InstanceStatusRunning
 	if err := resumeInstance(ctx, port.ResumeInstanceInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID,
-		AdminUserID: sig.AdminUserID, RecordVersion: sig.RecordVersion,
+		AdminUserID: sig.AdminUserID, Initiator: sig.Initiator, RecordVersion: sig.RecordVersion,
 	}); err != nil {
 		wf.GetLogger(ctx).Warn("resumeInstance failed", "error", err)
 	}
@@ -314,9 +315,13 @@ func (in *interpreter) handleInstanceResume(ctx wf.Context, sig adminSignal) {
 // propagates as stepOutcome's own error so Execute's runErr handling can
 // fall back to FAILED rather than reporting a false Terminated success.
 func (in *interpreter) cancelInstanceOnSignal(ctx wf.Context, sig adminSignal) error {
+	var reason *string
+	if sig.Reason != "" {
+		reason = &sig.Reason
+	}
 	return cancelInstance(ctx, port.CancelInstanceInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID,
-		AdminUserID: sig.AdminUserID, RecordVersion: sig.RecordVersion,
+		AdminUserID: sig.AdminUserID, Reason: reason, RecordVersion: sig.RecordVersion,
 	})
 }
 
