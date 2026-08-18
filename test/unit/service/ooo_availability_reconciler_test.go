@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -36,6 +37,10 @@ func TestOOOAvailabilityReconciler_Apply(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, temporal.signals, 1)
 		assert.Equal(t, port.SignalInstancePause, temporal.signals[0].SignalName)
+
+		b, err := json.Marshal(temporal.signals[0].Payload)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"Initiator":"`+domain.InitiatorOOO+`"`, "the signal must carry ooo as its initiator, not fall back to admin")
 	})
 
 	t.Run("status ooo with an active delegate is a no-op", func(t *testing.T) {
@@ -65,6 +70,10 @@ func TestOOOAvailabilityReconciler_Apply(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, temporal.signals, 1)
 		assert.Equal(t, port.SignalInstanceResume, temporal.signals[0].SignalName)
+
+		b, err := json.Marshal(temporal.signals[0].Payload)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"Initiator":"`+domain.InitiatorOOO+`"`, "the signal must carry ooo as its initiator, not fall back to admin")
 	})
 
 	t.Run("status available skips a RUNNING instance", func(t *testing.T) {

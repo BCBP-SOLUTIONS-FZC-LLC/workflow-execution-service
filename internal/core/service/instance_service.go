@@ -441,12 +441,24 @@ func (s *InstanceService) ListEvents(ctx context.Context, tenantID, instanceID u
 type adminSignalWire struct {
 	AdminUserID   string
 	Reason        string
+	Initiator     string
 	TargetDeptID  string
 	TargetNodeKey string
 	RecordVersion int64
 }
 
-func (s *InstanceService) signalLifecycle(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string, recordVersion int64, signalName string) error {
+// signalAnnotation bundles a signal's two free-text-ish fields — reason is a
+// genuine human-supplied text (Pause/Cancel's own API-caller-facing reason);
+// initiator is a caller-computed tag identifying what triggered the signal
+// (domain.InitiatorAdmin, InitiatorTenantState, InitiatorOOO, InitiatorSafetyNet)
+// so a pause/resume caused by something other than a direct admin API call
+// reports its real cause on the wire instead of a hardcoded "admin".
+type signalAnnotation struct {
+	reason    string
+	initiator string
+}
+
+func (s *InstanceService) signalLifecycle(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, ann signalAnnotation, recordVersion int64, signalName string) error {
 	inst, err := s.Instances.GetByID(ctx, tenantID, instanceID)
 	if err != nil {
 		return wrapInstanceErr(err)
@@ -458,7 +470,7 @@ func (s *InstanceService) signalLifecycle(ctx context.Context, tenantID, instanc
 		return err
 	}
 	return s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, signalName, adminSignalWire{
-		AdminUserID: actorUserID.String(), Reason: reason, RecordVersion: recordVersion,
+		AdminUserID: actorUserID.String(), Reason: ann.reason, Initiator: ann.initiator, RecordVersion: recordVersion,
 	})
 }
 
@@ -490,15 +502,15 @@ func validateInstanceStateFor(signalName string, status domain.InstanceStatus) e
 }
 
 func (s *InstanceService) Pause(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string, recordVersion int64) error {
-	return s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, reason, recordVersion, port.SignalInstancePause)
+	return s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, signalAnnotation{reason: reason, initiator: domain.InitiatorAdmin}, recordVersion, port.SignalInstancePause)
 }
 
 func (s *InstanceService) Resume(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, recordVersion int64) error {
-	return s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, "", recordVersion, port.SignalInstanceResume)
+	return s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, signalAnnotation{initiator: domain.InitiatorAdmin}, recordVersion, port.SignalInstanceResume)
 }
 
 func (s *InstanceService) Cancel(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string, recordVersion int64) error {
-	return s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, reason, recordVersion, port.SignalInstanceCancel)
+	return s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, signalAnnotation{reason: reason}, recordVersion, port.SignalInstanceCancel)
 }
 
 func (s *InstanceService) ForceForward(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, targetNodeKey string, recordVersion int64) error {
@@ -518,7 +530,7 @@ func (s *InstanceService) ForceForward(ctx context.Context, tenantID, instanceID
 }
 
 func (s *InstanceService) ForceBack(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, recordVersion int64) error {
-	return s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, "", recordVersion, port.SignalInstanceForceBack)
+	return s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, signalAnnotation{}, recordVersion, port.SignalInstanceForceBack)
 }
 
 // Terminate is the one direct (non-signal) client call (LLD §3.1) — no

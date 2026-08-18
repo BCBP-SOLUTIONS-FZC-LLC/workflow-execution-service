@@ -87,7 +87,7 @@ func (s *OOOAvailabilityReconciler) signalActiveInstances(ctx context.Context, t
 			continue
 		}
 		if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, signalName, adminSignalWire{
-			Reason: domain.InitiatorOOO, RecordVersion: inst.RecordVersion,
+			Initiator: domain.InitiatorOOO, RecordVersion: inst.RecordVersion,
 		}); err != nil {
 			s.logger().Warn("ooo availability: failed to signal instance", map[string]any{"instance_id": inst.ID, "signal": signalName, "error": err.Error()})
 		}

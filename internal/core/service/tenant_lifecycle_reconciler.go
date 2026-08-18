@@ -101,7 +101,7 @@ func (s *TenantLifecycleReconciler) signalAllByStatus(ctx context.Context, tenan
 	}
 	for _, inst := range instances {
 		if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, signalName, adminSignalWire{
-			Reason: domain.InitiatorTenantState, RecordVersion: inst.RecordVersion,
+			Initiator: domain.InitiatorTenantState, RecordVersion: inst.RecordVersion,
 		}); err != nil {
 			s.logger().Warn("tenant lifecycle: failed to signal instance", map[string]any{"instance_id": inst.ID, "signal": signalName, "error": err.Error()})
 		}

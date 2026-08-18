@@ -60,7 +60,7 @@ func (s *UserTaskPauser) PauseUserTasks(ctx context.Context, tenantID, userID uu
 			continue
 		}
 		if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, port.SignalInstancePause, adminSignalWire{
-			Reason: domain.InitiatorSafetyNet, RecordVersion: inst.RecordVersion,
+			Initiator: domain.InitiatorSafetyNet, RecordVersion: inst.RecordVersion,
 		}); err != nil {
 			s.logger().Warn("failed to signal instance-pause during safety-net pause", map[string]any{"instance_id": inst.ID, "error": err.Error()})
 		}
