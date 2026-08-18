@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,7 +122,19 @@ func prependGlueHeader(versionID string, payload []byte) ([]byte, error) {
 	return out, nil
 }
 
+// registrySchemaName converts a dotted wire event type (e.g.
+// "workflow.task.created") to the underscored form platform-schemagov's
+// register command actually uses in Glue - the JSON schema filename stem
+// (internal/eventschema/workflow_task_created.json), verbatim. There is no
+// name-override in platform-schemagov's register command, so this is the
+// only naming convention that matches what's really registered.
+func registrySchemaName(eventType string) string {
+	return strings.ReplaceAll(eventType, ".", "_")
+}
+
 func (c *Codec) getSchemaVersionID(ctx context.Context, schemaName string) (string, error) {
+	schemaName = registrySchemaName(schemaName)
+
 	c.mu.RLock()
 	entry, ok := c.cache[schemaName]
 	c.mu.RUnlock()

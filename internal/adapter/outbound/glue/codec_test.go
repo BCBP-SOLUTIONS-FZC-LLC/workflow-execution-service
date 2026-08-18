@@ -147,6 +147,38 @@ func TestCodec_GetSchemaVersionID_NilSchemaVersionID_ReturnsError(t *testing.T) 
 	require.Error(t, err)
 }
 
+// TestCodec_Encode_RequestsUnderscoredSchemaName is the regression test for
+// this adapter's registry-name mismatch: platform-schemagov's register
+// command has no name-override, and always registers schemas in Glue under
+// the underscored JSON schema filename stem (e.g. "workflow_task_created"),
+// never the dotted wire event type. Encode must convert before calling
+// GetSchemaVersion, or every real (non-stub) publish 404s.
+func TestCodec_Encode_RequestsUnderscoredSchemaName(t *testing.T) {
+	getter := &nameCapturingGetter{versionID: "8fa88cde-824c-47bc-836b-665cd42c2222"}
+	c := &Codec{
+		client:       getter,
+		registryName: "wf-workflow-events",
+		cache:        make(map[string]cacheEntry),
+		cacheTTL:     0,
+	}
+
+	_, err := c.Encode(context.Background(), "workflow.task.created", []byte(`{}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, getter.gotSchemaName)
+	assert.Equal(t, "workflow_task_created", *getter.gotSchemaName)
+}
+
+type nameCapturingGetter struct {
+	versionID     string
+	gotSchemaName *string
+}
+
+func (g *nameCapturingGetter) GetSchemaVersion(_ context.Context, params *awsglue.GetSchemaVersionInput, _ ...func(*awsglue.Options)) (*awsglue.GetSchemaVersionOutput, error) {
+	g.gotSchemaName = params.SchemaId.SchemaName
+	return &awsglue.GetSchemaVersionOutput{SchemaVersionId: aws.String(g.versionID)}, nil
+}
+
 func TestCodec_Encode_RegistryLookupError_FailsClosed(t *testing.T) {
 	wantErr := errors.New("schema not found")
 	c := &Codec{
