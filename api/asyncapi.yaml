@@ -615,6 +615,16 @@ components:
         stage_type:           { type: string }
         due_at:               { type: ["string", "null"], format: date-time }
         follow_up_at:         { type: ["string", "null"], format: date-time }
+        connector_type:       { type: ["string", "null"] }
+        resolved_inputs:      { type: ["object", "null"] }
+        output_mapping:
+          type: ["array", "null"]
+          items:
+            type: object
+            required: [source, target]
+            properties:
+              source: { type: string }
+              target: { type: string }
     WorkflowTaskClaimedPayload:
       type: object
       additionalProperties: true
