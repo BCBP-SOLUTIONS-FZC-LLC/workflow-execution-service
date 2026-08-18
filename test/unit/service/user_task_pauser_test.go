@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -33,6 +34,10 @@ func TestUserTaskPauser_PauseUserTasks(t *testing.T) {
 		require.Len(t, temporal.signals, 1)
 		assert.Equal(t, port.SignalInstancePause, temporal.signals[0].SignalName)
 		assert.Equal(t, instanceID, temporal.signals[0].InstanceID)
+
+		b, err := json.Marshal(temporal.signals[0].Payload)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"Initiator":"`+domain.InitiatorSafetyNet+`"`, "the signal must carry safety_net as its initiator, not fall back to admin")
 	})
 
 	t.Run("skips a non-RUNNING instance without failing the batch", func(t *testing.T) {

@@ -526,6 +526,34 @@ func TestInstanceService_LifecycleSignals(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, string(b), `"finance/settlement"`)
 	})
+
+	// TestInstanceService_LifecycleSignals/pause-resume-carry-admin-initiator
+	// is the regression test for the initiator finding: a direct admin-API
+	// Pause/Resume call must report initiator=admin on the signal wire, not
+	// leave it empty for handleInstancePause/handleInstanceResume to
+	// silently drop — Pause/Resume are otherwise this package's own callers
+	// of signalLifecycle, distinct from the reconcilers' non-admin triggers
+	// covered in tenant_lifecycle_reconciler_test.go/ooo_availability_reconciler_test.go/user_task_pauser_test.go.
+	t.Run("pause and resume carry admin initiator", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, _, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+
+		pausedInst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[pausedInst.ID] = pausedInst
+		require.NoError(t, svc.Pause(context.Background(), tenantID, pausedInst.ID, uuid.New(), "reason", 1))
+		require.Len(t, temporal.signals, 1)
+		b, err := json.Marshal(temporal.signals[0].Payload)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"Initiator":"admin"`)
+
+		resumedInst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusPaused, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[resumedInst.ID] = resumedInst
+		require.NoError(t, svc.Resume(context.Background(), tenantID, resumedInst.ID, uuid.New(), 1))
+		require.Len(t, temporal.signals, 2)
+		b, err = json.Marshal(temporal.signals[1].Payload)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"Initiator":"admin"`)
+	})
 }
 
 func TestInstanceService_Terminate(t *testing.T) {
