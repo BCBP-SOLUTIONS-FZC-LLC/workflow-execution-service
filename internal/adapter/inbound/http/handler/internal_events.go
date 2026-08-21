@@ -207,13 +207,18 @@ func guCtx(c *gin.Context, tenantID string) context.Context {
 // --- DelegationStarted ---
 
 type delegationStartedPayload struct {
-	DelegationID string  `json:"delegation_id"`
-	DelegatorID  string  `json:"delegator_id"`
-	DelegateID   string  `json:"delegate_id"`
-	Scope        string  `json:"scope"`
-	ScopeID      *string `json:"scope_id"`
-	StartsAt     string  `json:"starts_at"`
-	EndsAt       *string `json:"ends_at"`
+	DelegationID string `json:"delegation_id"`
+	DelegatorID  string `json:"delegator_id"`
+	DelegateID   string `json:"delegate_id"`
+	// Scope is "all", "department" (scoped by ScopeID as a department UUID),
+	// or any other value treated as business-key-scoped (ScopeID compared
+	// against the instance's business_key) — see scopeMatches. "tender" is
+	// the one business-key-scoped value seen on the wire today.
+	Scope    string  `json:"scope"`
+	ScopeID  *string `json:"scope_id"`
+	StartsAt string  `json:"starts_at"`
+	// EndsAt is nil for an open-ended delegation.
+	EndsAt *string `json:"ends_at"`
 }
 
 func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[json.RawMessage]) {
@@ -292,7 +297,10 @@ type delegationEndedPayload struct {
 	DelegationID string `json:"delegation_id"`
 	DelegatorID  string `json:"delegator_id"`
 	DelegateID   string `json:"delegate_id"`
-	EndedReason  string `json:"ended_reason"`
+	// EndedReason is "expired" | "cancelled" | "delegate_removed"; an
+	// unrecognized value is logged and treated as a generic end, per
+	// knownEndedReason below — never rejected.
+	EndedReason string `json:"ended_reason"`
 }
 
 func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json.RawMessage]) {
@@ -415,10 +423,14 @@ func (h *Handler) handleUserDeleted(c *gin.Context, env events.Envelope[json.Raw
 // --- UserAvailabilityChanged ---
 
 type userAvailabilityChangedPayload struct {
-	UserID         string  `json:"user_id"`
-	Status         string  `json:"status"`
-	OOOFrom        *string `json:"ooo_from"`
-	OOOUntil       *string `json:"ooo_until"`
+	UserID string `json:"user_id"`
+	// Status is "available" | "ooo" | "busy". Only ooo/available drive a
+	// pause/resume signal; other values are accepted but currently no-ops.
+	Status   string  `json:"status"`
+	OOOFrom  *string `json:"ooo_from"`
+	OOOUntil *string `json:"ooo_until"`
+	// DelegateUserID is informational only — never a reroute driver, per
+	// port.UserAvailabilityInput.
 	DelegateUserID *string `json:"delegate_user_id"`
 }
 
@@ -516,13 +528,16 @@ func (h *Handler) parseOptionalTime(c *gin.Context, eventType string, raw *strin
 // --- TenantStateChanged ---
 
 type tenantStateChangedPayload struct {
-	TenantID       string `json:"tenant_id"`
+	TenantID string `json:"tenant_id"`
+	// Status is one of trial | active | past_due | cancelled | suspended |
+	// trial_expired | offboarded.
 	Status         string `json:"status"`
 	PreviousStatus string `json:"previous_status"`
 	Plan           string `json:"plan"`
 	PreviousPlan   string `json:"previous_plan"`
 	ChangedAt      string `json:"changed_at"`
-	Cause          string `json:"cause"`
+	// Cause is the source lifecycle event type, e.g. "TenantSuspended".
+	Cause string `json:"cause"`
 }
 
 func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[json.RawMessage]) {
@@ -601,12 +616,14 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 // --- workflow.template.published ---
 
 type templatePublishedPayload struct {
-	WorkflowID          string  `json:"workflow_id"`
-	WorkflowKey         string  `json:"workflow_key"`
-	VersionID           string  `json:"version_id"`
-	VersionNumber       int     `json:"version_number"`
-	ArtifactHash        string  `json:"artifact_hash"`
-	PublishedBy         string  `json:"published_by"`
+	WorkflowID    string `json:"workflow_id"`
+	WorkflowKey   string `json:"workflow_key"` // unique per tenant, not globally
+	VersionID     string `json:"version_id"`
+	VersionNumber int    `json:"version_number"`
+	ArtifactHash  string `json:"artifact_hash"`
+	PublishedBy   string `json:"published_by"`
+	// PromotedFromVersion is nil for a fresh publish, set when this version
+	// was promoted from an existing draft/version.
 	PromotedFromVersion *string `json:"promoted_from_version_id"`
 }
 
