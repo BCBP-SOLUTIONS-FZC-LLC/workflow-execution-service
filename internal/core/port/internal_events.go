@@ -15,15 +15,14 @@ type DelegationRerouteInput struct {
 	Scope        string // "all" | "department" | "business_key"
 	ScopeID      *string
 	StartsAt     time.Time
-	EndsAt       *time.Time
+	EndsAt       *time.Time // nil for an open-ended delegation
 }
-
 type DelegationReversalInput struct {
 	TenantID     uuid.UUID
 	DelegationID uuid.UUID
 	DelegatorID  uuid.UUID
 	DelegateID   uuid.UUID
-	EndedReason  string
+	EndedReason  string // "expired" | "cancelled" | "delegate_removed" | other (treated as generic end)
 }
 
 // DelegationReconciler's real implementation (deferred to a future
@@ -69,12 +68,12 @@ type OOOAvailabilityReconciler interface {
 
 type TenantLifecycleInput struct {
 	TenantID       uuid.UUID
-	Status         string
+	Status         string // trial | active | past_due | cancelled | suspended | trial_expired | offboarded
 	PreviousStatus string
 	Plan           string
 	PreviousPlan   string
 	ChangedAt      time.Time
-	Cause          string
+	Cause          string // source lifecycle event type, e.g. "TenantSuspended"
 }
 
 // TenantLifecycleReconciler.Apply covers every sub-transaction the event
@@ -88,13 +87,15 @@ type TenantLifecycleReconciler interface {
 }
 
 type TemplatePublishedInput struct {
-	TenantID            uuid.UUID
-	WorkflowID          uuid.UUID
-	WorkflowKey         string
-	VersionID           uuid.UUID
-	VersionNumber       int
-	ArtifactHash        string
-	PublishedBy         uuid.UUID
+	TenantID      uuid.UUID
+	WorkflowID    uuid.UUID
+	WorkflowKey   string // unique per tenant, not globally
+	VersionID     uuid.UUID
+	VersionNumber int
+	ArtifactHash  string
+	PublishedBy   uuid.UUID
+	// PromotedFromVersion is nil for a fresh publish, set when this version
+	// was promoted from an existing draft/version.
 	PromotedFromVersion *uuid.UUID
 }
 
