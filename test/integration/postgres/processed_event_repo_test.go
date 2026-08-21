@@ -47,7 +47,7 @@ func TestProcessedEventRepo_IsProcessed(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, processed)
 
-	_, err = repo.RecordIfNew(ctx, eventID, "membership-execution", "DelegationStarted")
+	_, err = repo.RecordIfNew(ctx, eventID, "membership-execution", "delegation.started")
 	require.NoError(t, err)
 
 	processed, err = repo.IsProcessed(ctx, eventID, "membership-execution")
