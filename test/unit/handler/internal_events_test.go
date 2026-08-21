@@ -77,7 +77,7 @@ func TestHandleInternalEvent_UnsupportedMediaType(t *testing.T) {
 	router := newInternalRouter(newEventsHandler(fakes))
 
 	r := internalReq(http.MethodPost, "/api/v1/internal/events",
-		envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{}))
+		envelope("delegation.started", uuid.New(), testTenantID, time.Now(), map[string]any{}))
 	r.Header.Set("Content-Type", "text/plain")
 	w := do(router, r)
 
@@ -89,7 +89,7 @@ func TestHandleInternalEvent_PayloadTooLarge(t *testing.T) {
 	router := newInternalRouter(newEventsHandler(fakes))
 
 	oversized := strings.Repeat("a", 11<<20) // over the 10 MB cap
-	w := postEvent(router, envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("delegation.started", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"padding": oversized,
 	}))
 
@@ -108,7 +108,7 @@ func TestHandleInternalEvent_DelegationStarted_Success(t *testing.T) {
 	router := newInternalRouter(newEventsHandler(fakes))
 
 	eventID := uuid.New()
-	w := postEvent(router, envelope("DelegationStarted", eventID, testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("delegation.started", eventID, testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2,
 		"delegator_id":  testDelegatorID,
 		"delegate_id":   testDelegateID2,
@@ -131,7 +131,7 @@ func TestHandleInternalEvent_DelegationStarted_BadPayload_MissingField(t *testin
 	}
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("delegation.started", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2,
 		// delegator_id, delegate_id, scope, starts_at all omitted
 	}))
@@ -147,7 +147,7 @@ func TestHandleInternalEvent_DelegationStarted_ReconcilerError_500_DedupNotRecor
 	router := newInternalRouter(newEventsHandler(fakes))
 
 	eventID := uuid.New()
-	body := envelope("DelegationStarted", eventID, testTenantID, time.Now(), map[string]any{
+	body := envelope("delegation.started", eventID, testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2,
 		"delegator_id":  testDelegatorID,
 		"delegate_id":   testDelegateID2,
@@ -169,7 +169,7 @@ func TestHandleInternalEvent_DelegationStarted_ObservesRerouteDuration(t *testin
 
 	before := rerouteDurationSampleCount(t)
 
-	w := postEvent(router, envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("delegation.started", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2,
 		"delegator_id":  testDelegatorID,
 		"delegate_id":   testDelegateID2,
@@ -207,7 +207,7 @@ func TestHandleInternalEvent_DelegationEnded_Success(t *testing.T) {
 	}
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("delegation.ended", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2,
 		"delegator_id":  testDelegatorID,
 		"delegate_id":   testDelegateID2,
@@ -229,7 +229,7 @@ func TestHandleInternalEvent_DelegationEnded_InvalidEnvelopeTenantID_400(t *test
 	fakes := newEventsFakes()
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	body := envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
+	body := envelope("delegation.ended", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID,
 		"delegate_id": testDelegateID2, "ended_reason": "expired",
 	})
@@ -248,7 +248,7 @@ func TestHandleInternalEvent_DelegationEnded_UnknownEndedReason_StillProcessed(t
 	}
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("delegation.ended", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2,
 		"delegator_id":  testDelegatorID,
 		"delegate_id":   testDelegateID2,
@@ -395,7 +395,7 @@ func TestHandleInternalEvent_TenantStateChanged_Success(t *testing.T) {
 	}
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("TenantStateChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("tenant.state.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"tenant_id":       testTenantID.String(),
 		"status":          "suspended",
 		"previous_status": "active",
@@ -422,7 +422,7 @@ func TestHandleInternalEvent_TenantStateChanged_Offboarded_NeverSkippedEvenIfSta
 	older := newer.Add(-24 * time.Hour)
 
 	// Prime the recency guard with a newer value first.
-	w1 := postEvent(router, envelope("TenantStateChanged", uuid.New(), testTenantID, newer, map[string]any{
+	w1 := postEvent(router, envelope("tenant.state.changed", uuid.New(), testTenantID, newer, map[string]any{
 		"tenant_id": testTenantID.String(), "status": "suspended", "previous_status": "active",
 		"plan": "pro", "previous_plan": "pro", "changed_at": newer.Format(time.RFC3339), "cause": "x",
 	}))
@@ -430,7 +430,7 @@ func TestHandleInternalEvent_TenantStateChanged_Offboarded_NeverSkippedEvenIfSta
 	require.Equal(t, 1, calls)
 
 	// An older offboarded event must still be applied, not skipped.
-	w2 := postEvent(router, envelope("TenantStateChanged", uuid.New(), testTenantID, older, map[string]any{
+	w2 := postEvent(router, envelope("tenant.state.changed", uuid.New(), testTenantID, older, map[string]any{
 		"tenant_id": testTenantID.String(), "status": "offboarded", "previous_status": "suspended",
 		"plan": "pro", "previous_plan": "pro", "changed_at": older.Format(time.RFC3339), "cause": "churn",
 	}))
@@ -450,14 +450,14 @@ func TestHandleInternalEvent_TenantStateChanged_RecencyGuard_SkipsStaleNonOffboa
 	newer := time.Now()
 	older := newer.Add(-time.Hour)
 
-	w1 := postEvent(router, envelope("TenantStateChanged", uuid.New(), testTenantID, newer, map[string]any{
+	w1 := postEvent(router, envelope("tenant.state.changed", uuid.New(), testTenantID, newer, map[string]any{
 		"tenant_id": testTenantID.String(), "status": "suspended", "previous_status": "active",
 		"plan": "pro", "previous_plan": "pro", "changed_at": newer.Format(time.RFC3339), "cause": "x",
 	}))
 	require.Equal(t, http.StatusOK, w1.Code)
 	require.Equal(t, 1, calls)
 
-	w2 := postEvent(router, envelope("TenantStateChanged", uuid.New(), testTenantID, older, map[string]any{
+	w2 := postEvent(router, envelope("tenant.state.changed", uuid.New(), testTenantID, older, map[string]any{
 		"tenant_id": testTenantID.String(), "status": "active", "previous_status": "suspended",
 		"plan": "pro", "previous_plan": "pro", "changed_at": older.Format(time.RFC3339), "cause": "y",
 	}))
@@ -475,7 +475,7 @@ func TestHandleInternalEvent_TenantStateChanged_CommitsRecencyOnceAfterApplySucc
 	// against a sub-second-precision "at" here would spuriously always
 	// report After()=true.
 	at := time.Now().Truncate(time.Second)
-	w := postEvent(router, envelope("TenantStateChanged", uuid.New(), testTenantID, at, map[string]any{
+	w := postEvent(router, envelope("tenant.state.changed", uuid.New(), testTenantID, at, map[string]any{
 		"tenant_id": testTenantID.String(), "status": "suspended", "previous_status": "active",
 		"plan": "pro", "previous_plan": "pro", "changed_at": at.Format(time.RFC3339), "cause": "x",
 	}))
@@ -561,7 +561,7 @@ func TestHandleInternalEvent_InvalidEventID_400(t *testing.T) {
 	fakes := newEventsFakes()
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	body := envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
+	body := envelope("delegation.ended", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID,
 		"delegate_id": testDelegateID2, "ended_reason": "expired",
 	})
@@ -620,7 +620,7 @@ func TestHandleInternalEvent_DelegationStarted_InvalidFields(t *testing.T) {
 
 			data := validData()
 			data[tc.field] = tc.value
-			w := postEvent(router, envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), data))
+			w := postEvent(router, envelope("delegation.started", uuid.New(), testTenantID, time.Now(), data))
 
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 		})
@@ -645,7 +645,7 @@ func TestHandleInternalEvent_DelegationEnded_InvalidFields(t *testing.T) {
 
 			data := validData()
 			data[field] = "not-a-uuid"
-			w := postEvent(router, envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), data))
+			w := postEvent(router, envelope("delegation.ended", uuid.New(), testTenantID, time.Now(), data))
 
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 		})
@@ -734,7 +734,7 @@ func TestHandleInternalEvent_TenantStateChanged_InvalidPayloadTenantID(t *testin
 	fakes := newEventsFakes()
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("TenantStateChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("tenant.state.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"tenant_id": "not-a-uuid", "status": "suspended", "previous_status": "active",
 		"plan": "pro", "previous_plan": "pro", "changed_at": time.Now().Format(time.RFC3339), "cause": "x",
 	}))
@@ -746,7 +746,7 @@ func TestHandleInternalEvent_TenantStateChanged_InvalidChangedAt(t *testing.T) {
 	fakes := newEventsFakes()
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("TenantStateChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("tenant.state.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"tenant_id": testTenantID.String(), "status": "suspended", "previous_status": "active",
 		"plan": "pro", "previous_plan": "pro", "changed_at": "not-a-time", "cause": "x",
 	}))
@@ -762,7 +762,7 @@ func TestHandleInternalEvent_TenantStateChanged_ApplyError_500_RecencyNotCommitt
 	router := newInternalRouter(newEventsHandler(fakes))
 
 	at := time.Now().Truncate(time.Second)
-	w := postEvent(router, envelope("TenantStateChanged", uuid.New(), testTenantID, at, map[string]any{
+	w := postEvent(router, envelope("tenant.state.changed", uuid.New(), testTenantID, at, map[string]any{
 		"tenant_id": testTenantID.String(), "status": "suspended", "previous_status": "active",
 		"plan": "pro", "previous_plan": "pro", "changed_at": at.Format(time.RFC3339), "cause": "x",
 	}))
@@ -907,7 +907,7 @@ func TestHandleInternalEvent_DelegationStarted_AlreadyProcessed_SkipsReroute(t *
 	fakes.delegation.reroute = func(context.Context, port.DelegationRerouteInput) error { calls++; return nil }
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	body := envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	body := envelope("delegation.started", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID,
 		"delegate_id": testDelegateID2, "scope": "all", "starts_at": time.Now().Format(time.RFC3339),
 	})
@@ -922,7 +922,7 @@ func TestHandleInternalEvent_DelegationStarted_NoEndsAt(t *testing.T) {
 	fakes.delegation.reroute = func(_ context.Context, in port.DelegationRerouteInput) error { gotIn = in; return nil }
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("delegation.started", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID,
 		"delegate_id": testDelegateID2, "scope": "all", "starts_at": time.Now().Format(time.RFC3339),
 	}))
@@ -937,7 +937,7 @@ func TestHandleInternalEvent_DelegationEnded_AlreadyProcessed_SkipsReverse(t *te
 	fakes.delegation.reverse = func(context.Context, port.DelegationReversalInput) error { calls++; return nil }
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	body := envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
+	body := envelope("delegation.ended", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID,
 		"delegate_id": testDelegateID2, "ended_reason": "expired",
 	})
@@ -980,7 +980,7 @@ func TestHandleInternalEvent_TenantStateChanged_AlreadyProcessed_SkipsApply(t *t
 	fakes.tenantLifecycle.apply = func(context.Context, port.TenantLifecycleInput) error { calls++; return nil }
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	body := envelope("TenantStateChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	body := envelope("tenant.state.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"tenant_id": testTenantID.String(), "status": "suspended", "previous_status": "active",
 		"plan": "pro", "previous_plan": "pro", "changed_at": time.Now().Format(time.RFC3339), "cause": "x",
 	})
@@ -995,7 +995,7 @@ func TestHandleInternalEvent_TenantStateChanged_CommitError_StillReturns200(t *t
 	errRecency := &erroringCommitRecencyGuard{fakeRecencyGuard: fakes.recency}
 	router := newInternalRouter(newEventsHandlerWithRecency(fakes, errRecency))
 
-	w := postEvent(router, envelope("TenantStateChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("tenant.state.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"tenant_id": testTenantID.String(), "status": "suspended", "previous_status": "active",
 		"plan": "pro", "previous_plan": "pro", "changed_at": time.Now().Format(time.RFC3339), "cause": "x",
 	}))
@@ -1047,8 +1047,8 @@ func rawBody(eventType string, eventID, tenantID uuid.UUID, data any) map[string
 
 func TestHandleInternalEvent_MalformedDataPayload_PerEventType(t *testing.T) {
 	for _, eventType := range []string{
-		"DelegationStarted", "DelegationEnded", "user.deleted",
-		"user.availability.changed", "TenantStateChanged", "workflow.template.published",
+		"delegation.started", "delegation.ended", "user.deleted",
+		"user.availability.changed", "tenant.state.changed", "workflow.template.published",
 	} {
 		t.Run(eventType, func(t *testing.T) {
 			fakes := newEventsFakes()
@@ -1068,14 +1068,14 @@ func TestHandleInternalEvent_DelegationStarted_InvalidEnvelopeIDs(t *testing.T) 
 	t.Run("invalid event id", func(t *testing.T) {
 		fakes := newEventsFakes()
 		router := newInternalRouter(newEventsHandler(fakes))
-		body := envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), validData)
+		body := envelope("delegation.started", uuid.New(), testTenantID, time.Now(), validData)
 		body["id"] = "not-a-uuid"
 		assert.Equal(t, http.StatusBadRequest, postEvent(router, body).Code)
 	})
 	t.Run("invalid tenant id", func(t *testing.T) {
 		fakes := newEventsFakes()
 		router := newInternalRouter(newEventsHandler(fakes))
-		body := envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), validData)
+		body := envelope("delegation.started", uuid.New(), testTenantID, time.Now(), validData)
 		body["tenant_id"] = "not-a-uuid"
 		assert.Equal(t, http.StatusBadRequest, postEvent(router, body).Code)
 	})
@@ -1107,14 +1107,14 @@ func TestHandleInternalEvent_TenantStateChanged_InvalidEnvelopeIDs(t *testing.T)
 	t.Run("invalid event id", func(t *testing.T) {
 		fakes := newEventsFakes()
 		router := newInternalRouter(newEventsHandler(fakes))
-		body := envelope("TenantStateChanged", uuid.New(), testTenantID, time.Now(), validData)
+		body := envelope("tenant.state.changed", uuid.New(), testTenantID, time.Now(), validData)
 		body["id"] = "not-a-uuid"
 		assert.Equal(t, http.StatusBadRequest, postEvent(router, body).Code)
 	})
 	t.Run("invalid tenant id", func(t *testing.T) {
 		fakes := newEventsFakes()
 		router := newInternalRouter(newEventsHandler(fakes))
-		body := envelope("TenantStateChanged", uuid.New(), testTenantID, time.Now(), validData)
+		body := envelope("tenant.state.changed", uuid.New(), testTenantID, time.Now(), validData)
 		body["tenant_id"] = "not-a-uuid"
 		assert.Equal(t, http.StatusBadRequest, postEvent(router, body).Code)
 	})
@@ -1149,7 +1149,7 @@ func TestHandleInternalEvent_DelegationStarted_ValidEndsAt(t *testing.T) {
 	fakes.delegation.reroute = func(_ context.Context, in port.DelegationRerouteInput) error { gotIn = in; return nil }
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEvent(router, envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("delegation.started", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID, "delegate_id": testDelegateID2,
 		"scope": "all", "starts_at": time.Now().Format(time.RFC3339),
 		"ends_at": time.Now().Add(time.Hour).Format(time.RFC3339),
@@ -1254,7 +1254,7 @@ func TestHandleInternalEvent_TenantStateChanged_ShouldApplyError_500(t *testing.
 	errFakeRecency := &erroringRecencyGuard{err: errors.New("recency store unavailable")}
 	router := newInternalRouter(newEventsHandlerWithRecency(fakes, errFakeRecency))
 
-	w := postEvent(router, envelope("TenantStateChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+	w := postEvent(router, envelope("tenant.state.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"tenant_id": testTenantID.String(), "status": "suspended", "previous_status": "active",
 		"plan": "pro", "previous_plan": "pro", "changed_at": time.Now().Format(time.RFC3339), "cause": "x",
 	}))
@@ -1274,7 +1274,7 @@ func TestHandleInternalEvent_DuplicateDelivery_SecondDeliveryIsNoOp(t *testing.T
 	router := newInternalRouter(newEventsHandler(fakes))
 
 	eventID := uuid.New()
-	body := envelope("DelegationStarted", eventID, testTenantID, time.Now(), map[string]any{
+	body := envelope("delegation.started", eventID, testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2,
 		"delegator_id":  testDelegatorID,
 		"delegate_id":   testDelegateID2,

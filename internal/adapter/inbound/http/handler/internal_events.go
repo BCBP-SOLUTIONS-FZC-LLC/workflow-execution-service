@@ -90,15 +90,15 @@ func (h *Handler) HandleInternalEvent(c *gin.Context) {
 	}
 
 	switch env.Type {
-	case "DelegationStarted":
+	case "delegation.started":
 		h.handleDelegationStarted(c, env)
-	case "DelegationEnded":
+	case "delegation.ended":
 		h.handleDelegationEnded(c, env)
 	case "user.deleted":
 		h.handleUserDeleted(c, env)
 	case "user.availability.changed":
 		h.handleUserAvailabilityChanged(c, env)
-	case "TenantStateChanged":
+	case "tenant.state.changed":
 		h.handleTenantStateChanged(c, env)
 	case "workflow.template.published":
 		h.handleTemplatePublished(c, env)
@@ -217,10 +217,10 @@ type delegationStartedPayload struct {
 }
 
 func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[json.RawMessage]) {
-	const eventType = "DelegationStarted"
+	const eventType = "delegation.started"
 	var p delegationStartedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
-		h.badPayload(c, eventType, "invalid DelegationStarted payload")
+		h.badPayload(c, eventType, "invalid delegation.started payload")
 		return
 	}
 	eventID, ok := h.parseEventID(c, eventType, env.ID)
@@ -296,10 +296,10 @@ type delegationEndedPayload struct {
 }
 
 func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json.RawMessage]) {
-	const eventType = "DelegationEnded"
+	const eventType = "delegation.ended"
 	var p delegationEndedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
-		h.badPayload(c, eventType, "invalid DelegationEnded payload")
+		h.badPayload(c, eventType, "invalid delegation.ended payload")
 		return
 	}
 	eventID, ok := h.parseEventID(c, eventType, env.ID)
@@ -526,10 +526,10 @@ type tenantStateChangedPayload struct {
 }
 
 func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[json.RawMessage]) {
-	const eventType = "TenantStateChanged"
+	const eventType = "tenant.state.changed"
 	var p tenantStateChangedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
-		h.badPayload(c, eventType, "invalid TenantStateChanged payload")
+		h.badPayload(c, eventType, "invalid tenant.state.changed payload")
 		return
 	}
 	eventID, ok := h.parseEventID(c, eventType, env.ID)
