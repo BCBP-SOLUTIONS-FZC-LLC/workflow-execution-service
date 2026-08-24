@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.temporal.io/sdk/client"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
@@ -32,7 +31,6 @@ func newRouter(cfg *config.Config, pool *pgcommon.Pool, cache port.CacheStore, s
 
 	r.GET("/healthz", gincommon.HealthHandler())
 	r.GET("/readyz", readyzHandler(pool, cache, sdk))
-	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// /internal is service-to-service only, never a descendant of /api/v1's
 	// group — gin subgroups inherit every parent .Use(), and these routes

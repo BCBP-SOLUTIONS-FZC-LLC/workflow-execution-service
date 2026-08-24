@@ -49,11 +49,15 @@ spec:
               containerPort: {{ .Values.api.httpPort }}
             - name: grpc
               containerPort: {{ .Values.api.grpcPort }}
+            - name: metrics
+              containerPort: {{ .Values.api.metricsPort }}
           env:
             - name: HTTP_PORT
               value: {{ .Values.api.httpPort | quote }}
             - name: GRPC_PORT
               value: {{ .Values.api.grpcPort | quote }}
+            - name: METRICS_PORT
+              value: {{ .Values.api.metricsPort | quote }}
             - name: APP_ENV
               value: {{ .Values.env.appEnv | quote }}
             - name: BUILD_VERSION

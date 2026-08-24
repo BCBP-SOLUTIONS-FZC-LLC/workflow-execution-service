@@ -11,6 +11,7 @@ func setValidEnv(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://wfexec:wfexec@localhost:5432/workflow_execution?sslmode=disable")
 	t.Setenv("HTTP_PORT", "8080")
 	t.Setenv("GRPC_PORT", "9090")
+	t.Setenv("METRICS_PORT", "9091")
 	t.Setenv("WORKER_HEALTH_PORT", "8081")
 	t.Setenv("PG_MAX_CONNS", "10")
 	t.Setenv("PG_MIN_CONNS", "2")
@@ -55,6 +56,7 @@ func TestValidate(t *testing.T) {
 		{"http port too low", func(c *Config) { c.HTTPPort = 0 }, true},
 		{"http port too high", func(c *Config) { c.HTTPPort = 70000 }, true},
 		{"grpc port too low", func(c *Config) { c.GRPCPort = 0 }, true},
+		{"metrics port too low", func(c *Config) { c.MetricsPort = 0 }, true},
 		{"worker health port too low", func(c *Config) { c.WorkerHealthPort = 0 }, true},
 		{"pg max conns zero", func(c *Config) { c.PGMaxConns = 0 }, true},
 		{"pg min conns negative", func(c *Config) { c.PGMinConns = -1 }, true},
@@ -89,6 +91,7 @@ func TestValidate(t *testing.T) {
 				DatabaseURL:               "postgres://x",
 				HTTPPort:                  8080,
 				GRPCPort:                  9090,
+				MetricsPort:               9091,
 				WorkerHealthPort:          8081,
 				PGMaxConns:                10,
 				PGMinConns:                2,

@@ -10,7 +10,7 @@ spec:
     matchLabels:
       {{- include "workflow-execution-service.apiSelectorLabels" . | nindent 6 }}
   endpoints:
-    - port: http
+    - port: metrics
       path: /metrics
       interval: {{ .Values.serviceMonitor.interval }}
 ---

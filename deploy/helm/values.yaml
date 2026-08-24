@@ -17,6 +17,7 @@ api:
   replicas: 2
   httpPort: 8080
   grpcPort: 9090
+  metricsPort: 9091  # /metrics only — served on its own http.Server (cmd/server/wire.go)
   resources:
     requests:
       cpu: 100m

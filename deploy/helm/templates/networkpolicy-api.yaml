@@ -65,7 +65,7 @@ spec:
             matchLabels:
               {{- toYaml .Values.networkPolicy.metricsIngress.podSelector.matchLabels | nindent 14 }}
       ports:
-        - port: {{ .Values.api.httpPort }}
+        - port: {{ .Values.api.metricsPort }}
           protocol: TCP
     {{- end }}
 

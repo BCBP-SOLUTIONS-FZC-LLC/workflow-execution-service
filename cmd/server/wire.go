@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/contrib/opentelemetry"
 	"go.temporal.io/sdk/interceptor"
@@ -216,6 +217,13 @@ func newApp(cfg *config.Config) (*app, error) {
 		IdleTimeout:  60 * time.Second,
 	}
 
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", cfg.MetricsPort),
+		Handler: metricsMux,
+	}
+
 	return &app{
 		cfg:             cfg,
 		log:             log,
@@ -223,6 +231,7 @@ func newApp(cfg *config.Config) (*app, error) {
 		relayPool:       relayPool,
 		cache:           cacheClient,
 		httpServer:      httpServer,
+		metricsServer:   metricsServer,
 		grpcServer:      grpcSrv,
 		outboxRelay:     relay,
 		definitions:     definitions,
