@@ -8,6 +8,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
 
+	inboundhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/middleware"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
@@ -19,6 +20,10 @@ func newRouter(cfg *config.Config, pool *pgcommon.Pool, cache port.CacheStore, s
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
+
+	if cfg.AppEnv == "dev" {
+		r.GET("/asyncapi", inboundhttp.AsyncAPIHandler)
+	}
 
 	mwCfg := gincommon.Config{Logger: log, ServiceName: cfg.OTELServiceName, BuildVersion: cfg.BuildVersion}
 	for _, mw := range gincommon.ObservabilityMiddlewares(mwCfg) {
