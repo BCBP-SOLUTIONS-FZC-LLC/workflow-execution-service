@@ -297,9 +297,9 @@ type delegationEndedPayload struct {
 	DelegationID string `json:"delegation_id"`
 	DelegatorID  string `json:"delegator_id"`
 	DelegateID   string `json:"delegate_id"`
-	// EndedReason is "expired" | "cancelled" | "delegate_removed"; an
-	// unrecognized value is logged and treated as a generic end, per
-	// knownEndedReason below — never rejected.
+	// EndedReason is "expired" | "cancelled" | "delegate_removed" |
+	// "review_expired"; an unrecognized value is logged and treated as a
+	// generic end, per knownEndedReason below — never rejected.
 	EndedReason string `json:"ended_reason"`
 }
 
@@ -363,7 +363,7 @@ func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json
 
 func knownEndedReason(reason string) bool {
 	switch reason {
-	case "expired", "cancelled", "delegate_removed":
+	case "expired", "cancelled", "delegate_removed", "review_expired":
 		return true
 	default:
 		return false

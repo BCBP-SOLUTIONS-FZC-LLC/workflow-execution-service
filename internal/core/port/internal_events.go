@@ -22,7 +22,7 @@ type DelegationReversalInput struct {
 	DelegationID uuid.UUID
 	DelegatorID  uuid.UUID
 	DelegateID   uuid.UUID
-	EndedReason  string // "expired" | "cancelled" | "delegate_removed" | other (treated as generic end)
+	EndedReason  string // "expired" | "cancelled" | "delegate_removed" | "review_expired" | other (treated as generic end)
 }
 
 // DelegationReconciler's real implementation (deferred to a future
