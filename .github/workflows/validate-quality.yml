@@ -1,6 +1,7 @@
 # Reusable workflow — quality gate.
 # generate (buf + sqlc, inline — not a separate job) · fmt · tidy · vet ·
-# lint (golangci-lint) · vuln-check · buf lint.
+# lint (golangci-lint) · vuln-check · buf lint · buf breaking · Dockerfile
+# digest-pin check · Helm chart lint + kubeconform validation · actionlint.
 # Called by ci.yml. Does not gate validate-test.yml — they run in parallel.
 name: Validate / Quality
 
@@ -27,6 +28,7 @@ jobs:
         with:
           persist-credentials: false
           token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+          fetch-depth: 0 # buf breaking --against '.git#branch=main' needs main's history
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -40,6 +42,8 @@ jobs:
       - uses: bufbuild/buf-setup-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: azure/setup-helm@v4
 
       - name: Configure private module access
         env:
@@ -107,3 +111,26 @@ jobs:
       # not .tools/buf — buf-setup-action already gives us a pinned version.
       - name: Proto lint
         run: buf lint
+
+      # LLD §6.9 commits to this gate; buf.yaml already configures
+      # `breaking: use: [FILE]` but nothing invoked it before this task.
+      - name: Proto breaking-change check
+        run: buf breaking --against '.git#branch=main'
+
+      # Enforce digest-pinned FROM lines in the Dockerfile. Floating tags
+      # (e.g. golang:1.26-alpine without @sha256:...) can be silently
+      # overwritten upstream, breaking supply-chain guarantees. Run
+      # `make pin-base-images` to update the pinned digests.
+      - name: Dockerfile base image digest check
+        run: |
+          if grep -E '^FROM [^ @]+:[^ @]+( AS .+)?$' Dockerfile; then
+            echo "::error file=Dockerfile,title=Unpinned base image::Dockerfile FROM lines must use digest-pinned references (e.g. golang:1.26-alpine@sha256:...). Run 'make pin-base-images' to update."
+            exit 1
+          fi
+          echo "Dockerfile base images are digest-pinned."
+
+      - name: Helm chart lint + kubeconform
+        run: make helm-lint
+
+      - name: Lint GitHub Actions workflows
+        run: make lint-workflows

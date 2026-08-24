@@ -1,10 +1,10 @@
-# CI for https://github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service
+# CI for https://github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-execution-service
 #
 # Tier-0 shape, modeled on iam-user-profile's CI (no dedicated "generate" job —
 # buf/sqlc codegen runs as an inline step duplicated in each job that needs it,
-# same as iam duplicates its private-module-auth step). Docker image
-# build/lint/trivy scan, smoke tests, and GHCR push are deferred to Tier-1's
-# T1.12 — the Dockerfile is a placeholder with nothing real to smoke-test yet.
+# same as iam duplicates its private-module-auth step). T1.12 flips the five
+# previously-stubbed jobs on: two images (server, worker) are built from one
+# multi-target Dockerfile, matrixed throughout.
 #
 name: CI
 
@@ -26,6 +26,11 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  # GHCR image paths must be all-lowercase; github.repository_owner resolves
+  # to the org's mixed-case display name (BCBP-SOLUTIONS-FZC-LLC), which
+  # would break every push — hardcoded lowercase rather than a fragile
+  # expression-level tolower() workaround.
+  IMAGE_BASE: ghcr.io/bcbp-solutions-fzc-llc/workflow-execution-service
 
 jobs:
   validate-quality:
@@ -38,40 +43,220 @@ jobs:
     uses: ./.github/workflows/validate-test.yml
     secrets: inherit
 
-  # skipped (if: false)
-  # Kept in the DAG (rather than omitted) so the shape matches definition_service
-  # and can be filled in incrementally without restructuring the graph later.
-
   build-image-cache:
     name: Build image (cache)
-    if: false
+    strategy:
+      matrix:
+        target: [server, worker]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - run: echo "skipped — Docker build lands in Tier-1's T1.12"
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            go.mod
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dev tools
+        run: make tools
+
+      # Duplicated inline in validate-quality.yml/validate-test.yml too — the
+      # Docker build context needs gen/ and postgres/db/ on disk before
+      # `docker build`'s own COPY . . step, since neither buf nor sqlc runs
+      # inside the container.
+      - name: Generate (buf + sqlc)
+        run: make generate
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          config: .hadolint.yaml
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.target }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_BASE }}-${{ matrix.target }}:${{ github.sha }}
+          build-args: BUILD_VERSION=${{ github.sha }}
+          secrets: go_private_token=${{ secrets.GO_PRIVATE_TOKEN }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
 
   trivy-cve-scan:
     name: Trivy CVE scan
-    if: false
     needs: [build-image-cache]
+    strategy:
+      matrix:
+        target: [server, worker]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - run: echo "skipped — Docker build lands in Tier-1's T1.12"
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
 
+      - uses: docker/setup-buildx-action@v3
+
+      # Rebuilds from the GHA cache build-image-cache just populated — no
+      # re-fetch of Go modules, just the layer cache hit + local --load.
+      - name: Rebuild ${{ matrix.target }} image from cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_BASE }}-${{ matrix.target }}:${{ github.sha }}
+          build-args: BUILD_VERSION=${{ github.sha }}
+          secrets: go_private_token=${{ secrets.GO_PRIVATE_TOKEN }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_BASE }}-${{ matrix.target }}:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          cache-dir: .trivy-cache
+
+  # Deliberately minimal: cmd/server and cmd/worker are both still stub
+  # mains (no real listener, no /healthz, no Temporal client/worker wired) —
+  # a composition root is later Tier-2 work, not this task's. What's real
+  # today is checked for real: each image starts cleanly in its distroless
+  # runtime (no missing libs, correct nonroot permissions, correct
+  # entrypoint), and the `migrate` subcommand actually applies the schema.
+  # The instantiate/claim/complete/verify-event flow the LLD's §7.4
+  # describes needs that composition root before it can be written honestly
+  # — expand this job then, not before.
   smoke-tests:
     name: Smoke tests
-    if: false
     needs: [validate-test, build-image-cache]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
-      - run: echo "skipped — no real server/worker behavior to smoke-test yet"
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Rebuild both images from cache
+        env:
+          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
+        run: |
+          for t in server worker; do
+            docker buildx build --target "$t" --load \
+              --build-arg BUILD_VERSION=${{ github.sha }} \
+              --secret id=go_private_token,env=GO_PRIVATE_TOKEN \
+              --cache-from type=gha,scope="$t" \
+              -t "${{ env.IMAGE_BASE }}-$t:${{ github.sha }}" .
+          done
+
+      - name: migrate subcommand applies the schema
+        run: |
+          docker run --rm --network host \
+            -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable \
+            "${{ env.IMAGE_BASE }}-server:${{ github.sha }}" migrate
+
+      # cmd/server's stub main still calls config.Load() before logging
+      # "not implemented", so DATABASE_URL must be set even here — it fails
+      # closed on missing required config, which is itself worth smoke-testing.
+      - name: Each image starts and exits cleanly
+        run: |
+          docker run --rm \
+            -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable \
+            "${{ env.IMAGE_BASE }}-server:${{ github.sha }}"
+          docker run --rm "${{ env.IMAGE_BASE }}-worker:${{ github.sha }}"
 
   push-image-ghcr:
     name: Push image → GHCR
-    if: false
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [validate-test, validate-quality, trivy-cve-scan, smoke-tests]
+    strategy:
+      matrix:
+        target: [server, worker]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # Cosign keyless signing (Sigstore OIDC)
     steps:
-      - run: echo "skipped — image publish lands in Tier-1's T1.12"
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.target }} image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-${{ matrix.target }}:${{ github.sha }}
+            ${{ env.IMAGE_BASE }}-${{ matrix.target }}:latest
+          build-args: BUILD_VERSION=${{ github.sha }}
+          secrets: go_private_token=${{ secrets.GO_PRIVATE_TOKEN }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Sign and verify image (Cosign keyless)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          ref="${{ env.IMAGE_BASE }}-${{ matrix.target }}@${DIGEST}"
+          cosign sign --yes "$ref"
+          cosign verify "$ref" \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/ci\.yml@refs/heads/main$" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 
   pr-summary:
     name: PR summary
@@ -79,6 +264,4 @@ jobs:
     needs: [validate-quality, validate-test, build-image-cache, trivy-cve-scan, smoke-tests]
     runs-on: ubuntu-latest
     steps:
-      - run: >
-          echo "Tier-0 status: validate-quality/validate-test are the real gates;
-          the rest are stubbed until Tier-1 T1.12."
+      - run: echo "All CI gates are real as of T1.12 — build, scan, and smoke-test both images."

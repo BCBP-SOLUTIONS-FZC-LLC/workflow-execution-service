@@ -15,6 +15,8 @@ GOVULNCHECK_VERSION  := v1.1.4
 GOARCHLINT_VERSION   := v1.15.0
 HADOLINT_VERSION     := v2.12.0
 TRIVY_VERSION        := 0.71.2
+KUBECONFORM_VERSION  := 0.8.0
+ACTIONLINT_VERSION   := v1.7.12
 
 # Docker images pulled by integration tests via testcontainers-go.
 # Run `make tools-integration` once to warm the local Docker image cache.
@@ -35,6 +37,9 @@ GOVULNCHECK        := $(TOOLS_DIR)/govulncheck
 GOARCHLINT         := $(TOOLS_DIR)/go-arch-lint
 HADOLINT           := $(TOOLS_DIR)/hadolint
 TRIVY              := $(TOOLS_DIR)/trivy
+KUBECONFORM        := $(TOOLS_DIR)/kubeconform
+ACTIONLINT         := $(TOOLS_DIR)/actionlint
+HELM               ?= helm
 
 BUILD_VERSION      ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS            := -X main.version=$(BUILD_VERSION)
@@ -78,6 +83,7 @@ tools:
 		| sh -s -- -b $(PWD)/$(TOOLS_DIR) $(GOLANGCI_VERSION)
 	GOBIN=$(PWD)/$(TOOLS_DIR) go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	GOBIN=$(PWD)/$(TOOLS_DIR) go install github.com/fe3dback/go-arch-lint@$(GOARCHLINT_VERSION)
+	GOBIN=$(PWD)/$(TOOLS_DIR) go install github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
 	@OS=$$(uname -s); ARCH=$$(uname -m); \
 	if [ "$$OS" = "Darwin" ]; then \
 	    if command -v brew >/dev/null 2>&1; then \
@@ -98,6 +104,12 @@ tools:
 	curl -sLo /tmp/trivy.tar.gz \
 	  "https://github.com/aquasecurity/trivy/releases/download/v$(TRIVY_VERSION)/trivy_$(TRIVY_VERSION)_$$TRIVY_OS_ARCH.tar.gz" && \
 	tar -xzf /tmp/trivy.tar.gz -C $(TOOLS_DIR) trivy && rm /tmp/trivy.tar.gz
+	@OS=$$(uname -s | tr '[:upper:]' '[:lower:]'); ARCH=$$(uname -m); \
+	if [ "$$ARCH" = "aarch64" ]; then ARCH="arm64"; fi; \
+	if [ "$$ARCH" = "x86_64" ]; then ARCH="amd64"; fi; \
+	curl -sLo /tmp/kubeconform.tar.gz \
+	  "https://github.com/yannh/kubeconform/releases/download/v$(KUBECONFORM_VERSION)/kubeconform-$$OS-$$ARCH.tar.gz" && \
+	tar -xzf /tmp/kubeconform.tar.gz -C $(TOOLS_DIR) kubeconform && rm /tmp/kubeconform.tar.gz
 	@echo "✓ tools installed to $(TOOLS_DIR)/"
 
 ## tools-integration: Pre-pull Docker images used by integration tests (testcontainers-go)
@@ -334,12 +346,27 @@ docker-trivy:
 docker-check: docker-lint docker-trivy
 	@echo "✓ all container checks passed"
 
+## lint-workflows: Lint GitHub Actions workflow YAML (shellcheck of run: steps included)
+lint-workflows:
+	$(ACTIONLINT)
+
+## helm-lint: Lint the Helm chart and validate its rendered manifests against the Kubernetes API schema
+helm-lint:
+	$(HELM) lint deploy/helm \
+	  --set-string secret.secretValues.DATABASE_URL=placeholder \
+	  --set-string secret.secretValues.TEMPORAL_HOST_PORT=placeholder
+	$(HELM) template deploy/helm \
+	  --set-string secret.secretValues.DATABASE_URL=placeholder \
+	  --set-string secret.secretValues.TEMPORAL_HOST_PORT=placeholder \
+	  | $(KUBECONFORM) -strict -skip PrometheusRule,ServiceMonitor
+	@echo "✓ helm chart valid"
+
 ## pin-base-images: Resolve current digests for Dockerfile base images and pin them (writes .docker-digests)
 pin-base-images:
 	@GOLANG_DIGEST=$$(docker buildx imagetools inspect golang:1.26-alpine | awk '/^Digest:/{print $$2; exit}'); \
 	DISTROLESS_DIGEST=$$(docker buildx imagetools inspect gcr.io/distroless/static-debian12:nonroot | awk '/^Digest:/{print $$2; exit}'); \
-	sed -i.bak "s|FROM golang:1.26-alpine.*AS builder|FROM golang:1.26-alpine@$$GOLANG_DIGEST AS builder|" Dockerfile; \
-	sed -i.bak "s|FROM gcr.io/distroless/static-debian12:nonroot.*|FROM gcr.io/distroless/static-debian12:nonroot@$$DISTROLESS_DIGEST|" Dockerfile; \
+	sed -E -i.bak "s|^(FROM golang:1\.26-alpine)(@sha256:[0-9a-f]+)?( AS [A-Za-z0-9_-]+)?|\\1@$$GOLANG_DIGEST\\3|" Dockerfile; \
+	sed -E -i.bak "s|^(FROM gcr\.io/distroless/static-debian12:nonroot)(@sha256:[0-9a-f]+)?( AS [A-Za-z0-9_-]+)?|\\1@$$DISTROLESS_DIGEST\\3|" Dockerfile; \
 	rm -f Dockerfile.bak; \
 	printf 'golang:1.26-alpine@%s\ngcr.io/distroless/static-debian12:nonroot@%s\n' "$$GOLANG_DIGEST" "$$DISTROLESS_DIGEST" > .docker-digests; \
 	echo "Pinned base images — see .docker-digests"

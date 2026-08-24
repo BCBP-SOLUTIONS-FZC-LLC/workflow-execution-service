@@ -1,0 +1,31 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "workflow-execution-service.apiFullname" . }}
+  labels:
+    {{- include "workflow-execution-service.apiSelectorLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "workflow-execution-service.apiSelectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "workflow-execution-service.workerFullname" . }}
+  labels:
+    {{- include "workflow-execution-service.workerSelectorLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "workflow-execution-service.workerSelectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: health
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}

@@ -1,0 +1,111 @@
+# LLD §5.7/§9.2: /internal/* must be restricted to the Shared
+# Workflow-Events Consumer and Definition Service pod identities. Since
+# cmd/server exposes one HTTP port for both /api/v1/* (browser-gateway
+# traffic) and /internal/* (machine-to-machine traffic) — no dedicated
+# internal port exists yet — this policy allows both traffic classes onto
+# the same port rather than scoping the restriction to the path itself,
+# which a plain NetworkPolicy (L3/L4 only) cannot do. The x-internal-token
+# check at the application layer (LLD §5.7) is what actually enforces the
+# path-level boundary; this is defense-in-depth, not a replacement for it.
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "workflow-execution-service.apiFullname" . }}
+  labels:
+    {{- include "workflow-execution-service.apiSelectorLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "workflow-execution-service.apiSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Browser-gateway traffic for /api/v1/*.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressControllerNamespaceSelector.matchLabels | nindent 14 }}
+      ports:
+        - port: {{ .Values.api.httpPort }}
+          protocol: TCP
+
+    # Machine-to-machine /internal/* callers, on the same port (see note above).
+    {{- range .Values.networkPolicy.allowedCallers }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .podSelector.matchLabels | nindent 14 }}
+      ports:
+        - port: {{ $.Values.api.httpPort }}
+          protocol: TCP
+    {{- end }}
+
+    # gRPC: CheckActiveInstances/PauseUserTasks are both called only by
+    # Definition Service (LLD §5.3/§9.2) — named, not a blanket same-namespace
+    # allow.
+    {{- range .Values.networkPolicy.allowedCallers }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .podSelector.matchLabels | nindent 14 }}
+      ports:
+        - port: {{ $.Values.api.grpcPort }}
+          protocol: TCP
+    {{- end }}
+
+    {{- if .Values.networkPolicy.metricsIngress.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.metricsIngress.namespaceSelector.matchLabels | nindent 14 }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.metricsIngress.podSelector.matchLabels | nindent 14 }}
+      ports:
+        - port: {{ .Values.api.httpPort }}
+          protocol: TCP
+    {{- end }}
+
+    {{- with .Values.networkPolicy.additionalIngressRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - ports:
+        - port: 443
+          protocol: TCP
+    - ports:
+        - port: 5432
+          protocol: TCP
+        - port: 6432
+          protocol: TCP
+    - ports:
+        - port: 6379
+          protocol: TCP
+    - ports:
+        - port: 4317
+          protocol: TCP
+    # Temporal frontend (StartWorkflow/SignalWorkflow/QueryWorkflow).
+    - ports:
+        - port: 7233
+          protocol: TCP
+    # Named same-namespace egress target: Definition Service, for the outbound
+    # GetCompiledWorkflow call — not a blanket podSelector: {} allow.
+    {{- range .Values.networkPolicy.allowedEgressTargets }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .podSelector.matchLabels | nindent 14 }}
+    {{- end }}
+    {{- with .Values.networkPolicy.additionalEgressRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,47 @@
+{{- if .Values.worker.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "workflow-execution-service.workerFullname" . }}
+  labels:
+    {{- include "workflow-execution-service.workerSelectorLabels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "workflow-execution-service.workerFullname" . }}
+  minReplicas: {{ .Values.worker.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.worker.autoscaling.maxReplicas }}
+  metrics:
+    # CPU/memory today (T1.12 decision) — the LLD's own "queue depth / task
+    # backlog" HPA metric (§7.5, Appendix A.6 #4) doesn't exist anywhere in
+    # its §7.6 metrics catalogue, and this task can't add one (that would be
+    # Go source, out of scope here).
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.worker.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.worker.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- if .Values.worker.autoscaling.targetBacklogPerReplica }}
+    # Documented future hook — see values.yaml's own comment on this field
+    # for the prerequisite (a prometheus-adapter rule exposing this metric).
+    # deploy/monitoring/prometheus-adapter-rule.yaml is the pattern to
+    # extend once a real backlog metric exists — not pre-written here since
+    # worker_queue_backlog itself doesn't exist yet (inventing its adapter
+    # config would be inventing the metric by another name).
+    - type: Pods
+      pods:
+        metric:
+          name: worker_queue_backlog
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.worker.autoscaling.targetBacklogPerReplica }}
+    {{- end }}
+{{- end }}

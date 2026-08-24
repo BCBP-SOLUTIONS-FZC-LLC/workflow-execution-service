@@ -1,0 +1,48 @@
+# Prometheus Adapter ConfigMap — maps Prometheus metrics to the Custom Metrics API
+# so the API's HPA can scale on http_requests_per_second (values.yaml's
+# api.autoscaling.targetRPSPerReplica, disabled by default).
+#
+# Only covers the API's RPS metric — a real, already-available gincommon
+# metric. The Worker's own documented HPA hook (worker.autoscaling.
+# targetBacklogPerReplica, hpa-worker.yaml) has no equivalent rule here:
+# the underlying metric (a Temporal queue-depth/task-backlog count) doesn't
+# exist anywhere yet (checked exhaustively against the LLD's §7.6 metrics
+# catalogue) — add a second rule below once one does, matching this file's
+# own pattern.
+#
+# Deploy into the namespace where prometheus-adapter runs (typically
+# kube-system or monitoring). Merge with any existing prometheus-adapter
+# ConfigMap rather than replacing it.
+#
+# Reference:
+#   https://github.com/kubernetes-sigs/prometheus-adapter/blob/master/docs/config.md
+#
+# After applying, verify the metric is visible:
+#   kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | jq '.resources[].name' | grep rps
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-adapter-config
+  namespace: monitoring   # adjust to match your prometheus-adapter deployment namespace
+  labels:
+    app.kubernetes.io/name: prometheus-adapter
+    app.kubernetes.io/component: metrics
+data:
+  config.yaml: |
+    rules:
+      # Expose per-pod RPS as http_requests_per_second so the HPA can use
+      # type: Pods / metric: http_requests_per_second.
+      # Computed from the Prometheus counter http_requests_total scraped by
+      # the ServiceMonitor (serviceMonitor.enabled: true in Helm values) —
+      # the API pod only, since the Worker has no business HTTP traffic.
+      - seriesQuery: 'http_requests_total{namespace!="",pod!="",job="workflow-execution-service-api"}'
+        resources:
+          overrides:
+            namespace:
+              resource: namespace
+            pod:
+              resource: pod
+        name:
+          matches: "^(.*)_total$"
+          as: "${1}_per_second"
+        metricsQuery: 'sum(rate(<<.Series>>{<<.LabelMatchers>>}[2m])) by (<<.GroupBy>>)'
