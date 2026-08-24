@@ -5,7 +5,7 @@ The Temporal-backed execution control plane for the BPMN Workflow Engine platfor
 Three independently deployed binaries, one Go module:
 
 - `cmd/server` — HTTP API (`:8080`) + gRPC (`:9090`) + the outbox relay + the Temporal client (`StartWorkflow`/`SignalWorkflow`/`QueryWorkflow`).
-- `cmd/worker` — the Temporal Worker process: polls task queues, hosts the workflow function and Activities. Minimal `:8081` health/metrics surface, no business HTTP/gRPC surface of its own.
+- `cmd/worker` — the Temporal Worker process: polls task queues, hosts the workflow function and Activities. Minimal `:8081` health/ready surface plus a dedicated `:8082` `/metrics` listener, no business HTTP/gRPC surface of its own.
 - `cmd/connector-worker` — executes connector-typed tasks (automatic REST/SQL/storage/email/document-extract/chat-notify dispatch, per the `workflow-connectors` LLD). Consumes a Valkey Stream `cmd/server` publishes onto, dispatches to a real `workflow-connectors.Connector`, and reports the outcome back via `cmd/server`'s own `/internal/connector-tasks` HTTP endpoints — it never touches the Temporal SDK directly. Its own new dependencies (Valkey Streams, OpenBao) are separate from `cmd/server`'s KV cache and `cmd/worker`'s (still zero) Valkey usage.
 
 ## Private Module Access

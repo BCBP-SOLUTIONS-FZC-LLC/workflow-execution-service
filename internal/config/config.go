@@ -17,6 +17,11 @@ type Config struct {
 	GRPCPort         int
 	MetricsPort      int
 	WorkerHealthPort int
+	// WorkerMetricsPort isolates cmd/worker's /metrics onto its own listener,
+	// separate from WorkerHealthPort's /healthz+/readyz — mirrors cmd/server's
+	// HTTPPort/MetricsPort split, so a NetworkPolicy port rule can restrict
+	// metrics scraping without also gating liveness/readiness probes.
+	WorkerMetricsPort int
 
 	OTELServiceName        string
 	OTELExporterEndpoint   string
@@ -169,10 +174,11 @@ func Load() (*Config, error) {
 		AppEnv:       getEnvOrDefault("APP_ENV", "dev"),
 		BuildVersion: getEnvOrDefault("BUILD_VERSION", "dev"),
 
-		HTTPPort:         getEnvIntOrDefault("HTTP_PORT", 8080),
-		GRPCPort:         getEnvIntOrDefault("GRPC_PORT", 9090),
-		MetricsPort:      getEnvIntOrDefault("METRICS_PORT", 9091),
-		WorkerHealthPort: getEnvIntOrDefault("WORKER_HEALTH_PORT", 8081),
+		HTTPPort:          getEnvIntOrDefault("HTTP_PORT", 8080),
+		GRPCPort:          getEnvIntOrDefault("GRPC_PORT", 9090),
+		MetricsPort:       getEnvIntOrDefault("METRICS_PORT", 9091),
+		WorkerHealthPort:  getEnvIntOrDefault("WORKER_HEALTH_PORT", 8081),
+		WorkerMetricsPort: getEnvIntOrDefault("WORKER_METRICS_PORT", 8082),
 
 		OTELServiceName:        getEnvOrDefault("OTEL_SERVICE_NAME", "execution-service"),
 		OTELExporterEndpoint:   getEnvOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
@@ -276,6 +282,9 @@ func (c *Config) validate() error {
 	}
 	if c.WorkerHealthPort < 1 || c.WorkerHealthPort > 65535 {
 		return fmt.Errorf("WORKER_HEALTH_PORT must be in [1, 65535]")
+	}
+	if c.WorkerMetricsPort < 1 || c.WorkerMetricsPort > 65535 {
+		return fmt.Errorf("WORKER_METRICS_PORT must be in [1, 65535]")
 	}
 	if c.PGMaxConns <= 0 {
 		return fmt.Errorf("PG_MAX_CONNS must be > 0")

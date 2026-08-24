@@ -69,6 +69,13 @@ func main() {
 		}
 	}()
 
+	metricsSrv := newMetricsServer(fmt.Sprintf(":%d", cfg.WorkerMetricsPort))
+	go func() {
+		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			wlog.Error("metrics server exited", map[string]any{"error": err.Error()})
+		}
+	}()
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
@@ -80,6 +87,9 @@ func main() {
 
 	if err := healthSrv.Shutdown(shutdownCtx); err != nil {
 		wlog.Warn("health server shutdown error", map[string]any{"error": err.Error()})
+	}
+	if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
+		wlog.Warn("metrics server shutdown error", map[string]any{"error": err.Error()})
 	}
 
 	var wg sync.WaitGroup
@@ -93,13 +103,6 @@ func main() {
 	wg.Wait()
 }
 
-// buildDeps is cmd/worker's composition root (LLD §1.7): the only place this
-// binary wires concrete adapters to internal/adapter/outbound/temporal's
-// Deps struct. GUCProvider is required here (not just cmd/server's app
-// pool) — every tenant-scoped repo call an Activity makes depends on the
-// GUC being set on the connection; without it RLS silently returns zero
-// rows against a non-superuser role. cleanup drains the pool and closes the
-// Definition Service gRPC connection.
 func buildDeps(cfg *config.Config) (*outboundtemporal.Deps, port.ActiveTaskQueueRepository, *pgcommon.Pool, port.Logger, func(), error) {
 	wlog, err := logger.NewLogger(cfg.AppEnv)
 	if err != nil {
