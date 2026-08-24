@@ -43,14 +43,18 @@ spec:
           protocol: TCP
     {{- end }}
 
-    # gRPC (GetCompiledWorkflow caller) and same-namespace traffic generally.
+    # gRPC: CheckActiveInstances/PauseUserTasks are both called only by
+    # Definition Service (LLD §5.3/§9.2) — named, not a blanket same-namespace
+    # allow.
+    {{- range .Values.networkPolicy.allowedCallers }}
     - from:
-        - podSelector: {}
+        - podSelector:
+            matchLabels:
+              {{- toYaml .podSelector.matchLabels | nindent 14 }}
       ports:
-        - port: {{ .Values.api.httpPort }}
+        - port: {{ $.Values.api.grpcPort }}
           protocol: TCP
-        - port: {{ .Values.api.grpcPort }}
-          protocol: TCP
+    {{- end }}
 
     {{- if .Values.networkPolicy.metricsIngress.enabled }}
     - from:
@@ -93,8 +97,14 @@ spec:
     - ports:
         - port: 7233
           protocol: TCP
+    # Named same-namespace egress target: Definition Service, for the outbound
+    # GetCompiledWorkflow call — not a blanket podSelector: {} allow.
+    {{- range .Values.networkPolicy.allowedEgressTargets }}
     - to:
-        - podSelector: {}
+        - podSelector:
+            matchLabels:
+              {{- toYaml .podSelector.matchLabels | nindent 14 }}
+    {{- end }}
     {{- with .Values.networkPolicy.additionalEgressRules }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
