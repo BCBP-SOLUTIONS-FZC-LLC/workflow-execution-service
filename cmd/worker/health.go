@@ -10,15 +10,25 @@ import (
 	"go.temporal.io/sdk/client"
 )
 
-// newHealthServer builds cmd/worker's plain net/http health/ready/metrics
-// surface (LLD-mandated for both binaries). No gin dependency exists in this
-// binary today and three static-shaped endpoints don't justify adding one.
+// newHealthServer builds cmd/worker's plain net/http health/ready surface
+// (LLD-mandated for both binaries). No gin dependency exists in this binary
+// today and two static-shaped endpoints don't justify adding one. /metrics
+// lives on its own listener (newMetricsServer) so a NetworkPolicy port rule
+// can isolate Prometheus scraping from liveness/readiness probes.
 func newHealthServer(addr string, pool *pgcommon.Pool, sdk client.Client) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.HandleFunc("/readyz", readyzHandler(pool, sdk))
+	return &http.Server{Addr: addr, Handler: mux}
+}
+
+// newMetricsServer builds cmd/worker's dedicated /metrics listener, split
+// from newHealthServer's health/ready surface — mirrors cmd/server's own
+// httpServer/metricsServer split (cmd/server/wire.go).
+func newMetricsServer(addr string) *http.Server {
+	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 	return &http.Server{Addr: addr, Handler: mux}
 }

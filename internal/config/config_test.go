@@ -13,6 +13,7 @@ func setValidEnv(t *testing.T) {
 	t.Setenv("GRPC_PORT", "9090")
 	t.Setenv("METRICS_PORT", "9091")
 	t.Setenv("WORKER_HEALTH_PORT", "8081")
+	t.Setenv("WORKER_METRICS_PORT", "8082")
 	t.Setenv("PG_MAX_CONNS", "10")
 	t.Setenv("PG_MIN_CONNS", "2")
 	t.Setenv("OTEL_TRACES_SAMPLER_RATIO", "1.0")
@@ -58,6 +59,7 @@ func TestValidate(t *testing.T) {
 		{"grpc port too low", func(c *Config) { c.GRPCPort = 0 }, true},
 		{"metrics port too low", func(c *Config) { c.MetricsPort = 0 }, true},
 		{"worker health port too low", func(c *Config) { c.WorkerHealthPort = 0 }, true},
+		{"worker metrics port too low", func(c *Config) { c.WorkerMetricsPort = 0 }, true},
 		{"pg max conns zero", func(c *Config) { c.PGMaxConns = 0 }, true},
 		{"pg min conns negative", func(c *Config) { c.PGMinConns = -1 }, true},
 		{"pg min exceeds max", func(c *Config) { c.PGMinConns = 20; c.PGMaxConns = 10 }, true},
@@ -93,6 +95,7 @@ func TestValidate(t *testing.T) {
 				GRPCPort:                  9090,
 				MetricsPort:               9091,
 				WorkerHealthPort:          8081,
+				WorkerMetricsPort:         8082,
 				PGMaxConns:                10,
 				PGMinConns:                2,
 				OTELTracesSamplerRatio:    1.0,
