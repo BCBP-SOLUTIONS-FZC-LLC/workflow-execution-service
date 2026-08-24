@@ -45,9 +45,13 @@ spec:
           ports:
             - name: health
               containerPort: {{ .Values.worker.healthPort }}
+            - name: metrics
+              containerPort: {{ .Values.worker.metricsPort }}
           env:
             - name: WORKER_HEALTH_PORT
               value: {{ .Values.worker.healthPort | quote }}
+            - name: WORKER_METRICS_PORT
+              value: {{ .Values.worker.metricsPort | quote }}
             - name: APP_ENV
               value: {{ .Values.env.appEnv | quote }}
             - name: BUILD_VERSION

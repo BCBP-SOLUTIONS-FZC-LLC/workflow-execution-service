@@ -26,7 +26,7 @@ spec:
             matchLabels:
               {{- toYaml .Values.networkPolicy.metricsIngress.podSelector.matchLabels | nindent 14 }}
       ports:
-        - port: {{ .Values.worker.healthPort }}
+        - port: {{ .Values.worker.metricsPort }}
           protocol: TCP
     {{- end }}
 
