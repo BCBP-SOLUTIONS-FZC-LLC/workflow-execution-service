@@ -12,3 +12,6 @@ spec:
     - name: health
       port: {{ .Values.worker.healthPort }}
       targetPort: health
+    - name: metrics
+      port: {{ .Values.worker.metricsPort }}
+      targetPort: metrics

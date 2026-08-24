@@ -25,7 +25,7 @@ spec:
     matchLabels:
       {{- include "workflow-execution-service.workerSelectorLabels" . | nindent 6 }}
   endpoints:
-    - port: health
+    - port: metrics
       path: /metrics
       interval: {{ .Values.serviceMonitor.interval }}
 {{- end }}

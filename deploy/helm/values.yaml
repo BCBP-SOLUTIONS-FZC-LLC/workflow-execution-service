@@ -43,6 +43,7 @@ api:
 worker:
   replicas: 2
   healthPort: 8081
+  metricsPort: 8082  # /metrics only — served on its own http.Server (cmd/worker/health.go's newMetricsServer)
   resources:
     requests:
       cpu: 100m
