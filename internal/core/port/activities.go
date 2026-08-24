@@ -62,6 +62,9 @@ type CreateTaskInput struct {
 	ContextJSON  string
 	OverrideMap  map[string]string
 	VisitCount   int64
+	// IAMDepartmentID is the department's real IAM UUID, if the compiled
+	// plan carries one; empty falls back to CreateTask's placeholder.
+	IAMDepartmentID string
 }
 
 type CreateTaskOutput struct {

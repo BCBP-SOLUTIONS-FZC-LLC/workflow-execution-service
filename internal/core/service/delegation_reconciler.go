@@ -130,7 +130,7 @@ func (c *compiledPlanCache) mainPlan(ctx context.Context, tenantID, versionID uu
 // own DSL walk does.
 func requiredLevelForTask(plan *dsl.CompiledPlan, task *domain.Task) (string, bool) {
 	for _, dept := range plan.Departments {
-		if deptUUID(dept.ID) != task.DepartmentID {
+		if deptUUID(&dept) != task.DepartmentID {
 			continue
 		}
 		for i := range dept.Stages {

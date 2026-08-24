@@ -168,15 +168,11 @@ func deptFromNodeKey(key domain.NodeKey) string {
 	return s
 }
 
-// deptUUID derives a stable, deterministic UUID from a compiled plan's
-// DepartmentDef.ID — today a display-slug lane name, never a real IAM
-// department UUID (a still-open item in definition_service's own compiler,
-// documented in execution_service LLD §4.3). Mirrors
-// internal/adapter/outbound/temporal/helpers.go's own deptUUID
-// byte-for-byte — this package cannot import that one, and the two must
-// derive identically so the same department slug always yields the same
-// UUID regardless of which package computes it. Used only for
-// FailedBranch.DepartmentID (workflow.instance.degraded).
+// deptUUID stays on the placeholder scheme deliberately — it only feeds
+// FailedBranch.DepartmentID, an audit column, and this call site is
+// replayed, so giving it a real IAMDepartmentID would need GetVersion
+// gating (see stage.go's CreateTaskInput path, which does that already for
+// live eligibility checks) not worth it for an audit-only field.
 func deptUUID(deptID string) uuid.UUID {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:department:"+deptID))
 }

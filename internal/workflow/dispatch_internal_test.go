@@ -539,7 +539,7 @@ func TestRunTaskStageInterruptingBoundaryTransfers(t *testing.T) {
 			Type: "approve", NodeID: "n1",
 			BoundaryTimer: &dsl.BoundaryTimer{Duration: "1h", Interrupting: true, TargetDept: "escalation"},
 		}
-		_, err := in.runTaskStage(ctx, plan, stage, "sales/n1")
+		_, err := in.runTaskStage(ctx, plan, "sales", stage, "sales/n1")
 		return err
 	})
 	if err := env.GetWorkflowError(); err != nil {
@@ -573,7 +573,7 @@ func TestRunTaskStageNonInterruptingBoundaryContinuesBoth(t *testing.T) {
 			Type: "approve", NodeID: "n1",
 			BoundaryTimer: &dsl.BoundaryTimer{Duration: "1h", Interrupting: false, TargetDept: "escalation"},
 		}
-		_, err := in.runTaskStage(ctx, plan, stage, "sales/n1")
+		_, err := in.runTaskStage(ctx, plan, "sales", stage, "sales/n1")
 		return err
 	})
 	if err := env.GetWorkflowError(); err != nil {

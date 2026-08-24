@@ -15,15 +15,9 @@ import (
 // (get-workflow-status): while a task is pending, the query must report the
 // instance's current status and the pending node's key.
 //
-// The query's delay is deliberately much larger than this package's usual
-// first-checkpoint convention (time.Millisecond): this is the only test in
-// the package racing a query against three sequential activity round trips
-// (GetCompiledPlan -> CreateTask -> UpdateInstanceNodes) rather than a
-// signal, and each round trip crosses a real goroutine boundary the mock
-// clock doesn't wait on — 1ms/5ms reproduced a real, occasional failure
-// under -race. SetOnActivityCompletedListener was tried as a firmer sync
-// point and made it worse (fires before the workflow coroutine processes the
-// activity's own result, so it undercounts every time, not occasionally).
+// Delay is larger than this package's usual first checkpoint: this query
+// races three activity round trips, not a signal, and flaked under -race
+// at the usual 1ms.
 func TestExecute_GetWorkflowStatusQuery(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

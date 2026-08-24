@@ -172,6 +172,38 @@ func TestCreateTask_DifferentVisitCount_CreatesDistinctTask(t *testing.T) {
 	assert.Len(t, outbox.enqueued, 2, "a revisit must enqueue its own workflow.task.created, not be silently dropped")
 }
 
+func TestCreateTask_IAMDepartmentID_UsedAsDepartmentID(t *testing.T) {
+	deps, tasks, _, _ := newTestDeps()
+	compiled, err := json.Marshal(dsl.StageDef{Type: "review"})
+	require.NoError(t, err)
+	iamDeptID := uuid.New()
+
+	out, err := deps.CreateTask(context.Background(), port.CreateTaskInput{
+		InstanceID: uuid.New().String(), TenantID: uuid.New().String(), NodeKey: "sales/review",
+		CompiledNode: compiled, IAMDepartmentID: iamDeptID.String(),
+	})
+	require.NoError(t, err)
+
+	taskID, err := uuid.Parse(out.TaskID)
+	require.NoError(t, err)
+	assert.Equal(t, iamDeptID, tasks.byID[taskID].DepartmentID)
+}
+
+func TestCreateTask_NoIAMDepartmentID_FallsBackToPlaceholder(t *testing.T) {
+	deps, tasks, _, _ := newTestDeps()
+	compiled, err := json.Marshal(dsl.StageDef{Type: "review"})
+	require.NoError(t, err)
+
+	out, err := deps.CreateTask(context.Background(), port.CreateTaskInput{
+		InstanceID: uuid.New().String(), TenantID: uuid.New().String(), NodeKey: "sales/review", CompiledNode: compiled,
+	})
+	require.NoError(t, err)
+
+	taskID, err := uuid.Parse(out.TaskID)
+	require.NoError(t, err)
+	assert.NotEqual(t, uuid.Nil, tasks.byID[taskID].DepartmentID)
+}
+
 func TestCreateTask_InvalidTenantID_IsNonRetryable(t *testing.T) {
 	deps, _, _, _ := newTestDeps()
 	compiled, err := json.Marshal(dsl.StageDef{Type: "review"})

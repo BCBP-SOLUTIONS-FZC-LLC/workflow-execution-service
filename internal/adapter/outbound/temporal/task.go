@@ -57,7 +57,7 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 		TenantID:           tenantID,
 		WorkflowInstanceID: instanceID,
 		NodeKey:            string(in.NodeKey),
-		DepartmentID:       deptUUID(deptIDFromNodeKey(string(in.NodeKey))),
+		DepartmentID:       deptUUID(deptIDFromNodeKey(string(in.NodeKey)), in.IAMDepartmentID),
 		Status:             domain.TaskStatusReady,
 		DueAt:              parseCompiledDate(stage.DueDate),
 		FollowUpAt:         parseCompiledDate(stage.FollowUpDate),

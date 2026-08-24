@@ -56,19 +56,13 @@ func (s *InstanceService) logger() port.Logger {
 	return noopLogger{}
 }
 
-// deptUUID derives a placeholder IAM department UUID from a compiled plan's
-// display-slug department ID (execution_service LLD §4.3: reading a real one
-// out of a BPMN lane's extensionElements is a still-open definition_service
-// compiler TODO). Mirrors internal/adapter/outbound/temporal/helpers.go's own
-// deptUUID byte-for-byte — duplicated, not imported, since this package
-// cannot depend on that one (arch-lint's adapter/service dependency
-// direction). Both sides must derive the same value for the same deptID for
-// this to mean anything once eligibility checks against a real IAM
-// department ID land; until then, this is exactly as functionally
-// meaningless as the Worker-side copy, by the same already-accepted,
-// tracked gap.
-func deptUUID(deptID string) uuid.UUID {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:department:"+deptID))
+// deptUUID mirrors internal/adapter/outbound/temporal/helpers.go's own copy
+// byte-for-byte (arch-lint forbids importing it from here).
+func deptUUID(dept *dsl.DepartmentDef) uuid.UUID {
+	if id, err := uuid.Parse(dept.IAMDepartmentID); err == nil {
+		return id
+	}
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:department:"+dept.ID))
 }
 
 // stageNodeKey mirrors internal/workflow/stage.go's own unexported function
@@ -294,7 +288,7 @@ func (s *InstanceService) validateAssigneeEligibility(ctx context.Context, plan 
 				checks = append(checks, check{
 					nodeKey: nodeKey,
 					req: port.EligibilityCheckRequest{
-						NewUserID: userID, DepartmentID: deptUUID(dept.ID), RequiredLevel: stage.Role,
+						NewUserID: userID, DepartmentID: deptUUID(&dept), RequiredLevel: stage.Role,
 					},
 				})
 			}

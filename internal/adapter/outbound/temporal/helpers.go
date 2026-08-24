@@ -29,14 +29,12 @@ func nonRetryable(errType string, err error) error {
 	return temporal.NewApplicationErrorWithCause(err.Error(), errType, err) //nolint:wrapcheck // must stay *temporal.ApplicationError for NonRetryableErrorTypes matching
 }
 
-// deptUUID derives a stable, deterministic UUID from a compiled plan's
-// DepartmentDef.ID — today a display-slug lane name, never a real IAM
-// department UUID (execution_service LLD §4.3: reading one out of a BPMN
-// lane's extensionElements is a still-open TODO in definition_service's own
-// compiler). An explicit, temporary placeholder — replace with the compiled
-// plan's own real UUID once that compiler fix lands, not with anything
-// smarter here.
-func deptUUID(deptID string) uuid.UUID {
+// deptUUID must resolve identically to instance_service.go's own copy —
+// their outputs are compared directly in delegation_reconciler.go.
+func deptUUID(deptID, iamDeptID string) uuid.UUID {
+	if id, err := uuid.Parse(iamDeptID); err == nil {
+		return id
+	}
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:department:"+deptID))
 }
 

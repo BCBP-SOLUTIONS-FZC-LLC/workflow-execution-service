@@ -48,26 +48,35 @@ func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID s
 		if stage.EngineNote != "" {
 			wf.GetLogger(ctx).Warn("dispatching stage with engine note", "node_key", string(nodeKey), "engine_note", stage.EngineNote)
 		}
-		return in.runTaskStage(ctx, plan, stage, nodeKey)
+		return in.runTaskStage(ctx, plan, deptID, stage, nodeKey)
 	}
 }
 
 // runTaskStage handles prep/review/approve/unrecognized-Type dispatch (LLD
 // §2.2/§3.4).
-func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, stage *dsl.StageDef, nodeKey domain.NodeKey) (domain.NodeKey, error) {
+func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, stage *dsl.StageDef, nodeKey domain.NodeKey) (domain.NodeKey, error) {
 	compiledNode, err := json.Marshal(stage)
 	if err != nil {
 		return nodeKey, fmt.Errorf("workflow: marshaling stage %q: %w", nodeKey, err)
 	}
 	in.taskVisits[nodeKey]++
+
+	var iamDeptID string
+	if getVersion(ctx, deptIAMDepartmentIDChangeID) != wf.DefaultVersion {
+		if dept := findDepartment(plan, deptID); dept != nil {
+			iamDeptID = dept.IAMDepartmentID
+		}
+	}
+
 	out, err := createTask(ctx, port.CreateTaskInput{
-		InstanceID:   in.instanceID,
-		TenantID:     in.tenantID,
-		NodeKey:      nodeKey,
-		CompiledNode: compiledNode,
-		ContextJSON:  in.contextJSON,
-		OverrideMap:  in.overrideMap,
-		VisitCount:   in.taskVisits[nodeKey],
+		InstanceID:      in.instanceID,
+		TenantID:        in.tenantID,
+		NodeKey:         nodeKey,
+		CompiledNode:    compiledNode,
+		ContextJSON:     in.contextJSON,
+		OverrideMap:     in.overrideMap,
+		VisitCount:      in.taskVisits[nodeKey],
+		IAMDepartmentID: iamDeptID,
 	})
 	if err != nil {
 		return nodeKey, err
