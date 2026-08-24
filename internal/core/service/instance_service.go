@@ -387,7 +387,7 @@ func (s *InstanceService) Get(ctx context.Context, tenantID, instanceID uuid.UUI
 func (s *InstanceService) callerInScope(ctx context.Context, tenantID uuid.UUID, scope port.ReadScope, tasks []*domain.Task) bool {
 	for _, t := range tasks {
 		for _, d := range scope.Departments {
-			if d == t.DepartmentID.String() {
+			if d.DepartmentID == t.DepartmentID {
 				return true
 			}
 		}

@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -84,13 +85,17 @@ func TestListTasks(t *testing.T) {
 	}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
+	deptA, deptB := uuid.New(), uuid.New()
 	r := req(http.MethodGet, "/api/v1/tasks", nil)
-	r.Header.Set("x-departments", "dept-a, dept-b")
+	r.Header.Set("x-departments", fmt.Sprintf("%s:approver, %s:reviewer", deptA, deptB))
 	w := do(router, r)
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, testUserID, gotScope.CallerUserID)
-	assert.Equal(t, []string{"dept-a", "dept-b"}, gotScope.Departments)
+	assert.Equal(t, []port.DepartmentRole{
+		{DepartmentID: deptA, Role: "approver"},
+		{DepartmentID: deptB, Role: "reviewer"},
+	}, gotScope.Departments)
 	assert.False(t, gotScope.IsAdmin)
 
 	var body struct {

@@ -98,8 +98,18 @@ type TaskFilter struct {
 // current departments include the resource's, or IsAdmin bypasses the check.
 type ReadScope struct {
 	CallerUserID uuid.UUID
-	Departments  []string
+	Departments  []DepartmentRole
 	IsAdmin      bool
+}
+
+// DepartmentRole is one parsed entry from the caller's x-departments header
+// ("<department_id>:<role>", comma-separated, per definition_service.md §3.1
+// and IAM HLD v1.41). Role is carried for future finer-grained gating but
+// not consumed by any check today — only DepartmentID identity matters for
+// the current department-membership visibility check.
+type DepartmentRole struct {
+	DepartmentID uuid.UUID
+	Role         string
 }
 
 // Page is a list endpoint's decoded, validated pagination input. Cursor is

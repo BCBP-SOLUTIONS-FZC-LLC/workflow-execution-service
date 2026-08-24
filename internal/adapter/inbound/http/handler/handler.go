@@ -165,17 +165,33 @@ func requireAdmin(c *gin.Context) bool {
 	return true
 }
 
-func callerDepartments(c *gin.Context) []string {
+// callerDepartments parses x-departments' "<department_id>:<role>" pairs.
+// A token missing the ":" separator, or whose ID half isn't a valid UUID,
+// is dropped rather than guessed at — this previously split only on "," and
+// left each raw "<uuid>:<role>" string uncompared against anything but
+// itself, so department-scoped visibility (taskInScope/callerInScope) could
+// never match a real department UUID.
+func callerDepartments(c *gin.Context) []port.DepartmentRole {
 	raw := c.GetHeader(departmentsHeader)
 	if raw == "" {
 		return nil
 	}
 	parts := strings.Split(raw, ",")
-	departments := make([]string, 0, len(parts))
+	departments := make([]port.DepartmentRole, 0, len(parts))
 	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			departments = append(departments, p)
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
 		}
+		idPart, role, found := strings.Cut(p, ":")
+		if !found {
+			continue
+		}
+		deptID, err := uuid.Parse(idPart)
+		if err != nil {
+			continue
+		}
+		departments = append(departments, port.DepartmentRole{DepartmentID: deptID, Role: role})
 	}
 	return departments
 }

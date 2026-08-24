@@ -313,12 +313,28 @@ func TestInstanceService_Get(t *testing.T) {
 	})
 
 	t.Run("caller with no matching department/assignment is rejected", func(t *testing.T) {
-		_, _, err := svc.Get(context.Background(), tenantID, inst.ID, port.ReadScope{CallerUserID: uuid.New(), Departments: []string{"unrelated-dept"}})
+		_, _, err := svc.Get(context.Background(), tenantID, inst.ID, port.ReadScope{
+			CallerUserID: uuid.New(),
+			Departments:  []port.DepartmentRole{{DepartmentID: uuid.New(), Role: "approver"}},
+		})
 		assert.ErrorIs(t, err, port.ErrNotAuthorizedForRead)
 	})
 
 	t.Run("caller whose department matches the task is authorized", func(t *testing.T) {
-		got, _, err := svc.Get(context.Background(), tenantID, inst.ID, port.ReadScope{Departments: []string{task.DepartmentID.String()}})
+		got, _, err := svc.Get(context.Background(), tenantID, inst.ID, port.ReadScope{
+			Departments: []port.DepartmentRole{{DepartmentID: task.DepartmentID, Role: "reviewer"}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, inst.ID, got.ID)
+	})
+
+	t.Run("caller with roles in multiple departments, one matching, is authorized", func(t *testing.T) {
+		got, _, err := svc.Get(context.Background(), tenantID, inst.ID, port.ReadScope{
+			Departments: []port.DepartmentRole{
+				{DepartmentID: uuid.New(), Role: "member"},
+				{DepartmentID: task.DepartmentID, Role: "approver"},
+			},
+		})
 		require.NoError(t, err)
 		assert.Equal(t, inst.ID, got.ID)
 	})

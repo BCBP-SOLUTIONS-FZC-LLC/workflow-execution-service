@@ -101,7 +101,7 @@ func (s *TaskService) Get(ctx context.Context, tenantID, taskID uuid.UUID, scope
 
 func (s *TaskService) taskInScope(scope port.ReadScope, task *domain.Task, assignments []*domain.TaskAssignment) bool {
 	for _, d := range scope.Departments {
-		if d == task.DepartmentID.String() {
+		if d.DepartmentID == task.DepartmentID {
 			return true
 		}
 	}

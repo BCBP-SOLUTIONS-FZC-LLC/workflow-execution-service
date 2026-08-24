@@ -77,9 +77,29 @@ func TestTaskService_Get(t *testing.T) {
 	})
 
 	t.Run("department match authorized", func(t *testing.T) {
-		got, _, err := svc.Get(context.Background(), tenantID, task.ID, port.ReadScope{Departments: []string{task.DepartmentID.String()}})
+		got, _, err := svc.Get(context.Background(), tenantID, task.ID, port.ReadScope{
+			Departments: []port.DepartmentRole{{DepartmentID: task.DepartmentID, Role: "approver"}},
+		})
 		require.NoError(t, err)
 		assert.Equal(t, task.ID, got.ID)
+	})
+
+	t.Run("department match authorized among multiple unrelated departments", func(t *testing.T) {
+		got, _, err := svc.Get(context.Background(), tenantID, task.ID, port.ReadScope{
+			Departments: []port.DepartmentRole{
+				{DepartmentID: uuid.New(), Role: "reviewer"},
+				{DepartmentID: task.DepartmentID, Role: "member"},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, task.ID, got.ID)
+	})
+
+	t.Run("non-matching department rejected", func(t *testing.T) {
+		_, _, err := svc.Get(context.Background(), tenantID, task.ID, port.ReadScope{
+			Departments: []port.DepartmentRole{{DepartmentID: uuid.New(), Role: "approver"}},
+		})
+		assert.ErrorIs(t, err, port.ErrNotAuthorizedForRead)
 	})
 
 	t.Run("active assignee authorized", func(t *testing.T) {
