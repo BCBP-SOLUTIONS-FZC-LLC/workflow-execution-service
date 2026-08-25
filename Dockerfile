@@ -16,7 +16,7 @@
 # TODO before real deployment: pin base image digests via `make pin-base-images`
 # (deferred — no docker-build/trivy CI job exists yet at this Tier-0 stage).
 
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 ARG BUILD_VERSION=dev
 ENV CGO_ENABLED=0 \
