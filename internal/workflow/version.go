@@ -9,3 +9,5 @@ func getVersion(ctx wf.Context, changeID string) wf.Version {
 const initialInterpreterChangeID = "initial-interpreter"
 
 const stageFailChangeID = "stage-fail-signal"
+
+const taskStageCancelChangeID = "task-stage-cancel"

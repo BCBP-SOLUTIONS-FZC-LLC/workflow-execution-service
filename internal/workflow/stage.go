@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	wf "go.temporal.io/sdk/workflow"
@@ -11,6 +12,10 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/enums"
 )
+
+// errStageAbandoned means ctx was canceled (a force-forward past this
+// branch), not a completion or a failure.
+var errStageAbandoned = errors.New("workflow: stage abandoned")
 
 func stageNodeKey(deptID string, stage *dsl.StageDef) domain.NodeKey {
 	if stage.NodeID != "" {
@@ -85,12 +90,17 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	defer delete(in.pending, nodeKey)
 
 	sel := wf.NewSelector(ctx)
-	var resolved bool
+	var resolved, abandoned bool
 	var sig stageTransitionSignal
 	sel.AddReceive(resolveCh, func(c wf.ReceiveChannel, more bool) {
 		c.Receive(ctx, &sig)
 		resolved = true
 	})
+	if getVersion(ctx, taskStageCancelChangeID) != wf.DefaultVersion {
+		sel.AddReceive(ctx.Done(), func(c wf.ReceiveChannel, more bool) {
+			abandoned = true
+		})
+	}
 
 	var fired *boundaryFire
 	cancelBoundaries := registerTaskBoundaries(ctx, sel, in.msgBuf, stage.BoundaryTimer, stage.BoundaryMessage, func(f boundaryFire) {
@@ -101,10 +111,15 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 		DueDate: stage.DueDate, FollowUpDate: stage.FollowUpDate,
 	})
 
-	for !resolved && fired == nil {
+	for !resolved && fired == nil && !abandoned {
 		sel.Select(ctx)
 	}
 	cancelSLA()
+
+	if abandoned {
+		cancelBoundaries()
+		return nodeKey, errStageAbandoned
+	}
 
 	if fired != nil {
 		cancelBoundaries()

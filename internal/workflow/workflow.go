@@ -5,6 +5,7 @@
 package workflow
 
 import (
+	"errors"
 	"fmt"
 
 	wf "go.temporal.io/sdk/workflow"
@@ -93,6 +94,9 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 		var runErr error
 		wf.Go(runCtx, func(gctx wf.Context) {
 			outcome, runErr = in.runSteps(gctx, plan, steps, admin)
+			if errors.Is(runErr, errStageAbandoned) {
+				return // force-forwarded away; doneCh has no listener left for this iteration
+			}
 			doneCh.Send(gctx, struct{}{})
 		})
 
@@ -120,11 +124,7 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 			return stepOutcome{Terminated: true}, in.cancelInstanceOnSignal(ctx, sig)
 
 		case SignalInstanceForceFwd:
-			// Unlike force-back, force-forward jumps to a node that hasn't
-			// been visited yet — it must never call history.PopTo, which
-			// pops the ENTIRE stack when the target isn't found in it
-			// (that's force-back's regression semantics, not this one).
-			// OldNodeKeys reports only the currently bypassed position.
+			// Unlike force-back, this must never call history.PopTo.
 			var oldKeys []domain.NodeKey
 			if last := in.history.Peek(); last != "" {
 				oldKeys = []domain.NodeKey{last}
@@ -154,11 +154,6 @@ func (in *interpreter) recordAndRedirect(ctx wf.Context, oldNodeKeys []domain.No
 	})
 }
 
-// redirectSteps resumes at deptID by finding it within original — the
-// plan's own top-level steps, never an already-redirected list, so repeated
-// redirects don't compound. deptID not found here (e.g. nested inside a
-// SubWorkflow/Parallel) falls back to running it in isolation — the DSL has
-// no finer-grained continuation pointer than dept+stage+nodeID.
 func redirectSteps(original []dsl.ExecutionStep, deptID string) []dsl.ExecutionStep {
 	for i, step := range original {
 		for j, d := range step.Sequential {

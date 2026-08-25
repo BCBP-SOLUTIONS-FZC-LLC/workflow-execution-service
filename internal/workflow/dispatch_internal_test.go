@@ -71,6 +71,34 @@ func TestRunStageSendReceiveTask(t *testing.T) {
 	}
 }
 
+// TestRunTaskStage_AbandonedOnCancel exercises the fix for a branch parked
+// in runTaskStage's own Selector: canceling ctx (a force-forward past it)
+// must return errStageAbandoned promptly, not hang forever.
+func TestRunTaskStage_AbandonedOnCancel(t *testing.T) {
+	env := newTestEnv()
+
+	var stageErr error
+	env.ExecuteWorkflow(func(ctx wf.Context) error {
+		in := newInterpreter("tenant", "instance", "", nil, nil)
+		plan := &dsl.CompiledPlan{Name: "main"}
+
+		cctx, cancel := wf.WithCancel(ctx)
+		wf.Go(ctx, func(gctx wf.Context) {
+			_ = wf.Sleep(gctx, time.Millisecond)
+			cancel()
+		})
+
+		_, stageErr = in.runTaskStage(cctx, plan, "sales", &dsl.StageDef{Type: "approve", NodeID: "n1"}, "sales/n1")
+		return nil
+	})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	if !errors.Is(stageErr, errStageAbandoned) {
+		t.Errorf("runTaskStage error = %v, want errStageAbandoned", stageErr)
+	}
+}
+
 // TestRunStageLogsEngineNoteForUnrecognizedType exercises the EngineNote
 // logging branch for an unrecognized stage Type — forward-compat
 // passthrough, never a failure (LLD §2.4).

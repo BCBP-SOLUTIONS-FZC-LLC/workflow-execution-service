@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"errors"
+
 	wf "go.temporal.io/sdk/workflow"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
@@ -39,6 +41,9 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 		deptID, steps := b.DeptID, b.Steps
 		wf.Go(bctx, func(gctx wf.Context) {
 			out, err := in.runSteps(gctx, plan, steps, admin)
+			if errors.Is(err, errStageAbandoned) {
+				return // force-forwarded away; settle has no listener left for this dept
+			}
 			settle.Send(gctx, branchOutcome{DeptID: deptID, LastNode: out.LastNode, Err: err})
 		})
 	}
@@ -186,9 +191,6 @@ func (in *interpreter) handleParallelForceForward(ctx wf.Context, deptIDs []stri
 		oldKeys = []domain.NodeKey{node}
 	}
 	in.recordAndRedirect(ctx, oldKeys, sig)
-	// cancel() only interrupts a branch mid-ExecuteActivity; one parked on
-	// runTaskStage's own Selector is left orphaned — harmless since
-	// recordAndRedirect already vacated its assignment.
 	if cancel, ok := cancels[deptID]; ok {
 		cancel()
 	}
