@@ -9,5 +9,3 @@ func getVersion(ctx wf.Context, changeID string) wf.Version {
 const initialInterpreterChangeID = "initial-interpreter"
 
 const stageFailChangeID = "stage-fail-signal"
-
-const deptIAMDepartmentIDChangeID = "dept-iam-department-id"

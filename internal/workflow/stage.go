@@ -12,10 +12,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/enums"
 )
 
-// stageNodeKey builds this interpreter's NodeKey (execution LLD §4.2):
-// dept+NodeID when NodeID is populated (LLD §2.6), else dept+Type — matching
-// the once-stage-of-a-type-per-department shape real compiled plans exhibit
-// today.
 func stageNodeKey(deptID string, stage *dsl.StageDef) domain.NodeKey {
 	if stage.NodeID != "" {
 		return domain.NodeKey(deptID + "/" + stage.NodeID)
@@ -23,11 +19,8 @@ func stageNodeKey(deptID string, stage *dsl.StageDef) domain.NodeKey {
 	return domain.NodeKey(deptID + "/" + stage.Type)
 }
 
-// runStage dispatches a single compiled stage (LLD §2.4's stage-type
-// dispatch table). stage.Type is a plain string, not enums.StageType, by
-// design — an unrecognized value is a valid forward-compat passthrough
-// (definition_service's compiler emits it as a warning, never an error),
-// so this never treats an unknown Type as a failure.
+// stage.Type is a plain string, not enums.StageType: an unrecognized value
+// is a valid forward-compat passthrough, never a failure.
 func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, stage *dsl.StageDef) (domain.NodeKey, error) {
 	nodeKey := stageNodeKey(deptID, stage)
 
@@ -52,8 +45,6 @@ func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID s
 	}
 }
 
-// runTaskStage handles prep/review/approve/unrecognized-Type dispatch (LLD
-// §2.2/§3.4).
 func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, stage *dsl.StageDef, nodeKey domain.NodeKey) (domain.NodeKey, error) {
 	compiledNode, err := json.Marshal(stage)
 	if err != nil {
@@ -62,10 +53,8 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	in.taskVisits[nodeKey]++
 
 	var iamDeptID string
-	if getVersion(ctx, deptIAMDepartmentIDChangeID) != wf.DefaultVersion {
-		if dept := findDepartment(plan, deptID); dept != nil {
-			iamDeptID = dept.IAMDepartmentID
-		}
+	if dept := findDepartment(plan, deptID); dept != nil {
+		iamDeptID = dept.IAMDepartmentID
 	}
 
 	out, err := createTask(ctx, port.CreateTaskInput{
@@ -133,18 +122,9 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	return in.resolveTaskStage(ctx, nodeKey, out, sig)
 }
 
-// resolveTaskStage applies a settled runTaskStage signal: the pre-stage-fail
-// behavior (unconditional completeAssignment) for histories recorded before
-// stageFailChangeID, else completeAssignment for a normal resolution or
-// updateTaskStatus(FAILED) + a non-retryable error for sig.Failed.
-//
-// Simplification: CreateTaskOutput carries only TaskID, not a per-assignee
-// AssignmentID — this interpreter uses TaskID as the single-assignee
-// AssignmentID reference. Multi-assignee claim/lead bookkeeping
-// (ClaimAssignmentActivity) is a separate, additive path this task does not
-// need to invoke for the common single-assignee case. Reconcile with
-// whichever sibling task owns the real assignment ID convention if this
-// proves wrong.
+// CreateTaskOutput carries only TaskID, used here as the single-assignee
+// AssignmentID reference — multi-assignee claim/lead bookkeeping is a
+// separate path this doesn't need to invoke.
 func (in *interpreter) resolveTaskStage(
 	ctx wf.Context, nodeKey domain.NodeKey, out port.CreateTaskOutput, sig stageTransitionSignal,
 ) (domain.NodeKey, error) {

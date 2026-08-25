@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
@@ -15,15 +16,26 @@ func TestDeptUUID_PrefersIAMDepartmentID(t *testing.T) {
 	assert.Equal(t, iamDeptID, got)
 }
 
-func TestDeptUUID_FallsBackWithoutIAMDepartmentID(t *testing.T) {
+func TestDeptUUID_NilWithoutIAMDepartmentID(t *testing.T) {
 	got := deptUUID(&dsl.DepartmentDef{ID: "sales"})
-	assert.NotEqual(t, uuid.Nil, got)
-	assert.Equal(t, got, deptUUID(&dsl.DepartmentDef{ID: "sales"}), "must be stable for the same deptID")
+	assert.Equal(t, uuid.Nil, got)
 }
 
-// TestNoopLogger only confirms the zero-value fallback never panics — real
-// behavior (falling back to it when Log is nil) is exercised via
-// test/unit/service's InstanceService tests.
+func plainPlan(dept dsl.DepartmentDef) *dsl.CompiledPlan {
+	return &dsl.CompiledPlan{Departments: []dsl.DepartmentDef{dept}}
+}
+
+func TestRequiredLevelForTask_MatchesTaskWithRealIAMDepartmentID(t *testing.T) {
+	stage := dsl.StageDef{Type: "approve", NodeID: "n1", Role: "sales_rep"}
+	iamDeptID := uuid.New()
+	dept := dsl.DepartmentDef{ID: "sales", IAMDepartmentID: iamDeptID.String(), Stages: []dsl.StageDef{stage}}
+	task := &domain.Task{DepartmentID: iamDeptID, NodeKey: "sales/n1"}
+
+	role, ok := requiredLevelForTask(plainPlan(dept), task)
+	assert.True(t, ok)
+	assert.Equal(t, "sales_rep", role)
+}
+
 func TestNoopLogger(t *testing.T) {
 	var l noopLogger
 	l.Debug("msg", nil)

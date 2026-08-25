@@ -1,15 +1,7 @@
 // Package workflow is the Temporal workflow-function interpreter for
-// execution_service's compiled BPMN DSL (workflow-models's pkg/dsl). It is a
-// peer of internal/core/service, not internal/adapter (LLD §1.7): never
-// imported by adapter/, never imports it back, wired into cmd/worker only
-// via Temporal's runtime registration.
-//
-// DSL schema compatibility (fail-closed check + Factory/Strategy layer):
-// see "execution LLD" §2.5 and compat.go.
-//
-// The four custom Search Attributes (LLD §3.6) aren't implemented here yet,
-// but can only be set via workflow.UpsertSearchAttributes from inside the
-// workflow function itself, so any future addition must live in this package.
+// execution_service's compiled BPMN DSL. It is a peer of internal/core/service,
+// not internal/adapter: never imported by adapter/, never imports it back,
+// wired into cmd/worker only via Temporal's runtime registration.
 package workflow
 
 import (
@@ -22,8 +14,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// Execute is the workflow function itself (LLD §2.5); registering it with
-// worker.RegisterWorkflow is cmd/worker's job, a separate sibling task.
 func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 	getVersion(ctx, initialInterpreterChangeID)
 
@@ -90,13 +80,9 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 	return ExecuteOutput{Status: finalStatus}, runErr
 }
 
-// runTopLevel is the base (non-DEGRADED, no active Parallel gateway)
-// force-back/force-forward/cancel handler (LLD §2.7's base mechanism). It
-// listens on baseAdmin rather than admin — the channel runParallel/
-// enterDegraded use — because signals.go's router sends each signal to
-// exactly one of the two based on whether a Parallel gateway is currently
-// active; two Selectors racing the same channel would make delivery
-// ambiguous.
+// Listens on baseAdmin rather than admin (runParallel/enterDegraded's own
+// channel) — the router sends each signal to exactly one, since two
+// Selectors racing the same channel would make delivery ambiguous.
 func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin, baseAdmin wf.Channel) (stepOutcome, error) {
 	original := plan.Execution.Steps
 	steps := original
@@ -143,21 +129,7 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 			if last := in.history.Peek(); last != "" {
 				oldKeys = []domain.NodeKey{last}
 			}
-			// Errors from these two are deliberately not propagated: both
-			// already retry unlimited on any retryable failure
-			// (dbWriteActivityOptions), so an error here means a genuinely
-			// non-retryable one (bad input, not-found) on an admin-issued
-			// signal — surfacing it would abort the whole instance over a
-			// best-effort audit/projection write, which is a worse outcome
-			// than proceeding with the redirect the admin actually asked for.
-			_ = recordForceRoute(ctx, port.RecordForceRouteInput{
-				InstanceID: in.instanceID, TenantID: in.tenantID,
-				OldNodeKeys: oldKeys, TargetNodeID: string(sig.TargetNodeKey),
-				AdminUserID: sig.AdminUserID, RecordVersion: sig.RecordVersion,
-			})
-			_ = updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
-				InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{sig.TargetNodeKey},
-			})
+			in.recordAndRedirect(ctx, oldKeys, sig)
 			steps = redirectSteps(original, deptFromNodeKey(sig.TargetNodeKey))
 
 		case SignalInstanceForceBack:
@@ -166,6 +138,20 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 			steps = redirectSteps(original, deptFromNodeKey(sig.TargetNodeKey))
 		}
 	}
+}
+
+// Errors are deliberately swallowed: both already retry unlimited on any
+// retryable failure, so an error here is non-retryable and best ignored
+// rather than aborting the instance over a best-effort audit write.
+func (in *interpreter) recordAndRedirect(ctx wf.Context, oldNodeKeys []domain.NodeKey, sig adminSignal) {
+	_ = recordForceRoute(ctx, port.RecordForceRouteInput{
+		InstanceID: in.instanceID, TenantID: in.tenantID,
+		OldNodeKeys: oldNodeKeys, TargetNodeID: string(sig.TargetNodeKey),
+		AdminUserID: sig.AdminUserID, RecordVersion: sig.RecordVersion,
+	})
+	_ = updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
+		InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{sig.TargetNodeKey},
+	})
 }
 
 // redirectSteps resumes at deptID by finding it within original — the

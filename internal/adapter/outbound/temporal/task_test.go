@@ -189,7 +189,7 @@ func TestCreateTask_IAMDepartmentID_UsedAsDepartmentID(t *testing.T) {
 	assert.Equal(t, iamDeptID, tasks.byID[taskID].DepartmentID)
 }
 
-func TestCreateTask_NoIAMDepartmentID_FallsBackToPlaceholder(t *testing.T) {
+func TestCreateTask_NoIAMDepartmentID_IsNilDepartmentID(t *testing.T) {
 	deps, tasks, _, _ := newTestDeps()
 	compiled, err := json.Marshal(dsl.StageDef{Type: "review"})
 	require.NoError(t, err)
@@ -201,7 +201,7 @@ func TestCreateTask_NoIAMDepartmentID_FallsBackToPlaceholder(t *testing.T) {
 
 	taskID, err := uuid.Parse(out.TaskID)
 	require.NoError(t, err)
-	assert.NotEqual(t, uuid.Nil, tasks.byID[taskID].DepartmentID)
+	assert.Equal(t, uuid.Nil, tasks.byID[taskID].DepartmentID)
 }
 
 func TestCreateTask_InvalidTenantID_IsNonRetryable(t *testing.T) {

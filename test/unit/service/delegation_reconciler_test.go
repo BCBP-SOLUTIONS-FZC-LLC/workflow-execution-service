@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -13,6 +14,23 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
+
+// compiledPlanJSONWithDept is compiledPlanJSON's counterpart for tests that
+// need a specific DepartmentDef (e.g. a real IAMDepartmentID) rather than
+// the shared helper's fixed {ID: "finance", Label: "Finance"}.
+func compiledPlanJSONWithDept(t *testing.T, dept dsl.DepartmentDef) string {
+	t.Helper()
+	collab := dsl.CompiledCollaboration{
+		MainPlan: "main",
+		Plans: []*dsl.CompiledPlan{{
+			Name: "main", TaskQueue: "wf-queue-default",
+			Departments: []dsl.DepartmentDef{dept},
+		}},
+	}
+	b, err := json.Marshal(collab)
+	require.NoError(t, err)
+	return string(b)
+}
 
 func newDelegationReconcilerHarness() (*service.DelegationReconciler, *fakeInstanceRepo, *fakeTaskRepo, *fakeAssignmentRepo, *fakeOutbox, *fakeTemporalClient, *fakeDefinitionClient, *fakeEligibilityChecker) {
 	instances := newFakeInstanceRepo()
@@ -41,7 +59,7 @@ func seedDelegationFixture(instances *fakeInstanceRepo, tasks *fakeTaskRepo, ass
 	instances.byID[inst.ID] = inst
 
 	nodeKey := "finance/" + stage.NodeID
-	task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, NodeKey: nodeKey, DepartmentID: uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:department:finance")), RecordVersion: 1}
+	task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, NodeKey: nodeKey, DepartmentID: uuid.Nil, RecordVersion: 1}
 	tasks.byID[task.ID] = task
 
 	a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegatorID, IsActive: true}
@@ -103,6 +121,30 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, assignments.byID[a.ID].IsActive, "a row outside the given department scope must survive untouched")
 		assert.Empty(t, outbox.enqueued)
+	})
+
+	t.Run("department scope matches a task by its real IAMDepartmentID", func(t *testing.T) {
+		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
+		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		versionID := uuid.New()
+		financeIAMDeptID := uuid.New().String()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSONWithDept(t,
+			dsl.DepartmentDef{ID: "finance", IAMDepartmentID: financeIAMDeptID, Stages: []dsl.StageDef{{Type: "userTask", NodeID: "review", Role: "reviewer"}}}))
+
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "biz-1", TemporalWorkflowID: tenantID.String() + ":biz-1"}
+		instances.byID[inst.ID] = inst
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, NodeKey: "finance/review",
+			DepartmentID: uuid.MustParse(financeIAMDeptID), RecordVersion: 1}
+		tasks.byID[task.ID] = task
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegatorID, IsActive: true}
+		assignments.byID[a.ID] = a
+
+		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{
+			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, Scope: "department", ScopeID: &financeIAMDeptID,
+		})
+		require.NoError(t, err)
+		assert.False(t, assignments.byID[a.ID].IsActive)
+		require.Len(t, outbox.enqueued, 1)
 	})
 
 	t.Run("default scope matches on business_key", func(t *testing.T) {

@@ -15,27 +15,8 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// CreateTask is CreateTaskActivity (LLD §3.1): inserts workflow_task (READY)
-// plus N workflow_task_assignment rows and enqueues workflow.task.created,
-// all in one transaction. Connector-typed stages (ConnectorType != "") get
-// zero assignment rows — connector tasks are fully automation-only
-// (workflow_connectors.md) — and have IOMapping.Inputs resolved against
-// ContextJSON, mirroring internal/workflow/iomapping.go's applyIOMapping
-// literal-key-copy convention (deliberately not fixing that convention's
-// pre-existing "="-prefix gap here, out of scope for this activity).
-//
-// Idempotent under Temporal's at-least-once activity retry: task.ID is
-// deterministic (derived from instanceID+NodeKey+VisitCount — see
-// deterministicTaskID's own doc comment for why VisitCount is needed
-// alongside NodeKey, not NodeKey alone), so a retried attempt after a lost
-// ack re-derives the same ID and its INSERT hits its own primary key —
-// mapErr classifies that as domain.ErrAlreadyExists, and this activity
-// treats it as "already created" by fetching and returning the existing
-// row, rather than a real conflict. A business-key unique constraint
-// (instance+NodeKey) was considered and rejected: DeferTask's regression
-// task deliberately reuses its original task's own NodeKey (assignment.go's
-// createRegressionTask), which a business-key constraint would incorrectly
-// reject as a duplicate.
+// Idempotent under at-least-once retry: task.ID is deterministic, so a
+// retried attempt hits its own primary key and is treated as already done.
 func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
@@ -57,7 +38,7 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 		TenantID:           tenantID,
 		WorkflowInstanceID: instanceID,
 		NodeKey:            string(in.NodeKey),
-		DepartmentID:       deptUUID(deptIDFromNodeKey(string(in.NodeKey)), in.IAMDepartmentID),
+		DepartmentID:       deptUUID(in.IAMDepartmentID),
 		Status:             domain.TaskStatusReady,
 		DueAt:              parseCompiledDate(stage.DueDate),
 		FollowUpAt:         parseCompiledDate(stage.FollowUpDate),
@@ -98,11 +79,6 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 	err = d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
 		if err := d.Tasks.Create(ctx, task); err != nil {
 			if errors.Is(err, domain.ErrAlreadyExists) {
-				// A prior attempt already created this task (and its
-				// assignments/event) before its ack was lost — task.ID is
-				// deterministic, so this retry reproduces the exact same
-				// row. Nothing left to do; CreateTaskOutput below already
-				// carries the right (identical) TaskID.
 				return nil
 			}
 			return fmt.Errorf("create workflow_task: %w", err)
@@ -131,14 +107,6 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 	return port.CreateTaskOutput{TaskID: task.ID.String()}, nil
 }
 
-// resolveConnectorInputs resolves m.Inputs against contextJSON via a literal
-// source->target key copy — the same copy convention
-// internal/workflow/iomapping.go's applyIOMapping already uses for
-// callActivity inlining (including sharing its pre-existing "="-prefix gap,
-// deliberately not fixed here). Unlike applyIOMapping, which merges results
-// back into the full context map, this builds an isolated map containing
-// only the resolved keys — connector stages get a discrete
-// resolved_inputs blob, not a mutated context.
 func resolveConnectorInputs(contextJSON string, m *dsl.IOMapping) (map[string]any, error) {
 	vars := map[string]any{}
 	if contextJSON != "" {
@@ -155,12 +123,7 @@ func resolveConnectorInputs(contextJSON string, m *dsl.IOMapping) (map[string]an
 	return resolved, nil
 }
 
-// resolveAssignees returns the concrete user IDs to assign: an override, if
-// one exists for this node, replaces the compiled plan's own
-// DefaultAssignees entirely — both are already-resolved user ID strings by
-// the time they reach this activity, never role names needing further IAM
-// resolution here (LLD §5.5: default assignees are re-validated for
-// existence/eligibility at instantiation time, not re-derived per task).
+// An override, if present for this node, replaces DefaultAssignees entirely.
 func resolveAssignees(defaultAssignees []string, override string) ([]uuid.UUID, error) {
 	raw := defaultAssignees
 	if override != "" {
@@ -177,11 +140,6 @@ func resolveAssignees(defaultAssignees []string, override string) ([]uuid.UUID, 
 	return ids, nil
 }
 
-// parseCompiledDate parses a compiled StageDef's raw DueDate/FollowUpDate
-// string (execution LLD §2.8: a raw ISO-8601 passthrough, never validated by
-// Definition Service). Accepted scope limit, matching §2.8's own: a
-// non-ISO-8601 value (e.g. a FEEL expression) is treated as absent rather
-// than failing task creation over it.
 func parseCompiledDate(s string) *time.Time {
 	if s == "" {
 		return nil
@@ -193,10 +151,6 @@ func parseCompiledDate(s string) *time.Time {
 	return &t
 }
 
-// UpdateInstanceNodes is UpdateInstanceNodesActivity (LLD §3.1): every step
-// transition updates workflow_instance.current_node_keys. No event is
-// written here — this is a bookkeeping-only projection update, not an
-// audited transition in its own right.
 func (d *Deps) UpdateInstanceNodes(ctx context.Context, in port.UpdateInstanceNodesInput) error {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
