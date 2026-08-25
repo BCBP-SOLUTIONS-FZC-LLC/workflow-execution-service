@@ -69,9 +69,11 @@ func buildDeps(cfg *config.Config) (*deps, func(), error) {
 		return nil, nil, fmt.Errorf("ensure consumer group: %w", err)
 	}
 
-	// TODO: wire Config.StorageProviders once workflow-connectors is pushed
-	// and go.mod is bumped past 7d9be28 — that version predates
-	// StorageProviderConstructor/NewGocloudStorageProvider/NewDriveStorageProvider.
+	// TODO: wire Config.StorageProviders/SendEmailProviders once workflow-connectors
+	// is pushed and go.mod is bumped past 7d9be28 — that version predates
+	// StorageProviderConstructor/NewGocloudStorageProvider/NewDriveStorageProvider
+	// and SendEmailProviderConstructor/NewSendGridProvider/NewSESProvider/
+	// NewGraphSendMailProvider/NewGmailProvider.
 	connectorSet, err := connectors.New(connectors.Config{
 		Aliases:       aliases,
 		InternalToken: cfg.InternalAPIToken,
