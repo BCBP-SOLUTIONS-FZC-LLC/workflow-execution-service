@@ -99,8 +99,8 @@ func checkRequiredConfig(cfg *config.Config) error {
 		return fmt.Errorf("CONNECTOR_STREAM_KEY is required")
 	case cfg.OpenBaoAddr == "":
 		return fmt.Errorf("OPENBAO_ADDR is required")
-	case cfg.ConnectorAliasRegistryPath == "":
-		return fmt.Errorf("CONNECTOR_ALIAS_REGISTRY_PATH is required")
+	case cfg.DefinitionServiceInternalHTTPAddr == "":
+		return fmt.Errorf("DEFINITION_SERVICE_INTERNAL_HTTP_ADDR is required")
 	case cfg.ExecutionServiceInternalAddr == "":
 		return fmt.Errorf("EXECUTION_SERVICE_INTERNAL_ADDR is required")
 	case cfg.AppEnv == "prod" && cfg.InternalAPIToken == "":

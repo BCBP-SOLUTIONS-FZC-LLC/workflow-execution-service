@@ -134,11 +134,15 @@ type Config struct {
 	OpenBaoMount   string
 	OpenBaoTimeout time.Duration
 
-	// ConnectorAliasRegistryPath is the static endpointAlias/queryAlias
-	// registry file cmd/connector-worker loads at startup via
-	// workflow-connectors' own aliasconfig.Load (LLD Decision #12) —
-	// connector-worker-only, not validated here.
-	ConnectorAliasRegistryPath string
+	// DefinitionServiceInternalHTTPAddr/ConnectorAliasFetchTimeout:
+	// cmd/connector-worker fetches the endpointAlias/queryAlias registry from
+	// definition_service's GET /internal/connector-aliases once at startup
+	// (definition_service owns it now, not a static file — LLD Decision #21),
+	// authenticated the same x-internal-token way as ExecutionServiceInternalAddr
+	// below. connector-worker-only, not validated here. Distinct from
+	// DefinitionServiceAddr above, which is the gRPC port (9090), not HTTP.
+	DefinitionServiceInternalHTTPAddr string
+	ConnectorAliasFetchTimeout        time.Duration
 
 	// Per-connector-type dispatch pool sizing + internal execution timeout
 	// (LLD §6.5 step 2 — one bounded pool + one timeout per connector type).
@@ -240,7 +244,8 @@ func Load() (*Config, error) {
 		OpenBaoMount:   getEnvOrDefault("OPENBAO_MOUNT", "secret"),
 		OpenBaoTimeout: getEnvDurationOrDefault("OPENBAO_TIMEOUT", 5*time.Second),
 
-		ConnectorAliasRegistryPath: getEnvOrDefault("CONNECTOR_ALIAS_REGISTRY_PATH", ""),
+		DefinitionServiceInternalHTTPAddr: getEnvOrDefault("DEFINITION_SERVICE_INTERNAL_HTTP_ADDR", ""),
+		ConnectorAliasFetchTimeout:        getEnvDurationOrDefault("CONNECTOR_ALIAS_FETCH_TIMEOUT", 10*time.Second),
 
 		ConnectorPoolSizeStorage:         getEnvIntOrDefault("CONNECTOR_POOL_SIZE_STORAGE", 10),
 		ConnectorPoolSizeSendEmail:       getEnvIntOrDefault("CONNECTOR_POOL_SIZE_SEND_EMAIL", 5),
@@ -330,7 +335,7 @@ func (c *Config) validate() error {
 	if c.AppEnv != "dev" && c.OutboxRelayDatabaseURL == "" {
 		return fmt.Errorf("OUTBOX_RELAY_DATABASE_URL is required when APP_ENV != dev — a missing relay DSN would silently fall back to the RLS-enforced app role and see zero rows forever")
 	}
-	// Connector-worker-only fields (OpenBao*, ConnectorAliasRegistryPath,
+	// Connector-worker-only fields (OpenBao*, DefinitionServiceInternalHTTPAddr,
 	// ConnectorPoolSize*/ConnectorTimeout*, ExecutionServiceInternalAddr)
 	// are deliberately NOT validated here, mirroring DefinitionServiceAddr's
 	// own precedent above: this Config is shared by cmd/server and

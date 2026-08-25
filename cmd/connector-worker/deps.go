@@ -43,9 +43,9 @@ type deps struct {
 // into execution_service's own /internal/connector-tasks endpoints (LLD
 // workflow_connectors.md §6.1 Decision #2).
 func buildDeps(cfg *config.Config) (*deps, func(), error) {
-	aliases, err := aliasconfig.Load(cfg.ConnectorAliasRegistryPath)
+	aliases, err := fetchAliases(context.Background(), cfg.DefinitionServiceInternalHTTPAddr, cfg.InternalAPIToken, cfg.ConnectorAliasFetchTimeout)
 	if err != nil {
-		return nil, nil, fmt.Errorf("load alias registry: %w", err)
+		return nil, nil, fmt.Errorf("fetch alias registry: %w", err)
 	}
 
 	valkeyClient := redis.NewClient(&redis.Options{
@@ -69,6 +69,9 @@ func buildDeps(cfg *config.Config) (*deps, func(), error) {
 		return nil, nil, fmt.Errorf("ensure consumer group: %w", err)
 	}
 
+	// TODO: wire Config.StorageProviders once workflow-connectors is pushed
+	// and go.mod is bumped past 7d9be28 — that version predates
+	// StorageProviderConstructor/NewGocloudStorageProvider/NewDriveStorageProvider.
 	connectorSet, err := connectors.New(connectors.Config{
 		Aliases:       aliases,
 		InternalToken: cfg.InternalAPIToken,
