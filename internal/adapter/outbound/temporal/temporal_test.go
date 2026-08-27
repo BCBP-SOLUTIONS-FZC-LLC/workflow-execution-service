@@ -17,8 +17,9 @@ import (
 // fakeInstanceRepo is an in-memory port.InstanceRepository — no real
 // Postgres involved, this package's own tests exercise Activity logic only.
 type fakeInstanceRepo struct {
-	byID            map[uuid.UUID]*domain.Instance
-	updateStatusErr error
+	byID                     map[uuid.UUID]*domain.Instance
+	updateStatusErr          error
+	updateCurrentNodeKeysErr error
 }
 
 func newFakeInstanceRepo(instances ...*domain.Instance) *fakeInstanceRepo {
@@ -71,6 +72,9 @@ func (r *fakeInstanceRepo) CountActiveByTaskQueue(_ context.Context, _ uuid.UUID
 }
 
 func (r *fakeInstanceRepo) UpdateCurrentNodeKeys(_ context.Context, _, id uuid.UUID, keys []string, recordVersion int64) (*domain.Instance, error) {
+	if r.updateCurrentNodeKeysErr != nil {
+		return nil, r.updateCurrentNodeKeysErr
+	}
 	inst, ok := r.byID[id]
 	if !ok {
 		return nil, domain.ErrNotFound
@@ -85,12 +89,23 @@ func (r *fakeInstanceRepo) UpdateCurrentNodeKeys(_ context.Context, _, id uuid.U
 
 // fakeTaskRepo is an in-memory port.TaskRepository. createErr, when set,
 // makes Create fail without touching byID — used to exercise callers'
-// DB-failure branches.
+// DB-failure branches. getByIDErr, when set, makes GetByID fail for
+// getByIDErrID specifically (or for every ID, if getByIDErrID is left
+// uuid.Nil) — needed to force the post-ErrAlreadyExists GetByID error branch
+// in createRegressionTask without also breaking the same call's earlier,
+// unrelated GetByID(taskID) lookup. pages, when non-nil, makes ListByInstance
+// ignore byID and instead walk through pages one PageRequest at a time —
+// used to exercise a caller's multi-page cursor loop (byID's own
+// ListByInstance has no real pagination, it returns everything in one page).
 type fakeTaskRepo struct {
 	byID            map[uuid.UUID]*domain.Task
 	createErr       error
 	updateStatusErr error
+	getByIDErr      error
+	getByIDErrID    uuid.UUID
 	listErr         error
+	pages           [][]*domain.Task
+	pageCalls       int
 }
 
 func newFakeTaskRepo(tasks ...*domain.Task) *fakeTaskRepo {
@@ -120,6 +135,9 @@ func (r *fakeTaskRepo) Create(_ context.Context, task *domain.Task) error {
 }
 
 func (r *fakeTaskRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domain.Task, error) {
+	if r.getByIDErr != nil && (r.getByIDErrID == uuid.Nil || r.getByIDErrID == id) {
+		return nil, r.getByIDErr
+	}
 	task, ok := r.byID[id]
 	if !ok {
 		return nil, domain.ErrNotFound
@@ -146,6 +164,18 @@ func (r *fakeTaskRepo) UpdateStatus(_ context.Context, _, id uuid.UUID, status d
 func (r *fakeTaskRepo) ListByInstance(_ context.Context, _, instanceID uuid.UUID, _ port.PageRequest) ([]*domain.Task, *port.Cursor, error) {
 	if r.listErr != nil {
 		return nil, nil, r.listErr
+	}
+	if r.pages != nil {
+		idx := r.pageCalls
+		r.pageCalls++
+		if idx >= len(r.pages) {
+			return nil, nil, nil
+		}
+		var next *port.Cursor
+		if idx < len(r.pages)-1 {
+			next = &port.Cursor{}
+		}
+		return r.pages[idx], next, nil
 	}
 	var out []*domain.Task
 	for _, task := range r.byID {
@@ -177,6 +207,7 @@ func (r *fakeTaskRepo) GetByInstanceAndNode(_ context.Context, _, instanceID uui
 type fakeAssignmentRepo struct {
 	byID          map[uuid.UUID]*domain.TaskAssignment
 	createErr     error
+	getByIDErr    error
 	setLeadErr    error
 	vacateErr     error
 	completeErr   error
@@ -211,6 +242,9 @@ func (r *fakeAssignmentRepo) Create(_ context.Context, a *domain.TaskAssignment)
 }
 
 func (r *fakeAssignmentRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domain.TaskAssignment, error) {
+	if r.getByIDErr != nil {
+		return nil, r.getByIDErr
+	}
 	a, ok := r.byID[id]
 	if !ok {
 		return nil, domain.ErrNotFound
@@ -308,6 +342,7 @@ func (r *fakeAssignmentRepo) SetLead(_ context.Context, _, _, id uuid.UUID, task
 type fakeOutbox struct {
 	enqueued   []events.Envelope[json.RawMessage]
 	enqueueErr error
+	existsErr  error
 }
 
 func (o *fakeOutbox) Enqueue(_ context.Context, env events.Envelope[json.RawMessage]) error {
@@ -323,6 +358,9 @@ func (o *fakeOutbox) ListByInstance(_ context.Context, _, _ uuid.UUID, _ port.Pa
 }
 
 func (o *fakeOutbox) ExistsForTask(_ context.Context, eventType string, taskID uuid.UUID) (bool, error) {
+	if o.existsErr != nil {
+		return false, o.existsErr
+	}
 	for _, env := range o.enqueued {
 		if env.Type != eventType {
 			continue

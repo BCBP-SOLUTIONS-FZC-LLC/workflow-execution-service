@@ -74,6 +74,39 @@ func TestUpdateInstanceStatus_Failed_CascadesOpenTasksAndEnqueuesBoth(t *testing
 	assert.Equal(t, domain.EventWorkflowInstanceFailed, outbox.enqueued[1].Type)
 }
 
+// TestUpdateInstanceStatus_Paused_NoEventEnqueued covers the switch's
+// Paused/Terminated case: neither status is ever reached through this
+// activity in practice (each has its own dedicated Pause/CancelInstance
+// activity), but the branch still exists and must stay a safe no-op rather
+// than enqueuing a bogus event.
+func TestUpdateInstanceStatus_Paused_NoEventEnqueued(t *testing.T) {
+	instanceID, tenantID := uuid.New(), uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1, Status: domain.InstanceStatusRunning}
+	deps, outbox := newInstanceTestDeps(inst, nil, nil)
+
+	err := deps.UpdateInstanceStatus(context.Background(), port.UpdateInstanceStatusInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), Status: domain.InstanceStatusPaused,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, domain.InstanceStatusPaused, inst.Status, "the status write itself still happens")
+	assert.Empty(t, outbox.enqueued, "no event class is defined for this activity reaching Paused")
+}
+
+// TestUpdateInstanceStatus_UnknownStatus_NoEventEnqueued covers the switch's
+// default case for a status this activity doesn't know how to build an event
+// for.
+func TestUpdateInstanceStatus_UnknownStatus_NoEventEnqueued(t *testing.T) {
+	instanceID, tenantID := uuid.New(), uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1}
+	deps, outbox := newInstanceTestDeps(inst, nil, nil)
+
+	err := deps.UpdateInstanceStatus(context.Background(), port.UpdateInstanceStatusInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), Status: domain.InstanceStatus("bogus_status"),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, outbox.enqueued)
+}
+
 func TestPauseInstance_UpdatesStatusAndEnqueuesPaused(t *testing.T) {
 	instanceID, tenantID := uuid.New(), uuid.New()
 	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1, Status: domain.InstanceStatusRunning}
@@ -141,6 +174,43 @@ func TestResumeInstance_UpdatesStatusAndEnqueuesResumed(t *testing.T) {
 	assert.Equal(t, domain.EventWorkflowInstanceResumed, outbox.enqueued[0].Type)
 }
 
+// TestPauseInstance_GetInstanceError forces instanceLifecycleEvent's
+// Instances.GetByID call (shared by Pause/ResumeInstance) to fail — the
+// instance is absent from the repo.
+func TestPauseInstance_GetInstanceError(t *testing.T) {
+	instanceID, tenantID := uuid.New(), uuid.New()
+	deps := &outboundtemporal.Deps{
+		Instances: newFakeInstanceRepo(), Tasks: newFakeTaskRepo(), Assignments: newFakeAssignmentRepo(),
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+	}
+
+	err := deps.PauseInstance(context.Background(), port.PauseInstanceInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), RecordVersion: 1,
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "get instance")
+}
+
+// TestResumeInstance_UpdateStatusError forces instanceLifecycleEvent's
+// Instances.UpdateStatus call to fail once the instance is not already in
+// the target status.
+func TestResumeInstance_UpdateStatusError(t *testing.T) {
+	instanceID, tenantID := uuid.New(), uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1, Status: domain.InstanceStatusPaused}
+	instances := newFakeInstanceRepo(inst)
+	instances.updateStatusErr = errBoom
+	deps := &outboundtemporal.Deps{
+		Instances: instances, Tasks: newFakeTaskRepo(), Assignments: newFakeAssignmentRepo(),
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+	}
+
+	err := deps.ResumeInstance(context.Background(), port.ResumeInstanceInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), RecordVersion: 1,
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "update instance status")
+}
+
 // TestCancelInstance_CascadesAndEmitsCancelled is the regression test for
 // the dead-event finding: cancel must emit workflow.instance.cancelled, not
 // workflow.instance.terminated — the LLD documents these as distinct
@@ -167,6 +237,86 @@ func TestCancelInstance_CascadesAndEmitsCancelled(t *testing.T) {
 	require.NoError(t, json.Unmarshal(outbox.enqueued[1].Payload, &payload))
 	require.NotNil(t, payload.Reason)
 	assert.Equal(t, reason, *payload.Reason)
+}
+
+// TestCancelInstance_GetInstanceError forces CancelInstance's
+// Instances.GetByID call to fail — the instance is absent from the repo.
+func TestCancelInstance_GetInstanceError(t *testing.T) {
+	instanceID, tenantID := uuid.New(), uuid.New()
+	deps := &outboundtemporal.Deps{
+		Instances: newFakeInstanceRepo(), Tasks: newFakeTaskRepo(), Assignments: newFakeAssignmentRepo(),
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+	}
+
+	reason := "no longer needed"
+	err := deps.CancelInstance(context.Background(), port.CancelInstanceInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), Reason: &reason, RecordVersion: 1,
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "get instance")
+}
+
+// TestCancelInstance_UpdateStatusError forces CancelInstance's
+// Instances.UpdateStatus call to fail after the failActiveTasks cascade
+// succeeds.
+func TestCancelInstance_UpdateStatusError(t *testing.T) {
+	instanceID, tenantID := uuid.New(), uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1}
+	instances := newFakeInstanceRepo(inst)
+	instances.updateStatusErr = errBoom
+	deps := &outboundtemporal.Deps{
+		Instances: instances, Tasks: newFakeTaskRepo(), Assignments: newFakeAssignmentRepo(),
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+	}
+
+	reason := "no longer needed"
+	err := deps.CancelInstance(context.Background(), port.CancelInstanceInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), Reason: &reason, RecordVersion: 1,
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "update instance status")
+}
+
+// TestFailActiveTasks_Paginates forces a second ListByInstance page during
+// CancelInstance's task-failure cascade — open tasks spanning two pages must
+// all cascade to FAILED, not just the first page's.
+func TestFailActiveTasks_Paginates(t *testing.T) {
+	instanceID, tenantID := uuid.New(), uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1}
+	page1Task := &domain.Task{ID: uuid.New(), WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady, RecordVersion: 1}
+	page2Task := &domain.Task{ID: uuid.New(), WorkflowInstanceID: instanceID, Status: domain.TaskStatusInProgress, RecordVersion: 1}
+	tasks := newFakeTaskRepo(page1Task, page2Task)
+	tasks.pages = [][]*domain.Task{{page1Task}, {page2Task}}
+	deps, outbox := newInstanceTestDeps(inst, tasks, newFakeAssignmentRepo())
+
+	reason := "no longer needed"
+	err := deps.CancelInstance(context.Background(), port.CancelInstanceInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), Reason: &reason, RecordVersion: 1,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, domain.TaskStatusFailed, page1Task.Status)
+	assert.Equal(t, domain.TaskStatusFailed, page2Task.Status, "page 2's open task must cascade too")
+	assert.Equal(t, 2, tasks.pageCalls, "the pagination loop must have followed the cursor to a second page")
+	require.Len(t, outbox.enqueued, 3, "one workflow.task.failed per task, plus workflow.instance.cancelled")
+}
+
+// TestFailTask_ListActiveAssignmentsError forces failTask's
+// Assignments.ListActiveByTask call to fail.
+func TestFailTask_ListActiveAssignmentsError(t *testing.T) {
+	instanceID, tenantID := uuid.New(), uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1}
+	openTask := &domain.Task{ID: uuid.New(), WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady, RecordVersion: 1}
+	tasks := newFakeTaskRepo(openTask)
+	assignments := newFakeAssignmentRepo()
+	assignments.listActiveErr = errBoom
+	deps, _ := newInstanceTestDeps(inst, tasks, assignments)
+
+	reason := "no longer needed"
+	err := deps.CancelInstance(context.Background(), port.CancelInstanceInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), Reason: &reason, RecordVersion: 1,
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "list active assignments")
 }
 
 // TestUpdateInstanceStatus_Degraded_EnqueuesDegradedEvent is the regression

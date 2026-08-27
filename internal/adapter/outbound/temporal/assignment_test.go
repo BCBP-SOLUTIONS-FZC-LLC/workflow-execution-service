@@ -41,6 +41,23 @@ func TestClaimAssignment_SetsLeadAndEnqueuesClaimed(t *testing.T) {
 	assert.Equal(t, domain.EventWorkflowTaskClaimed, outbox.enqueued[0].Type)
 }
 
+// TestClaimAssignment_AlreadyLead_NoOp is the idempotency no-op for a
+// retried ClaimAssignment: a prior attempt already made this assignment
+// lead, so the retry must skip SetLead/the event re-enqueue entirely rather
+// than reusing a stale task.RecordVersion.
+func TestClaimAssignment_AlreadyLead_NoOp(t *testing.T) {
+	tenantID, taskID := uuid.New(), uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
+	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New(), IsLead: true}
+	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(assignment))
+
+	err := deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{
+		AssignmentID: assignment.ID.String(), TenantID: tenantID.String(), UserID: assignment.UserID.String(), RecordVersion: 1,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, outbox.enqueued, "already-lead retry must not re-enqueue workflow.task.claimed")
+}
+
 func TestCompleteAssignment_AllDoneWhenNoActiveAssignmentsRemain(t *testing.T) {
 	taskID := uuid.New()
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
@@ -68,6 +85,22 @@ func TestCompleteAssignment_NotAllDoneWhenAnotherAssignmentStillActive(t *testin
 	})
 	require.NoError(t, err)
 	assert.False(t, out.AllDone)
+}
+
+// TestCompleteAssignment_CompleteError forces Assignments.Complete to fail.
+func TestCompleteAssignment_CompleteError(t *testing.T) {
+	taskID := uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
+	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
+	assignments := newFakeAssignmentRepo(assignment)
+	assignments.completeErr = errBoom
+	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
+
+	_, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
+		AssignmentID: assignment.ID.String(), TenantID: uuid.New().String(), ResultJSON: `{}`,
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "complete assignment")
 }
 
 func TestDeferTask_CreatesRegressionTaskForDeferrer(t *testing.T) {
@@ -155,6 +188,102 @@ func TestDeferTask_RetriedCall_IsIdempotent(t *testing.T) {
 	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.deferred")
 }
 
+// TestDeferTask_GetAssignmentError forces Assignments.GetByID to fail.
+func TestDeferTask_GetAssignmentError(t *testing.T) {
+	tenantID, deferrerID := uuid.New(), uuid.New()
+	taskID := uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), NodeKey: "sales/review", RecordVersion: 1}
+	assignments := newFakeAssignmentRepo()
+	assignments.getByIDErr = errBoom
+	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
+
+	_, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
+		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
+		AssignmentID: uuid.New().String(), Reason: "not ready yet",
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "get assignment")
+}
+
+// TestDeferTask_MarkDeferredError forces the Tasks.UpdateStatus call that
+// marks the task DEFERRED to fail.
+func TestDeferTask_MarkDeferredError(t *testing.T) {
+	tenantID, deferrerID := uuid.New(), uuid.New()
+	taskID := uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), NodeKey: "sales/review", RecordVersion: 1}
+	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: deferrerID}
+	tasks := newFakeTaskRepo(task)
+	tasks.updateStatusErr = errBoom
+	deps, _ := newAssignmentTestDeps(tasks, newFakeAssignmentRepo(assignment))
+
+	_, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
+		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet",
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "mark task deferred")
+}
+
+// TestDeferTask_CompleteDeferringAssignmentError forces the
+// Assignments.Complete call on the deferring assignment itself to fail.
+func TestDeferTask_CompleteDeferringAssignmentError(t *testing.T) {
+	tenantID, deferrerID := uuid.New(), uuid.New()
+	taskID := uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), NodeKey: "sales/review", RecordVersion: 1}
+	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: deferrerID}
+	assignments := newFakeAssignmentRepo(assignment)
+	assignments.completeErr = errBoom
+	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
+
+	_, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
+		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet",
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "complete deferring assignment")
+}
+
+// TestCreateRegressionTask_GetExistingErrorAfterAlreadyExists forces the
+// GetByID lookup that follows a Create-hits-ErrAlreadyExists race to itself
+// fail — distinct from the ordinary happy-path idempotent-retry case
+// (TestDeferTask_RetriedCall_IsIdempotent), which never needs this lookup to
+// error. A first DeferTask call creates the regression task for real; a
+// second DeferTask call against the same original task (a fresh, unrelated
+// assignment, so it isn't just the plain retry-no-op path) computes the same
+// deterministic regression-task ID and hits Create's ErrAlreadyExists
+// branch, whose own GetByID is then made to fail via a targeted
+// getByIDErrID — the earlier, unrelated GetByID(taskID) call at the top of
+// DeferTask is untouched by it.
+func TestCreateRegressionTask_GetExistingErrorAfterAlreadyExists(t *testing.T) {
+	tenantID, deferrerID := uuid.New(), uuid.New()
+	taskID := uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), NodeKey: "sales/review", RecordVersion: 1}
+	firstAssignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: deferrerID}
+	tasks := newFakeTaskRepo(task)
+	deps, _ := newAssignmentTestDeps(tasks, newFakeAssignmentRepo(firstAssignment))
+
+	out1, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
+		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
+		AssignmentID: firstAssignment.ID.String(), Reason: "not ready yet",
+	})
+	require.NoError(t, err)
+	regressionTaskID, err := uuid.Parse(out1.NewTaskID)
+	require.NoError(t, err)
+
+	tasks.getByIDErr = errBoom
+	tasks.getByIDErrID = regressionTaskID
+	secondAssignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: deferrerID}
+	deps.Assignments.(*fakeAssignmentRepo).byID[secondAssignment.ID] = secondAssignment
+	secondAssignment.IsActive = true
+
+	_, err = deps.DeferTask(context.Background(), port.DeferTaskInput{
+		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
+		AssignmentID: secondAssignment.ID.String(), Reason: "still not ready",
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "get existing regression task")
+}
+
 func TestReassignAssignment_VacatesOldInsertsNew(t *testing.T) {
 	taskID, oldUser, newUser, adminUser := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
@@ -234,6 +363,37 @@ func TestUpdateTaskStatus_NonFailed_NoEvent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Empty(t, outbox.enqueued)
+}
+
+// TestUpdateTaskStatus_GetTaskError forces Tasks.GetByID to fail.
+func TestUpdateTaskStatus_GetTaskError(t *testing.T) {
+	taskID := uuid.New()
+	tasks := newFakeTaskRepo()
+	tasks.getByIDErr = errBoom
+	deps, _ := newAssignmentTestDeps(tasks, newFakeAssignmentRepo())
+
+	err := deps.UpdateTaskStatus(context.Background(), port.UpdateTaskStatusInput{
+		TaskID: taskID.String(), TenantID: uuid.New().String(), Status: domain.TaskStatusFailed, RecordVersion: 1,
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "get task")
+}
+
+// TestUpdateTaskStatus_ListActiveAssignmentsError forces
+// Assignments.ListActiveByTask to fail once the status write to FAILED has
+// already succeeded.
+func TestUpdateTaskStatus_ListActiveAssignmentsError(t *testing.T) {
+	taskID := uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
+	assignments := newFakeAssignmentRepo()
+	assignments.listActiveErr = errBoom
+	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
+
+	err := deps.UpdateTaskStatus(context.Background(), port.UpdateTaskStatusInput{
+		TaskID: taskID.String(), TenantID: uuid.New().String(), Status: domain.TaskStatusFailed, RecordVersion: 1,
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "list active assignments")
 }
 
 // TestUpdateTaskStatus_RetriedCall_NoOp is the regression test for the

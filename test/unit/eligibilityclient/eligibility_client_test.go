@@ -198,6 +198,21 @@ func TestNewEligibilityClient(t *testing.T) {
 	require.NotNil(t, client)
 }
 
+// A base URL containing a control character fails http.NewRequestWithContext's
+// own URL parsing before any network call is attempted — a malformed-request
+// error, not an upstream one, so it must fail closed on the first attempt
+// without retrying.
+func TestCheckEligibility_MalformedBaseURLFailsWithoutRetry(t *testing.T) {
+	client := httpadapter.NewEligibilityClient("http://example.invalid\x7f", 5*time.Second)
+
+	_, err := client.CheckEligibility(context.Background(), uuid.New(), uuid.New(), "reviewer", uuid.New())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "build eligibility request")
+	assert.False(t, errors.Is(err, httpadapter.ErrUpstreamUnavailable),
+		"a malformed request is rejected, not an upstream failure")
+}
+
 func TestCheckEligibilityBatch(t *testing.T) {
 	t.Run("all eligible, one real call per request", func(t *testing.T) {
 		var calls int32

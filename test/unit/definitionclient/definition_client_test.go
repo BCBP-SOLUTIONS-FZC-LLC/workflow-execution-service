@@ -100,6 +100,26 @@ func TestNewDefinitionClient_AndClose(t *testing.T) {
 	require.NoError(t, c.Close())
 }
 
+// A target containing a control character fails net/url parsing before any
+// network dial is attempted — a real, deterministic way to exercise
+// NewDefinitionClient's dial-setup error path without a live server.
+func TestNewDefinitionClient_DialError(t *testing.T) {
+	_, err := grpcadapter.NewDefinitionClient("bad\x7ftarget", defaultTimeout)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dial definition service")
+}
+
+func TestDefinitionClient_Close_AlreadyClosed(t *testing.T) {
+	addr := startServer(t, &fakeDefinitionServer{})
+	c, err := grpcadapter.NewDefinitionClient(addr, defaultTimeout)
+	require.NoError(t, err)
+	require.NoError(t, c.Close())
+
+	err = c.Close()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "close definition client")
+}
+
 func TestDefinitionClient_GetCompiledWorkflow(t *testing.T) {
 	wfID := uuid.New()
 	verID := uuid.New()

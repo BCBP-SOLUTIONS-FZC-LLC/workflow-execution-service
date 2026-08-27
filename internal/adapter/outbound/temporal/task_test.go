@@ -231,3 +231,19 @@ func TestUpdateInstanceNodes_UpdatesCurrentNodeKeys(t *testing.T) {
 	assert.Equal(t, []string{"sales/approve"}, inst.CurrentNodeKeys)
 	assert.Equal(t, int64(2), inst.RecordVersion)
 }
+
+// TestUpdateInstanceNodes_UpdateCurrentNodeKeysError forces
+// Instances.UpdateCurrentNodeKeys to fail.
+func TestUpdateInstanceNodes_UpdateCurrentNodeKeysError(t *testing.T) {
+	tenantID, instanceID := uuid.New(), uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1}
+	instances := newFakeInstanceRepo(inst)
+	instances.updateCurrentNodeKeysErr = errBoom
+	deps := &outboundtemporal.Deps{Instances: instances}
+
+	err := deps.UpdateInstanceNodes(context.Background(), port.UpdateInstanceNodesInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), NodeKeys: []domain.NodeKey{"sales/approve"},
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "update current_node_keys")
+}
