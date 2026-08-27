@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DelegationStartedInbound",
+  "type": "object",
+  "required": [
+    "delegation_id",
+    "delegator_id",
+    "delegate_id",
+    "scope",
+    "starts_at"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "delegation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "delegator_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "delegate_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "all",
+        "department",
+        "tender"
+      ]
+    },
+    "scope_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "starts_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ends_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}

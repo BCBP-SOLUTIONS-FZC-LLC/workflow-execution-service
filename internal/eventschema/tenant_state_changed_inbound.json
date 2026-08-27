@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TenantStateChangedInbound",
+  "type": "object",
+  "required": [
+    "tenant_id",
+    "status",
+    "previous_status",
+    "plan",
+    "previous_plan",
+    "changed_at",
+    "cause"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "trial",
+        "active",
+        "past_due",
+        "cancelled",
+        "suspended",
+        "trial_expired",
+        "offboarded"
+      ]
+    },
+    "previous_status": {
+      "type": "string"
+    },
+    "plan": {
+      "type": "string"
+    },
+    "previous_plan": {
+      "type": "string"
+    },
+    "changed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "cause": {
+      "type": "string",
+      "description": "source lifecycle event type, e.g. TenantSuspended"
+    }
+  }
+}
