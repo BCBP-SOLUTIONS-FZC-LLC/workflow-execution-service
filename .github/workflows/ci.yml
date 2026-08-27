@@ -6,6 +6,13 @@
 # previously-stubbed jobs on: two images (server, worker) are built from one
 # multi-target Dockerfile, matrixed throughout.
 #
+# ci-gate: lets a draft PR (or a PR labeled "skip-ci") skip the expensive
+# jobs below while iterating — never applies on push (a merge to main),
+# since github.event.pull_request.* only exists on pull_request events.
+# Only the 3 root jobs (validate-quality, validate-test, build-image-cache)
+# need the gate directly — trivy-cve-scan/smoke-tests already `needs:` one
+# of these, and GitHub Actions cascades a skip to anything that needs a
+# skipped job, reporting success rather than leaving required checks pending.
 name: CI
 
 "on":
@@ -33,18 +40,39 @@ env:
   IMAGE_BASE: ghcr.io/bcbp-solutions-fzc-llc/workflow-execution-service
 
 jobs:
+  ci-gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - id: decide
+        run: >
+          echo "run=${{
+            github.event_name != 'pull_request' ||
+            (github.event.pull_request.draft == false &&
+             !contains(github.event.pull_request.labels.*.name, 'skip-ci'))
+          }}" >> "$GITHUB_OUTPUT"
+
   validate-quality:
     name: Validate / Quality
+    needs: [ci-gate]
+    if: needs.ci-gate.outputs.run == 'true'
     uses: ./.github/workflows/validate-quality.yml
     secrets: inherit
 
   validate-test:
     name: Validate / Test
+    needs: [ci-gate]
+    if: needs.ci-gate.outputs.run == 'true'
     uses: ./.github/workflows/validate-test.yml
     secrets: inherit
 
   build-image-cache:
     name: Build image (cache)
+    needs: [ci-gate]
+    if: needs.ci-gate.outputs.run == 'true'
     strategy:
       matrix:
         target: [server, worker]
@@ -261,7 +289,7 @@ jobs:
   pr-summary:
     name: PR summary
     if: always() && github.event_name == 'pull_request'
-    needs: [validate-quality, validate-test, build-image-cache, trivy-cve-scan, smoke-tests]
+    needs: [ci-gate, validate-quality, validate-test, build-image-cache, trivy-cve-scan, smoke-tests]
     runs-on: ubuntu-latest
     steps:
-      - run: echo "All CI gates are real as of T1.12 — build, scan, and smoke-test both images."
+      - run: echo "All CI gates are real as of T1.12 — build, scan, and smoke-test both images (ci-gate run=${{ needs.ci-gate.outputs.run }})"
