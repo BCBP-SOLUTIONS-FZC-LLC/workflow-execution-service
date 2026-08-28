@@ -70,10 +70,12 @@ func buildDeps(cfg *config.Config) (*deps, func(), error) {
 	}
 
 	// TODO: wire Config.StorageProviders/SendEmailProviders once workflow-connectors
-	// is pushed and go.mod is bumped past 7d9be28 — that version predates
-	// StorageProviderConstructor/NewGocloudStorageProvider/NewDriveStorageProvider
-	// and SendEmailProviderConstructor/NewSendGridProvider/NewSESProvider/
-	// NewGraphSendMailProvider/NewGmailProvider.
+	// is pushed and go.mod is bumped past its pkg/connectors reorg (provider
+	// constructors moved out of pkg/connectors into their own subpackages) —
+	// that version predates storage.ProviderConstructor/storage.NewGocloudStorageProvider/
+	// storage.NewDriveStorageProvider and sendemail.ProviderConstructor/
+	// sendemail.NewSendGridProvider/sendemail.NewSESProvider/
+	// sendemail.NewGraphSendMailProvider/sendemail.NewGmailProvider.
 	connectorSet, err := connectors.New(connectors.Config{
 		Aliases:       aliases,
 		InternalToken: cfg.InternalAPIToken,

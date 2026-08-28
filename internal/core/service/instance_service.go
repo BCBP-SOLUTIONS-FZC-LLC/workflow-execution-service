@@ -15,6 +15,16 @@ import (
 
 var _ port.InstanceService = (*InstanceService)(nil)
 
+// compiledPlanCacheTTL is a provisional number (matching this LLD's own
+// treatment of MAX_CLIENT_CONN/MAX_TENANT_QUEUES_PER_WORKER elsewhere) — a
+// cache miss always falls through to a direct GetCompiledWorkflow call, so
+// an over- or under-generous TTL only affects hit rate, never correctness.
+const compiledPlanCacheTTL = time.Hour
+
+func compiledPlanCacheKey(tenantID, versionID uuid.UUID) string {
+	return "compiled_plan:" + tenantID.String() + ":" + versionID.String()
+}
+
 type InstanceService struct {
 	Instances   port.InstanceRepository
 	Tasks       port.TaskRepository
@@ -51,7 +61,23 @@ func (s *InstanceService) fetchCompiledWorkflow(ctx context.Context, tenantID, v
 			s.logger().Warn("compiled-plan cache hit failed to unmarshal, falling back to Definitions", nil)
 		}
 	}
-	return s.Definitions.GetCompiledWorkflow(ctx, tenantID, versionID)
+
+	compiled, err := s.Definitions.GetCompiledWorkflow(ctx, tenantID, versionID)
+	if err != nil {
+		return nil, err
+	}
+	// Write-through on a miss: with no other populator left in this codebase
+	// (the former TemplateCachePrewarmer was the only one), skipping this
+	// would leave the cache permanently cold — every Start call paying the
+	// Definitions hop forever, not just the first one after a publish.
+	if s.Cache != nil {
+		if raw, err := json.Marshal(compiled); err != nil {
+			s.logger().Warn("compiled-plan marshal for cache write-through failed", map[string]any{"error": err.Error()})
+		} else if err := s.Cache.Set(ctx, compiledPlanCacheKey(tenantID, versionID), string(raw), compiledPlanCacheTTL); err != nil {
+			s.logger().Warn("compiled-plan cache write-through failed", map[string]any{"error": err.Error()})
+		}
+	}
+	return compiled, nil
 }
 
 func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput) (*port.Instance, error) {

@@ -2673,6 +2673,167 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  # internal, service-to-service caller — type-scoped subpaths (rev 1.36).
+  # The shared Workflow-Events Consumer posts execution-bound events directly
+  # to whichever of these 4 matches (internal/forwarder/category.go);
+  # /api/v1/internal/events above stays registered as the catch-all for
+  # workflow.task.created and any future/unrecognized type. Same auth,
+  # envelope, and retry contract as the catch-all — the subpath is routing
+  # sugar, not a distinct contract, so responses/security are identical.
+  /api/v1/internal/events/delegation:
+    post:
+      operationId: ingestDelegationEvent
+      tags: [Internal (Events)]
+      summary: Ingest delegation.started / delegation.ended directly
+      description: >
+        Same contract as ingestInternalEvent (§6.1), scoped to
+        delegation.started/delegation.ended. A type outside this category
+        (should the consumer ever send one) is accepted and ignored with 200,
+        same as the catch-all's unrecognized-type behavior.
+      security:
+        - InternalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventEnvelope" }
+      responses:
+        "200":
+          description: Event processed, an idempotent no-op, or an out-of-category type accepted and ignored. No response body.
+        "400":
+          description: Malformed envelope or payload — non-retryable, the consumer routes to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          description: Transient processing failure. The consumer retries until the queue's maxReceiveCount (5) moves the message to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/internal/events/user-profile:
+    post:
+      operationId: ingestUserProfileEvent
+      tags: [Internal (Events)]
+      summary: Ingest user.deleted / user.availability.changed directly
+      description: >
+        Same contract as ingestInternalEvent (§6.1), scoped to
+        user.deleted/user.availability.changed. A type outside this category
+        is accepted and ignored with 200.
+      security:
+        - InternalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventEnvelope" }
+      responses:
+        "200":
+          description: Event processed, an idempotent no-op, or an out-of-category type accepted and ignored. No response body.
+        "400":
+          description: Malformed envelope or payload — non-retryable, the consumer routes to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          description: Transient processing failure. The consumer retries until the queue's maxReceiveCount (5) moves the message to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/internal/events/tenant:
+    post:
+      operationId: ingestTenantEvent
+      tags: [Internal (Events)]
+      summary: Ingest tenant.state.changed directly
+      description: >
+        Same contract as ingestInternalEvent (§6.1), scoped to
+        tenant.state.changed. A type outside this category is accepted and
+        ignored with 200.
+      security:
+        - InternalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventEnvelope" }
+      responses:
+        "200":
+          description: Event processed, an idempotent no-op, or an out-of-category type accepted and ignored. No response body.
+        "400":
+          description: Malformed envelope or payload — non-retryable, the consumer routes to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          description: Transient processing failure. The consumer retries until the queue's maxReceiveCount (5) moves the message to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/internal/events/workflow-template:
+    post:
+      operationId: ingestWorkflowTemplateEvent
+      tags: [Internal (Events)]
+      summary: Ingest workflow.template.published directly
+      description: >
+        Same contract as ingestInternalEvent (§6.1), scoped to
+        workflow.template.published. Validated and dedup-recorded only — no
+        cache action since TemplateCachePrewarmer's removal (rev 1.36, §6.2).
+        A type outside this category is accepted and ignored with 200.
+      security:
+        - InternalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventEnvelope" }
+      responses:
+        "200":
+          description: Event processed, an idempotent no-op, or an out-of-category type accepted and ignored. No response body.
+        "400":
+          description: Malformed envelope or payload — non-retryable, the consumer routes to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          description: Transient processing failure. The consumer retries until the queue's maxReceiveCount (5) moves the message to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   # internal, service-to-service caller
   /api/v1/internal/workflows/delegate-impact:
     get:

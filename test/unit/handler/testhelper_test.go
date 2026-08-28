@@ -439,19 +439,6 @@ func (f *fakeTenantLifecycleReconciler) Apply(ctx context.Context, in port.Tenan
 
 var _ port.TenantLifecycleReconciler = (*fakeTenantLifecycleReconciler)(nil)
 
-type fakeTemplateCachePrewarmer struct {
-	prewarm func(context.Context, port.TemplatePublishedInput) error
-}
-
-func (f *fakeTemplateCachePrewarmer) Prewarm(ctx context.Context, in port.TemplatePublishedInput) error {
-	if f.prewarm != nil {
-		return f.prewarm(ctx, in)
-	}
-	return nil
-}
-
-var _ port.TemplateCachePrewarmer = (*fakeTemplateCachePrewarmer)(nil)
-
 // fakeEventDecoder is the hand-rolled fake for port.EventDecoder, used to
 // exercise HandleInternalEvent's schema-registry decode step without a real
 // events.Codec.
@@ -503,7 +490,6 @@ type eventsFakes struct {
 	tenantLifecycle *fakeTenantLifecycleReconciler
 	userSafetyNet   *fakeUserSafetyNetReconciler
 	oooAvailability *fakeOOOAvailabilityReconciler
-	templateCache   *fakeTemplateCachePrewarmer
 	log             *fakeLogger
 }
 
@@ -515,7 +501,6 @@ func newEventsFakes() *eventsFakes {
 		tenantLifecycle: &fakeTenantLifecycleReconciler{},
 		userSafetyNet:   &fakeUserSafetyNetReconciler{},
 		oooAvailability: &fakeOOOAvailabilityReconciler{},
-		templateCache:   &fakeTemplateCachePrewarmer{},
 		log:             &fakeLogger{},
 	}
 }
@@ -582,7 +567,6 @@ func newEventsHandlerWithRecency(f *eventsFakes, recency port.RecencyGuard) *han
 		TenantLifecycle: f.tenantLifecycle,
 		UserSafetyNet:   f.userSafetyNet,
 		OOOAvailability: f.oooAvailability,
-		TemplateCache:   f.templateCache,
 		Log:             f.log,
 	})
 }
@@ -595,7 +579,6 @@ func newEventsHandlerWithProcessedEvents(f *eventsFakes, processedEvents port.Pr
 		TenantLifecycle: f.tenantLifecycle,
 		UserSafetyNet:   f.userSafetyNet,
 		OOOAvailability: f.oooAvailability,
-		TemplateCache:   f.templateCache,
 		Log:             f.log,
 	})
 }
@@ -608,7 +591,6 @@ func newEventsHandlerWithDecoder(f *eventsFakes, decoder port.EventDecoder) *han
 		TenantLifecycle: f.tenantLifecycle,
 		UserSafetyNet:   f.userSafetyNet,
 		OOOAvailability: f.oooAvailability,
-		TemplateCache:   f.templateCache,
 		EventDecoder:    decoder,
 		Log:             f.log,
 	})
@@ -622,7 +604,6 @@ func newEventsHandler(f *eventsFakes) *handler.Handler {
 		TenantLifecycle: f.tenantLifecycle,
 		UserSafetyNet:   f.userSafetyNet,
 		OOOAvailability: f.oooAvailability,
-		TemplateCache:   f.templateCache,
 		Log:             f.log,
 	})
 }

@@ -49,6 +49,18 @@ const (
 	consumerConnector  = "connector-stream-execution"
 )
 
+// Event type strings — shared between HandleInternalEvent's legacy catch-all
+// switch and each category entrypoint's own smaller switch, so the two never
+// drift apart on the literal.
+const (
+	eventTypeDelegationStarted         = "delegation.started"
+	eventTypeDelegationEnded           = "delegation.ended"
+	eventTypeUserDeleted               = "user.deleted"
+	eventTypeUserAvailabilityChanged   = "user.availability.changed"
+	eventTypeTenantStateChanged        = "tenant.state.changed"
+	eventTypeWorkflowTemplatePublished = "workflow.template.published"
+)
+
 // parseEventID and parseTenantID share the "invalid event id"/"invalid
 // tenant_id" 400 message every one of the six handlers needs for the
 // envelope's own ID/TenantID fields, as opposed to a payload field.
@@ -70,44 +82,123 @@ func (h *Handler) parseTenantID(c *gin.Context, eventType, raw string) (uuid.UUI
 	return id, true
 }
 
-func (h *Handler) HandleInternalEvent(c *gin.Context) {
+// decodeEnvelope binds and schema-decodes an inbound event envelope — the
+// preamble every category entrypoint below shares before dispatching on
+// env.Type. Returns ok=false once it has already written the error response.
+func (h *Handler) decodeEnvelope(c *gin.Context) (events.Envelope[json.RawMessage], bool) {
 	var env events.Envelope[json.RawMessage]
 	if !bindJSON(c, &env) {
 		incIngestTotal("unknown", "bad_payload")
-		return
+		return env, false
 	}
 	if env.Type == "" {
 		h.badPayload(c, "unknown", "missing event type")
-		return
+		return env, false
 	}
 
 	if env.SchemaID != "" {
 		decoded, ok := h.decodeSchemaRegistryPayload(c, env)
 		if !ok {
-			return
+			return env, false
 		}
 		env.Payload = decoded
 	}
+	return env, true
+}
+
+func (h *Handler) unhandledType(c *gin.Context, eventType string) {
+	h.logInfo("internal events: ignoring unhandled type", map[string]any{"event_type": eventType})
+	h.markOK(eventType)
+	c.Status(http.StatusOK)
+}
+
+// HandleInternalEvent is the legacy catch-all — POST /internal/events, kept
+// registered alongside the category-scoped routes below (LLD §6.1) so
+// workflow.task.created and any future/unrecognized type are never dropped.
+func (h *Handler) HandleInternalEvent(c *gin.Context) {
+	env, ok := h.decodeEnvelope(c)
+	if !ok {
+		return
+	}
 
 	switch env.Type {
-	case "delegation.started":
+	case eventTypeDelegationStarted:
 		h.handleDelegationStarted(c, env)
-	case "delegation.ended":
+	case eventTypeDelegationEnded:
 		h.handleDelegationEnded(c, env)
-	case "user.deleted":
+	case eventTypeUserDeleted:
 		h.handleUserDeleted(c, env)
-	case "user.availability.changed":
+	case eventTypeUserAvailabilityChanged:
 		h.handleUserAvailabilityChanged(c, env)
-	case "tenant.state.changed":
+	case eventTypeTenantStateChanged:
 		h.handleTenantStateChanged(c, env)
-	case "workflow.template.published":
+	case eventTypeWorkflowTemplatePublished:
 		h.handleTemplatePublished(c, env)
 	case "workflow.task.created":
 		h.handleWorkflowTaskCreated(c, env)
 	default:
-		h.logInfo("internal events: ignoring unhandled type", map[string]any{"event_type": env.Type})
-		h.markOK(env.Type)
-		c.Status(http.StatusOK)
+		h.unhandledType(c, env.Type)
+	}
+}
+
+// HandleDelegationEvents is POST /events/delegation — event_consumer routes
+// delegation.started/.ended here directly (internal/forwarder/category.go).
+func (h *Handler) HandleDelegationEvents(c *gin.Context) {
+	env, ok := h.decodeEnvelope(c)
+	if !ok {
+		return
+	}
+	switch env.Type {
+	case eventTypeDelegationStarted:
+		h.handleDelegationStarted(c, env)
+	case eventTypeDelegationEnded:
+		h.handleDelegationEnded(c, env)
+	default:
+		h.unhandledType(c, env.Type)
+	}
+}
+
+// HandleUserProfileEvents is POST /events/user-profile.
+func (h *Handler) HandleUserProfileEvents(c *gin.Context) {
+	env, ok := h.decodeEnvelope(c)
+	if !ok {
+		return
+	}
+	switch env.Type {
+	case eventTypeUserDeleted:
+		h.handleUserDeleted(c, env)
+	case eventTypeUserAvailabilityChanged:
+		h.handleUserAvailabilityChanged(c, env)
+	default:
+		h.unhandledType(c, env.Type)
+	}
+}
+
+// HandleTenantEvents is POST /events/tenant.
+func (h *Handler) HandleTenantEvents(c *gin.Context) {
+	env, ok := h.decodeEnvelope(c)
+	if !ok {
+		return
+	}
+	switch env.Type {
+	case eventTypeTenantStateChanged:
+		h.handleTenantStateChanged(c, env)
+	default:
+		h.unhandledType(c, env.Type)
+	}
+}
+
+// HandleWorkflowTemplateEvents is POST /events/workflow-template.
+func (h *Handler) HandleWorkflowTemplateEvents(c *gin.Context) {
+	env, ok := h.decodeEnvelope(c)
+	if !ok {
+		return
+	}
+	switch env.Type {
+	case eventTypeWorkflowTemplatePublished:
+		h.handleTemplatePublished(c, env)
+	default:
+		h.unhandledType(c, env.Type)
 	}
 }
 
@@ -222,7 +313,7 @@ type delegationStartedPayload struct {
 }
 
 func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[json.RawMessage]) {
-	const eventType = "delegation.started"
+	const eventType = eventTypeDelegationStarted
 	var p delegationStartedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		h.badPayload(c, eventType, "invalid delegation.started payload")
@@ -304,7 +395,7 @@ type delegationEndedPayload struct {
 }
 
 func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json.RawMessage]) {
-	const eventType = "delegation.ended"
+	const eventType = eventTypeDelegationEnded
 	var p delegationEndedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		h.badPayload(c, eventType, "invalid delegation.ended payload")
@@ -378,7 +469,7 @@ type userDeletedPayload struct {
 }
 
 func (h *Handler) handleUserDeleted(c *gin.Context, env events.Envelope[json.RawMessage]) {
-	const eventType = "user.deleted"
+	const eventType = eventTypeUserDeleted
 	var p userDeletedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		h.badPayload(c, eventType, "invalid UserDeleted payload")
@@ -435,7 +526,7 @@ type userAvailabilityChangedPayload struct {
 }
 
 func (h *Handler) handleUserAvailabilityChanged(c *gin.Context, env events.Envelope[json.RawMessage]) {
-	const eventType = "user.availability.changed"
+	const eventType = eventTypeUserAvailabilityChanged
 	var p userAvailabilityChangedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		h.badPayload(c, eventType, "invalid UserAvailabilityChanged payload")
@@ -541,7 +632,7 @@ type tenantStateChangedPayload struct {
 }
 
 func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[json.RawMessage]) {
-	const eventType = "tenant.state.changed"
+	const eventType = eventTypeTenantStateChanged
 	var p tenantStateChangedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		h.badPayload(c, eventType, "invalid tenant.state.changed payload")
@@ -628,7 +719,7 @@ type templatePublishedPayload struct {
 }
 
 func (h *Handler) handleTemplatePublished(c *gin.Context, env events.Envelope[json.RawMessage]) {
-	const eventType = "workflow.template.published"
+	const eventType = eventTypeWorkflowTemplatePublished
 	var p templatePublishedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		h.badPayload(c, eventType, "invalid workflow.template.published payload")
@@ -638,70 +729,30 @@ func (h *Handler) handleTemplatePublished(c *gin.Context, env events.Envelope[js
 	if !ok {
 		return
 	}
-	tenantID, ok := h.parseTenantID(c, eventType, env.TenantID)
-	if !ok {
+	if _, ok := h.parseTenantID(c, eventType, env.TenantID); !ok {
 		return
 	}
-	workflowID, err := uuid.Parse(p.WorkflowID)
-	if err != nil {
+	if _, err := uuid.Parse(p.WorkflowID); err != nil {
 		h.badPayload(c, eventType, "invalid workflow_id in payload")
 		return
 	}
-	versionID, err := uuid.Parse(p.VersionID)
-	if err != nil {
+	if _, err := uuid.Parse(p.VersionID); err != nil {
 		h.badPayload(c, eventType, "invalid version_id in payload")
 		return
 	}
-	publishedBy, err := uuid.Parse(p.PublishedBy)
-	if err != nil {
+	if _, err := uuid.Parse(p.PublishedBy); err != nil {
 		h.badPayload(c, eventType, "invalid published_by in payload")
 		return
 	}
-	var promotedFromVersion *uuid.UUID
 	if p.PromotedFromVersion != nil {
-		v, err := uuid.Parse(*p.PromotedFromVersion)
-		if err != nil {
+		if _, err := uuid.Parse(*p.PromotedFromVersion); err != nil {
 			h.badPayload(c, eventType, "invalid promoted_from_version_id in payload")
 			return
 		}
-		promotedFromVersion = &v
 	}
 
 	if h.alreadyProcessed(c, eventID, consumerTemplate, eventType) {
 		return
-	}
-
-	// workflow_key is only unique per tenant (definition_service's workflow
-	// table is UNIQUE(tenant_id, business_key)) — tenantID must be part of
-	// the scope key, or two tenants publishing the same business key would
-	// share one recency row and could skip each other's legitimate publishes.
-	scopeKey := "template:" + tenantID.String() + ":" + p.WorkflowKey
-	applied, err := h.recency.CheckAndCommit(c.Request.Context(), scopeKey, env.Timestamp)
-	if err != nil {
-		h.logWarn("internal events: recency check failed, proceeding fail-open", map[string]any{
-			"event_type": eventType, "error": err.Error(),
-		})
-		applied = true
-	}
-	if applied {
-		ctx := guCtx(c, env.TenantID)
-		if err := h.templateCache.Prewarm(ctx, port.TemplatePublishedInput{
-			TenantID:            tenantID,
-			WorkflowID:          workflowID,
-			WorkflowKey:         p.WorkflowKey,
-			VersionID:           versionID,
-			VersionNumber:       p.VersionNumber,
-			ArtifactHash:        p.ArtifactHash,
-			PublishedBy:         publishedBy,
-			PromotedFromVersion: promotedFromVersion,
-		}); err != nil {
-			// Fail-open by design (LLD §6.2 item 5): a warm-fetch failure
-			// logs and still returns 200 — the plan loads lazily on the next
-			// instantiation anyway.
-			h.logWarn("internal events: template cache prewarm failed, fail-open", map[string]any{
-				"event_type": eventType, "error": err.Error(),
-			})
-		}
 	}
 
 	h.respondOK(c, eventID, consumerTemplate, eventType)

@@ -96,6 +96,111 @@ func TestHandleInternalEvent_PayloadTooLarge(t *testing.T) {
 	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 }
 
+// --- category-scoped subpaths (event_consumer forwards these directly per internal/forwarder/category.go) ---
+
+func postEventTo(router *gin.Engine, path string, body map[string]any) *httptest.ResponseRecorder {
+	return do(router, internalReq(http.MethodPost, path, body))
+}
+
+func TestHandleDelegationEvents_DispatchesDelegationStarted(t *testing.T) {
+	fakes := newEventsFakes()
+	var called bool
+	fakes.delegation.reroute = func(context.Context, port.DelegationRerouteInput) error {
+		called = true
+		return nil
+	}
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEventTo(router, "/api/v1/internal/events/delegation", envelope("delegation.started", uuid.New(), testTenantID, time.Now(), map[string]any{
+		"delegation_id": testDelegationID2,
+		"delegator_id":  testDelegatorID,
+		"delegate_id":   testDelegateID2,
+		"scope":         "department",
+		"scope_id":      testDelegatorID.String(),
+		"starts_at":     time.Now().Format(time.RFC3339),
+	}))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, called, "delegation.started must dispatch through /events/delegation exactly as it does through the legacy /events path")
+}
+
+func TestHandleDelegationEvents_TypeOutsideCategory_Unhandled200(t *testing.T) {
+	fakes := newEventsFakes()
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEventTo(router, "/api/v1/internal/events/delegation", envelope("tenant.state.changed", uuid.New(), testTenantID, time.Now(), map[string]any{}))
+
+	assert.Equal(t, http.StatusOK, w.Code, "a type outside this subpath's category falls through to the shared unhandledType branch, never a 4xx")
+}
+
+func TestHandleUserProfileEvents_DispatchesUserDeleted(t *testing.T) {
+	fakes := newEventsFakes()
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEventTo(router, "/api/v1/internal/events/user-profile", envelope("user.deleted", uuid.New(), testTenantID, time.Now(), map[string]any{
+		"user_id":    uuid.New().String(),
+		"deleted_at": time.Now().Format(time.RFC3339),
+	}))
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandleUserProfileEvents_TypeOutsideCategory_Unhandled200(t *testing.T) {
+	fakes := newEventsFakes()
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEventTo(router, "/api/v1/internal/events/user-profile", envelope("delegation.started", uuid.New(), testTenantID, time.Now(), map[string]any{}))
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandleTenantEvents_DispatchesTenantStateChanged(t *testing.T) {
+	fakes := newEventsFakes()
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEventTo(router, "/api/v1/internal/events/tenant", envelope("tenant.state.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
+		"tenant_id":  testTenantID.String(),
+		"status":     "active",
+		"changed_at": time.Now().Format(time.RFC3339),
+	}))
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandleTenantEvents_TypeOutsideCategory_Unhandled200(t *testing.T) {
+	fakes := newEventsFakes()
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEventTo(router, "/api/v1/internal/events/tenant", envelope("user.deleted", uuid.New(), testTenantID, time.Now(), map[string]any{}))
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandleWorkflowTemplateEvents_DispatchesTemplatePublished(t *testing.T) {
+	fakes := newEventsFakes()
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEventTo(router, "/api/v1/internal/events/workflow-template", envelope("workflow.template.published", uuid.New(), testTenantID, time.Now(), map[string]any{
+		"workflow_id":    uuid.New().String(),
+		"workflow_key":   "wf-key",
+		"version_id":     uuid.New().String(),
+		"version_number": 1,
+		"artifact_hash":  "sha256:abc",
+		"published_by":   uuid.New().String(),
+	}))
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandleWorkflowTemplateEvents_TypeOutsideCategory_Unhandled200(t *testing.T) {
+	fakes := newEventsFakes()
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEventTo(router, "/api/v1/internal/events/workflow-template", envelope("user.deleted", uuid.New(), testTenantID, time.Now(), map[string]any{}))
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
 // --- DelegationStarted ---
 
 func TestHandleInternalEvent_DelegationStarted_Success(t *testing.T) {
@@ -490,11 +595,6 @@ func TestHandleInternalEvent_TenantStateChanged_CommitsRecencyOnceAfterApplySucc
 
 func TestHandleInternalEvent_TemplatePublished_Success(t *testing.T) {
 	fakes := newEventsFakes()
-	var gotIn port.TemplatePublishedInput
-	fakes.templateCache.prewarm = func(_ context.Context, in port.TemplatePublishedInput) error {
-		gotIn = in
-		return nil
-	}
 	router := newInternalRouter(newEventsHandler(fakes))
 
 	w := postEvent(router, envelope("workflow.template.published", uuid.New(), testTenantID, time.Now(), map[string]any{
@@ -506,53 +606,7 @@ func TestHandleInternalEvent_TemplatePublished_Success(t *testing.T) {
 		"published_by":   testUserID.String(),
 	}))
 
-	require.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "tender-approval", gotIn.WorkflowKey)
-	assert.Nil(t, gotIn.PromotedFromVersion)
-}
-
-func TestHandleInternalEvent_TemplatePublished_PromotedFromVersion_PassedThrough(t *testing.T) {
-	fakes := newEventsFakes()
-	var gotIn port.TemplatePublishedInput
-	fakes.templateCache.prewarm = func(_ context.Context, in port.TemplatePublishedInput) error {
-		gotIn = in
-		return nil
-	}
-	router := newInternalRouter(newEventsHandler(fakes))
-
-	promotedFrom := uuid.New()
-	w := postEvent(router, envelope("workflow.template.published", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"workflow_id":              testInstID.String(),
-		"workflow_key":             "tender-approval",
-		"version_id":               testTaskID.String(),
-		"version_number":           3,
-		"artifact_hash":            "sha256:abc",
-		"published_by":             testUserID.String(),
-		"promoted_from_version_id": promotedFrom.String(),
-	}))
-
-	require.Equal(t, http.StatusOK, w.Code)
-	require.NotNil(t, gotIn.PromotedFromVersion)
-	assert.Equal(t, promotedFrom, *gotIn.PromotedFromVersion)
-}
-
-func TestHandleInternalEvent_TemplatePublished_PrewarmFails_StillReturns200_FailOpen(t *testing.T) {
-	fakes := newEventsFakes()
-	fakes.templateCache.prewarm = func(context.Context, port.TemplatePublishedInput) error {
-		return errors.New("upstream unavailable")
-	}
-	router := newInternalRouter(newEventsHandler(fakes))
-
-	w := postEvent(router, envelope("workflow.template.published", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"workflow_id":    testInstID.String(),
-		"workflow_key":   "tender-approval",
-		"version_id":     testTaskID.String(),
-		"version_number": 3,
-		"artifact_hash":  "sha256:abc",
-		"published_by":   testUserID.String(),
-	}))
-
-	assert.Equal(t, http.StatusOK, w.Code, "a prewarm failure must be fail-open, never a 5xx")
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // --- envelope-level validation (shared by every handler) ---
@@ -800,71 +854,6 @@ func TestHandleInternalEvent_TemplatePublished_InvalidFields(t *testing.T) {
 	}
 }
 
-func TestHandleInternalEvent_TemplatePublished_RecencyGuard_SkipsStalePrewarm(t *testing.T) {
-	fakes := newEventsFakes()
-	calls := 0
-	fakes.templateCache.prewarm = func(context.Context, port.TemplatePublishedInput) error {
-		calls++
-		return nil
-	}
-	router := newInternalRouter(newEventsHandler(fakes))
-
-	newer := time.Now()
-	older := newer.Add(-time.Hour)
-
-	w1 := postEvent(router, envelope("workflow.template.published", uuid.New(), testTenantID, newer, map[string]any{
-		"workflow_id": testInstID.String(), "workflow_key": "tender-approval", "version_id": testTaskID.String(),
-		"version_number": 3, "artifact_hash": "sha256:abc", "published_by": testUserID.String(),
-	}))
-	require.Equal(t, http.StatusOK, w1.Code)
-	require.Equal(t, 1, calls)
-
-	w2 := postEvent(router, envelope("workflow.template.published", uuid.New(), testTenantID, older, map[string]any{
-		"workflow_id": testInstID.String(), "workflow_key": "tender-approval", "version_id": testTaskID.String(),
-		"version_number": 3, "artifact_hash": "sha256:abc", "published_by": testUserID.String(),
-	}))
-	require.Equal(t, http.StatusOK, w2.Code)
-	assert.Equal(t, 1, calls, "a stale republish must skip the prewarm call")
-}
-
-// TestHandleInternalEvent_TemplatePublished_RecencyGuard_ScopedPerTenant is a
-// regression test: workflow_key is only unique per tenant (definition_service's
-// workflow table is UNIQUE(tenant_id, business_key)), so the recency guard's
-// scope key must include tenant_id — otherwise two tenants publishing the
-// same business key would share one recency row and a later publish from one
-// tenant could cause the other tenant's own, unrelated publish to be
-// wrongly skipped as stale.
-func TestHandleInternalEvent_TemplatePublished_RecencyGuard_ScopedPerTenant(t *testing.T) {
-	fakes := newEventsFakes()
-	calls := 0
-	fakes.templateCache.prewarm = func(context.Context, port.TemplatePublishedInput) error {
-		calls++
-		return nil
-	}
-	router := newInternalRouter(newEventsHandler(fakes))
-
-	otherTenantID := uuid.New()
-	newer := time.Now()
-	older := newer.Add(-time.Hour)
-
-	w1 := postEvent(router, envelope("workflow.template.published", uuid.New(), testTenantID, newer, map[string]any{
-		"workflow_id": testInstID.String(), "workflow_key": "shared-business-key", "version_id": testTaskID.String(),
-		"version_number": 3, "artifact_hash": "sha256:abc", "published_by": testUserID.String(),
-	}))
-	require.Equal(t, http.StatusOK, w1.Code)
-	require.Equal(t, 1, calls)
-
-	// A different tenant publishing the SAME workflow_key at an OLDER
-	// timestamp must still apply — it's a distinct scope, not a stale
-	// republish of the first tenant's event.
-	w2 := postEvent(router, envelope("workflow.template.published", uuid.New(), otherTenantID, older, map[string]any{
-		"workflow_id": testInstID.String(), "workflow_key": "shared-business-key", "version_id": testTaskID.String(),
-		"version_number": 1, "artifact_hash": "sha256:def", "published_by": testUserID.String(),
-	}))
-	require.Equal(t, http.StatusOK, w2.Code)
-	assert.Equal(t, 2, calls, "a different tenant's publish of the same workflow_key must not be skipped by the first tenant's recency state")
-}
-
 // --- respondOK / alreadyProcessed error paths ---
 
 func TestHandleInternalEvent_RecordIfNewError_StillReturns200(t *testing.T) {
@@ -1003,10 +992,8 @@ func TestHandleInternalEvent_TenantStateChanged_CommitError_StillReturns200(t *t
 	assert.Equal(t, http.StatusOK, w.Code, "a recency-Commit failure after Apply succeeds must not surface as an error")
 }
 
-func TestHandleInternalEvent_TemplatePublished_AlreadyProcessed_SkipsPrewarm(t *testing.T) {
+func TestHandleInternalEvent_TemplatePublished_AlreadyProcessed_Returns200Twice(t *testing.T) {
 	fakes := newEventsFakes()
-	calls := 0
-	fakes.templateCache.prewarm = func(context.Context, port.TemplatePublishedInput) error { calls++; return nil }
 	router := newInternalRouter(newEventsHandler(fakes))
 
 	body := envelope("workflow.template.published", uuid.New(), testTenantID, time.Now(), map[string]any{
@@ -1014,24 +1001,7 @@ func TestHandleInternalEvent_TemplatePublished_AlreadyProcessed_SkipsPrewarm(t *
 		"version_number": 3, "artifact_hash": "sha256:abc", "published_by": testUserID.String(),
 	})
 	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
-	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
-	assert.Equal(t, 1, calls)
-}
-
-func TestHandleInternalEvent_TemplatePublished_RecencyCheckError_FailsOpenAndPrewarms(t *testing.T) {
-	fakes := newEventsFakes()
-	called := false
-	fakes.templateCache.prewarm = func(context.Context, port.TemplatePublishedInput) error { called = true; return nil }
-	errFakeRecency := &erroringRecencyGuard{err: errors.New("recency store unavailable")}
-	router := newInternalRouter(newEventsHandlerWithRecency(fakes, errFakeRecency))
-
-	w := postEvent(router, envelope("workflow.template.published", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"workflow_id": testInstID.String(), "workflow_key": "tender-approval", "version_id": testTaskID.String(),
-		"version_number": 3, "artifact_hash": "sha256:abc", "published_by": testUserID.String(),
-	}))
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.True(t, called, "a recency-check failure on the fail-open path must still attempt the prewarm")
+	require.Equal(t, http.StatusOK, postEvent(router, body).Code, "a redelivered event with the same id must still 200, not error")
 }
 
 // --- malformed (non-object) data payload + invalid envelope id/tenant_id,

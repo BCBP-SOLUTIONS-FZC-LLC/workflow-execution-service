@@ -52,7 +52,6 @@ type Handler struct {
 	tenantLifecycle port.TenantLifecycleReconciler
 	userSafetyNet   port.UserSafetyNetReconciler
 	oooAvailability port.OOOAvailabilityReconciler
-	templateCache   port.TemplateCachePrewarmer
 	eventDecoder    port.EventDecoder
 	connectorTasks  port.ConnectorTaskService
 	connectorEvents port.ConnectorEventPublisher
@@ -76,7 +75,6 @@ type Services struct {
 	TenantLifecycle port.TenantLifecycleReconciler
 	UserSafetyNet   port.UserSafetyNetReconciler
 	OOOAvailability port.OOOAvailabilityReconciler
-	TemplateCache   port.TemplateCachePrewarmer
 	// EventDecoder is nil-safe: HandleInternalEvent treats a nil decoder as
 	// a decode failure only for envelopes that actually carry a SchemaID -
 	// until a real events.Codec is wired up in cmd/server, no producer sets
@@ -113,7 +111,6 @@ func New(s Services) *Handler {
 		tenantLifecycle: s.TenantLifecycle,
 		userSafetyNet:   s.UserSafetyNet,
 		oooAvailability: s.OOOAvailability,
-		templateCache:   s.TemplateCache,
 		eventDecoder:    s.EventDecoder,
 		connectorTasks:  s.ConnectorTasks,
 		connectorEvents: s.ConnectorEvents,

@@ -13,9 +13,11 @@ import (
 	"go.temporal.io/sdk/interceptor"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/pkg/outbox"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/logger"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/grpc"
+	httpadapter "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
 	outboundgrpc "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/grpc"
@@ -195,23 +197,30 @@ func newApp(cfg *config.Config) (*app, error) {
 	oooAvailabilityReconciler := &service.OOOAvailabilityReconciler{
 		Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal, Log: log,
 	}
-	templateCachePrewarmer := &service.TemplateCachePrewarmer{Definitions: definitions, Cache: cache}
 
 	h := handler.New(handler.Services{
 		Tasks: taskService, Instances: instanceService, Eligibility: eligibility, WorkflowClient: workflowClient,
 		Cache: cache, IdempotencyTTL: cfg.IdempotencyTTL, ProcessedEvents: processedEvents, Recency: recency,
 		Delegation: delegationReconciler, TenantLifecycle: tenantLifecycleReconciler,
 		UserSafetyNet: userSafetyNetReconciler, OOOAvailability: oooAvailabilityReconciler,
-		TemplateCache: templateCachePrewarmer, ConnectorTasks: connectorTaskService,
+		ConnectorTasks:  connectorTaskService,
 		ConnectorEvents: connectorEvents, Log: log,
 	})
 
 	grpcSrv := grpc.NewGRPCServer(cfg.OTELServiceName, cfg.BuildVersion, cfg.InternalAPIToken, log, guard, pauser)
 
-	r := newRouter(cfg, appPool, cache, sdkClient, log, h)
+	router := httpadapter.NewRouter(httpadapter.RouterConfig{
+		GinConfig:        gincommon.Config{Logger: log, ServiceName: cfg.OTELServiceName, BuildVersion: cfg.BuildVersion},
+		AppEnv:           cfg.AppEnv,
+		InternalAPIToken: cfg.InternalAPIToken,
+		Handler:          h,
+		DB:               dbPinger{pool: appPool},
+		Cache:            cache,
+		Temporal:         temporalPinger{sdk: sdkClient},
+	})
 	httpServer := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
-		Handler:      r,
+		Handler:      router.Handler(),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,

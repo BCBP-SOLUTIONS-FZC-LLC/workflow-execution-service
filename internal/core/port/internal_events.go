@@ -85,24 +85,3 @@ type TenantLifecycleInput struct {
 type TenantLifecycleReconciler interface {
 	Apply(ctx context.Context, in TenantLifecycleInput) error
 }
-
-type TemplatePublishedInput struct {
-	TenantID      uuid.UUID
-	WorkflowID    uuid.UUID
-	WorkflowKey   string // unique per tenant, not globally
-	VersionID     uuid.UUID
-	VersionNumber int
-	ArtifactHash  string
-	PublishedBy   uuid.UUID
-	// PromotedFromVersion is nil for a fresh publish, set when this version
-	// was promoted from an existing draft/version.
-	PromotedFromVersion *uuid.UUID
-}
-
-// TemplateCachePrewarmer.Prewarm is fail-open by handler contract (LLD §6.2
-// item 5): any returned error is logged by the caller and still yields 200.
-// It still returns an error, rather than swallowing one itself, so the real
-// implementation can report cause and callers can assert the fail-open path.
-type TemplateCachePrewarmer interface {
-	Prewarm(ctx context.Context, in TemplatePublishedInput) error
-}

@@ -36,7 +36,6 @@ func newConnectorEventsHandler(fakes *eventsFakes, publisher port.ConnectorEvent
 		TenantLifecycle: fakes.tenantLifecycle,
 		UserSafetyNet:   fakes.userSafetyNet,
 		OOOAvailability: fakes.oooAvailability,
-		TemplateCache:   fakes.templateCache,
 		ConnectorEvents: publisher,
 		Log:             fakes.log,
 	})

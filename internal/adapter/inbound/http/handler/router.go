@@ -50,8 +50,17 @@ func RegisterInternalRoutes(rg *gin.RouterGroup, h *Handler) {
 // and this repo already splits registration by feature area (RegisterRoutes
 // vs. RegisterInternalRoutes) — T2.1's future composition root calls both on
 // the same real /internal group.
+//
+// /events stays registered as the legacy catch-all alongside the 4
+// category-scoped subpaths event_consumer forwards to directly
+// (internal/forwarder/category.go) — workflow.task.created and any
+// future/unrecognized type still arrive here, never dropped.
 func RegisterInternalEventsRoutes(rg *gin.RouterGroup, h *Handler) {
 	rg.POST("/events", h.HandleInternalEvent)
+	rg.POST("/events/delegation", h.HandleDelegationEvents)
+	rg.POST("/events/user-profile", h.HandleUserProfileEvents)
+	rg.POST("/events/tenant", h.HandleTenantEvents)
+	rg.POST("/events/workflow-template", h.HandleWorkflowTemplateEvents)
 }
 
 // RegisterInternalConnectorRoutes mounts POST /internal/connector-tasks/:id/
