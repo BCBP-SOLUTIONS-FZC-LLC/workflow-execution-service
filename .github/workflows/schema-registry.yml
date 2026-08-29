@@ -30,10 +30,10 @@
 #   3. Diff vs. staging registry
 #   4. Emit metrics
 #
-# Note (execution_service-specific): the 6 inbound (receive-only) messages in
+# Note (execution_service-specific): the 5 inbound (receive-only) messages in
 # api/asyncapi.yaml (DelegationStarted, DelegationEnded, TenantStateChanged,
-# UserDeleted, UserAvailabilityChanged, WorkflowTemplatePublished) are owned
-# and registered by their producing services, not by this pipeline — their
+# UserDeleted, UserAvailabilityChanged) are owned and registered by their
+# producing services, not by this pipeline — their
 # component schemas are deliberately not "...Payload"-suffixed so extract/
 # validate never pull them into internal/eventschema/.
 #

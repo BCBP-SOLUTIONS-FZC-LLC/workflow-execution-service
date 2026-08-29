@@ -58,6 +58,13 @@ func hashBody(b []byte) string {
 // unreachable never blocks the request) and is logged at WARN via log, which
 // may be nil (in which case it's silently skipped, same as every other
 // logWarn call site in this package).
+// Idempotent wraps fn with this Handler's own cache/TTL/log, so callers
+// outside this package (router.go) can compose WithIdempotency without
+// reaching into Handler's unexported fields directly.
+func (h *Handler) Idempotent(fn gin.HandlerFunc) gin.HandlerFunc {
+	return WithIdempotency(h.cache, h.idempotencyTTL, h.log, fn)
+}
+
 func WithIdempotency(cache port.CacheStore, ttl time.Duration, log port.Logger, h gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		key := c.GetHeader("Idempotency-Key")
@@ -92,8 +99,8 @@ func WithIdempotency(cache port.CacheStore, ttl time.Duration, log port.Logger, 
 }
 
 // idempotencyScopePrefix returns "<tenantID>:" when the request carries
-// gateway identity, or "" for internal routes that don't (RegisterInternalRoutes
-// mounts a bare group with no ProtectedMiddlewares — see router.go).
+// gateway identity, or "" for internal routes that don't (the /internal
+// group router.go mounts carries no ProtectedMiddlewares).
 func idempotencyScopePrefix(c *gin.Context) string {
 	if rc, ok := gincommon.RequestContext(c); ok && rc.TenantID != "" {
 		return rc.TenantID + ":"

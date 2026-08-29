@@ -245,8 +245,8 @@ components:
           description: >
             Dotted-lowercase or PascalCase wire type, dispatched by the switch in
             internal_events.go (§6.2). One of: DelegationStarted, DelegationEnded,
-            TenantStateChanged, user.deleted, user.availability.changed,
-            workflow.template.published. Any other value is accepted and ignored with 200.
+            TenantStateChanged, user.deleted, user.availability.changed. Any other
+            value is accepted and ignored with 200.
           example: "DelegationStarted"
         subject:
           type: string
@@ -2675,7 +2675,7 @@ paths:
 
   # internal, service-to-service caller — type-scoped subpaths (rev 1.36).
   # The shared Workflow-Events Consumer posts execution-bound events directly
-  # to whichever of these 4 matches (internal/forwarder/category.go);
+  # to whichever of these 3 matches (internal/forwarder/category.go);
   # /api/v1/internal/events above stays registered as the catch-all for
   # workflow.task.created and any future/unrecognized type. Same auth,
   # envelope, and retry contract as the catch-all — the subpath is routing
@@ -2766,45 +2766,6 @@ paths:
         Same contract as ingestInternalEvent (§6.1), scoped to
         tenant.state.changed. A type outside this category is accepted and
         ignored with 200.
-      security:
-        - InternalServiceAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/EventEnvelope" }
-      responses:
-        "200":
-          description: Event processed, an idempotent no-op, or an out-of-category type accepted and ignored. No response body.
-        "400":
-          description: Malformed envelope or payload — non-retryable, the consumer routes to its DLQ.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/ProblemDetails" }
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "415":
-          $ref: "#/components/responses/UnsupportedMediaType"
-        "500":
-          description: Transient processing failure. The consumer retries until the queue's maxReceiveCount (5) moves the message to its DLQ.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/ProblemDetails" }
-        "503":
-          $ref: "#/components/responses/ServiceUnavailable"
-
-  /api/v1/internal/events/workflow-template:
-    post:
-      operationId: ingestWorkflowTemplateEvent
-      tags: [Internal (Events)]
-      summary: Ingest workflow.template.published directly
-      description: >
-        Same contract as ingestInternalEvent (§6.1), scoped to
-        workflow.template.published. Validated and dedup-recorded only — no
-        cache action since TemplateCachePrewarmer's removal (rev 1.36, §6.2).
-        A type outside this category is accepted and ignored with 200.
       security:
         - InternalServiceAuth: []
       requestBody:

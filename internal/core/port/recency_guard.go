@@ -6,12 +6,11 @@ import (
 )
 
 // RecencyGuard is the generic <=-skip-with-tie-resolves-to-skip out-of-order
-// delivery guard shared by TenantStateChanged, UserAvailabilityChanged, and
-// workflow.template.published (LLD §6.2 items 4/6, Appendix A #25/#26).
-// scopeKey conventions: "tenant:<tenant_id>", "user_availability:<tenant_id>:<user_id>",
-// "template:<tenant_id>:<workflow_key>" — a Keycloak user_id and a workflow_key
-// are each only unique per tenant, so tenant_id must be part of every
-// multi-tenant scope key or two tenants sharing a user/business key would
+// delivery guard shared by TenantStateChanged and UserAvailabilityChanged
+// (LLD §6.2 items 4/6, Appendix A #25/#26). scopeKey conventions:
+// "tenant:<tenant_id>", "user_availability:<tenant_id>:<user_id>" — a
+// Keycloak user_id is only unique per tenant, so tenant_id must be part of
+// every multi-tenant scope key or two tenants sharing a user id would
 // collide on one recency row.
 type RecencyGuard interface {
 	// ShouldApply is a pure read: true when eventTime is strictly newer than
@@ -22,12 +21,12 @@ type RecencyGuard interface {
 
 	// CheckAndCommit performs ShouldApply's check and the commit in one
 	// atomic statement — only safe for callers whose guarded operation can't
-	// itself fail in a way that needs a retry (e.g. template prewarm, which
-	// is fail-open by handler contract). Any caller whose side effect can
-	// fail and must be retried on a later, equally-timed redelivery should
-	// use ShouldApply before the side effect and Commit after it succeeds
-	// instead — committing here first and then having the side effect fail
-	// would advance the guard past an event that was never actually applied.
+	// itself fail in a way that needs a retry. Any caller whose side effect
+	// can fail and must be retried on a later, equally-timed redelivery
+	// should use ShouldApply before the side effect and Commit after it
+	// succeeds instead — committing here first and then having the side
+	// effect fail would advance the guard past an event that was never
+	// actually applied.
 	CheckAndCommit(ctx context.Context, scopeKey string, eventTime time.Time) (applied bool, err error)
 
 	// Commit unconditionally, monotonically records eventTime (never lowers

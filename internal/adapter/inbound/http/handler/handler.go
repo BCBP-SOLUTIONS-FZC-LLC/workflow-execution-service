@@ -1,6 +1,7 @@
-// Package handler is the HTTP surface for /tasks, /instances,
-// GET /workflows/active-by-user, and POST /instances/:id/nodes/:node/override.
-// Route registration lives in router.go's RegisterRoutes — this package
+// Package handler implements the HTTP surface for /tasks, /instances,
+// GET /workflows/active-by-user, POST /instances/:id/nodes/:node/override,
+// and the /internal/* and /internal/events/* handler methods. Route
+// registration lives in the parent http package's router.go — this package
 // never starts a gin.Engine or touches cmd/server.
 package handler
 

@@ -1,8 +1,7 @@
 // Package http's router.go is the single source of truth for this
 // service's HTTP surface: every path, method, middleware, and route group.
-// It mirrors iam-user-profile's own router.go — cmd/server's job is to
-// construct dependencies and call NewRouter, not to encode routing
-// decisions itself.
+// cmd/server's job is to construct dependencies and call NewRouter, not to
+// encode routing decisions itself.
 package http
 
 import (
@@ -69,12 +68,17 @@ func (r *Router) Handler() http.Handler { return r.engine }
 
 // NewRouter builds and wires every route this service exposes: the dev-only
 // AsyncAPI doc route, the unauthenticated infra probes, and the protected
-// /internal + /api/v1 route groups.
+// /internal + /api/v1 route groups. TimeoutMiddleware is applied first, ahead
+// of every other middleware and route, per its own doc comment's ordering
+// requirement.
 func NewRouter(cfg RouterConfig) *Router {
 	if cfg.AppEnv != "dev" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
+	h := cfg.Handler
+
+	r.Use(gincommon.TimeoutMiddleware(30 * time.Second))
 
 	if cfg.AppEnv == "dev" {
 		r.GET("/asyncapi", AsyncAPIHandler)
@@ -92,15 +96,61 @@ func NewRouter(cfg RouterConfig) *Router {
 	// must never see the gateway-identity-assuming ProtectedMiddlewares chain.
 	internal := r.Group("/internal")
 	internal.Use(middleware.RequireInternalToken(cfg.InternalAPIToken))
-	handler.RegisterInternalRoutes(internal, cfg.Handler)
-	handler.RegisterInternalEventsRoutes(internal, cfg.Handler)
-	handler.RegisterInternalConnectorRoutes(internal, cfg.Handler)
+
+	// /internal/workflows/* (LLD §5.8).
+	internalWorkflows := internal.Group("/workflows")
+	internalWorkflows.POST("/reassign-delegate", h.Idempotent(h.ReassignDelegate))
+	internalWorkflows.POST("/cancel-by-delegate", h.Idempotent(h.CancelByDelegate))
+	internalWorkflows.GET("/delegate-impact", h.DelegateImpact)
+
+	// POST /internal/events (LLD §6.1) stays registered as the legacy
+	// catch-all alongside the 3 category-scoped subpaths event_consumer
+	// forwards to directly (internal/forwarder/category.go) — workflow.task.created
+	// and any future/unrecognized type still arrive here, never dropped.
+	internal.POST("/events", h.HandleInternalEvent)
+	internal.POST("/events/delegation", h.HandleDelegationEvents)
+	internal.POST("/events/user-profile", h.HandleUserProfileEvents)
+	internal.POST("/events/tenant", h.HandleTenantEvents)
+
+	// POST /internal/connector-tasks/:id/{complete,fail} — cmd/connector-worker
+	// calls these instead of touching the Temporal SDK directly (the
+	// workflow-connectors LLD §6.1 Decision #2); the human /tasks/:id/complete
+	// path explicitly rejects connector-typed tasks (checkHumanActionable), so
+	// this is their only completion path. No idempotency wrapper:
+	// connector-worker's own retry model is Stream-redelivery-driven, not
+	// header-driven, and ConnectorTaskService already carries its own
+	// state+dedup idempotency guard.
+	connectorTasks := internal.Group("/connector-tasks")
+	connectorTasks.POST("/:id/complete", h.CompleteConnectorTask)
+	connectorTasks.POST("/:id/fail", h.FailConnectorTask)
 
 	api := r.Group("/api/v1")
 	for _, mw := range gincommon.ProtectedMiddlewares(cfg.GinConfig) {
 		api.Use(mw)
 	}
-	handler.RegisterRoutes(api, cfg.Handler)
+
+	tasks := api.Group("/tasks")
+	tasks.GET("", h.ListTasks)
+	tasks.GET("/:id", h.GetTask)
+	tasks.POST("/:id/claim", h.Idempotent(h.ClaimTask))
+	tasks.POST("/:id/complete", h.Idempotent(h.CompleteTask))
+	tasks.POST("/:id/defer", h.Idempotent(h.DeferTask))
+	tasks.POST("/:id/reassign", h.Idempotent(h.ReassignTask))
+
+	api.GET("/workflows/active-by-user", h.ListActiveByUser)
+	api.POST("/instances/:id/nodes/:node/override", h.Idempotent(h.OverrideNodeAssignee))
+
+	instances := api.Group("/instances")
+	instances.POST("", h.Idempotent(h.StartInstance))
+	instances.GET("", h.ListInstances)
+	instances.GET("/:id", h.GetInstance)
+	instances.GET("/:id/events", h.ListInstanceEvents)
+	instances.POST("/:id/pause", h.Idempotent(h.PauseInstance))
+	instances.POST("/:id/resume", h.Idempotent(h.ResumeInstance))
+	instances.POST("/:id/cancel", h.Idempotent(h.CancelInstance))
+	instances.POST("/:id/terminate", h.Idempotent(h.TerminateInstance))
+	instances.POST("/:id/force-forward", h.Idempotent(h.ForceForwardInstance))
+	instances.POST("/:id/force-back", h.Idempotent(h.ForceBackInstance))
 
 	return &Router{engine: r}
 }

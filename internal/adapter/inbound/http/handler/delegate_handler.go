@@ -25,8 +25,8 @@ type reassignDelegateResp struct {
 	Reassigned int `json:"reassigned"`
 }
 
-// ReassignDelegate is not stubbed for Idempotency-Key here — see
-// RegisterInternalRoutes, which wraps this handler with WithIdempotency.
+// ReassignDelegate is not stubbed for Idempotency-Key here — see router.go,
+// which wraps this handler with Idempotent.
 func (h *Handler) ReassignDelegate(c *gin.Context) {
 	var req reassignDelegateReq
 	if !bindJSON(c, &req) {

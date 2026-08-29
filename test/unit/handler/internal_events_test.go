@@ -133,6 +133,35 @@ func TestHandleDelegationEvents_TypeOutsideCategory_Unhandled200(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "a type outside this subpath's category falls through to the shared unhandledType branch, never a 4xx")
 }
 
+func TestHandleDelegationEvents_DispatchesDelegationEnded(t *testing.T) {
+	fakes := newEventsFakes()
+	var called bool
+	fakes.delegation.reverse = func(context.Context, port.DelegationReversalInput) error {
+		called = true
+		return nil
+	}
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEventTo(router, "/api/v1/internal/events/delegation", envelope("delegation.ended", uuid.New(), testTenantID, time.Now(), map[string]any{
+		"delegation_id": testDelegationID2,
+		"delegator_id":  testDelegatorID,
+		"delegate_id":   testDelegateID2,
+		"ended_reason":  "expired",
+	}))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, called, "delegation.ended must dispatch through /events/delegation exactly as it does through the legacy /events path")
+}
+
+func TestHandleDelegationEvents_MalformedEnvelope_Returns400(t *testing.T) {
+	fakes := newEventsFakes()
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEventTo(router, "/api/v1/internal/events/delegation", envelope("", uuid.New(), testTenantID, time.Now(), map[string]any{}))
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "a missing event type is malformed before this subpath's own switch ever runs")
+}
+
 func TestHandleUserProfileEvents_DispatchesUserDeleted(t *testing.T) {
 	fakes := newEventsFakes()
 	router := newInternalRouter(newEventsHandler(fakes))
@@ -152,6 +181,27 @@ func TestHandleUserProfileEvents_TypeOutsideCategory_Unhandled200(t *testing.T) 
 	w := postEventTo(router, "/api/v1/internal/events/user-profile", envelope("delegation.started", uuid.New(), testTenantID, time.Now(), map[string]any{}))
 
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandleUserProfileEvents_DispatchesUserAvailabilityChanged(t *testing.T) {
+	fakes := newEventsFakes()
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEventTo(router, "/api/v1/internal/events/user-profile", envelope("user.availability.changed", uuid.New(), testTenantID, time.Now(), map[string]any{
+		"user_id": testUserID.String(),
+		"status":  "ooo",
+	}))
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandleUserProfileEvents_MalformedEnvelope_Returns400(t *testing.T) {
+	fakes := newEventsFakes()
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEventTo(router, "/api/v1/internal/events/user-profile", envelope("", uuid.New(), testTenantID, time.Now(), map[string]any{}))
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "a missing event type is malformed before this subpath's own switch ever runs")
 }
 
 func TestHandleTenantEvents_DispatchesTenantStateChanged(t *testing.T) {
@@ -176,29 +226,13 @@ func TestHandleTenantEvents_TypeOutsideCategory_Unhandled200(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-func TestHandleWorkflowTemplateEvents_DispatchesTemplatePublished(t *testing.T) {
+func TestHandleTenantEvents_MalformedEnvelope_Returns400(t *testing.T) {
 	fakes := newEventsFakes()
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	w := postEventTo(router, "/api/v1/internal/events/workflow-template", envelope("workflow.template.published", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"workflow_id":    uuid.New().String(),
-		"workflow_key":   "wf-key",
-		"version_id":     uuid.New().String(),
-		"version_number": 1,
-		"artifact_hash":  "sha256:abc",
-		"published_by":   uuid.New().String(),
-	}))
+	w := postEventTo(router, "/api/v1/internal/events/tenant", envelope("", uuid.New(), testTenantID, time.Now(), map[string]any{}))
 
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestHandleWorkflowTemplateEvents_TypeOutsideCategory_Unhandled200(t *testing.T) {
-	fakes := newEventsFakes()
-	router := newInternalRouter(newEventsHandler(fakes))
-
-	w := postEventTo(router, "/api/v1/internal/events/workflow-template", envelope("user.deleted", uuid.New(), testTenantID, time.Now(), map[string]any{}))
-
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "a missing event type is malformed before this subpath's own switch ever runs")
 }
 
 // --- DelegationStarted ---
@@ -591,24 +625,6 @@ func TestHandleInternalEvent_TenantStateChanged_CommitsRecencyOnceAfterApplySucc
 	assert.False(t, shouldApplySame, "recency must be committed after Apply succeeds, not left unset")
 }
 
-// --- workflow.template.published ---
-
-func TestHandleInternalEvent_TemplatePublished_Success(t *testing.T) {
-	fakes := newEventsFakes()
-	router := newInternalRouter(newEventsHandler(fakes))
-
-	w := postEvent(router, envelope("workflow.template.published", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"workflow_id":    testInstID.String(),
-		"workflow_key":   "tender-approval",
-		"version_id":     testTaskID.String(),
-		"version_number": 3,
-		"artifact_hash":  "sha256:abc",
-		"published_by":   testUserID.String(),
-	}))
-
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
 // --- envelope-level validation (shared by every handler) ---
 
 func TestHandleInternalEvent_InvalidEventID_400(t *testing.T) {
@@ -827,33 +843,6 @@ func TestHandleInternalEvent_TenantStateChanged_ApplyError_500_RecencyNotCommitt
 	assert.True(t, shouldApply, "recency must not be committed when Apply fails")
 }
 
-// --- workflow.template.published: per-field payload validation ---
-
-func TestHandleInternalEvent_TemplatePublished_InvalidFields(t *testing.T) {
-	validData := func() map[string]any {
-		return map[string]any{
-			"workflow_id":    testInstID.String(),
-			"workflow_key":   "tender-approval",
-			"version_id":     testTaskID.String(),
-			"version_number": 3,
-			"artifact_hash":  "sha256:abc",
-			"published_by":   testUserID.String(),
-		}
-	}
-	for _, field := range []string{"workflow_id", "version_id", "published_by", "promoted_from_version_id"} {
-		t.Run(field, func(t *testing.T) {
-			fakes := newEventsFakes()
-			router := newInternalRouter(newEventsHandler(fakes))
-
-			data := validData()
-			data[field] = "not-a-uuid"
-			w := postEvent(router, envelope("workflow.template.published", uuid.New(), testTenantID, time.Now(), data))
-
-			assert.Equal(t, http.StatusBadRequest, w.Code)
-		})
-	}
-}
-
 // --- respondOK / alreadyProcessed error paths ---
 
 func TestHandleInternalEvent_RecordIfNewError_StillReturns200(t *testing.T) {
@@ -992,18 +981,6 @@ func TestHandleInternalEvent_TenantStateChanged_CommitError_StillReturns200(t *t
 	assert.Equal(t, http.StatusOK, w.Code, "a recency-Commit failure after Apply succeeds must not surface as an error")
 }
 
-func TestHandleInternalEvent_TemplatePublished_AlreadyProcessed_Returns200Twice(t *testing.T) {
-	fakes := newEventsFakes()
-	router := newInternalRouter(newEventsHandler(fakes))
-
-	body := envelope("workflow.template.published", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"workflow_id": testInstID.String(), "workflow_key": "tender-approval", "version_id": testTaskID.String(),
-		"version_number": 3, "artifact_hash": "sha256:abc", "published_by": testUserID.String(),
-	})
-	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
-	require.Equal(t, http.StatusOK, postEvent(router, body).Code, "a redelivered event with the same id must still 200, not error")
-}
-
 // --- malformed (non-object) data payload + invalid envelope id/tenant_id,
 // one per handler (each handler's own call sites are distinct coverage
 // statements, not shared across handlers) ---
@@ -1018,7 +995,7 @@ func rawBody(eventType string, eventID, tenantID uuid.UUID, data any) map[string
 func TestHandleInternalEvent_MalformedDataPayload_PerEventType(t *testing.T) {
 	for _, eventType := range []string{
 		"delegation.started", "delegation.ended", "user.deleted",
-		"user.availability.changed", "tenant.state.changed", "workflow.template.published",
+		"user.availability.changed", "tenant.state.changed",
 	} {
 		t.Run(eventType, func(t *testing.T) {
 			fakes := newEventsFakes()
@@ -1085,27 +1062,6 @@ func TestHandleInternalEvent_TenantStateChanged_InvalidEnvelopeIDs(t *testing.T)
 		fakes := newEventsFakes()
 		router := newInternalRouter(newEventsHandler(fakes))
 		body := envelope("tenant.state.changed", uuid.New(), testTenantID, time.Now(), validData)
-		body["tenant_id"] = "not-a-uuid"
-		assert.Equal(t, http.StatusBadRequest, postEvent(router, body).Code)
-	})
-}
-
-func TestHandleInternalEvent_TemplatePublished_InvalidEnvelopeIDs(t *testing.T) {
-	validData := map[string]any{
-		"workflow_id": testInstID.String(), "workflow_key": "tender-approval", "version_id": testTaskID.String(),
-		"version_number": 3, "artifact_hash": "sha256:abc", "published_by": testUserID.String(),
-	}
-	t.Run("invalid event id", func(t *testing.T) {
-		fakes := newEventsFakes()
-		router := newInternalRouter(newEventsHandler(fakes))
-		body := envelope("workflow.template.published", uuid.New(), testTenantID, time.Now(), validData)
-		body["id"] = "not-a-uuid"
-		assert.Equal(t, http.StatusBadRequest, postEvent(router, body).Code)
-	})
-	t.Run("invalid tenant id", func(t *testing.T) {
-		fakes := newEventsFakes()
-		router := newInternalRouter(newEventsHandler(fakes))
-		body := envelope("workflow.template.published", uuid.New(), testTenantID, time.Now(), validData)
 		body["tenant_id"] = "not-a-uuid"
 		assert.Equal(t, http.StatusBadRequest, postEvent(router, body).Code)
 	})
