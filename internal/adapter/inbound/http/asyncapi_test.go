@@ -477,12 +477,12 @@ bindings:
   sns:
     messageAttributes:
       event_type:
-        value: workflow.template.published
+        value: workflow.instance.started
 `), &h)
 		if err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
-		if got := snsEventType(&h.Bindings); got != "workflow.template.published" {
+		if got := snsEventType(&h.Bindings); got != "workflow.instance.started" {
 			t.Errorf("got %q", got)
 		}
 	})
@@ -731,7 +731,7 @@ components:
         sns:
           messageAttributes:
             event_type:
-              value: workflow.template.published
+              value: workflow.instance.started
       payload: { $ref: '#/components/schemas/EventTypedInbound' }
     DanglingPayloadMsg:
       title: Dangling Payload
@@ -797,7 +797,7 @@ func TestRenderMessage(t *testing.T) {
 		if strings.Contains(got, "unused because summary wins") {
 			t.Errorf("description should not render when summary is set: %s", got)
 		}
-		if !strings.Contains(got, "event_type: workflow.template.published") {
+		if !strings.Contains(got, "event_type: workflow.instance.started") {
 			t.Errorf("missing SNS event_type badge: %s", got)
 		}
 	})

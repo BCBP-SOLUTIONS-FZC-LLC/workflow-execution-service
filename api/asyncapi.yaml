@@ -94,19 +94,6 @@ channels:
     messages:
       user.deleted:              { $ref: '#/components/messages/UserDeletedInbound' }
       user.availability.changed: { $ref: '#/components/messages/UserAvailabilityChangedInbound' }
-  wf/template/events:
-    address: wf-template-events
-    description: Consumed off wf-execution-sync-q (dedup consumer `template-sync-execution`).
-    bindings:
-      sqs:
-        queue:
-          name: wf-execution-sync-q
-          fifoQueue: false
-          redrivePolicy:
-            deadLetterQueue: { name: wf-execution-sync-dlq }
-            maxReceiveCount: 5
-    messages:
-      workflow.template.published: { $ref: '#/components/messages/WorkflowTemplatePublishedInbound' }
 
 operations:
   publishWorkflowEvents:
@@ -142,10 +129,6 @@ operations:
     action: receive
     channel: { $ref: '#/channels/iam~1user~1events' }
     description: UserDeleted safety-net pause + UserAvailabilityChanged OOO pause/resume.
-  receiveTemplateEvents:
-    action: receive
-    channel: { $ref: '#/channels/wf~1template~1events' }
-    description: Compiled-plan cache pre-warm (fail-open).
 
 components:
   securitySchemes:
@@ -444,19 +427,9 @@ components:
         (initiator=ooo), and resume them on status=available. Delegation events remain
         the sole reroute mechanism — availability changes only pause/resume, never reroute.
         Recency-guarded against out-of-order redelivery via the envelope's own time, the
-        same protection TenantStateChanged/WorkflowTemplatePublished already have.
+        same protection TenantStateChanged already has.
       x-schema-owner: iam-user-profile
       payload: { $ref: '#/components/schemas/UserAvailabilityChangedInbound' }
-    WorkflowTemplatePublishedInbound:
-      name: workflow.template.published
-      x-lifecycle: { status: active }
-      title: Template version published (owned by workflow-definition-svc)
-      description: >
-        Consumed to pre-warm the compiled-plan cache and the workflow_key→version_id map.
-        Fail-open on cache-population failure; recency-guarded against out-of-order
-        delivery.
-      x-schema-owner: workflow-definition-svc
-      payload: { $ref: '#/components/schemas/WorkflowTemplatePublishedInbound' }
 
   schemas:
     # Shared envelope — platform-events Envelope[T], CloudEvents-aligned JSON keys.
@@ -786,15 +759,3 @@ components:
         ooo_from:         { type: ["string", "null"], format: date-time }
         ooo_until:        { type: ["string", "null"], format: date-time }
         delegate_user_id: { type: ["string", "null"], format: uuid }
-    WorkflowTemplatePublishedInbound:
-      type: object
-      additionalProperties: true
-      required: [workflow_id, workflow_key, version_id, version_number, artifact_hash, published_by]
-      properties:
-        workflow_id:              { type: string, format: uuid }
-        workflow_key:             { type: string }
-        version_id:               { type: string, format: uuid }
-        version_number:           { type: integer }
-        artifact_hash:            { type: string }
-        published_by:             { type: string, format: uuid }
-        promoted_from_version_id: { type: ["string", "null"], format: uuid }

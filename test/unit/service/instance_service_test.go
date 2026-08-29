@@ -723,9 +723,7 @@ func TestInstanceService_Start_CompiledPlanCache(t *testing.T) {
 	// the fetched plan back on a miss, or the cache would never come warm
 	// again — a fresh Start call for the SAME (tenant, version), right after
 	// a cold-cache first call, must now hit the cache instead of calling
-	// Definitions a second time. This is the guarantee "the plan loads
-	// lazily on the next instantiation anyway" (handleTemplatePublished's own
-	// comment) actually depends on.
+	// Definitions a second time.
 	t.Run("a cache miss is written back so a later Start for the same version hits the cache", func(t *testing.T) {
 		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
 		cache := newFakeCacheStore()

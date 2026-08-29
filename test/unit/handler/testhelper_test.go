@@ -636,6 +636,9 @@ func newDelegateHandlerWithCacheAndLog(wc *fakeWorkflowClient, cache *fakeCacheS
 	return handler.New(handler.Services{WorkflowClient: wc, Cache: cache, IdempotencyTTL: time.Hour, Log: log})
 }
 
+// newRouter rebuilds the /api/v1 route table router.go registers in
+// production — kept in sync with it by hand, since RegisterRoutes no longer
+// exists as a shared function to call directly (router.go inlines it).
 func newRouter(h *handler.Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -643,21 +646,58 @@ func newRouter(h *handler.Handler) *gin.Engine {
 		r.Use(mw)
 	}
 	rg := r.Group("/api/v1")
-	handler.RegisterRoutes(rg, h)
+
+	tasks := rg.Group("/tasks")
+	tasks.GET("", h.ListTasks)
+	tasks.GET("/:id", h.GetTask)
+	tasks.POST("/:id/claim", h.Idempotent(h.ClaimTask))
+	tasks.POST("/:id/complete", h.Idempotent(h.CompleteTask))
+	tasks.POST("/:id/defer", h.Idempotent(h.DeferTask))
+	tasks.POST("/:id/reassign", h.Idempotent(h.ReassignTask))
+
+	rg.GET("/workflows/active-by-user", h.ListActiveByUser)
+	rg.POST("/instances/:id/nodes/:node/override", h.Idempotent(h.OverrideNodeAssignee))
+
+	instances := rg.Group("/instances")
+	instances.POST("", h.Idempotent(h.StartInstance))
+	instances.GET("", h.ListInstances)
+	instances.GET("/:id", h.GetInstance)
+	instances.GET("/:id/events", h.ListInstanceEvents)
+	instances.POST("/:id/pause", h.Idempotent(h.PauseInstance))
+	instances.POST("/:id/resume", h.Idempotent(h.ResumeInstance))
+	instances.POST("/:id/cancel", h.Idempotent(h.CancelInstance))
+	instances.POST("/:id/terminate", h.Idempotent(h.TerminateInstance))
+	instances.POST("/:id/force-forward", h.Idempotent(h.ForceForwardInstance))
+	instances.POST("/:id/force-back", h.Idempotent(h.ForceBackInstance))
+
 	return r
 }
 
 // newInternalRouter builds a BARE router (no gincommon.ProtectedMiddlewares,
 // no middleware.RequireInternalToken) for the /internal group's routes —
 // these callers carry no gateway identity, and the token guard is a
-// separate middleware-package concern tested on its own.
+// separate middleware-package concern tested on its own. Kept in sync by
+// hand with router.go's /internal route table, for the same reason newRouter
+// is above.
 func newInternalRouter(h *handler.Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	rg := r.Group("/api/v1/internal")
-	handler.RegisterInternalRoutes(rg, h)
-	handler.RegisterInternalEventsRoutes(rg, h)
-	handler.RegisterInternalConnectorRoutes(rg, h)
+
+	workflows := rg.Group("/workflows")
+	workflows.POST("/reassign-delegate", h.Idempotent(h.ReassignDelegate))
+	workflows.POST("/cancel-by-delegate", h.Idempotent(h.CancelByDelegate))
+	workflows.GET("/delegate-impact", h.DelegateImpact)
+
+	rg.POST("/events", h.HandleInternalEvent)
+	rg.POST("/events/delegation", h.HandleDelegationEvents)
+	rg.POST("/events/user-profile", h.HandleUserProfileEvents)
+	rg.POST("/events/tenant", h.HandleTenantEvents)
+
+	connectorTasks := rg.Group("/connector-tasks")
+	connectorTasks.POST("/:id/complete", h.CompleteConnectorTask)
+	connectorTasks.POST("/:id/fail", h.FailConnectorTask)
+
 	return r
 }
 

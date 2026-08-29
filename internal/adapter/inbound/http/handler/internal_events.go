@@ -45,7 +45,6 @@ func observeDelegationReroute(seconds float64) {
 const (
 	consumerMembership = "membership-execution"
 	consumerUser       = "user-execution"
-	consumerTemplate   = "template-sync-execution"
 	consumerConnector  = "connector-stream-execution"
 )
 
@@ -53,16 +52,15 @@ const (
 // switch and each category entrypoint's own smaller switch, so the two never
 // drift apart on the literal.
 const (
-	eventTypeDelegationStarted         = "delegation.started"
-	eventTypeDelegationEnded           = "delegation.ended"
-	eventTypeUserDeleted               = "user.deleted"
-	eventTypeUserAvailabilityChanged   = "user.availability.changed"
-	eventTypeTenantStateChanged        = "tenant.state.changed"
-	eventTypeWorkflowTemplatePublished = "workflow.template.published"
+	eventTypeDelegationStarted       = "delegation.started"
+	eventTypeDelegationEnded         = "delegation.ended"
+	eventTypeUserDeleted             = "user.deleted"
+	eventTypeUserAvailabilityChanged = "user.availability.changed"
+	eventTypeTenantStateChanged      = "tenant.state.changed"
 )
 
 // parseEventID and parseTenantID share the "invalid event id"/"invalid
-// tenant_id" 400 message every one of the six handlers needs for the
+// tenant_id" 400 message every one of the five handlers needs for the
 // envelope's own ID/TenantID fields, as opposed to a payload field.
 func (h *Handler) parseEventID(c *gin.Context, eventType, raw string) (uuid.UUID, bool) {
 	id, err := uuid.Parse(raw)
@@ -132,8 +130,6 @@ func (h *Handler) HandleInternalEvent(c *gin.Context) {
 		h.handleUserAvailabilityChanged(c, env)
 	case eventTypeTenantStateChanged:
 		h.handleTenantStateChanged(c, env)
-	case eventTypeWorkflowTemplatePublished:
-		h.handleTemplatePublished(c, env)
 	case "workflow.task.created":
 		h.handleWorkflowTaskCreated(c, env)
 	default:
@@ -183,20 +179,6 @@ func (h *Handler) HandleTenantEvents(c *gin.Context) {
 	switch env.Type {
 	case eventTypeTenantStateChanged:
 		h.handleTenantStateChanged(c, env)
-	default:
-		h.unhandledType(c, env.Type)
-	}
-}
-
-// HandleWorkflowTemplateEvents is POST /events/workflow-template.
-func (h *Handler) HandleWorkflowTemplateEvents(c *gin.Context) {
-	env, ok := h.decodeEnvelope(c)
-	if !ok {
-		return
-	}
-	switch env.Type {
-	case eventTypeWorkflowTemplatePublished:
-		h.handleTemplatePublished(c, env)
 	default:
 		h.unhandledType(c, env.Type)
 	}
@@ -702,58 +684,4 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 	}
 
 	h.respondOK(c, eventID, consumerMembership, eventType)
-}
-
-// --- workflow.template.published ---
-
-type templatePublishedPayload struct {
-	WorkflowID    string `json:"workflow_id"`
-	WorkflowKey   string `json:"workflow_key"` // unique per tenant, not globally
-	VersionID     string `json:"version_id"`
-	VersionNumber int    `json:"version_number"`
-	ArtifactHash  string `json:"artifact_hash"`
-	PublishedBy   string `json:"published_by"`
-	// PromotedFromVersion is nil for a fresh publish, set when this version
-	// was promoted from an existing draft/version.
-	PromotedFromVersion *string `json:"promoted_from_version_id"`
-}
-
-func (h *Handler) handleTemplatePublished(c *gin.Context, env events.Envelope[json.RawMessage]) {
-	const eventType = eventTypeWorkflowTemplatePublished
-	var p templatePublishedPayload
-	if err := json.Unmarshal(env.Payload, &p); err != nil {
-		h.badPayload(c, eventType, "invalid workflow.template.published payload")
-		return
-	}
-	eventID, ok := h.parseEventID(c, eventType, env.ID)
-	if !ok {
-		return
-	}
-	if _, ok := h.parseTenantID(c, eventType, env.TenantID); !ok {
-		return
-	}
-	if _, err := uuid.Parse(p.WorkflowID); err != nil {
-		h.badPayload(c, eventType, "invalid workflow_id in payload")
-		return
-	}
-	if _, err := uuid.Parse(p.VersionID); err != nil {
-		h.badPayload(c, eventType, "invalid version_id in payload")
-		return
-	}
-	if _, err := uuid.Parse(p.PublishedBy); err != nil {
-		h.badPayload(c, eventType, "invalid published_by in payload")
-		return
-	}
-	if p.PromotedFromVersion != nil {
-		if _, err := uuid.Parse(*p.PromotedFromVersion); err != nil {
-			h.badPayload(c, eventType, "invalid promoted_from_version_id in payload")
-			return
-		}
-	}
-
-	if h.alreadyProcessed(c, eventID, consumerTemplate, eventType) {
-		return
-	}
-
-	h.respondOK(c, eventID, consumerTemplate, eventType)
 }
