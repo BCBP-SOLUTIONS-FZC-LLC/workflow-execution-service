@@ -44,7 +44,6 @@ func TestRegister_EveryMetricIsScrapable(t *testing.T) {
 	observability.Register()
 
 	observability.RecordVersionConflictTotal.WithLabelValues("workflow_instance").Inc()
-	observability.DBTxRetryTotal.Inc()
 	observability.InternalEventsIngestTotal.WithLabelValues("delegation.started", "ok").Inc()
 	observability.DelegationRerouteDurationSeconds.Observe(1.5)
 	observability.TaskSignalDurationSeconds.WithLabelValues("claim").Observe(0.1)
@@ -72,7 +71,6 @@ func TestRegister_EveryMetricIsScrapable(t *testing.T) {
 
 	metricNames := []string{
 		"record_version_conflict_total",
-		"db_tx_retry_total",
 		"internal_events_ingest_total",
 		"delegation_reroute_duration_seconds",
 		"task_signal_duration_seconds",

@@ -13,6 +13,8 @@ import (
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
 
 // Buckets tuned to each histogram's own LLD §10.3 SLO p99 target, not
@@ -32,7 +34,6 @@ var (
 // process boot (a later task's composition-root job, not this one's).
 var (
 	RecordVersionConflictTotal *prometheus.CounterVec
-	DBTxRetryTotal             prometheus.Counter
 	InternalEventsIngestTotal  *prometheus.CounterVec
 
 	DelegationRerouteDurationSeconds prometheus.Histogram
@@ -61,9 +62,12 @@ var (
 
 var registerOnce sync.Once
 
-// Register constructs and registers every metric above against the default
-// Prometheus registry. Safe to call more than once (e.g. from more than one
-// test in this package) — only the first call has any effect.
+// Register constructs and registers every metric above against
+// gincommon.MetricsRegisterer() (platform-gincommon's own HTTP metrics
+// registerer, so custom collectors land on the same registry rather than
+// guessing prometheus.DefaultRegisterer independently). Safe to call more
+// than once (e.g. from more than one test in this package) — only the first
+// call has any effect.
 //
 // Deliberately out of scope: the DB-pool gauges LLD §7.6 says are "already
 // registered for Definition Service, applied identically to both processes'
@@ -79,11 +83,6 @@ func register() {
 		Name: "record_version_conflict_total",
 		Help: "Total optimistic-lock record_version conflicts, by table.",
 	}, []string{"table"})
-
-	DBTxRetryTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "db_tx_retry_total",
-		Help: "Total transaction retries across the service.",
-	})
 
 	InternalEventsIngestTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "internal_events_ingest_total",
@@ -184,9 +183,13 @@ func register() {
 		Help: "Age in seconds of the oldest unpublished outbox_events row.",
 	})
 
-	prometheus.MustRegister(
+	// gincommon.MetricsRegisterer() returns the same registerer gincommon's
+	// own HTTP metrics use (falling back to prometheus.DefaultRegisterer if
+	// ObservabilityMiddlewares/DefaultMiddlewares hasn't run yet), so this
+	// service's custom collectors always land wherever gincommon's do rather
+	// than guessing prometheus.DefaultRegisterer independently.
+	gincommon.MetricsRegisterer().MustRegister(
 		RecordVersionConflictTotal,
-		DBTxRetryTotal,
 		InternalEventsIngestTotal,
 		DelegationRerouteDurationSeconds,
 		TaskSignalDurationSeconds,
