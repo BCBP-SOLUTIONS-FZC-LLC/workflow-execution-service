@@ -59,3 +59,4 @@ vendor/
 !.claude/*.md
 .claude/CLAUDE.local.md
 .claude/NEXT_STEPS.md
+connector-worker
