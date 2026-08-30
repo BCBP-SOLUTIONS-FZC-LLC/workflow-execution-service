@@ -53,19 +53,20 @@ func newApp(cfg *config.Config) (*app, error) {
 	// none is registered yet, so whichever of the two runs first wins and
 	// produces the real, capturable shutdown func.
 	observability.Register()
+	observability.RegisterPGMetrics(cfg.OTELServiceName, cfg.BuildVersion)
 	tracingShutdown := observability.InitTracing()
 	cleanups = append(cleanups, tracingShutdown)
 
 	ctx := context.Background()
 
-	appPool, err := newAppPool(ctx, cfg)
+	appPool, err := newAppPool(ctx, cfg, log)
 	if err != nil {
 		unwind()
 		return nil, err
 	}
 	cleanups = append(cleanups, appPool.Close)
 
-	relayPool, err := newRelayPool(ctx, cfg)
+	relayPool, err := newRelayPool(ctx, cfg, log)
 	if err != nil {
 		unwind()
 		return nil, err

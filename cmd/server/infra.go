@@ -14,6 +14,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/glue"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pglogger"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkey"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -21,7 +22,7 @@ import (
 
 // newAppPool builds the RLS-enforced execution_app pool every ordinary
 // tenant-scoped repo call runs against.
-func newAppPool(ctx context.Context, cfg *config.Config) (*pgcommon.Pool, error) {
+func newAppPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgcommon.Pool, error) {
 	pool, err := pgcommon.NewPool(ctx, pgcommon.Config{
 		DSN:                cfg.DatabaseURL,
 		MaxConns:           cfg.PGMaxConns,
@@ -29,6 +30,7 @@ func newAppPool(ctx context.Context, cfg *config.Config) (*pgcommon.Pool, error)
 		PGBouncerMode:      cfg.PGBouncerMode,
 		SlowQueryThreshold: time.Duration(cfg.PGSlowQueryThresholdMS) * time.Millisecond,
 		GUCProvider:        pgcommon.GUCSetFromContext,
+		Logger:             pglogger.New(log),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("app db pool: %w", err)
@@ -39,12 +41,13 @@ func newAppPool(ctx context.Context, cfg *config.Config) (*pgcommon.Pool, error)
 // newRelayPool builds the BYPASSRLS execution_outbox_relay pool the outbox
 // relay uses to scan every tenant's unpublished rows in one query. No
 // GUCProvider: the relay role bypasses RLS, so a GUC would be meaningless.
-func newRelayPool(ctx context.Context, cfg *config.Config) (*pgcommon.Pool, error) {
+func newRelayPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgcommon.Pool, error) {
 	pool, err := pgcommon.NewPool(ctx, pgcommon.Config{
 		DSN:           cfg.OutboxRelayDSN(),
 		MaxConns:      cfg.PGMaxConns,
 		MinConns:      cfg.PGMinConns,
 		PGBouncerMode: cfg.PGBouncerMode,
+		Logger:        pglogger.New(log),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("outbox relay db pool: %w", err)
