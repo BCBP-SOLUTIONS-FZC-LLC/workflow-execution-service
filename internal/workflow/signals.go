@@ -123,9 +123,12 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 			logger.Warn("dropping stage-defer signal", "error", err)
 			return
 		}
+		// fromNode names the currently-pending stage being deferred — never
+		// yet in history.Push'd (that only happens once a stage completes,
+		// stage.go), so there's nothing of its own to PopTo here. Any
+		// regression-task bookkeeping belongs to DeferTaskActivity itself
+		// (a persistence-layer concern, not yet built).
 		fromNode := domain.NodeKey(sig.DeptID + "/" + sig.FromStage)
-		popped := in.history.PopTo(fromNode)
-		in.msgBuf.ResetSpan(popped)
 		// Simplification: uses the from-node key as a stand-in Task/AssignmentID
 		// (same as runTaskStage's CompleteAssignmentActivity call) until the
 		// persistence-layer sibling task defines the real convention.

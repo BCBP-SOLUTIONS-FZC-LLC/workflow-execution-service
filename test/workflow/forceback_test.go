@@ -201,10 +201,15 @@ func TestExecute_InstanceCancelWhileRunning(t *testing.T) {
 	}
 }
 
-// TestExecute_StageDeferPopsHistoryAndRegresses drives the stage-defer
-// signal (LLD §3.1): a user-initiated single-step regress distinct from
-// admin force-back, backed by DeferTaskActivity.
-func TestExecute_StageDeferPopsHistoryAndRegresses(t *testing.T) {
+// TestExecute_StageDeferOnPendingStageDoesNotDisruptFlow drives the
+// stage-defer signal (LLD §3.1) against the currently-pending stage it's
+// meant for — a user-initiated defer of their own in-flight task, backed by
+// DeferTaskActivity — and confirms it doesn't perturb the interpreter's own
+// control flow (history/message-buffer/dispatch) at all: that bookkeeping is
+// DeferTaskActivity's own concern, not the signal handler's, since the
+// pending stage was never pushed to history in the first place (stage.go
+// only pushes once a stage completes).
+func TestExecute_StageDeferOnPendingStageDoesNotDisruptFlow(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 
@@ -217,9 +222,7 @@ func TestExecute_StageDeferPopsHistoryAndRegresses(t *testing.T) {
 		})
 	}, time.Millisecond)
 
-	// Defer regresses deptA — the instance stays RUNNING throughout, no
-	// redirect happens (stage-defer only pops history/resets the message
-	// buffer and records the defer; it doesn't re-dispatch on its own).
+	// deptB/prep is now pending — defer it directly, the real usage shape.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-defer:instance-1", struct {
 			DeptID        string
@@ -227,7 +230,7 @@ func TestExecute_StageDeferPopsHistoryAndRegresses(t *testing.T) {
 			Reason        string
 			UserID        string
 			RecordVersion int64
-		}{DeptID: "deptA", FromStage: "prep", Reason: "need more info", UserID: "user-1", RecordVersion: 1})
+		}{DeptID: "deptB", FromStage: "prep", Reason: "need more info", UserID: "user-1", RecordVersion: 1})
 	}, 5*time.Millisecond)
 
 	env.RegisterDelayedCallback(func() {
