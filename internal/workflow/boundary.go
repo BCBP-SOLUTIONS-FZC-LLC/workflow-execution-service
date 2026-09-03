@@ -82,9 +82,12 @@ func addErrorCase(ctx wf.Context, sel wf.Selector, ch wf.Channel, errorPaths []d
 	sel.AddReceive(ch, func(c wf.ReceiveChannel, more bool) {
 		var code string
 		c.Receive(ctx, &code)
-		if ep := matchErrorPath(errorPaths, code); ep != nil {
-			onFire(boundaryFire{Kind: "error", TargetDept: ep.TargetDept, ErrorCode: code})
+		ep := matchErrorPath(errorPaths, code)
+		if ep == nil {
+			wf.GetLogger(ctx).Warn("error-boundary event has no matching ErrorPath and no catch-all; dropping", "error_code", code)
+			return
 		}
+		onFire(boundaryFire{Kind: "error", TargetDept: ep.TargetDept, ErrorCode: code})
 	})
 }
 

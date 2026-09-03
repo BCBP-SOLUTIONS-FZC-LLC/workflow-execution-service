@@ -186,6 +186,8 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 			case SignalInstanceForceFwd:
 				idx := indexOfFailedBranch(failed, sig.TargetDeptID)
 				if idx < 0 {
+					wf.GetLogger(ctx).Warn("instance-force-forward: target_dept_id doesn't name a currently-failed branch; dropping",
+						"target_dept_id", sig.TargetDeptID)
 					return
 				}
 				fb := failed[idx]
@@ -205,6 +207,8 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 			case SignalInstanceForceBack:
 				idx := indexOfFailedBranch(failed, sig.TargetDeptID)
 				if idx < 0 {
+					wf.GetLogger(ctx).Warn("instance-force-back: target_dept_id doesn't name a currently-failed branch; dropping",
+						"target_dept_id", sig.TargetDeptID)
 					return
 				}
 				fb := failed[idx]
