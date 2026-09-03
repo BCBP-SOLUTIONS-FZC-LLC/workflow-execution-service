@@ -25,10 +25,18 @@ func (in *interpreter) runCallPool(ctx wf.Context, callerPlan *dsl.CompiledPlan,
 	}
 
 	if target.Ignored {
+		// Visit-qualified NodeID: two concurrent Parallel branches calling
+		// the same Ignored pool would otherwise both resolve to the
+		// identical NodeKey ("call_pool/"+cp.Pool), so the second
+		// registration in stage.go's in.pending would silently clobber the
+		// first's still-live entry — same "map keyed too coarsely" shape as
+		// this package's own taskVisits convention (CLAUDE.md) exists to
+		// prevent.
+		in.callPoolVisits[cp.Pool]++
 		adminStage := &dsl.StageDef{
 			Type:     "approve",
 			Activity: "admin_completed_pool:" + cp.Pool,
-			NodeID:   cp.Pool,
+			NodeID:   fmt.Sprintf("%s#%d", cp.Pool, in.callPoolVisits[cp.Pool]),
 			Role:     "tenant_admin",
 		}
 		return in.runStage(ctx, callerPlan, callerDeptForCallPool, adminStage)

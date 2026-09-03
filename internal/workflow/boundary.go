@@ -22,6 +22,7 @@ func addTimerCase(ctx wf.Context, sel wf.Selector, duration string, interrupting
 	}
 	dur, err := time.ParseDuration(duration)
 	if err != nil {
+		wf.GetLogger(ctx).Warn("boundary timer has an unparseable duration, disabling it", "duration", duration, "error", err)
 		return func() { /* no boundary was registered, nothing to cancel */ }
 	}
 	timerCtx, cancelTimer := wf.WithCancel(ctx)
@@ -52,6 +53,28 @@ func addMessageCase(ctx wf.Context, sel wf.Selector, msgBuf *messageBuffer, mess
 	return cancelWait
 }
 
+// matchErrorPath finds the ErrorPath matching code, preferring an exact
+// ErrorCode match over the implicit-else (ErrorCode == "") catch-all
+// regardless of list order — the same order-independent precedence
+// selectBranch (exclusive.go) already applies to its own single-wildcard
+// convention.
+func matchErrorPath(errorPaths []dsl.ErrorPath, code string) *dsl.ErrorPath {
+	var wildcard *dsl.ErrorPath
+	for i := range errorPaths {
+		ep := &errorPaths[i]
+		if ep.ErrorCode == "" {
+			if wildcard == nil {
+				wildcard = ep
+			}
+			continue
+		}
+		if ep.ErrorCode == code {
+			return ep
+		}
+	}
+	return wildcard
+}
+
 func addErrorCase(ctx wf.Context, sel wf.Selector, ch wf.Channel, errorPaths []dsl.ErrorPath, onFire func(boundaryFire)) {
 	if ch == nil || len(errorPaths) == 0 {
 		return
@@ -59,12 +82,12 @@ func addErrorCase(ctx wf.Context, sel wf.Selector, ch wf.Channel, errorPaths []d
 	sel.AddReceive(ch, func(c wf.ReceiveChannel, more bool) {
 		var code string
 		c.Receive(ctx, &code)
-		for _, ep := range errorPaths {
-			if ep.ErrorCode == code || ep.ErrorCode == "" {
-				onFire(boundaryFire{Kind: "error", TargetDept: ep.TargetDept, ErrorCode: code})
-				return
-			}
+		ep := matchErrorPath(errorPaths, code)
+		if ep == nil {
+			wf.GetLogger(ctx).Warn("error-boundary event has no matching ErrorPath and no catch-all; dropping", "error_code", code)
+			return
 		}
+		onFire(boundaryFire{Kind: "error", TargetDept: ep.TargetDept, ErrorCode: code})
 	})
 }
 

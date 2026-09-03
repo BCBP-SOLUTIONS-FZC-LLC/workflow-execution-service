@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -33,6 +34,10 @@ func newTestEnv() *testsuite.TestWorkflowEnvironment {
 			return port.CompleteAssignmentOutput{AllDone: true}, nil
 		},
 		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.UpdateTaskStatusInput) error { return nil },
+		activity.RegisterOptions{Name: port.ActivityUpdateTaskStatus},
 	)
 	return env
 }
@@ -204,10 +209,10 @@ func TestRunExclusiveRevertPopsHistory(t *testing.T) {
 }
 
 // TestRunExclusiveForwardFallsBackToTargetFromTop exercises runExclusive's
-// plain Target dispatch when TargetNodeID is empty — regression protection
-// for the pre-existing, non-ambiguous case (LLD §2.6's field table:
-// "Dispatch uses TargetNodeID/RevertToNodeID when present, falling back to
-// Target+TargetStage otherwise").
+// plain Target dispatch when neither TargetNodeID nor TargetStage is set —
+// the genuinely non-ambiguous case (LLD §2.6's field table: "Dispatch uses
+// TargetNodeID/RevertToNodeID when present, falling back to
+// Target+TargetStage, then bare Target otherwise").
 func TestRunExclusiveForwardFallsBackToTargetFromTop(t *testing.T) {
 	env := newTestEnv()
 
@@ -228,7 +233,7 @@ func TestRunExclusiveForwardFallsBackToTargetFromTop(t *testing.T) {
 			Departments: []dsl.DepartmentDef{{ID: "shipping", Stages: []dsl.StageDef{{Type: "approve", NodeID: "Task_ship"}}}},
 		}
 		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
-			{ConditionExpression: `decision == "approved"`, Target: "shipping", TargetStage: "approve"},
+			{ConditionExpression: `decision == "approved"`, Target: "shipping"},
 		})
 		lastNode = out.LastNode
 		return err
@@ -238,6 +243,71 @@ func TestRunExclusiveForwardFallsBackToTargetFromTop(t *testing.T) {
 	}
 	if lastNode != "shipping/Task_ship" {
 		t.Errorf("LastNode = %q, want shipping/Task_ship", lastNode)
+	}
+}
+
+// TestRunExclusiveUsesTargetStageToAvoidReRunningEarlierStage exercises the
+// TargetStage forward path (LLD §2.6) for a department whose stages carry no
+// NodeID — TargetStage must resolve to the matching stage.Type's own index,
+// not restart the department from Stages[0].
+func TestRunExclusiveUsesTargetStageToAvoidReRunningEarlierStage(t *testing.T) {
+	env := newTestEnv()
+
+	var createdNodeKeys []domain.NodeKey
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			createdNodeKeys = append(createdNodeKeys, in.NodeKey)
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCreateTask},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.UpdateInstanceNodesInput) error { return nil },
+		activity.RegisterOptions{Name: port.ActivityUpdateInstanceNodes},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
+			return port.CompleteAssignmentOutput{AllDone: true}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
+	)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "billing", ToStage: "invoice", ResultJSON: "{}"})
+	}, time.Millisecond)
+
+	var lastNode domain.NodeKey
+	env.ExecuteWorkflow(func(ctx wf.Context) error {
+		in := newInterpreter("tenant", "instance", "", nil, nil)
+		in.lastResultJSON = `{"decision":"approved"}`
+		admin := wf.NewBufferedChannel(ctx, 1)
+		baseAdmin := wf.NewBufferedChannel(ctx, 1)
+		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
+
+		plan := &dsl.CompiledPlan{
+			Name: "main",
+			Departments: []dsl.DepartmentDef{{
+				ID: "billing",
+				Stages: []dsl.StageDef{
+					{Type: "collect"},
+					{Type: "invoice"},
+				},
+			}},
+		}
+		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
+			{ConditionExpression: `decision == "approved"`, Target: "billing", TargetStage: "invoice"},
+		})
+		lastNode = out.LastNode
+		return err
+	})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	if lastNode != "billing/invoice" {
+		t.Errorf("LastNode = %q, want billing/invoice", lastNode)
+	}
+	if len(createdNodeKeys) != 1 || createdNodeKeys[0] != "billing/invoice" {
+		t.Errorf("createdNodeKeys = %v, want exactly [billing/invoice] — TargetStage should dispatch straight to billing/invoice, not restart department \"billing\" from Stages[0] and re-run billing/collect", createdNodeKeys)
 	}
 }
 
@@ -391,6 +461,81 @@ func TestRunExclusiveRevertUsesRevertToNodeID(t *testing.T) {
 	}
 }
 
+// TestRunExclusiveRevertUsesRevertToStage exercises the RevertToStage revert
+// path for a department whose stages carry no NodeID — same "shares a
+// department with an earlier stage" shape as the RevertToNodeID test above,
+// but resolved via stage.Type instead.
+func TestRunExclusiveRevertUsesRevertToStage(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	var createdNodeKeys []domain.NodeKey
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			createdNodeKeys = append(createdNodeKeys, in.NodeKey)
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCreateTask},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.UpdateInstanceNodesInput) error { return nil },
+		activity.RegisterOptions{Name: port.ActivityUpdateInstanceNodes},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
+			return port.CompleteAssignmentOutput{AllDone: true}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
+	)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", ToStage: "prep", ResultJSON: "{}"})
+	}, time.Millisecond)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", ToStage: "approve", ResultJSON: "{}"})
+	}, 2*time.Millisecond)
+
+	env.ExecuteWorkflow(func(ctx wf.Context) error {
+		in := newInterpreter("tenant", "instance", "", nil, nil)
+		in.lastResultJSON = `{"decision":"rejected"}`
+		in.history.Push("rework/prep")
+		in.history.Push("rework/approve")
+		admin := wf.NewBufferedChannel(ctx, 1)
+		baseAdmin := wf.NewBufferedChannel(ctx, 1)
+		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
+
+		plan := &dsl.CompiledPlan{
+			Name: "main",
+			Departments: []dsl.DepartmentDef{{
+				ID: "rework",
+				Stages: []dsl.StageDef{
+					{Type: "prep"},
+					{Type: "approve"},
+				},
+			}},
+		}
+		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
+			{ConditionExpression: `decision == "rejected"`, RevertToDept: "rework", RevertToStage: "approve"},
+		})
+		if err != nil {
+			return err
+		}
+		if out.LastNode != "rework/approve" {
+			return errBadHistoryLen(-2)
+		}
+		if len(in.history.stack) != 2 {
+			return errBadHistoryLen(len(in.history.stack))
+		}
+		return nil
+	})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	if len(createdNodeKeys) != 1 || createdNodeKeys[0] != "rework/approve" {
+		t.Errorf("createdNodeKeys = %v, want exactly [rework/approve] — RevertToStage should skip straight to approve, not restart department \"rework\" from Stages[0] and re-run prep", createdNodeKeys)
+	}
+}
+
 type errBadHistoryLen int
 
 func (e errBadHistoryLen) Error() string { return "unexpected history length" }
@@ -447,6 +592,57 @@ func TestRunStepsUnpopulatedVariantErrors(t *testing.T) {
 	})
 	if err := env.GetWorkflowError(); err != nil {
 		t.Fatalf("workflow returned error: %v", err)
+	}
+}
+
+// TestRunStepsSequentialPreservesLastNodeOnLaterFailure is regression
+// coverage for a bug where a Sequential list's second department failing
+// overwrote `last` with its own (empty, since its first stage never
+// completed) return value — losing the first department's real completion.
+// Callers (DEGRADED respawn, RecordForceRoute's audit trail) depend on
+// LastNode surviving a later sibling's failure.
+func TestRunStepsSequentialPreservesLastNodeOnLaterFailure(t *testing.T) {
+	env := newTestEnv()
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			if in.NodeKey == "dept2/prep" {
+				return port.CreateTaskOutput{}, errors.New("dept2 failed")
+			}
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCreateTask},
+	)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "dept1", ToStage: "prep", ResultJSON: "{}"})
+	}, time.Millisecond)
+
+	var lastNode domain.NodeKey
+	env.ExecuteWorkflow(func(ctx wf.Context) error {
+		in := newInterpreter("tenant", "instance", "", nil, nil)
+		admin := wf.NewBufferedChannel(ctx, 1)
+		baseAdmin := wf.NewBufferedChannel(ctx, 1)
+		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
+
+		plan := &dsl.CompiledPlan{
+			Name: "main",
+			Departments: []dsl.DepartmentDef{
+				{ID: "dept1", Stages: []dsl.StageDef{{Type: "prep"}}},
+				{ID: "dept2", Stages: []dsl.StageDef{{Type: "prep"}}},
+			},
+		}
+		out, err := in.runSteps(ctx, plan, []dsl.ExecutionStep{{Sequential: []string{"dept1", "dept2"}}}, admin)
+		lastNode = out.LastNode
+		if err == nil {
+			return errBadHistoryLen(-6)
+		}
+		return nil
+	})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	if lastNode != "dept1/prep" {
+		t.Errorf("LastNode = %q, want dept1/prep — dept2's failure must not overwrite dept1's real completion", lastNode)
 	}
 }
 
@@ -544,10 +740,38 @@ func TestExecuteFailsWhenMainPlanMissing(t *testing.T) {
 
 // TestRunTaskStageInterruptingBoundaryTransfers exercises runTaskStage's
 // fired-and-interrupting path directly: the in-flight task is abandoned and
-// control transfers to the boundary's TargetDept (LLD §2.2 step 5).
+// control transfers to the boundary's TargetDept (LLD §2.2 step 5) — and the
+// abandoned task is marked SUPERSEDED rather than left open forever with no
+// terminal status.
 func TestRunTaskStageInterruptingBoundaryTransfers(t *testing.T) {
-	env := newTestEnv()
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
 	env.SetStartTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCreateTask},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.UpdateInstanceNodesInput) error { return nil },
+		activity.RegisterOptions{Name: port.ActivityUpdateInstanceNodes},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
+			return port.CompleteAssignmentOutput{AllDone: true}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
+	)
+
+	var supersededCalls []port.UpdateTaskStatusInput
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.UpdateTaskStatusInput) error {
+			supersededCalls = append(supersededCalls, in)
+			return nil
+		},
+		activity.RegisterOptions{Name: port.ActivityUpdateTaskStatus},
+	)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "escalation", ToStage: "prep", ResultJSON: "{}"})
@@ -572,6 +796,9 @@ func TestRunTaskStageInterruptingBoundaryTransfers(t *testing.T) {
 	})
 	if err := env.GetWorkflowError(); err != nil {
 		t.Fatalf("workflow returned error: %v", err)
+	}
+	if len(supersededCalls) != 1 || supersededCalls[0].TaskID != "sales/n1" || supersededCalls[0].Status != domain.TaskStatusSuperseded {
+		t.Errorf("UpdateTaskStatusActivity calls = %+v, want exactly one SUPERSEDED call for sales/n1", supersededCalls)
 	}
 }
 
@@ -609,55 +836,102 @@ func TestRunTaskStageNonInterruptingBoundaryContinuesBoth(t *testing.T) {
 	}
 }
 
-// TestRunCallPoolRecursesInlineWhenNotIgnored exercises CallPool's
-// Ignored:false path — recurse inline like subProcess (LLD §2.3).
-func TestRunCallPoolRecursesInlineWhenNotIgnored(t *testing.T) {
-	env := newTestEnv()
-
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "vendor", ToStage: "prep", ResultJSON: "{}"})
-	}, time.Millisecond)
-
-	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		target := &dsl.CompiledPlan{
-			Name:        "vendor-pool",
-			Ignored:     false,
-			Departments: []dsl.DepartmentDef{{ID: "vendor", Stages: []dsl.StageDef{{Type: "prep"}}}},
-			Execution:   dsl.ExecutionPlan{Steps: []dsl.ExecutionStep{{Sequential: []string{"vendor"}}}},
-		}
-		collab := &dsl.CompiledCollaboration{MainPlan: "main", Plans: []*dsl.CompiledPlan{{Name: "main"}, target}}
-		in := newInterpreter("tenant", "instance", "", collab, nil)
-		admin := wf.NewBufferedChannel(ctx, 1)
-		baseAdmin := wf.NewBufferedChannel(ctx, 1)
-		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
-
-		callerPlan := &dsl.CompiledPlan{Name: "main"}
-		_, err := in.runCallPool(ctx, callerPlan, &dsl.CallPoolStep{Pool: "vendor-pool"}, admin)
-		return err
-	})
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("workflow returned error: %v", err)
+// TestRedirectStepsSequential is regression coverage for the pre-existing,
+// already-correct case: a deptID found directly under a top-level Sequential
+// step resumes from there, with every later top-level step preserved.
+func TestRedirectStepsSequential(t *testing.T) {
+	original := []dsl.ExecutionStep{
+		{Sequential: []string{"intake", "review"}},
+		{Sequential: []string{"shipping"}},
+	}
+	got := redirectSteps(original, "review")
+	want := []dsl.ExecutionStep{
+		{Sequential: []string{"review"}},
+		{Sequential: []string{"shipping"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("redirectSteps() = %+v, want %+v", got, want)
 	}
 }
 
-// TestRunCallPoolTargetNotFound exercises the "target plan not found"
-// error path.
-func TestRunCallPoolTargetNotFound(t *testing.T) {
-	var suite testsuite.WorkflowTestSuite
-	env := suite.NewTestWorkflowEnvironment()
+// TestRedirectStepsParallelBranch is the regression case for the original
+// data-loss bug: deptID lives inside a ParallelBranch, not a top-level
+// Sequential step. redirectSteps must resolve to that branch's own Steps
+// and must NOT drop the Sequential step that was still queued after the
+// Parallel step.
+func TestRedirectStepsParallelBranch(t *testing.T) {
+	original := []dsl.ExecutionStep{
+		{Parallel: []dsl.ParallelBranch{
+			{DeptID: "deptA", Steps: []dsl.ExecutionStep{{Sequential: []string{"deptA"}}}},
+			{DeptID: "deptB", Steps: []dsl.ExecutionStep{{Sequential: []string{"deptB"}}}},
+		}},
+		{Sequential: []string{"shipping"}},
+	}
+	got := redirectSteps(original, "deptA")
+	want := []dsl.ExecutionStep{
+		{Sequential: []string{"deptA"}},
+		{Sequential: []string{"shipping"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("redirectSteps() = %+v, want %+v (must not drop the trailing Sequential step)", got, want)
+	}
+}
 
-	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		collab := &dsl.CompiledCollaboration{MainPlan: "main", Plans: []*dsl.CompiledPlan{{Name: "main"}}}
-		in := newInterpreter("tenant", "instance", "", collab, nil)
-		admin := wf.NewBufferedChannel(ctx, 1)
-		callerPlan := &dsl.CompiledPlan{Name: "main"}
-		_, err := in.runCallPool(ctx, callerPlan, &dsl.CallPoolStep{Pool: "does-not-exist"}, admin)
-		if err == nil {
-			return errBadHistoryLen(-1)
-		}
-		return nil
-	})
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("workflow returned error: %v", err)
+// TestRedirectStepsExclusiveBranch covers a deptID reachable only as an
+// ExclusiveBranch's Target or RevertToDept.
+func TestRedirectStepsExclusiveBranch(t *testing.T) {
+	original := []dsl.ExecutionStep{
+		{Exclusive: []dsl.ExclusiveBranch{
+			{Target: "approved"},
+			{RevertToDept: "rework"},
+		}},
+		{Sequential: []string{"shipping"}},
+	}
+	got := redirectSteps(original, "rework")
+	want := []dsl.ExecutionStep{
+		{Sequential: []string{"rework"}},
+		{Sequential: []string{"shipping"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("redirectSteps() = %+v, want %+v", got, want)
+	}
+}
+
+// TestRedirectStepsSubWorkflowNested covers a deptID reachable only inside a
+// SubWorkflowStep's own inline Plan.Steps.
+func TestRedirectStepsSubWorkflowNested(t *testing.T) {
+	original := []dsl.ExecutionStep{
+		{SubWorkflow: &dsl.SubWorkflowStep{
+			Name: "escalation",
+			Plan: dsl.ExecutionPlan{Steps: []dsl.ExecutionStep{
+				{Sequential: []string{"triage", "resolve"}},
+			}},
+		}},
+		{Sequential: []string{"shipping"}},
+	}
+	got := redirectSteps(original, "resolve")
+	want := []dsl.ExecutionStep{
+		{Sequential: []string{"resolve"}},
+		{Sequential: []string{"shipping"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("redirectSteps() = %+v, want %+v", got, want)
+	}
+}
+
+// TestRedirectStepsNotFoundFallsBackToIsolation covers the one remaining
+// structurally-unreachable case (a deptID that only exists inside a
+// CallPool's separately compiled target plan, or a genuinely nonexistent
+// deptID): redirectSteps can't recurse into it, so it isolates deptID —
+// still not a data-loss bug on its own, since there's no trailing plan to
+// preserve when the target isn't found anywhere in this plan's own tree.
+func TestRedirectStepsNotFoundFallsBackToIsolation(t *testing.T) {
+	original := []dsl.ExecutionStep{
+		{CallPool: &dsl.CallPoolStep{Pool: "vendor-pool"}},
+	}
+	got := redirectSteps(original, "does-not-exist")
+	want := []dsl.ExecutionStep{{Sequential: []string{"does-not-exist"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("redirectSteps() = %+v, want %+v", got, want)
 	}
 }

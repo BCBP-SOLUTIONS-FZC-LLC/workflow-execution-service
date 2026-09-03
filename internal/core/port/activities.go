@@ -192,9 +192,12 @@ type ReassignAssignmentInput struct {
 	RecordVersion int64
 }
 
-// UpdateTaskStatusInput drives a task-status-only transition — stage-fail is
-// its only caller today, marking a workflow_task row FAILED without
-// touching any assignment row.
+// UpdateTaskStatusInput drives a task-status-only transition — stage-fail
+// (marking a workflow_task row FAILED without touching any assignment row)
+// and an interrupting boundary event abandoning an in-flight task (marking
+// it SUPERSEDED, RecordVersion left zero since that's a system-initiated
+// transition with no caller-asserted expected version to check) are its
+// callers today.
 type UpdateTaskStatusInput struct {
 	TaskID        string
 	TenantID      string

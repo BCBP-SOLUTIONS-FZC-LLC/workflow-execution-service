@@ -142,6 +142,35 @@ func TestAddErrorCaseFallsThroughToDefaultErrorPath(t *testing.T) {
 	}
 }
 
+// TestAddErrorCasePrefersSpecificMatchRegardlessOfOrder is regression
+// coverage for matchErrorPath: a catch-all ErrorPath listed BEFORE a
+// specific-code match must not shadow it — matching selectBranch's own
+// order-independent precedence for its single implicit-else branch
+// (exclusive.go).
+func TestAddErrorCasePrefersSpecificMatchRegardlessOfOrder(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	var fired boundaryFire
+	env.ExecuteWorkflow(func(ctx wf.Context) error {
+		errCh := wf.NewBufferedChannel(ctx, 1)
+		errCh.Send(ctx, "E1")
+		sel := wf.NewSelector(ctx)
+		addErrorCase(ctx, sel, errCh, []dsl.ErrorPath{
+			{ErrorCode: "", TargetDept: "catch-all"},
+			{ErrorCode: "E1", TargetDept: "handler"},
+		}, func(f boundaryFire) { fired = f })
+		sel.Select(ctx)
+		return nil
+	})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	if fired.TargetDept != "handler" {
+		t.Errorf("addErrorCase should prefer the specific E1 match over a preceding catch-all, fired = %+v", fired)
+	}
+}
+
 func TestAddErrorCaseNilChannelOrEmptyPathsIsANoOp(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

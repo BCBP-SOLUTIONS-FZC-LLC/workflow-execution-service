@@ -245,16 +245,22 @@ func (in *interpreter) handleStageFail(ctx wf.Context, sig stageFailSignal) {
 	}
 }
 
-// handleStageDefer closes the deferring assignment(s) and pops history back
-// to the deferred-from node.
+// handleStageDefer closes the deferring assignment(s) for a stage-defer
+// signal.
 func (in *interpreter) handleStageDefer(ctx wf.Context, sig stageDeferSignal) {
 	if err := validateSignal(in.status, SignalStageDefer); err != nil {
 		wf.GetLogger(ctx).Warn("dropping stage-defer signal", "error", err)
 		return
 	}
+	// fromNode names the currently-pending stage being deferred — never yet
+	// in history.Push'd (that only happens once a stage completes, stage.go),
+	// so there's nothing of its own to PopTo here: an earlier version of
+	// this handler called history.PopTo(fromNode) anyway, and PopTo's own
+	// not-found fallback then wiped the ENTIRE history stack, including
+	// unrelated already-completed nodes. Any regression-task bookkeeping
+	// belongs to DeferTaskActivity itself (a persistence-layer concern, not
+	// yet built).
 	fromNode := domain.NodeKey(sig.DeptID + "/" + sig.FromStage)
-	popped := in.history.PopTo(fromNode)
-	in.msgBuf.ResetSpan(popped)
 	// Simplification: uses the from-node key as a stand-in Task/AssignmentID
 	// (same as runTaskStage's CompleteAssignmentActivity call) until the
 	// persistence-layer sibling task defines the real convention.

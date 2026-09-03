@@ -39,7 +39,8 @@ func addSLATimers(ctx wf.Context, sel wf.Selector, p slaTimerParams) (cancel fun
 		}
 		at, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
-			return // unparsable date is treated as "no SLA timer", not an error
+			wf.GetLogger(ctx).Warn("SLA timer has an unparseable date, disabling it", "date", raw, "error", err)
+			return
 		}
 		waitDur := at.Sub(wf.Now(ctx))
 		if waitDur < 0 {

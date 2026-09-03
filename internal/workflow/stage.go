@@ -125,6 +125,15 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 		cancelBoundaries()
 		if fired.Interrupting {
 			delete(in.pending, nodeKey)
+			// The task row createTask created above is now abandoned — mark
+			// it SUPERSEDED so it doesn't sit open/claimable forever with no
+			// terminal status. Best-effort: an error here would abort the
+			// whole instance over what's ultimately an audit/bookkeeping
+			// write, a worse outcome than proceeding with the boundary
+			// transfer the compiled plan actually calls for.
+			_ = updateTaskStatus(ctx, port.UpdateTaskStatusInput{
+				TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusSuperseded,
+			})
 			return in.runDepartment(ctx, plan, fired.TargetDept)
 		}
 		// Non-interrupting: the host keeps running (we keep waiting below).
