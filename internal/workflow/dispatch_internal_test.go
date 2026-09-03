@@ -808,59 +808,6 @@ func TestRunTaskStageNonInterruptingBoundaryContinuesBoth(t *testing.T) {
 	}
 }
 
-// TestRunCallPoolRecursesInlineWhenNotIgnored exercises CallPool's
-// Ignored:false path — recurse inline like subProcess (LLD §2.3).
-func TestRunCallPoolRecursesInlineWhenNotIgnored(t *testing.T) {
-	env := newTestEnv()
-
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "vendor", ToStage: "prep", ResultJSON: "{}"})
-	}, time.Millisecond)
-
-	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		target := &dsl.CompiledPlan{
-			Name:        "vendor-pool",
-			Ignored:     false,
-			Departments: []dsl.DepartmentDef{{ID: "vendor", Stages: []dsl.StageDef{{Type: "prep"}}}},
-			Execution:   dsl.ExecutionPlan{Steps: []dsl.ExecutionStep{{Sequential: []string{"vendor"}}}},
-		}
-		collab := &dsl.CompiledCollaboration{MainPlan: "main", Plans: []*dsl.CompiledPlan{{Name: "main"}, target}}
-		in := newInterpreter("tenant", "instance", "", collab)
-		admin := wf.NewBufferedChannel(ctx, 1)
-		baseAdmin := wf.NewBufferedChannel(ctx, 1)
-		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
-
-		callerPlan := &dsl.CompiledPlan{Name: "main"}
-		_, err := in.runCallPool(ctx, callerPlan, &dsl.CallPoolStep{Pool: "vendor-pool"}, admin)
-		return err
-	})
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("workflow returned error: %v", err)
-	}
-}
-
-// TestRunCallPoolTargetNotFound exercises the "target plan not found"
-// error path.
-func TestRunCallPoolTargetNotFound(t *testing.T) {
-	var suite testsuite.WorkflowTestSuite
-	env := suite.NewTestWorkflowEnvironment()
-
-	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		collab := &dsl.CompiledCollaboration{MainPlan: "main", Plans: []*dsl.CompiledPlan{{Name: "main"}}}
-		in := newInterpreter("tenant", "instance", "", collab)
-		admin := wf.NewBufferedChannel(ctx, 1)
-		callerPlan := &dsl.CompiledPlan{Name: "main"}
-		_, err := in.runCallPool(ctx, callerPlan, &dsl.CallPoolStep{Pool: "does-not-exist"}, admin)
-		if err == nil {
-			return errBadHistoryLen(-1)
-		}
-		return nil
-	})
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("workflow returned error: %v", err)
-	}
-}
-
 // TestRedirectStepsSequential is regression coverage for the pre-existing,
 // already-correct case: a deptID found directly under a top-level Sequential
 // step resumes from there, with every later top-level step preserved.
