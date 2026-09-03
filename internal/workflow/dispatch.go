@@ -33,10 +33,16 @@ func (in *interpreter) runSteps(ctx wf.Context, plan *dsl.CompiledPlan, steps []
 		case len(step.Sequential) > 0:
 			for _, deptID := range step.Sequential {
 				node, err := in.runDepartment(ctx, plan, deptID)
-				last = node
+				// last only advances on success: a failing department's own
+				// (possibly empty, if its very first stage failed) return
+				// value must never overwrite the real last-completed node
+				// from an EARLIER department in this same Sequential list —
+				// callers (DEGRADED respawn, RecordForceRoute's audit trail)
+				// depend on LastNode surviving a later sibling's failure.
 				if err != nil {
 					return stepOutcome{LastNode: last}, err
 				}
+				last = node
 			}
 
 		case len(step.Parallel) > 0:

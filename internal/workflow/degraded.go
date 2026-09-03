@@ -10,9 +10,12 @@ import (
 
 // failedBranch is a Parallel branch whose goroutine already returned a
 // non-retryable error — only respawnable, never resumed (execution LLD
-// Appendix A.2 #8/#9/#11).
+// Appendix A.2 #8/#9/#11). Steps is the branch's own original dispatch (LLD
+// §2.5 point 2.ii) — needed for respawn to correctly resume a branch whose
+// Steps ran more than a single bare department (respawnBranch below).
 type failedBranch struct {
 	DeptID            string
+	Steps             []dsl.ExecutionStep
 	LastCompletedNode domain.NodeKey
 	Err               error
 }
@@ -41,12 +44,14 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 	settle := wf.NewChannel(ctx)
 	deptIDs := make([]string, 0, len(branches))
 	cancels := make(map[string]wf.CancelFunc, len(branches))
+	branchSteps := make(map[string][]dsl.ExecutionStep, len(branches))
 	// resolved guards two races a force-forward introduces: a stale settle
 	// landing after its branch has already been force-forwarded past, and a
 	// duplicate/late force-forward for a dept already resolved.
 	resolved := make(map[string]bool, len(branches))
 	for _, b := range branches {
 		deptIDs = append(deptIDs, b.DeptID)
+		branchSteps[b.DeptID] = b.Steps
 		bctx, cancel := wf.WithCancel(ctx)
 		cancels[b.DeptID] = cancel
 		deptID, steps := b.DeptID, b.Steps
@@ -76,7 +81,7 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 			resolved[out.DeptID] = true
 			remaining--
 			if out.Err != nil {
-				failed = append(failed, failedBranch{DeptID: out.DeptID, LastCompletedNode: out.LastNode, Err: out.Err})
+				failed = append(failed, failedBranch{DeptID: out.DeptID, Steps: branchSteps[out.DeptID], LastCompletedNode: out.LastNode, Err: out.Err})
 			} else {
 				completed = append(completed, completedBranch{DeptID: out.DeptID, LastNode: out.LastNode})
 			}
@@ -216,12 +221,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 				in.msgBuf.ResetSpan([]domain.NodeKey{fb.LastCompletedNode})
 				respawning++
 				wf.Go(ctx, func(gctx wf.Context) {
-					dept := findDepartment(plan, fb.DeptID)
-					startIdx := 0
-					if dept != nil {
-						startIdx = stageIndexAfter(dept, fb.LastCompletedNode)
-					}
-					node, err := in.runDepartmentFrom(gctx, plan, fb.DeptID, startIdx)
+					node, err := in.respawnBranch(gctx, plan, fb, admin)
 					settle.Send(gctx, branchOutcome{DeptID: fb.DeptID, LastNode: node, Err: err})
 				})
 			}
@@ -254,6 +254,71 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 		return stepOutcome{}, err
 	}
 	return stepOutcome{LastNode: preFork}, nil
+}
+
+// respawnBranch resumes a DEGRADED-failed branch (execution LLD §3.3's
+// respawn procedure). fb.LastCompletedNode's own department is what
+// actually needs resuming — not necessarily fb.DeptID itself, since a
+// branch's Steps can run more than one department in sequence before
+// failing (fb.DeptID is only the branch's own stable identity, set once at
+// dispatch — dispatch.go's runParallel).
+func (in *interpreter) respawnBranch(ctx wf.Context, plan *dsl.CompiledPlan, fb failedBranch, admin wf.Channel) (domain.NodeKey, error) {
+	if fb.LastCompletedNode == "" {
+		// Nothing in this branch completed before it failed — safe to
+		// re-run its entire original step list from the top.
+		out, err := in.runSteps(ctx, plan, fb.Steps, admin)
+		return out.LastNode, err
+	}
+
+	resumeDept := deptFromNodeKey(fb.LastCompletedNode)
+	dept := findDepartment(plan, resumeDept)
+	if dept == nil {
+		// resumeDept isn't a plain department (e.g. inside a CallPool's or
+		// SubWorkflow's own inline recursion) — this interpreter has no
+		// finer-grained resume pointer for that shape. Re-running the whole
+		// branch is the safe fallback, matching redirectSteps' own
+		// documented isolation fallback for the same structural limit
+		// (workflow.go) — it may re-run an already-completed department
+		// within this branch, but that beats respawn failing every time.
+		out, err := in.runSteps(ctx, plan, fb.Steps, admin)
+		return out.LastNode, err
+	}
+
+	node, err := in.runDepartmentFrom(ctx, plan, resumeDept, stageIndexAfter(dept, fb.LastCompletedNode))
+	if err != nil {
+		return node, err
+	}
+	rest := stepsAfterDept(fb.Steps, resumeDept)
+	if len(rest) == 0 {
+		return node, nil
+	}
+	out, err := in.runSteps(ctx, plan, rest, admin)
+	if out.LastNode != "" {
+		node = out.LastNode
+	}
+	return node, err
+}
+
+// stepsAfterDept returns whatever branchSteps still queued strictly after
+// deptID within its own top-level Sequential list — deptID itself is
+// excluded, since respawnBranch above already dispatches it separately via
+// a stage-indexed resume. deptID nested inside a Parallel/Exclusive/
+// SubWorkflow step returns nil: this interpreter has no finer-grained
+// continuation pointer for that shape (same limit as redirectSteps'
+// isolation fallback, workflow.go).
+func stepsAfterDept(branchSteps []dsl.ExecutionStep, deptID string) []dsl.ExecutionStep {
+	for i, step := range branchSteps {
+		for j, d := range step.Sequential {
+			if d == deptID {
+				var out []dsl.ExecutionStep
+				if rest := step.Sequential[j+1:]; len(rest) > 0 {
+					out = append(out, dsl.ExecutionStep{Sequential: append([]string{}, rest...)})
+				}
+				return append(out, branchSteps[i+1:]...)
+			}
+		}
+	}
+	return nil
 }
 
 func indexOfFailedBranch(failed []failedBranch, deptID string) int {

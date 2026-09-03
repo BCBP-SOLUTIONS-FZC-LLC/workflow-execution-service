@@ -142,6 +142,113 @@ func TestExecute_ParallelBranchFailureDegradesThenForceBackRespawns(t *testing.T
 	}
 }
 
+// multiDeptBranchCollaboration is parallelCollaboration's shape but with
+// billing's Parallel branch running TWO departments in sequence
+// ("billing_charge" then "billing_invoice") rather than one — the shape
+// respawnBranch (degraded.go) exists to resume correctly: fb.DeptID (the
+// branch's own stable identity, "billing_charge") is not necessarily the
+// department that actually needs resuming.
+func multiDeptBranchCollaboration() *dsl.CompiledCollaboration {
+	return &dsl.CompiledCollaboration{
+		MainPlan: "main",
+		Plans: []*dsl.CompiledPlan{
+			{
+				Name: "main",
+				Departments: []dsl.DepartmentDef{
+					{ID: "warehouse", Stages: []dsl.StageDef{{Type: "prep", Activity: "pack_order"}}},
+					{ID: "billing_charge", Stages: []dsl.StageDef{{Type: "prep", Activity: "charge_card"}}},
+					{ID: "billing_invoice", Stages: []dsl.StageDef{{Type: "prep", Activity: "send_invoice"}}},
+				},
+				Execution: dsl.ExecutionPlan{
+					Steps: []dsl.ExecutionStep{
+						{Parallel: []dsl.ParallelBranch{
+							{DeptID: "warehouse", Steps: []dsl.ExecutionStep{{Sequential: []string{"warehouse"}}}},
+							{DeptID: "billing_charge", Steps: []dsl.ExecutionStep{{Sequential: []string{"billing_charge", "billing_invoice"}}}},
+						}},
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestExecute_ParallelBranchRespawnResumesPastLastCompletedDeptNotFromScratch
+// is regression coverage for a bug where DEGRADED respawn always resumed via
+// fb.DeptID (the branch's own stable identity) treated as a bare
+// DepartmentDef — for a branch running more than one department in sequence,
+// this either errored respawn outright (a non-department DeptID) or silently
+// re-ran the WRONG/already-completed department while never actually
+// retrying the one that failed. billing_charge succeeds, billing_invoice
+// fails, force-back must resume billing_invoice — not re-run billing_charge.
+func TestExecute_ParallelBranchRespawnResumesPastLastCompletedDeptNotFromScratch(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := multiDeptBranchCollaboration()
+	chargeCalls, invoiceCalls := 0, 0
+	firstInvoiceAttempt := true
+	registerFakeActivities(env, collab, &activityHooks{createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+		switch in.NodeKey {
+		case "billing_charge/prep":
+			chargeCalls++
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		case "billing_invoice/prep":
+			invoiceCalls++
+			if firstInvoiceAttempt {
+				firstInvoiceAttempt = false
+				return port.CreateTaskOutput{}, temporal.NewApplicationError("invoice service down", "ValidationError")
+			}
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		default:
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		}
+	}})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+		})
+	}, time.Millisecond)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "billing_charge", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+		})
+	}, 2*time.Millisecond)
+
+	// billing_charge/prep resolves, billing_invoice/prep fails and DEGRADEs.
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetDeptID: "billing_charge", RecordVersion: 1,
+		})
+	}, 10*time.Millisecond)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "billing_invoice", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+		})
+	}, 20*time.Millisecond)
+
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+	})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	var out wfengine.ExecuteOutput
+	if err := env.GetWorkflowResult(&out); err != nil {
+		t.Fatalf("GetWorkflowResult error: %v", err)
+	}
+	if chargeCalls != 1 {
+		t.Errorf("billing_charge CreateTaskActivity calls = %d, want exactly 1 — respawn must not re-run the already-completed department", chargeCalls)
+	}
+	if invoiceCalls != 2 {
+		t.Errorf("billing_invoice CreateTaskActivity calls = %d, want 2 (initial failure + respawn) — respawn must actually retry the department that failed", invoiceCalls)
+	}
+	if out.Status != domain.InstanceStatusCompleted {
+		t.Errorf("Status = %v, want COMPLETED", out.Status)
+	}
+}
+
 // TestExecute_ActiveParallelForceForwardSupersedesOneBranch closes the T1.1
 // gap: instance-force-forward's LLD §3.1 precondition is "RUNNING or
 // DEGRADED", not DEGRADED-only — force-forward must resolve a still-active

@@ -39,8 +39,10 @@ func TestExecute_CallPoolIgnoredCreatesAdminStubTask(t *testing.T) {
 	registerFakeActivities(env, collab, nil)
 
 	env.RegisterDelayedCallback(func() {
+		// NodeID is visit-qualified ("vendor-pool#1") so two concurrent
+		// branches calling the same pool never collide on one NodeKey.
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "call_pool", ToStage: "approve", NodeID: "vendor-pool", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "call_pool", ToStage: "approve", NodeID: "vendor-pool#1", ResultJSON: "{}", RecordVersion: 1,
 		})
 	}, time.Millisecond)
 

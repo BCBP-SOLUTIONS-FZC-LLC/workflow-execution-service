@@ -61,6 +61,12 @@ type interpreter struct {
 	// by an active-parallel-gateway force-back (LLD §2.7).
 	pauseGates map[string]wf.Channel
 
+	// callPoolVisits: pool name -> how many times runCallPool (callpool.go)
+	// has dispatched an Ignored target for it — qualifies the synthetic
+	// admin-stub task's NodeID so two concurrent Parallel branches calling
+	// the same pool never collide on one NodeKey.
+	callPoolVisits map[string]int64
+
 	status domain.InstanceStatus
 
 	// parallelDepth >0 while a Parallel gateway is aggregating; routes each
@@ -85,6 +91,7 @@ func newInterpreter(tenantID, instanceID, initialContextJSON string, collab *dsl
 		pending:        make(map[domain.NodeKey]wf.Channel),
 		pendingSignals: make(map[domain.NodeKey]stageTransitionSignal),
 		pauseGates:     make(map[string]wf.Channel),
+		callPoolVisits: make(map[string]int64),
 		status:         domain.InstanceStatusRunning,
 	}
 }

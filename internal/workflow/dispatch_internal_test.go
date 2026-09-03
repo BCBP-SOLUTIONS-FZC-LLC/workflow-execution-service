@@ -563,6 +563,57 @@ func TestRunStepsUnpopulatedVariantErrors(t *testing.T) {
 	}
 }
 
+// TestRunStepsSequentialPreservesLastNodeOnLaterFailure is regression
+// coverage for a bug where a Sequential list's second department failing
+// overwrote `last` with its own (empty, since its first stage never
+// completed) return value — losing the first department's real completion.
+// Callers (DEGRADED respawn, RecordForceRoute's audit trail) depend on
+// LastNode surviving a later sibling's failure.
+func TestRunStepsSequentialPreservesLastNodeOnLaterFailure(t *testing.T) {
+	env := newTestEnv()
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			if in.NodeKey == "dept2/prep" {
+				return port.CreateTaskOutput{}, errors.New("dept2 failed")
+			}
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCreateTask},
+	)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "dept1", ToStage: "prep", ResultJSON: "{}"})
+	}, time.Millisecond)
+
+	var lastNode domain.NodeKey
+	env.ExecuteWorkflow(func(ctx wf.Context) error {
+		in := newInterpreter("tenant", "instance", "", nil)
+		admin := wf.NewBufferedChannel(ctx, 1)
+		baseAdmin := wf.NewBufferedChannel(ctx, 1)
+		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
+
+		plan := &dsl.CompiledPlan{
+			Name: "main",
+			Departments: []dsl.DepartmentDef{
+				{ID: "dept1", Stages: []dsl.StageDef{{Type: "prep"}}},
+				{ID: "dept2", Stages: []dsl.StageDef{{Type: "prep"}}},
+			},
+		}
+		out, err := in.runSteps(ctx, plan, []dsl.ExecutionStep{{Sequential: []string{"dept1", "dept2"}}}, admin)
+		lastNode = out.LastNode
+		if err == nil {
+			return errBadHistoryLen(-6)
+		}
+		return nil
+	})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	if lastNode != "dept1/prep" {
+		t.Errorf("LastNode = %q, want dept1/prep — dept2's failure must not overwrite dept1's real completion", lastNode)
+	}
+}
+
 // TestEnterDegradedUnknownTargetDeptIsANoOp exercises enterDegraded's
 // idx<0 early-return branches: a force-forward/force-back naming a
 // department that isn't actually failed is dropped, not misapplied to the

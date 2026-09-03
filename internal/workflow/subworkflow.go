@@ -11,7 +11,12 @@ import (
 // Temporal execution — never a child workflow (execution LLD §2.3) — racing
 // its own completion against the subprocess's boundary events (§2.2).
 func (in *interpreter) runSubWorkflow(ctx wf.Context, plan *dsl.CompiledPlan, sw *dsl.SubWorkflowStep, admin wf.Channel) (domain.NodeKey, error) {
-	doneCh := wf.NewChannel(ctx)
+	// Buffered: the interrupting-boundary path below returns without ever
+	// receiving from doneCh, so the child goroutine's own Send must not
+	// block on a listener that's gone — an unbuffered channel here leaked
+	// one coroutine per interrupting boundary fired, for the rest of the
+	// workflow execution.
+	doneCh := wf.NewBufferedChannel(ctx, 1)
 	// errCh: pushed to on a matching ErrorCode. Nothing pushes to it yet —
 	// error-raising activities are a sibling task's concern.
 	errCh := wf.NewChannel(ctx)
