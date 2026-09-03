@@ -54,6 +54,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	// produces the real, capturable shutdown func.
 	observability.Register()
 	observability.RegisterPGMetrics(cfg.OTELServiceName, cfg.BuildVersion)
+	observability.RegisterEventsMetrics(cfg.OTELServiceName, cfg.BuildVersion)
 	tracingShutdown := observability.InitTracing()
 	cleanups = append(cleanups, tracingShutdown)
 
@@ -65,6 +66,7 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, err
 	}
 	cleanups = append(cleanups, appPool.Close)
+	observability.RegisterPoolStats(appPool, cfg.OTELServiceName+"-app")
 
 	relayPool, err := newRelayPool(ctx, cfg, log)
 	if err != nil {
@@ -72,6 +74,7 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, err
 	}
 	cleanups = append(cleanups, relayPool.Close)
+	observability.RegisterPoolStats(relayPool, cfg.OTELServiceName+"-relay")
 
 	cache, cacheClient, err := newCacheStore(ctx, cfg)
 	if err != nil {

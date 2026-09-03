@@ -19,6 +19,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
 	outboundgrpc "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/grpc"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pglogger"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pgtracer"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
 	outboundtemporal "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
@@ -119,10 +120,12 @@ func buildDeps(cfg *config.Config) (*outboundtemporal.Deps, port.ActiveTaskQueue
 		SlowQueryThreshold: time.Duration(cfg.PGSlowQueryThresholdMS) * time.Millisecond,
 		GUCProvider:        pgcommon.GUCSetFromContext,
 		Logger:             pglogger.New(wlog),
+		Tracer:             pgtracer.New(cfg.OTELServiceName),
 	})
 	if err != nil {
 		return nil, nil, nil, nil, nil, fmt.Errorf("new postgres pool: %w", err)
 	}
+	observability.RegisterPoolStats(pool, cfg.OTELServiceName+"-worker")
 
 	validator, err := eventbus.NewSchemaValidator()
 	if err != nil {
