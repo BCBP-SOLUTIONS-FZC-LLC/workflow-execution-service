@@ -35,6 +35,10 @@ func newTestEnv() *testsuite.TestWorkflowEnvironment {
 		},
 		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
 	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.UpdateTaskStatusInput) error { return nil },
+		activity.RegisterOptions{Name: port.ActivityUpdateTaskStatus},
+	)
 	return env
 }
 
@@ -708,10 +712,38 @@ func TestExecuteFailsWhenMainPlanMissing(t *testing.T) {
 
 // TestRunTaskStageInterruptingBoundaryTransfers exercises runTaskStage's
 // fired-and-interrupting path directly: the in-flight task is abandoned and
-// control transfers to the boundary's TargetDept (LLD §2.2 step 5).
+// control transfers to the boundary's TargetDept (LLD §2.2 step 5) — and the
+// abandoned task is marked SUPERSEDED rather than left open forever with no
+// terminal status.
 func TestRunTaskStageInterruptingBoundaryTransfers(t *testing.T) {
-	env := newTestEnv()
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
 	env.SetStartTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCreateTask},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.UpdateInstanceNodesInput) error { return nil },
+		activity.RegisterOptions{Name: port.ActivityUpdateInstanceNodes},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
+			return port.CompleteAssignmentOutput{AllDone: true}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
+	)
+
+	var supersededCalls []port.UpdateTaskStatusInput
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.UpdateTaskStatusInput) error {
+			supersededCalls = append(supersededCalls, in)
+			return nil
+		},
+		activity.RegisterOptions{Name: port.ActivityUpdateTaskStatus},
+	)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "escalation", ToStage: "prep", ResultJSON: "{}"})
@@ -736,6 +768,9 @@ func TestRunTaskStageInterruptingBoundaryTransfers(t *testing.T) {
 	})
 	if err := env.GetWorkflowError(); err != nil {
 		t.Fatalf("workflow returned error: %v", err)
+	}
+	if len(supersededCalls) != 1 || supersededCalls[0].TaskID != "sales/n1" || supersededCalls[0].Status != domain.TaskStatusSuperseded {
+		t.Errorf("UpdateTaskStatusActivity calls = %+v, want exactly one SUPERSEDED call for sales/n1", supersededCalls)
 	}
 }
 

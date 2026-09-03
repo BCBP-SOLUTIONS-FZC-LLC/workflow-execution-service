@@ -34,6 +34,7 @@ const (
 	ActivityResumeInstance       = "ResumeInstanceActivity"
 	ActivityCancelInstance       = "CancelInstanceActivity"
 	ActivityReassignAssignment   = "ReassignAssignmentActivity"
+	ActivityUpdateTaskStatus     = "UpdateTaskStatusActivity"
 )
 
 type GetCompiledPlanInput struct {
@@ -171,5 +172,17 @@ type ReassignAssignmentInput struct {
 	OldUserID     string
 	NewUserID     string
 	AdminUserID   string
+	RecordVersion int64
+}
+
+// UpdateTaskStatusInput drives a task-status-only transition — an
+// interrupting boundary event abandoning an in-flight task (marking it
+// SUPERSEDED, RecordVersion left zero since this is a system-initiated
+// transition with no caller-asserted expected version to check) is this
+// package's own caller today.
+type UpdateTaskStatusInput struct {
+	TaskID        string
+	TenantID      string
+	Status        domain.TaskStatus
 	RecordVersion int64
 }
