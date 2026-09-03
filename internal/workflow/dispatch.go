@@ -121,6 +121,26 @@ func findDepartment(plan *dsl.CompiledPlan, id string) *dsl.DepartmentDef {
 	return nil
 }
 
+// runDepartmentAtKey resolves key to its index within deptID's compiled
+// Stages via stageNodeKey and runs from there (execution LLD §2.6):
+// TargetNodeID/TargetStage and their Revert* counterparts give
+// machine-addressable routing for the case a bare department reference
+// can't express — a branch target that shares a department with a stage
+// already run earlier in the same plan, where starting at index 0 would
+// re-run it.
+func (in *interpreter) runDepartmentAtKey(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, key domain.NodeKey) (domain.NodeKey, error) {
+	dept := findDepartment(plan, deptID)
+	if dept == nil {
+		return "", fmt.Errorf("workflow: department %q not found in plan %q", deptID, plan.Name)
+	}
+	for i := range dept.Stages {
+		if stageNodeKey(deptID, &dept.Stages[i]) == key {
+			return in.runDepartmentFrom(ctx, plan, deptID, i)
+		}
+	}
+	return "", fmt.Errorf("workflow: node %q not found in department %q stages", key, deptID)
+}
+
 func findPlan(collab *dsl.CompiledCollaboration, name string) *dsl.CompiledPlan {
 	for _, p := range collab.Plans {
 		if p.Name == name {
@@ -194,13 +214,43 @@ func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, bran
 	// Forward Target and condition-triggered RevertTo share the same
 	// transfer mechanism (execution LLD §2.6 point 4); a revert additionally
 	// pops history and resets the message buffer, matching force-back (§2.7).
-	deptID := winner.Target
 	if winner.RevertToDept != "" {
-		deptID = winner.RevertToDept
-		target := domain.NodeKey(deptID + "/" + winner.RevertToStage)
-		popped := in.history.PopTo(target)
-		in.msgBuf.ResetSpan(popped)
+		node, err := in.runExclusiveRevert(ctx, plan, winner)
+		return stepOutcome{LastNode: node}, err
 	}
-	node, err := in.runDepartment(ctx, plan, deptID)
+
+	// TargetNodeID, then TargetStage, give machine-addressable routing when
+	// a bare department reference would be ambiguous (LLD §2.6's field
+	// table); fall back to Target's department-from-the-top otherwise.
+	identifier := winner.TargetNodeID
+	if identifier == "" {
+		identifier = winner.TargetStage
+	}
+	if identifier == "" {
+		node, err := in.runDepartment(ctx, plan, winner.Target)
+		return stepOutcome{LastNode: node}, err
+	}
+	node, err := in.runDepartmentAtKey(ctx, plan, winner.Target, domain.NodeKey(winner.Target+"/"+identifier))
 	return stepOutcome{LastNode: node}, err
+}
+
+// runExclusiveRevert handles a condition-triggered back-edge: pop history
+// down to the revert target, reset the message buffer over the popped span,
+// then dispatch — via RevertToNodeID, then RevertToStage, for precise
+// routing, else RevertToDept's department-from-the-top (same precedence as
+// the forward path, LLD §2.6).
+func (in *interpreter) runExclusiveRevert(ctx wf.Context, plan *dsl.CompiledPlan, winner *dsl.ExclusiveBranch) (domain.NodeKey, error) {
+	deptID := winner.RevertToDept
+	identifier := winner.RevertToNodeID
+	if identifier == "" {
+		identifier = winner.RevertToStage
+	}
+	target := domain.NodeKey(deptID + "/" + identifier)
+	popped := in.history.PopTo(target)
+	in.msgBuf.ResetSpan(popped)
+
+	if identifier == "" {
+		return in.runDepartment(ctx, plan, deptID)
+	}
+	return in.runDepartmentAtKey(ctx, plan, deptID, target)
 }

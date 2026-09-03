@@ -56,6 +56,9 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 	}
 
 	if err := in.registerStatusQuery(ctx); err != nil {
+		_ = updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
+			InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusFailed,
+		})
 		return ExecuteOutput{Status: domain.InstanceStatusFailed}, err
 	}
 
@@ -163,18 +166,62 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 
 // redirectSteps resumes at deptID by finding it within original — the
 // plan's own top-level steps, never an already-redirected list, so repeated
-// redirects don't compound. deptID not found here (e.g. nested inside a
-// SubWorkflow/Parallel) falls back to running it in isolation — the DSL has
-// no finer-grained continuation pointer than dept+stage+nodeID.
+// redirects don't compound — recursing into Parallel branches, Exclusive
+// branches, and inline SubWorkflow steps to find it wherever it's nested,
+// and always preserving whatever steps were still owed after the containing
+// step once found (never truncating the rest of the plan). A CallPool step
+// references a separately compiled plan (runCallPool resolves it via
+// in.collab, not the plan/steps in scope here) with no deptID surface this
+// function can reach — the one case still falling back to running deptID in
+// isolation with nothing else queued after it.
 func redirectSteps(original []dsl.ExecutionStep, deptID string) []dsl.ExecutionStep {
-	for i, step := range original {
-		for j, d := range step.Sequential {
-			if d == deptID {
-				remainder := append([]string{}, step.Sequential[j:]...)
-				out := []dsl.ExecutionStep{{Sequential: remainder}}
-				return append(out, original[i+1:]...)
-			}
-		}
+	if cont, ok := findRedirectTarget(original, deptID); ok {
+		return cont
 	}
 	return []dsl.ExecutionStep{{Sequential: []string{deptID}}}
+}
+
+// findRedirectTarget searches steps in order, returning deptID's isolated
+// continuation (itself, plus whatever its own containing structure still
+// owed it) followed by every step after the one it was found in.
+func findRedirectTarget(steps []dsl.ExecutionStep, deptID string) ([]dsl.ExecutionStep, bool) {
+	for i := range steps {
+		if cont, ok := redirectWithinStep(&steps[i], deptID); ok {
+			return append(cont, steps[i+1:]...), true
+		}
+	}
+	return nil, false
+}
+
+// redirectWithinStep looks for deptID inside one ExecutionStep's Sequential,
+// Parallel, Exclusive, and SubWorkflow variants.
+func redirectWithinStep(step *dsl.ExecutionStep, deptID string) ([]dsl.ExecutionStep, bool) {
+	for j, d := range step.Sequential {
+		if d == deptID {
+			remainder := append([]string{}, step.Sequential[j:]...)
+			return []dsl.ExecutionStep{{Sequential: remainder}}, true
+		}
+	}
+	for _, b := range step.Parallel {
+		if b.DeptID == deptID {
+			// b.Steps is the branch's own full dispatch for deptID — never
+			// prepend a bare {Sequential: [deptID]} ahead of it, or deptID
+			// would run twice.
+			return b.Steps, true
+		}
+		if cont, ok := findRedirectTarget(b.Steps, deptID); ok {
+			return cont, true
+		}
+	}
+	for _, b := range step.Exclusive {
+		if b.Target == deptID || b.RevertToDept == deptID {
+			return []dsl.ExecutionStep{{Sequential: []string{deptID}}}, true
+		}
+	}
+	if step.SubWorkflow != nil {
+		if cont, ok := findRedirectTarget(step.SubWorkflow.Plan.Steps, deptID); ok {
+			return cont, true
+		}
+	}
+	return nil, false
 }
