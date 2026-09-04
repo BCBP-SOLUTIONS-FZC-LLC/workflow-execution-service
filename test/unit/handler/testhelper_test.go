@@ -273,8 +273,9 @@ var _ port.WorkflowClient = (*fakeWorkflowClient)(nil)
 // in-memory map — used by the idempotency wrapper's tests. getErr, when set,
 // forces Get to return an error (e.g. a transient cache-unavailable case).
 type fakeCacheStore struct {
-	data   map[string]string
-	getErr error
+	data     map[string]string
+	getErr   error
+	setNXErr error
 }
 
 func newFakeCacheStore() *fakeCacheStore {
@@ -301,6 +302,9 @@ func (f *fakeCacheStore) Del(_ context.Context, keys ...string) error {
 }
 
 func (f *fakeCacheStore) SetNX(_ context.Context, key string, value string, _ time.Duration) (bool, error) {
+	if f.setNXErr != nil {
+		return false, f.setNXErr
+	}
 	if _, exists := f.data[key]; exists {
 		return false, nil
 	}
@@ -311,6 +315,31 @@ func (f *fakeCacheStore) SetNX(_ context.Context, key string, value string, _ ti
 func (f *fakeCacheStore) Ping(_ context.Context) error { return nil }
 
 var _ port.CacheStore = (*fakeCacheStore)(nil)
+
+// setFailingCacheStore delegates to a real fakeCacheStore but always fails
+// Set — used to exercise storeResult's "cache the real response" failure
+// path independently of any other cache operation.
+type setFailingCacheStore struct {
+	*fakeCacheStore
+}
+
+func (f *setFailingCacheStore) Set(context.Context, string, string, time.Duration) error {
+	return errors.New("cache set failed")
+}
+
+var _ port.CacheStore = (*setFailingCacheStore)(nil)
+
+// delFailingCacheStore delegates to a real fakeCacheStore but always fails
+// Del — used to exercise storeResult's "release the claim" failure path.
+type delFailingCacheStore struct {
+	*fakeCacheStore
+}
+
+func (f *delFailingCacheStore) Del(context.Context, ...string) error {
+	return errors.New("cache del failed")
+}
+
+var _ port.CacheStore = (*delFailingCacheStore)(nil)
 
 // fakeProcessedEventRepository is the hand-rolled fake for
 // port.ProcessedEventRepository, backed by an in-memory set of
@@ -375,6 +404,12 @@ func (f *fakeRecencyGuard) Commit(_ context.Context, scopeKey string, eventTime 
 		f.last[scopeKey] = eventTime
 	}
 	return nil
+}
+
+// WithLock is a single-process test fake — no real locking needed, fn just
+// runs directly.
+func (f *fakeRecencyGuard) WithLock(ctx context.Context, _ string, fn func(context.Context) error) error {
+	return fn(ctx)
 }
 
 var _ port.RecencyGuard = (*fakeRecencyGuard)(nil)
@@ -522,6 +557,10 @@ func (e *erroringRecencyGuard) CheckAndCommit(context.Context, string, time.Time
 
 func (e *erroringRecencyGuard) Commit(context.Context, string, time.Time) error { return e.err }
 
+func (e *erroringRecencyGuard) WithLock(context.Context, string, func(context.Context) error) error {
+	return e.err
+}
+
 var _ port.RecencyGuard = (*erroringRecencyGuard)(nil)
 
 // erroringProcessedEventRepository lets a test force IsProcessed and/or
@@ -632,7 +671,7 @@ func newDelegateHandlerWithCache(wc *fakeWorkflowClient, cache *fakeCacheStore) 
 	return handler.New(handler.Services{WorkflowClient: wc, Cache: cache, IdempotencyTTL: time.Hour})
 }
 
-func newDelegateHandlerWithCacheAndLog(wc *fakeWorkflowClient, cache *fakeCacheStore, log *fakeLogger) *handler.Handler {
+func newDelegateHandlerWithCacheAndLog(wc *fakeWorkflowClient, cache port.CacheStore, log *fakeLogger) *handler.Handler {
 	return handler.New(handler.Services{WorkflowClient: wc, Cache: cache, IdempotencyTTL: time.Hour, Log: log})
 }
 

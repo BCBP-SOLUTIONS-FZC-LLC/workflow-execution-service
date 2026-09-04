@@ -61,6 +61,23 @@ func TestHandleInternalEvent_EmptyType_Returns400(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code, "an envelope missing its type entirely is malformed, not merely an unrecognized future type")
 }
 
+// TestHandleInternalEvent_ZeroTimestamp_Returns400 is a regression test: a
+// zero/missing envelope timestamp used to flow straight through into
+// time.Since(zero) for the delegation-reroute duration metric and into the
+// recency-guard scope key, silently corrupting both rather than being
+// rejected as the malformed envelope it is.
+func TestHandleInternalEvent_ZeroTimestamp_Returns400(t *testing.T) {
+	fakes := newEventsFakes()
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	body := envelope("delegation.started", uuid.New(), testTenantID, time.Now(), map[string]any{})
+	delete(body, "time")
+
+	w := postEvent(router, body)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
 func TestHandleInternalEvent_MalformedEnvelope_Returns400(t *testing.T) {
 	fakes := newEventsFakes()
 	router := newInternalRouter(newEventsHandler(fakes))

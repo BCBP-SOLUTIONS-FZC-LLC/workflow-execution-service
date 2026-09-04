@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -232,4 +233,20 @@ func TestOverrideNodeAssignee_NotAdmin_Forbidden(t *testing.T) {
 	}
 	decodeJSON(t, w.Body, &body)
 	assert.Equal(t, "FORBIDDEN", body.Code)
+}
+
+func TestOverrideNodeAssignee_ReasonTooLong_400(t *testing.T) {
+	fake := &fakeTaskService{
+		getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
+			t.Fatal("must not call the service when reason exceeds the 500-char cap")
+			return nil, nil
+		},
+	}
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
+
+	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
+		"new_user_id": uuid.New(), "record_version": 4, "reason": strings.Repeat("a", 501),
+	})))
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }

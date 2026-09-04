@@ -11,7 +11,7 @@ import (
 
 type overrideReq struct {
 	NewUserID     uuid.UUID `json:"new_user_id" binding:"required"`
-	Reason        string    `json:"reason"`
+	Reason        string    `json:"reason" binding:"max=500"`
 	RecordVersion int64     `json:"record_version" binding:"required"`
 }
 

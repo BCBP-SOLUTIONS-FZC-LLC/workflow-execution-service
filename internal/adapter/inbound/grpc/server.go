@@ -24,6 +24,23 @@ func NewServer(log port.Logger, guard port.ArchiveGuard, pauser port.UserTaskPau
 	return &Server{log: log, guard: guard, pauser: pauser}
 }
 
+// logger guards against a nil log the same way every internal/core/service
+// reconciler's own logger() accessor does, since a nil port.Logger would
+// otherwise panic on the first Error/Info call below.
+func (s *Server) logger() port.Logger {
+	if s.log != nil {
+		return s.log
+	}
+	return noopLogger{}
+}
+
+type noopLogger struct{}
+
+func (noopLogger) Debug(string, map[string]any) { /* no-op fallback */ }
+func (noopLogger) Info(string, map[string]any)  { /* no-op fallback */ }
+func (noopLogger) Warn(string, map[string]any)  { /* no-op fallback */ }
+func (noopLogger) Error(string, map[string]any) { /* no-op fallback */ }
+
 func (s *Server) CheckActiveInstances(
 	ctx context.Context,
 	req *executionv1.CheckActiveInstancesRequest,
@@ -45,7 +62,7 @@ func (s *Server) CheckActiveInstances(
 
 	hasActive, count, err := s.guard.CheckActiveInstances(ctx, tenantID, workflowID)
 	if err != nil {
-		s.log.Error("CheckActiveInstances: guard error", map[string]any{"error": err.Error()})
+		s.logger().Error("CheckActiveInstances: guard error", map[string]any{"error": err.Error()})
 		return nil, status.Error(codes.Internal, "internal error") //nolint:wrapcheck
 	}
 	return &executionv1.CheckActiveInstancesResponse{HasActive: hasActive, Count: count}, nil
@@ -71,7 +88,7 @@ func (s *Server) PauseUserTasks(
 	}
 
 	if err := s.pauser.PauseUserTasks(ctx, tenantID, userID); err != nil {
-		s.log.Error("PauseUserTasks: pauser error", map[string]any{"error": err.Error()})
+		s.logger().Error("PauseUserTasks: pauser error", map[string]any{"error": err.Error()})
 		return nil, status.Error(codes.Internal, "internal error") //nolint:wrapcheck
 	}
 	return &executionv1.PauseUserTasksResponse{}, nil

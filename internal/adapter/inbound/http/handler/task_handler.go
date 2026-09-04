@@ -270,7 +270,7 @@ func (h *Handler) CompleteTask(c *gin.Context) {
 }
 
 type deferReq struct {
-	Reason        string `json:"reason"`
+	Reason        string `json:"reason" binding:"max=500"`
 	RecordVersion int64  `json:"record_version" binding:"required"`
 }
 

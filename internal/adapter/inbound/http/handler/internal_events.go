@@ -93,6 +93,13 @@ func (h *Handler) decodeEnvelope(c *gin.Context) (events.Envelope[json.RawMessag
 		h.badPayload(c, "unknown", "missing event type")
 		return env, false
 	}
+	if env.Timestamp.IsZero() {
+		// A zero timestamp would silently corrupt the recency-guard scope key
+		// and the delegation-reroute duration metric (time.Since(zero) reads
+		// as a multi-decade "duration").
+		h.badPayload(c, env.Type, "missing or zero envelope timestamp")
+		return env, false
+	}
 
 	if env.SchemaID != "" {
 		decoded, ok := h.decodeSchemaRegistryPayload(c, env)
@@ -104,9 +111,16 @@ func (h *Handler) decodeEnvelope(c *gin.Context) (events.Envelope[json.RawMessag
 	return env, true
 }
 
+// unhandledType still returns 200 (an unrecognized type must never train the
+// upstream event bridge to retry forever), but records its own
+// "unhandled_type" result label rather than markOK's "ok" — folding it into
+// "ok" made a wire-format mismatch (like the DelegationStarted/
+// TenantStateChanged casing bug this handler once had) indistinguishable
+// from a real success in ingest metrics/dashboards.
 func (h *Handler) unhandledType(c *gin.Context, eventType string) {
-	h.logInfo("internal events: ignoring unhandled type", map[string]any{"event_type": eventType})
-	h.markOK(eventType)
+	h.logWarn("internal events: ignoring unhandled type", map[string]any{"event_type": eventType})
+	incIngestTotal(eventType, "unhandled_type")
+	markLastReceived(eventType)
 	c.Status(http.StatusOK)
 }
 
@@ -550,40 +564,52 @@ func (h *Handler) handleUserAvailabilityChanged(c *gin.Context, env events.Envel
 	}
 
 	scopeKey := "user_availability:" + tenantID.String() + ":" + userID.String()
-	shouldApply, err := h.recency.ShouldApply(c.Request.Context(), scopeKey, env.Timestamp)
-	if err != nil {
+	input := port.UserAvailabilityInput{
+		TenantID: tenantID, UserID: userID, Status: p.Status,
+		OOOFrom: oooFrom, OOOUntil: oooUntil, DelegateUserID: delegateUserID,
+	}
+	if err := h.applyUserAvailabilityLocked(c, env, input, scopeKey); err != nil {
 		h.reconcilerError(c, eventType, err)
 		return
-	}
-	if !shouldApply {
-		h.respondOK(c, eventID, consumerUser, eventType)
-		return
-	}
-
-	ctx := guCtx(c, env.TenantID)
-	if err := h.oooAvailability.Apply(ctx, port.UserAvailabilityInput{
-		TenantID:       tenantID,
-		UserID:         userID,
-		Status:         p.Status,
-		OOOFrom:        oooFrom,
-		OOOUntil:       oooUntil,
-		DelegateUserID: delegateUserID,
-	}); err != nil {
-		h.reconcilerError(c, eventType, err)
-		return
-	}
-
-	// Recency commits only after Apply has actually succeeded — never
-	// up front — so a transient Apply failure never leaves the guard
-	// advanced past an event that was never really applied (which would
-	// otherwise cause a legitimate retry to be silently skipped as stale).
-	if err := h.recency.Commit(c.Request.Context(), scopeKey, env.Timestamp); err != nil {
-		h.logWarn("internal events: recency Commit failed after Apply succeeded", map[string]any{
-			"event_type": eventType, "scope_key": scopeKey, "error": err.Error(),
-		})
 	}
 
 	h.respondOK(c, eventID, consumerUser, eventType)
+}
+
+// applyUserAvailabilityLocked runs the recency-check-apply-commit sequence
+// under scopeKey's advisory lock — see applyTenantStateChangeLocked's
+// identical comment for why: IAM's standard, non-FIFO delivery means two
+// conflicting availability events for the same user can otherwise have
+// their Apply calls execute out of timestamp order even though Commit
+// correctly records the newer one.
+func (h *Handler) applyUserAvailabilityLocked(
+	c *gin.Context, env events.Envelope[json.RawMessage], input port.UserAvailabilityInput, scopeKey string,
+) error {
+	return h.recency.WithLock(c.Request.Context(), scopeKey, func(ctx context.Context) error {
+		shouldApply, err := h.recency.ShouldApply(ctx, scopeKey, env.Timestamp)
+		if err != nil {
+			return err
+		}
+		if !shouldApply {
+			return nil
+		}
+
+		applyCtx := guCtx(c, env.TenantID)
+		if err := h.oooAvailability.Apply(applyCtx, input); err != nil {
+			return err
+		}
+
+		// Recency commits only after Apply has actually succeeded — never
+		// up front — so a transient Apply failure never leaves the guard
+		// advanced past an event that was never really applied (which would
+		// otherwise cause a legitimate retry to be silently skipped as stale).
+		if err := h.recency.Commit(ctx, scopeKey, env.Timestamp); err != nil {
+			h.logWarn("internal events: recency Commit failed after Apply succeeded", map[string]any{
+				"event_type": eventTypeUserAvailabilityChanged, "scope_key": scopeKey, "error": err.Error(),
+			})
+		}
+		return nil
+	})
 }
 
 func (h *Handler) parseOptionalTime(c *gin.Context, eventType string, raw *string) (*time.Time, bool) {
@@ -645,43 +671,58 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 		return
 	}
 
-	// offboarded is terminal and never skipped, even if changed_at looks
-	// stale (LLD §6.2 item 4, Appendix A #26) — every other transition goes
-	// through the recency guard.
 	scopeKey := "tenant:" + tenantID.String()
-	if p.Status != "offboarded" {
-		shouldApply, err := h.recency.ShouldApply(c.Request.Context(), scopeKey, changedAt)
-		if err != nil {
-			h.reconcilerError(c, eventType, err)
-			return
-		}
-		if !shouldApply {
-			h.respondOK(c, eventID, consumerMembership, eventType)
-			return
-		}
-	}
-
-	ctx := guCtx(c, env.TenantID)
-	if err := h.tenantLifecycle.Apply(ctx, port.TenantLifecycleInput{
-		TenantID:       tenantID,
-		Status:         p.Status,
-		PreviousStatus: p.PreviousStatus,
-		Plan:           p.Plan,
-		PreviousPlan:   p.PreviousPlan,
-		ChangedAt:      changedAt,
-		Cause:          p.Cause,
-	}); err != nil {
+	if err := h.applyTenantStateChangeLocked(c, env, p, tenantID, scopeKey, changedAt); err != nil {
 		h.reconcilerError(c, eventType, err)
 		return
 	}
 
-	// Recency commits once, after every sub-transaction Apply carried has
-	// committed successfully — never per sub-transaction (LLD §6.2 item 4.3).
-	if err := h.recency.Commit(c.Request.Context(), scopeKey, changedAt); err != nil {
-		h.logWarn("internal events: recency Commit failed after Apply succeeded", map[string]any{
-			"event_type": eventType, "scope_key": scopeKey, "error": err.Error(),
-		})
-	}
-
 	h.respondOK(c, eventID, consumerMembership, eventType)
+}
+
+// applyTenantStateChangeLocked runs the recency-check-apply-commit sequence
+// under scopeKey's advisory lock (LLD §6.2 item 4): IAM's standard, non-FIFO
+// SNS/SQS delivery gives no ordering guarantee, and overlapping delivery for
+// the same tenant is documented as expected during bursts, not rare —
+// without the lock, an older event's Apply could execute after a newer
+// event's Apply even though Commit correctly records the newer timestamp.
+// offboarded is terminal and never skipped, even if changedAt looks stale
+// (Appendix A #26) — every other transition goes through the recency guard.
+func (h *Handler) applyTenantStateChangeLocked(
+	c *gin.Context, env events.Envelope[json.RawMessage], p tenantStateChangedPayload,
+	tenantID uuid.UUID, scopeKey string, changedAt time.Time,
+) error {
+	return h.recency.WithLock(c.Request.Context(), scopeKey, func(ctx context.Context) error {
+		if p.Status != "offboarded" {
+			shouldApply, err := h.recency.ShouldApply(ctx, scopeKey, changedAt)
+			if err != nil {
+				return err
+			}
+			if !shouldApply {
+				return nil
+			}
+		}
+
+		applyCtx := guCtx(c, env.TenantID)
+		if err := h.tenantLifecycle.Apply(applyCtx, port.TenantLifecycleInput{
+			TenantID:       tenantID,
+			Status:         p.Status,
+			PreviousStatus: p.PreviousStatus,
+			Plan:           p.Plan,
+			PreviousPlan:   p.PreviousPlan,
+			ChangedAt:      changedAt,
+			Cause:          p.Cause,
+		}); err != nil {
+			return err
+		}
+
+		// Recency commits once, after every sub-transaction Apply carried has
+		// committed successfully — never per sub-transaction (LLD §6.2 item 4.3).
+		if err := h.recency.Commit(ctx, scopeKey, changedAt); err != nil {
+			h.logWarn("internal events: recency Commit failed after Apply succeeded", map[string]any{
+				"event_type": eventTypeTenantStateChanged, "scope_key": scopeKey, "error": err.Error(),
+			})
+		}
+		return nil
+	})
 }

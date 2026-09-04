@@ -3,9 +3,11 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
 
@@ -69,4 +71,27 @@ func (r *RecencyGuardRepo) Commit(ctx context.Context, scopeKey string, eventTim
 			EventTime: eventTime,
 		})
 	})
+}
+
+// WithLock holds scopeKey's session-level advisory lock on one dedicated
+// connection for fn's entire duration. fn's own calls to ShouldApply/Commit
+// each acquire their own connection from the same pool rather than reusing
+// this one — safe as long as the pool has more than one connection (true of
+// every real deployment; PG_MIN_CONNS/PG_MAX_CONNS default to 2/10), since
+// the lock only needs to be held by this session, not by whichever
+// connection issues the guarded statements.
+func (r *RecencyGuardRepo) WithLock(ctx context.Context, scopeKey string, fn func(context.Context) error) error {
+	err := r.pool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+		if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock(hashtext($1))", scopeKey); err != nil {
+			return fmt.Errorf("acquire advisory lock: %w", err)
+		}
+		defer func() {
+			_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(hashtext($1))", scopeKey)
+		}()
+		return fn(ctx)
+	})
+	if err != nil {
+		return fmt.Errorf("recency guard: with lock: %w", err)
+	}
+	return nil
 }

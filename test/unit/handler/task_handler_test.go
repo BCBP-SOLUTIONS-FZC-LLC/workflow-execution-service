@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -421,6 +422,22 @@ func TestDeferTask(t *testing.T) {
 	}))
 
 	assert.Equal(t, http.StatusAccepted, w.Code)
+}
+
+func TestDeferTask_ReasonTooLong_400(t *testing.T) {
+	fake := &fakeTaskService{
+		deferTask: func(_ context.Context, _, _, _ uuid.UUID, reason string, _ int64) (*port.Task, error) {
+			t.Fatal("handler must not run when reason exceeds the 500-char cap")
+			return nil, nil
+		},
+	}
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
+
+	w := do(router, req(http.MethodPost, "/api/v1/tasks/"+testTaskID.String()+"/defer", map[string]any{
+		"reason": strings.Repeat("a", 501), "record_version": 4,
+	}))
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestReassignTask(t *testing.T) {

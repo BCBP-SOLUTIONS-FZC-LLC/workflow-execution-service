@@ -19,6 +19,15 @@ func signalAccepted(c *gin.Context) {
 	c.JSON(http.StatusAccepted, signalAcceptedResp{Message: "signal accepted"})
 }
 
+// actionCompleted responds for Terminate specifically: unlike the other five
+// lifecycle endpoints, Terminate is a direct DB-write-then-TerminateWorkflow
+// call, not a signal-forward (LLD §3.1) — by the time this handler returns,
+// the action has already fully happened, so "signal accepted" (202, implying
+// async processing still pending) would misdescribe it.
+func actionCompleted(c *gin.Context) {
+	c.JSON(http.StatusOK, signalAcceptedResp{Message: "action completed"})
+}
+
 func derefTime(t *time.Time) time.Time {
 	if t == nil {
 		return time.Time{}
@@ -415,11 +424,11 @@ func (h *Handler) TerminateInstance(c *gin.Context) {
 		errResponse(c, err)
 		return
 	}
-	signalAccepted(c)
+	actionCompleted(c)
 }
 
 type forceForwardInstanceReq struct {
-	TargetNodeKey string `json:"target_node_key" binding:"required"`
+	TargetNodeKey string `json:"target_node_key" binding:"required,max=255"`
 	RecordVersion int64  `json:"record_version" binding:"required"`
 }
 

@@ -621,7 +621,11 @@ func TestTerminateInstance_Success(t *testing.T) {
 	r := req(http.MethodPost, instancePath(testInstID)+"/terminate", map[string]any{"reason": "fraud detected"})
 	r.Header.Set("x-tenant-roles", "tenant_owner")
 	w := do(router, r)
-	require.Equal(t, http.StatusAccepted, w.Code)
+	// Unlike the other five lifecycle endpoints, Terminate has already fully
+	// completed (direct DB write + TerminateWorkflow) by the time this
+	// response is sent — 200, not the 202 "accepted for later processing"
+	// the genuine signal-forwards return.
+	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "fraud detected", gotReason)
 }
 
@@ -698,6 +702,18 @@ func TestForceForwardInstance_InvalidInstanceState(t *testing.T) {
 func TestForceForwardInstance_MissingTargetNodeKey(t *testing.T) {
 	router := newRouter(newInstanceHandler(&fakeInstanceService{}))
 	w := do(router, asAdmin(req(http.MethodPost, instancePath(testInstID)+"/force-forward", map[string]any{"record_version": 2})))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestForceForwardInstance_TargetNodeKeyTooLong_400(t *testing.T) {
+	fake := &fakeInstanceService{forceForward: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, int64) error {
+		t.Fatal("must not call the service when target_node_key exceeds the 255-char cap")
+		return nil
+	}}
+	router := newRouter(newInstanceHandler(fake))
+	w := do(router, asAdmin(req(http.MethodPost, instancePath(testInstID)+"/force-forward", map[string]any{
+		"target_node_key": strings.Repeat("a", 256), "record_version": 2,
+	})))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 

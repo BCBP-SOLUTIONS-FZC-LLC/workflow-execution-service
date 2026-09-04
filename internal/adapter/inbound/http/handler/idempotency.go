@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -36,25 +37,38 @@ func hashBody(b []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
+// idempotencyClaim is the placeholder value SetNX stakes atomically before
+// the wrapped handler runs, so two requests racing on the same
+// Idempotency-Key can't both win the check-then-act window a plain Get/Set
+// leaves open. A raw string, not JSON, so it's trivially distinguishable
+// from a real cachedResp without risking a false "corrupted entry" read.
+const idempotencyClaim = "CLAIMED"
+
 // WithIdempotency wraps a Gin handler with Idempotency-Key support (LLD
 // §5.9), mirroring definition_service's own implementation.
 //
-// On the first call with a given Idempotency-Key the handler runs normally
-// and the response (status + body) plus a SHA-256 hash of the request body
-// are stored in cache under a route-scoped key with the given TTL.
+// On the first call with a given Idempotency-Key, SetNX atomically claims
+// the key before the handler runs; on success the handler executes and its
+// response (status + body) plus a SHA-256 hash of the request body replace
+// the claim in cache under the given TTL.
 //
 // On subsequent requests with the same key:
+//   - If the claim hasn't resolved into a real response yet — a concurrent
+//     request is still executing, or it crashed before storing one — the
+//     request is rejected with IDEMPOTENCY_KEY_REPLAY (409) rather than
+//     also executing the handler.
 //   - If the request body hash matches the stored hash, the cached response
 //     is returned without re-executing the handler (standard idempotent replay).
 //   - If the hash differs, the request is rejected with IDEMPOTENCY_KEY_REPLAY
 //     (409) so callers know they reused a key with a different payload.
 //
-// Only 2xx responses are cached; error responses are never replayed so
-// callers can retry after fixing the request.
+// Only 2xx responses are cached; a non-2xx response releases the claim
+// (deletes the key) instead, so callers can retry immediately after fixing
+// the request rather than waiting out the full TTL.
 //
 // If cache is nil (dev/test, or before T2.1 wires a real Valkey client) or
 // the header is absent, the handler runs as-is with no idempotency
-// enforcement. A cache Get/Set failure is fail-open (LLD §5.9: Valkey being
+// enforcement. A SetNX/cache failure is fail-open (LLD §5.9: Valkey being
 // unreachable never blocks the request) and is logged at WARN via log, which
 // may be nil (in which case it's silently skipped, same as every other
 // logWarn call site in this package).
@@ -73,9 +87,9 @@ func WithIdempotency(cache port.CacheStore, ttl time.Duration, log port.Logger, 
 			return
 		}
 
-		bodyBytes, incomingHash, ok := drainBody(c)
-		if !ok {
-			h(c)
+		bodyBytes, incomingHash, err := drainBody(c)
+		if err != nil {
+			bindErrResponse(c, err)
 			return
 		}
 		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
@@ -87,14 +101,26 @@ func WithIdempotency(cache port.CacheStore, ttl time.Duration, log port.Logger, 
 		// body-hash comparison still prevents cross-tenant key reuse there,
 		// since tenant_id is always part of their request body.
 		cacheKey := "idem:" + idempotencyScopePrefix(c) + c.Request.Method + ":" + c.Request.URL.Path + ":" + key
-		if replayed := replayIfCached(c, cache, cacheKey, incomingHash, log); replayed {
+
+		claimed, err := cache.SetNX(c.Request.Context(), cacheKey, idempotencyClaim, ttl)
+		if err != nil {
+			idempotencyLogWarn(log, "idempotency: cache claim failed, proceeding without idempotency enforcement", map[string]any{
+				"cache_key": cacheKey, "error": err.Error(),
+			})
+			h(c)
+			return
+		}
+		if !claimed {
+			if !replayIfCached(c, cache, cacheKey, incomingHash, log) {
+				errResponse(c, port.ErrIdempotencyKeyReplay)
+			}
 			return
 		}
 
 		rec := &bodyRecorder{ResponseWriter: c.Writer, buf: &bytes.Buffer{}}
 		c.Writer = rec
 		h(c)
-		storeIfSuccess(c, cache, cacheKey, incomingHash, ttl, rec, log)
+		storeResult(c, cache, cacheKey, incomingHash, ttl, rec, log)
 	}
 }
 
@@ -114,27 +140,38 @@ func idempotencyLogWarn(log port.Logger, msg string, fields map[string]any) {
 	}
 }
 
-func drainBody(c *gin.Context) (body []byte, hash string, ok bool) {
+func drainBody(c *gin.Context) (body []byte, hash string, err error) {
 	b, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes))
 	if err != nil {
-		return nil, "", false
+		return nil, "", fmt.Errorf("drain request body: %w", err)
 	}
-	return b, hashBody(b), true
+	return b, hashBody(b), nil
 }
 
+// replayIfCached reports whether it fully handled the response (a genuine
+// replay, a hash-mismatch rejection, or an unresolved-claim rejection).
+// false means the cache entry couldn't be read or understood at all — the
+// caller (WithIdempotency) still must not run the handler, since SetNX
+// already reported this key as claimed by someone else.
 func replayIfCached(c *gin.Context, cache port.CacheStore, cacheKey, incomingHash string, log port.Logger) bool {
 	raw, err := cache.Get(c.Request.Context(), cacheKey)
 	if err != nil {
-		idempotencyLogWarn(log, "idempotency: cache get failed, proceeding without replay", map[string]any{
+		idempotencyLogWarn(log, "idempotency: cache get failed after a claimed key, rejecting replay", map[string]any{
 			"cache_key": cacheKey, "error": err.Error(),
 		})
 		return false
 	}
-	if raw == "" {
+	if raw == "" || raw == idempotencyClaim {
+		// Either the claim already expired out from under us, or another
+		// request is still executing the handler — either way, not our
+		// response to serve.
 		return false
 	}
 	var cr cachedResp
-	if json.Unmarshal([]byte(raw), &cr) != nil {
+	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
+		idempotencyLogWarn(log, "idempotency: corrupted cache entry for a claimed key, rejecting replay", map[string]any{
+			"cache_key": cacheKey, "error": err.Error(),
+		})
 		return false
 	}
 	if cr.BodyHash != "" && cr.BodyHash != incomingHash {
@@ -145,9 +182,17 @@ func replayIfCached(c *gin.Context, cache port.CacheStore, cacheKey, incomingHas
 	return true
 }
 
-func storeIfSuccess(c *gin.Context, cache port.CacheStore, cacheKey, incomingHash string, ttl time.Duration, rec *bodyRecorder, log port.Logger) {
+// storeResult replaces the SetNX claim with the real response on success, or
+// releases it on failure so a caller with a fixed request can retry
+// immediately with the same key rather than waiting out the full TTL.
+func storeResult(c *gin.Context, cache port.CacheStore, cacheKey, incomingHash string, ttl time.Duration, rec *bodyRecorder, log port.Logger) {
 	status := rec.Status()
 	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		if err := cache.Del(c.Request.Context(), cacheKey); err != nil {
+			idempotencyLogWarn(log, "idempotency: failed to release claim after a non-2xx response", map[string]any{
+				"cache_key": cacheKey, "error": err.Error(),
+			})
+		}
 		return
 	}
 	entry := cachedResp{Status: status, Body: rec.buf.Bytes(), BodyHash: incomingHash}

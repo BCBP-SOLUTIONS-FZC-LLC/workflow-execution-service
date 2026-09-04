@@ -1556,8 +1556,12 @@ paths:
                   description: Human-readable reason for termination; stored on the instance record.
                   example: "Duplicate instance created in error"
       responses:
-        "202":
-          description: Terminate signal accepted.
+        "200":
+          description: >-
+            Terminate already completed synchronously (direct DB write then
+            TerminateWorkflow) by the time this response is sent — unlike the
+            other lifecycle endpoints, which forward a signal for the running
+            workflow to process asynchronously.
           content:
             application/json:
               schema:
