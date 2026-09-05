@@ -55,7 +55,7 @@ func newInstanceServiceHarness() (*service.InstanceService, *fakeInstanceRepo, *
 		Temporal:    temporal,
 		Definitions: definitions,
 		Eligibility: eligibility,
-		Validator:   noopValidator{},
+		Validator:   realValidator(),
 	}
 	return svc, instances, tasks, assignments, outbox, temporal, definitions, eligibility
 }
@@ -95,11 +95,11 @@ func TestInstanceService_Start(t *testing.T) {
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(),
 			compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer", DefaultAssignees: []string{userID.String()}}))
 		var gotRequests []port.EligibilityCheckRequest
-		eligibility.batchCheck = func(_ context.Context, reqs []port.EligibilityCheckRequest, _ uuid.UUID) ([]bool, error) {
+		eligibility.batchCheck = func(_ context.Context, reqs []port.EligibilityCheckRequest, _ uuid.UUID) ([]port.EligibilityResult, error) {
 			gotRequests = reqs
-			results := make([]bool, len(reqs))
+			results := make([]port.EligibilityResult, len(reqs))
 			for i := range results {
-				results[i] = true
+				results[i] = port.EligibilityResult{Eligible: true}
 			}
 			return results, nil
 		}
@@ -117,8 +117,8 @@ func TestInstanceService_Start(t *testing.T) {
 		svc, _, _, _, _, _, definitions, eligibility := newInstanceServiceHarness()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(),
 			compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review", DefaultAssignees: []string{uuid.New().String()}}))
-		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]bool, error) {
-			return []bool{false}, nil
+		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]port.EligibilityResult, error) {
+			return []port.EligibilityResult{{Eligible: false}}, nil
 		}
 
 		_, err := svc.Start(context.Background(), port.StartInstanceInput{
@@ -135,7 +135,7 @@ func TestInstanceService_Start(t *testing.T) {
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(),
 			compiledPlanJSON(t, dsl.StageDef{Type: "serviceTask", NodeID: "send", ConnectorType: "send-email", DefaultAssignees: []string{uuid.New().String()}}))
 		called := false
-		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]bool, error) {
+		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]port.EligibilityResult, error) {
 			called = true
 			return nil, nil
 		}
@@ -154,10 +154,10 @@ func TestInstanceService_Start(t *testing.T) {
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(),
 			compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review", DefaultAssignees: []string{defaultUser.String()}}))
 		var gotUser uuid.UUID
-		eligibility.batchCheck = func(_ context.Context, reqs []port.EligibilityCheckRequest, _ uuid.UUID) ([]bool, error) {
+		eligibility.batchCheck = func(_ context.Context, reqs []port.EligibilityCheckRequest, _ uuid.UUID) ([]port.EligibilityResult, error) {
 			require.Len(t, reqs, 1)
 			gotUser = reqs[0].NewUserID
-			return []bool{true}, nil
+			return []port.EligibilityResult{{Eligible: true}}, nil
 		}
 
 		_, err := svc.Start(context.Background(), port.StartInstanceInput{

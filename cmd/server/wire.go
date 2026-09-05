@@ -176,13 +176,14 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 	taskService := &service.TaskService{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides,
-		Temporal: temporal, IAM: iam, Log: log,
+		Temporal: temporal, IAM: iam, Eligibility: eligibility, Definitions: definitions, Log: log,
 	}
 	connectorTaskService := &service.ConnectorTaskService{
 		Instances: instances, Tasks: tasks, Temporal: temporal, Cache: cache, Log: log,
 	}
 	workflowClient := &service.WorkflowClient{
-		Instances: instances, Tasks: tasks, Assignments: assignments, Temporal: temporal, Log: log,
+		Instances: instances, Tasks: tasks, Assignments: assignments, Temporal: temporal,
+		IAM: iam, Eligibility: eligibility, Definitions: definitions, Log: log,
 	}
 	guard := &service.ArchiveGuard{Instances: instances}
 	pauser := &service.UserTaskPauser{

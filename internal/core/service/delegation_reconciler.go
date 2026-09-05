@@ -83,12 +83,18 @@ func (s *DelegationReconciler) eligibleCandidates(ctx context.Context, tenantID,
 		return nil, err
 	}
 	out := make([]delegationCandidate, 0, len(resolved))
-	for i, ok := range eligible {
-		if ok {
+	for i, result := range eligible {
+		if result.Err == nil && result.Eligible {
 			out = append(out, resolved[i])
 			continue
 		}
-		s.logger().Warn(logPrefix+": row held, candidate ineligible for node", map[string]any{"task_id": resolved[i].task.ID})
+		fields := map[string]any{"task_id": resolved[i].task.ID}
+		reason := "candidate ineligible for node"
+		if result.Err != nil {
+			reason = "eligibility check failed"
+			fields["error"] = result.Err.Error()
+		}
+		s.logger().Warn(logPrefix+": row held, "+reason, fields)
 	}
 	return out, nil
 }

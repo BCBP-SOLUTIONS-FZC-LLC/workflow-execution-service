@@ -29,7 +29,7 @@ func newInstanceTestDeps(inst *domain.Instance, tasks *fakeTaskRepo, assignments
 		Assignments: assignments,
 		Outbox:      outbox,
 		Transactor:  fakeTransactor{},
-		Validator:   noopValidator{},
+		Validator:   realValidator(),
 	}
 	return deps, outbox
 }
@@ -113,7 +113,7 @@ func TestPauseInstance_UpdatesStatusAndEnqueuesPaused(t *testing.T) {
 	deps, outbox := newInstanceTestDeps(inst, nil, nil)
 
 	err := deps.PauseInstance(context.Background(), port.PauseInstanceInput{
-		InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), RecordVersion: 1,
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), Initiator: domain.InitiatorAdmin, RecordVersion: 1,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, domain.InstanceStatusPaused, inst.Status)
@@ -151,7 +151,7 @@ func TestPauseInstance_RetriedCall_NoOp(t *testing.T) {
 	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1, Status: domain.InstanceStatusRunning}
 	deps, outbox := newInstanceTestDeps(inst, nil, nil)
 
-	in := port.PauseInstanceInput{InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), RecordVersion: 1}
+	in := port.PauseInstanceInput{InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), Initiator: domain.InitiatorAdmin, RecordVersion: 1}
 
 	require.NoError(t, deps.PauseInstance(context.Background(), in))
 	require.NoError(t, deps.PauseInstance(context.Background(), in), "a retried PauseInstance must succeed idempotently, not error")
@@ -166,7 +166,7 @@ func TestResumeInstance_UpdatesStatusAndEnqueuesResumed(t *testing.T) {
 	deps, outbox := newInstanceTestDeps(inst, nil, nil)
 
 	err := deps.ResumeInstance(context.Background(), port.ResumeInstanceInput{
-		InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), RecordVersion: 1,
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), AdminUserID: uuid.New().String(), Initiator: domain.InitiatorAdmin, RecordVersion: 1,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, domain.InstanceStatusRunning, inst.Status)
@@ -181,7 +181,7 @@ func TestPauseInstance_GetInstanceError(t *testing.T) {
 	instanceID, tenantID := uuid.New(), uuid.New()
 	deps := &outboundtemporal.Deps{
 		Instances: newFakeInstanceRepo(), Tasks: newFakeTaskRepo(), Assignments: newFakeAssignmentRepo(),
-		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	err := deps.PauseInstance(context.Background(), port.PauseInstanceInput{
@@ -201,7 +201,7 @@ func TestResumeInstance_UpdateStatusError(t *testing.T) {
 	instances.updateStatusErr = errBoom
 	deps := &outboundtemporal.Deps{
 		Instances: instances, Tasks: newFakeTaskRepo(), Assignments: newFakeAssignmentRepo(),
-		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	err := deps.ResumeInstance(context.Background(), port.ResumeInstanceInput{
@@ -245,7 +245,7 @@ func TestCancelInstance_GetInstanceError(t *testing.T) {
 	instanceID, tenantID := uuid.New(), uuid.New()
 	deps := &outboundtemporal.Deps{
 		Instances: newFakeInstanceRepo(), Tasks: newFakeTaskRepo(), Assignments: newFakeAssignmentRepo(),
-		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	reason := "no longer needed"
@@ -266,7 +266,7 @@ func TestCancelInstance_UpdateStatusError(t *testing.T) {
 	instances.updateStatusErr = errBoom
 	deps := &outboundtemporal.Deps{
 		Instances: instances, Tasks: newFakeTaskRepo(), Assignments: newFakeAssignmentRepo(),
-		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	reason := "no longer needed"

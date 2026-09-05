@@ -44,7 +44,7 @@ func newDelegationReconcilerHarness() (*service.DelegationReconciler, *fakeInsta
 	svc := &service.DelegationReconciler{
 		Instances: instances, Tasks: tasks, Assignments: assignments,
 		Outbox: outbox, Transactor: fakeTransactor{}, Temporal: temporal,
-		Definitions: definitions, Eligibility: eligibility, Validator: noopValidator{},
+		Definitions: definitions, Eligibility: eligibility, Validator: realValidator(),
 	}
 	return svc, instances, tasks, assignments, outbox, temporal, definitions, eligibility
 }
@@ -96,8 +96,8 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		svc, instances, tasks, assignments, outbox, temporal, definitions, eligibility := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
-		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]bool, error) {
-			return []bool{false}, nil
+		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]port.EligibilityResult, error) {
+			return []port.EligibilityResult{{Eligible: false}}, nil
 		}
 
 		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{
@@ -213,8 +213,8 @@ func TestDelegationReconciler_Reverse(t *testing.T) {
 		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegateID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
 		a.Reason = "delegation:" + delegationID.String()
-		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]bool, error) {
-			return []bool{false}, nil
+		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]port.EligibilityResult, error) {
+			return []port.EligibilityResult{{Eligible: false}}, nil
 		}
 
 		err := svc.Reverse(context.Background(), port.DelegationReversalInput{
@@ -315,7 +315,7 @@ func TestDelegationReconciler_EligibleCandidates(t *testing.T) {
 		svc, instances, tasks, assignments, _, _, definitions, eligibility := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID := uuid.New(), uuid.New(), uuid.New()
 		seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
-		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]bool, error) {
+		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]port.EligibilityResult, error) {
 			return nil, assert.AnError
 		}
 

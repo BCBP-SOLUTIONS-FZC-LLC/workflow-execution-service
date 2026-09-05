@@ -54,25 +54,18 @@ func (c *EligibilityClient) CheckEligibilityBatch(
 	ctx context.Context,
 	requests []port.EligibilityCheckRequest,
 	actorID uuid.UUID,
-) ([]bool, error) {
-	results := make([]bool, len(requests))
-	errs := make([]error, len(requests))
+) ([]port.EligibilityResult, error) {
+	results := make([]port.EligibilityResult, len(requests))
 	var wg sync.WaitGroup
 	for i, req := range requests {
 		wg.Add(1)
 		go func(i int, req port.EligibilityCheckRequest) {
 			defer wg.Done()
 			eligible, err := c.CheckEligibility(ctx, req.NewUserID, req.DepartmentID, req.RequiredLevel, actorID)
-			results[i], errs[i] = eligible, err
+			results[i] = port.EligibilityResult{Eligible: eligible, Err: err}
 		}(i, req)
 	}
 	wg.Wait()
-
-	for _, err := range errs {
-		if err != nil {
-			return nil, err
-		}
-	}
 	return results, nil
 }
 

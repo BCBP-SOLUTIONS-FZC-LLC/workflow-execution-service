@@ -19,6 +19,8 @@ func TestMapErr(t *testing.T) {
 		domain.ErrDuplicateBusinessKey)
 	assert.ErrorIs(t, mapErr(&pgconn.PgError{Code: "23505", ConstraintName: constraintTaskAssignmentActive}),
 		domain.ErrDuplicateActiveAssignment)
+	assert.ErrorIs(t, mapErr(&pgconn.PgError{Code: "23505", ConstraintName: constraintSLAEventTaskUnique}),
+		domain.ErrAlreadyExists)
 
 	unrelated := &pgconn.PgError{Code: "23505", ConstraintName: "some_other_constraint"}
 	assert.Same(t, error(unrelated), mapErr(unrelated))

@@ -352,7 +352,7 @@ func (d *Deps) UpdateTaskStatus(ctx context.Context, in port.UpdateTaskStatusInp
 		if err != nil {
 			return fmt.Errorf("list active assignments for task %s: %w", task.ID, err)
 		}
-		var assigneeUserIDs []uuid.UUID
+		assigneeUserIDs := []uuid.UUID{}
 		for _, a := range active {
 			assigneeUserIDs = append(assigneeUserIDs, a.UserID)
 		}

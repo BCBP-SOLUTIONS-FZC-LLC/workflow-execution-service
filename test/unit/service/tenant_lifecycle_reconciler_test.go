@@ -23,7 +23,7 @@ func newTenantLifecycleHarness() (*service.TenantLifecycleReconciler, *fakeInsta
 	temporal := &fakeTemporalClient{}
 	svc := &service.TenantLifecycleReconciler{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Queues: queues,
-		Outbox: outbox, Transactor: fakeTransactor{}, Temporal: temporal, Validator: noopValidator{},
+		Outbox: outbox, Transactor: fakeTransactor{}, Temporal: temporal, Validator: realValidator(),
 	}
 	return svc, instances, tasks, assignments, queues, outbox, temporal
 }

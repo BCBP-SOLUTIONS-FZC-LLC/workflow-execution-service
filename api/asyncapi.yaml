@@ -95,6 +95,19 @@ channels:
       user.deleted:              { $ref: '#/components/messages/UserDeletedInbound' }
       user.availability.changed: { $ref: '#/components/messages/UserAvailabilityChangedInbound' }
 
+  self/task-dispatch:
+    address: /api/v1/internal/events
+    description: >
+      Not a queue subscription: this service reacts to its own
+      WorkflowTaskCreated publish, delivered back to it over the same
+      POST /api/v1/internal/events HTTP surface every other inbound event
+      above arrives on (internal_events_connector.go). Whether this service
+      is actually subscribed to its own WorkflowTaskCreated topic in any real
+      subscription topology is unconfirmed (LLD §6.1, Appendix B) — this
+      channel documents the receiving contract if/when it is.
+    messages:
+      WorkflowTaskCreated: { $ref: '#/components/messages/WorkflowTaskCreated' }
+
 operations:
   publishWorkflowEvents:
     action: send
@@ -129,6 +142,14 @@ operations:
     action: receive
     channel: { $ref: '#/channels/iam~1user~1events' }
     description: UserDeleted safety-net pause + UserAvailabilityChanged OOO pause/resume.
+  receiveSelfTaskDispatch:
+    action: receive
+    channel: { $ref: '#/channels/self~1task-dispatch' }
+    description: >
+      Connector/automation-typed task dispatch: for stage.ConnectorType != ""
+      nodes, this service's own WorkflowTaskCreated publish is what triggers
+      the connector-worker handoff, delivered back to it as an ordinary
+      inbound event rather than acted on directly at publish time.
 
 components:
   securitySchemes:

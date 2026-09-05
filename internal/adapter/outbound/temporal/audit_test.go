@@ -26,7 +26,7 @@ func TestRecordForceRoute_SupersedesBypassedTaskAndEnqueuesBoth(t *testing.T) {
 	outbox := &fakeOutbox{}
 	deps := &outboundtemporal.Deps{
 		Instances: newFakeInstanceRepo(inst), Tasks: tasks, Assignments: assignments,
-		Outbox: outbox, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: outbox, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	err := deps.RecordForceRoute(context.Background(), port.RecordForceRouteInput{
@@ -51,7 +51,7 @@ func TestRecordForceRoute_GetInstanceError(t *testing.T) {
 	instanceID, tenantID := uuid.New(), uuid.New()
 	deps := &outboundtemporal.Deps{
 		Instances: newFakeInstanceRepo(), Tasks: newFakeTaskRepo(), Assignments: newFakeAssignmentRepo(),
-		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	err := deps.RecordForceRoute(context.Background(), port.RecordForceRouteInput{
@@ -71,7 +71,7 @@ func TestSupersedeBypassedTasks_ListError(t *testing.T) {
 	tasks.listErr = errBoom
 	deps := &outboundtemporal.Deps{
 		Instances: newFakeInstanceRepo(inst), Tasks: tasks, Assignments: newFakeAssignmentRepo(),
-		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	err := deps.RecordForceRoute(context.Background(), port.RecordForceRouteInput{
@@ -95,7 +95,7 @@ func TestSupersedeBypassedTasks_Paginates(t *testing.T) {
 	outbox := &fakeOutbox{}
 	deps := &outboundtemporal.Deps{
 		Instances: newFakeInstanceRepo(inst), Tasks: tasks, Assignments: newFakeAssignmentRepo(),
-		Outbox: outbox, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: outbox, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	err := deps.RecordForceRoute(context.Background(), port.RecordForceRouteInput{
@@ -118,7 +118,7 @@ func TestSupersedeTask_UpdateStatusError(t *testing.T) {
 	tasks.updateStatusErr = errBoom
 	deps := &outboundtemporal.Deps{
 		Instances: newFakeInstanceRepo(inst), Tasks: tasks, Assignments: newFakeAssignmentRepo(),
-		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	err := deps.RecordForceRoute(context.Background(), port.RecordForceRouteInput{
@@ -140,7 +140,7 @@ func TestSupersedeTask_ListActiveAssignmentsError(t *testing.T) {
 	assignments.listActiveErr = errBoom
 	deps := &outboundtemporal.Deps{
 		Instances: newFakeInstanceRepo(inst), Tasks: tasks, Assignments: assignments,
-		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	err := deps.RecordForceRoute(context.Background(), port.RecordForceRouteInput{
@@ -163,7 +163,7 @@ func TestSupersedeTask_VacateError(t *testing.T) {
 	assignments.vacateErr = errBoom
 	deps := &outboundtemporal.Deps{
 		Instances: newFakeInstanceRepo(inst), Tasks: tasks, Assignments: assignments,
-		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	err := deps.RecordForceRoute(context.Background(), port.RecordForceRouteInput{
@@ -182,7 +182,7 @@ func TestRecordSLAWarning_EnqueuesAuditEventOnly(t *testing.T) {
 	outbox := &fakeOutbox{}
 	deps := &outboundtemporal.Deps{
 		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(assignee),
-		Outbox: outbox, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: outbox, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	err := deps.RecordSLAWarning(context.Background(), port.RecordSLAWarningInput{
@@ -210,7 +210,7 @@ func TestRecordSLAWarning_RetriedCall_NoOp(t *testing.T) {
 	outbox := &fakeOutbox{}
 	deps := &outboundtemporal.Deps{
 		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(),
-		Outbox: outbox, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: outbox, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	in := port.RecordSLAWarningInput{InstanceID: instanceID.String(), TenantID: uuid.New().String(), TaskID: taskID.String(), NodeKey: "sales/review"}
@@ -218,6 +218,27 @@ func TestRecordSLAWarning_RetriedCall_NoOp(t *testing.T) {
 	require.NoError(t, deps.RecordSLAWarning(context.Background(), in))
 	require.NoError(t, deps.RecordSLAWarning(context.Background(), in), "a retried RecordSLAWarning must succeed idempotently, not error")
 	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.sla-warning")
+}
+
+// TestRecordSLAEvent_ConcurrentEnqueue_TreatedAsNoOp is the regression test
+// for the SLA dedup race: two overlapping activity attempts can both pass
+// the ExistsForTask check under READ COMMITTED before either commits, so the
+// DB-level idx_outbox_events_sla_task_unique backstop (db/migrations/000003)
+// is the real guard — Enqueue then reports ErrAlreadyExists on the loser,
+// which must be swallowed as a no-op, not surfaced as a failed activity.
+func TestRecordSLAEvent_ConcurrentEnqueue_TreatedAsNoOp(t *testing.T) {
+	taskID, instanceID := uuid.New(), uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady}
+	outbox := &fakeOutbox{enqueueErr: domain.ErrAlreadyExists}
+	deps := &outboundtemporal.Deps{
+		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(),
+		Outbox: outbox, Transactor: fakeTransactor{}, Validator: realValidator(),
+	}
+
+	err := deps.RecordSLAWarning(context.Background(), port.RecordSLAWarningInput{
+		InstanceID: instanceID.String(), TenantID: uuid.New().String(), TaskID: taskID.String(), NodeKey: "sales/review",
+	})
+	require.NoError(t, err, "a unique-violation race loser must be a no-op, not an activity error")
 }
 
 // TestRecordSLAEvent_ExistsForTaskError forces the Outbox.ExistsForTask
@@ -229,7 +250,7 @@ func TestRecordSLAEvent_ExistsForTaskError(t *testing.T) {
 	outbox := &fakeOutbox{existsErr: errBoom}
 	deps := &outboundtemporal.Deps{
 		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(),
-		Outbox: outbox, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: outbox, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	err := deps.RecordSLAWarning(context.Background(), port.RecordSLAWarningInput{
@@ -248,7 +269,7 @@ func TestRecordSLAEvent_ListActiveAssignmentsError(t *testing.T) {
 	assignments.listActiveErr = errBoom
 	deps := &outboundtemporal.Deps{
 		Tasks: newFakeTaskRepo(task), Assignments: assignments,
-		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	err := deps.RecordSLABreach(context.Background(), port.RecordSLABreachInput{
@@ -265,7 +286,7 @@ func TestRecordSLABreach_EnqueuesAuditEventOnly(t *testing.T) {
 	outbox := &fakeOutbox{}
 	deps := &outboundtemporal.Deps{
 		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(),
-		Outbox: outbox, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: outbox, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
 	err := deps.RecordSLABreach(context.Background(), port.RecordSLABreachInput{

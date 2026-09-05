@@ -222,7 +222,7 @@ func (d *Deps) failTask(ctx context.Context, tenantID, instanceID uuid.UUID, tas
 	if err != nil {
 		return fmt.Errorf("list active assignments for task %s: %w", task.ID, err)
 	}
-	var assigneeUserIDs []uuid.UUID
+	assigneeUserIDs := []uuid.UUID{}
 	for _, a := range assignments {
 		if _, err := d.Assignments.Vacate(ctx, tenantID, a.ID); err != nil {
 			return fmt.Errorf("vacate assignment %s: %w", a.ID, err)

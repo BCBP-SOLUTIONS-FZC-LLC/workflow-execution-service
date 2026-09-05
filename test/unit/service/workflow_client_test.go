@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -11,6 +12,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
 func newWorkflowClientHarness() (*service.WorkflowClient, *fakeInstanceRepo, *fakeTaskRepo, *fakeAssignmentRepo, *fakeTemporalClient) {
@@ -150,6 +152,149 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, count)
 		assert.NotEmpty(t, log.warnCalls)
+	})
+
+	// Regression tests for the eligibility/liveness gap found reviewing this
+	// path: unlike DelegationReconciler's Reroute/Reverse, this bulk
+	// delegate-to-delegate reassignment never checked the new delegate at all.
+	t.Run("eligible new delegate succeeds", func(t *testing.T) {
+		svc, instances, tasks, assignments, temporal := newWorkflowClientHarness()
+		definitions := &fakeDefinitionClient{}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) { return true, nil }}
+
+		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
+		instanceID, versionID := uuid.New(), uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review", RecordVersion: 1}
+		tasks.byID[task.ID] = task
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		assignments.byID[a.ID] = a
+
+		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
+		require.Len(t, temporal.signals, 1)
+	})
+
+	t.Run("ineligible new delegate's row is held, not counted", func(t *testing.T) {
+		svc, instances, tasks, assignments, temporal := newWorkflowClientHarness()
+		definitions := &fakeDefinitionClient{}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) { return false, nil }}
+
+		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
+		instanceID, versionID := uuid.New(), uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review", RecordVersion: 1}
+		tasks.byID[task.ID] = task
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		assignments.byID[a.ID] = a
+
+		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
+		require.NoError(t, err, "an ineligible row is held, not a whole-call error")
+		assert.Zero(t, count)
+		assert.True(t, assignments.byID[a.ID].IsActive, "an ineligible new delegate must not have the row reassigned to them")
+		assert.Empty(t, temporal.signals)
+	})
+
+	t.Run("eligibility check error on one task is logged and skipped, not counted", func(t *testing.T) {
+		svc, instances, tasks, assignments, temporal := newWorkflowClientHarness()
+		definitions := &fakeDefinitionClient{}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+			return false, assert.AnError
+		}}
+
+		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
+		instanceID, versionID := uuid.New(), uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review", RecordVersion: 1}
+		tasks.byID[task.ID] = task
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		assignments.byID[a.ID] = a
+
+		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
+		require.NoError(t, err)
+		assert.Zero(t, count)
+		assert.True(t, assignments.byID[a.ID].IsActive)
+		assert.Empty(t, temporal.signals)
+	})
+
+	t.Run("Instances.GetByID error during eligibility check is logged and skipped", func(t *testing.T) {
+		svc, _, tasks, assignments, _ := newWorkflowClientHarness()
+		svc.Definitions = &fakeDefinitionClient{}
+		svc.Eligibility = &fakeEligibilityChecker{}
+
+		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
+		// task.WorkflowInstanceID has no matching entry in instances.byID.
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: uuid.New(), NodeKey: "finance/review", RecordVersion: 1}
+		tasks.byID[task.ID] = task
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		assignments.byID[a.ID] = a
+
+		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
+		require.NoError(t, err)
+		assert.Zero(t, count)
+		assert.True(t, assignments.byID[a.ID].IsActive)
+	})
+
+	t.Run("node not found in compiled plan is treated as ineligible, not a crash", func(t *testing.T) {
+		svc, instances, tasks, assignments, _ := newWorkflowClientHarness()
+		definitions := &fakeDefinitionClient{}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+			t.Fatal("CheckEligibility must not be called when the node has no matching compiled-plan stage")
+			return false, nil
+		}}
+
+		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
+		instanceID, versionID := uuid.New(), uuid.New()
+		// The compiled plan has no stage at all, so requiredLevelForTask can't
+		// resolve a role for the task's "finance/review" node.
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t))
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review", RecordVersion: 1}
+		tasks.byID[task.ID] = task
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		assignments.byID[a.ID] = a
+
+		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
+		require.NoError(t, err)
+		assert.Zero(t, count, "an unresolvable node is fail-closed, matching DelegationReconciler's own posture")
+		assert.True(t, assignments.byID[a.ID].IsActive)
+	})
+
+	t.Run("liveness stub error fails open for the whole call, matching self-service semantics", func(t *testing.T) {
+		svc, instances, tasks, assignments, temporal := newWorkflowClientHarness()
+		svc.IAM = &fakeIAMClient{err: errors.New("iam client: user-status endpoint contract not yet confirmed")}
+
+		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
+		instanceID := uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, RecordVersion: 1}
+		tasks.byID[task.ID] = task
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		assignments.byID[a.ID] = a
+
+		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
+		require.NoError(t, err, "an unresolved liveness check must not block the reassignment")
+		assert.Equal(t, 1, count)
+		require.Len(t, temporal.signals, 1)
+	})
+
+	t.Run("a confirmed-unavailable new delegate blocks the whole call", func(t *testing.T) {
+		svc, _, _, assignments, _ := newWorkflowClientHarness()
+		svc.IAM = &fakeIAMClient{status: port.UserStatus{IsDeleted: true}}
+		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
+
+		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
+		assert.ErrorIs(t, err, port.ErrAssigneeUnavailable)
+		assert.Zero(t, count)
+		assert.Empty(t, assignments.byID, "must not even list/attempt assignments once the new delegate is confirmed unavailable")
 	})
 }
 

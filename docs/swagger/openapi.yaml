@@ -36,6 +36,12 @@ tags:
     description: >
       Service-to-service ingestion endpoint called by the shared Workflow-Events
       Consumer, not routed through the gateway.
+  - name: Internal (ConnectorTaskService)
+    description: >
+      Service-to-service endpoints called by cmd/connector-worker to resolve a
+      connector-typed task, not routed through the gateway. connector-worker
+      never touches the Temporal SDK directly (workflow-connectors LLD §6.1
+      Decision #2) — this is its only path to signal task resolution.
 
 components:
   securitySchemes:
@@ -3037,6 +3043,117 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # internal, service-to-service caller
+  /api/v1/internal/connector-tasks/{id}/complete:
+    post:
+      operationId: completeConnectorTask
+      tags: [Internal (ConnectorTaskService)]
+      summary: Resolve a connector-typed task as completed (internal)
+      description: >
+        Internal, service-to-service endpoint called by cmd/connector-worker once a
+        connector-typed task's action has finished successfully. No idempotency-key
+        wrapper: connector-worker's own retry model is Stream-redelivery-driven, not
+        header-driven, and ConnectorTaskService carries its own state+dedup idempotency
+        guard. No record_version in the body — a connector task has exactly one
+        legitimate resolver (the worker that dispatched it), never a concurrent human
+        racing it, so the service reads the task's current record_version itself.
+      security:
+        - InternalServiceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id]
+              properties:
+                tenant_id:
+                  type: string
+                  format: uuid
+                  description: Tenant UUID the task belongs to.
+                output:
+                  type: object
+                  additionalProperties: true
+                  description: Connector output values, mapped onto the compiled stage's io_mapping.outputs before the stage-transition signal is sent.
+      responses:
+        "204":
+          description: Task resolved as completed; the stage-transition signal has been sent.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Task not found for the given tenant_id.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "409":
+          description: Task is not connector-typed, or is no longer in a resolvable state.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # internal, service-to-service caller
+  /api/v1/internal/connector-tasks/{id}/fail:
+    post:
+      operationId: failConnectorTask
+      tags: [Internal (ConnectorTaskService)]
+      summary: Resolve a connector-typed task as failed (internal)
+      description: >
+        Internal, service-to-service endpoint called by cmd/connector-worker once a
+        connector-typed task's action has failed. Sends a stage-fail signal carrying
+        error_class; the human /tasks/:id/complete path explicitly rejects
+        connector-typed tasks (checkHumanActionable), so this is the only resolution
+        path for a failed connector task. Same no-idempotency-wrapper,
+        no-record_version rationale as the complete endpoint above.
+      security:
+        - InternalServiceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, error_class]
+              properties:
+                tenant_id:
+                  type: string
+                  format: uuid
+                  description: Tenant UUID the task belongs to.
+                error_class:
+                  type: string
+                  description: Connector-defined error classification, carried onto the stage-fail signal.
+                  example: "upstream_timeout"
+      responses:
+        "204":
+          description: Task resolved as failed; the stage-fail signal has been sent.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Task not found for the given tenant_id.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "409":
+          description: Task is not connector-typed, or is no longer in a resolvable state.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
         "500":
           $ref: "#/components/responses/InternalError"
         "503":

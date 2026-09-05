@@ -10,6 +10,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/pkg/events"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
@@ -393,5 +394,21 @@ func (fakeTransactor) RunInTxWithRetry(ctx context.Context, fn func(context.Cont
 type noopValidator struct{}
 
 func (noopValidator) Validate(context.Context, string, json.RawMessage) error { return nil }
+
+// realValidator constructs the production JSON-schema validator so tests
+// that DO build a real outbound event payload assert against the actual
+// contract, not just against repo/outbox state — noopValidator alone missed
+// exactly this: workflow.task.created shipped "assignee_user_ids": null for
+// a whole class of tasks because no test ever ran the real schema check
+// against a constructed payload. No *testing.T needed: construction is
+// deterministic against the embedded schemas, so a failure here means the
+// build itself is broken, not this particular test case.
+func realValidator() port.EventValidator {
+	v, err := eventbus.NewSchemaValidator()
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
 
 var errBoom = errors.New("boom")

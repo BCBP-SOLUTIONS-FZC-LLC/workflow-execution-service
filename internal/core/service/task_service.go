@@ -25,6 +25,8 @@ type TaskService struct {
 	Overrides   port.AssigneeOverrideRepository
 	Temporal    port.TemporalClient
 	IAM         port.IAMClient
+	Eligibility port.EligibilityChecker
+	Definitions port.DefinitionServiceClient
 	Log         port.Logger
 }
 
@@ -140,12 +142,19 @@ func (s *TaskService) ActiveByUser(ctx context.Context, tenantID, userID uuid.UU
 // every task action fail the moment this dependency has any hiccup) —
 // only a successful, confirmed deleted/OOO response rejects the action.
 func (s *TaskService) checkUserLive(ctx context.Context, tenantID, userID uuid.UUID) error {
-	if s.IAM == nil {
+	return checkUserLiveWith(ctx, s.IAM, s.logger(), tenantID, userID)
+}
+
+// checkUserLiveWith is checkUserLive's shared implementation — also used by
+// WorkflowClient.ReassignDelegate, which needs the identical fail-open
+// liveness gate on a bulk-reassignment's replacement delegate.
+func checkUserLiveWith(ctx context.Context, iam port.IAMClient, log port.Logger, tenantID, userID uuid.UUID) error {
+	if iam == nil {
 		return nil
 	}
-	status, err := s.IAM.GetUserStatus(ctx, tenantID, userID)
+	status, err := iam.GetUserStatus(ctx, tenantID, userID)
 	if err != nil {
-		s.logger().Warn("live user-status check failed, proceeding fail-open", map[string]any{"user_id": userID, "error": err.Error()})
+		log.Warn("live user-status check failed, proceeding fail-open", map[string]any{"user_id": userID, "error": err.Error()})
 		return nil
 	}
 	if status.IsDeleted || status.IsOOO {
@@ -333,18 +342,53 @@ func (s *TaskService) Reassign(ctx context.Context, tenantID, taskID, actorUserI
 	if err != nil {
 		return nil, wrapInstanceErr(err)
 	}
-	if err := s.sendReassignSignal(ctx, inst, taskID, oldUserID, newUserID, actorUserID, recordVersion); err != nil {
+	if err := s.sendReassignSignal(ctx, inst, task, oldUserID, newUserID, actorUserID, recordVersion); err != nil {
 		return nil, err
 	}
 	return toPortTask(task), nil
 }
 
-func (s *TaskService) sendReassignSignal(ctx context.Context, inst *domain.Instance, taskID, oldUserID, newUserID, actorUserID uuid.UUID, recordVersion int64) error {
+func (s *TaskService) sendReassignSignal(ctx context.Context, inst *domain.Instance, task *domain.Task, oldUserID, newUserID, actorUserID uuid.UUID, recordVersion int64) error {
+	if err := s.checkReassignEligibility(ctx, inst, task, newUserID); err != nil {
+		return err
+	}
+	if err := s.checkUserLive(ctx, inst.TenantID, newUserID); err != nil {
+		return err
+	}
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, port.SignalInstanceReassign, reassignSignalWire{
-		TaskID: taskID.String(), OldUserID: oldUserID.String(), NewUserID: newUserID.String(),
+		TaskID: task.ID.String(), OldUserID: oldUserID.String(), NewUserID: newUserID.String(),
 		AdminUserID: actorUserID.String(), RecordVersion: recordVersion,
 	}); err != nil {
 		return fmt.Errorf("signal instance-reassign: %w", err)
+	}
+	return nil
+}
+
+// checkReassignEligibility is Reassign/SignalReassign's own gate on the
+// replacement assignee — closes the gap found reviewing this path: unlike
+// DelegationReconciler's Reroute/Reverse, nothing here ever checked whether
+// newUserID is actually eligible for the task's department/role before
+// committing the reassignment. Nil-guarded like checkUserLive: eligibility
+// wiring is optional in tests that don't exercise this path.
+func (s *TaskService) checkReassignEligibility(ctx context.Context, inst *domain.Instance, task *domain.Task, newUserID uuid.UUID) error {
+	if s.Eligibility == nil || s.Definitions == nil {
+		return nil
+	}
+	plan, err := newCompiledPlanCache(s.Definitions).mainPlan(ctx, inst.TenantID, inst.WorkflowVersionID)
+	if err != nil {
+		return fmt.Errorf("get compiled plan for eligibility check: %w", err)
+	}
+	level, ok := requiredLevelForTask(plan, task)
+	if !ok {
+		s.logger().Warn("reassign eligibility: no matching stage in compiled plan, skipping check", map[string]any{"task_id": task.ID})
+		return nil
+	}
+	eligible, err := s.Eligibility.CheckEligibility(ctx, newUserID, task.DepartmentID, level, newUserID)
+	if err != nil {
+		return fmt.Errorf("check reassign eligibility: %w", err)
+	}
+	if !eligible {
+		return port.ErrAssigneeIneligible
 	}
 	return nil
 }
@@ -435,5 +479,5 @@ func (s *TaskService) SignalReassign(ctx context.Context, tenantID, taskID, acto
 	if err != nil {
 		return wrapInstanceErr(err)
 	}
-	return s.sendReassignSignal(ctx, inst, taskID, previousUserID, newUserID, actorUserID, recordVersion)
+	return s.sendReassignSignal(ctx, inst, task, previousUserID, newUserID, actorUserID, recordVersion)
 }

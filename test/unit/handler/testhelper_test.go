@@ -226,14 +226,11 @@ func (f *fakeEligibilityChecker) CheckEligibility(ctx context.Context, newUserID
 	return true, nil
 }
 
-func (f *fakeEligibilityChecker) CheckEligibilityBatch(ctx context.Context, requests []port.EligibilityCheckRequest, actorID uuid.UUID) ([]bool, error) {
-	results := make([]bool, len(requests))
+func (f *fakeEligibilityChecker) CheckEligibilityBatch(ctx context.Context, requests []port.EligibilityCheckRequest, actorID uuid.UUID) ([]port.EligibilityResult, error) {
+	results := make([]port.EligibilityResult, len(requests))
 	for i, req := range requests {
 		eligible, err := f.CheckEligibility(ctx, req.NewUserID, req.DepartmentID, req.RequiredLevel, actorID)
-		if err != nil {
-			return nil, err
-		}
-		results[i] = eligible
+		results[i] = port.EligibilityResult{Eligible: eligible, Err: err}
 	}
 	return results, nil
 }

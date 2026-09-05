@@ -14,6 +14,7 @@ const (
 	constraintTaskAssignmentActive = "uq_workflow_task_assignment_active"
 	constraintTaskPK               = "workflow_task_pkey"
 	constraintTaskAssignmentPK     = "workflow_task_assignment_pkey"
+	constraintSLAEventTaskUnique   = "idx_outbox_events_sla_task_unique"
 )
 
 // notFoundOrVersionConflict disambiguates a zero-row optimistic-lock UPDATE
@@ -48,6 +49,12 @@ func mapErr(err error) error {
 			// hits its own primary key on the second attempt — the intended
 			// idempotency signal, not a real conflict. Callers treat this as
 			// "already created," not an error.
+			return domain.ErrAlreadyExists
+		case constraintSLAEventTaskUnique:
+			// recordSLAEvent's check-then-enqueue (ExistsForTask) races under
+			// READ COMMITTED: two overlapping activity attempts can both pass
+			// the check before either commits. This unique index is the
+			// backstop — the loser hits it here instead of double-enqueueing.
 			return domain.ErrAlreadyExists
 		}
 	}

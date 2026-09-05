@@ -1,3 +1,4 @@
+DROP INDEX IF EXISTS idx_outbox_events_sla_task_unique;
 DROP INDEX IF EXISTS idx_outbox_events_task;
 DROP INDEX IF EXISTS idx_outbox_events_instance_created;
 

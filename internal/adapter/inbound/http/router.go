@@ -91,10 +91,13 @@ func NewRouter(cfg RouterConfig) *Router {
 	r.GET("/healthz", gincommon.HealthHandler())
 	r.GET("/readyz", readyzHandler(cfg.DB, cfg.Cache, cfg.Temporal))
 
-	// /internal is service-to-service only, never a descendant of /api/v1's
-	// group — gin subgroups inherit every parent .Use(), and these routes
-	// must never see the gateway-identity-assuming ProtectedMiddlewares chain.
-	internal := r.Group("/internal")
+	// /api/v1/internal is service-to-service only. It shares the /api/v1
+	// path prefix (matching openapi.yaml and every cross-team contract doc)
+	// but is built as its own top-level group, never a descendant of the
+	// /api/v1 group below — gin subgroups inherit every parent .Use(), and
+	// these routes must never see the gateway-identity-assuming
+	// ProtectedMiddlewares chain.
+	internal := r.Group("/api/v1/internal")
 	internal.Use(middleware.RequireInternalToken(cfg.InternalAPIToken))
 
 	// /internal/workflows/* (LLD §5.8).

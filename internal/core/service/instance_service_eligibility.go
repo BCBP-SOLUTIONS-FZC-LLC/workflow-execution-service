@@ -105,8 +105,8 @@ func (s *InstanceService) validateAssigneeEligibility(ctx context.Context, plan 
 	}
 
 	var ineligibleNodes []string
-	for i, eligible := range results {
-		if !eligible {
+	for i, result := range results {
+		if result.Err != nil || !result.Eligible {
 			ineligibleNodes = append(ineligibleNodes, checks[i].nodeKey)
 		}
 	}

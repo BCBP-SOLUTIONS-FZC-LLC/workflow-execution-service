@@ -13,6 +13,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
 func newTaskServiceHarness() (*service.TaskService, *fakeInstanceRepo, *fakeTaskRepo, *fakeAssignmentRepo, *fakeAssigneeOverrideRepo, *fakeTemporalClient) {
@@ -609,6 +610,142 @@ func TestTaskService_Reassign(t *testing.T) {
 
 		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
 		assert.Error(t, err)
+	})
+
+	// Regression tests for the eligibility/liveness gap found reviewing this
+	// path: unlike OverrideAssignee (checked in its HTTP handler), plain
+	// Reassign never checked the replacement assignee at all.
+	t.Run("eligible replacement succeeds", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		definitions := &fakeDefinitionClient{}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) { return true, nil }}
+
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1)
+	})
+
+	t.Run("ineligible replacement is rejected", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		definitions := &fakeDefinitionClient{}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) { return false, nil }}
+
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrAssigneeIneligible)
+		assert.Empty(t, temporal.signals, "an ineligible replacement must never reach the workflow signal")
+	})
+
+	t.Run("eligibility service error propagates, not silently swallowed", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		definitions := &fakeDefinitionClient{}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+			return false, assert.AnError
+		}}
+
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		assert.Error(t, err)
+		assert.Empty(t, temporal.signals, "an unresolved eligibility check must never reach the workflow signal")
+	})
+
+	t.Run("compiled-plan fetch error propagates from the eligibility check", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		definitions := &fakeDefinitionClient{err: assert.AnError}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{}
+
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		assert.Error(t, err)
+		assert.Empty(t, temporal.signals)
+	})
+
+	t.Run("node not found in compiled plan skips the eligibility check", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		definitions := &fakeDefinitionClient{}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+			t.Fatal("CheckEligibility must not be called when the node has no matching compiled-plan stage")
+			return false, nil
+		}}
+
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		// The compiled plan has no stage at all, so requiredLevelForTask can't
+		// resolve a role for newReadyTask's "finance/review" node.
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t))
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		require.NoError(t, err, "an unresolvable node must not block the reassignment")
+		require.Len(t, temporal.signals, 1)
+	})
+
+	t.Run("a confirmed-unavailable replacement blocks the reassignment", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		svc.IAM = &fakeIAMClient{status: port.UserStatus{IsOOO: true}}
+
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrAssigneeUnavailable)
+		assert.Empty(t, temporal.signals)
+	})
+
+	t.Run("liveness stub error fails open, matching self-service checkUserLive semantics", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		svc.IAM = &fakeIAMClient{err: errors.New("iam client: user-status endpoint contract not yet confirmed")}
+
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		require.NoError(t, err, "an unresolved liveness check must not block the reassignment")
+		require.Len(t, temporal.signals, 1)
 	})
 }
 

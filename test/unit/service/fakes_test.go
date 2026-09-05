@@ -15,6 +15,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/pkg/events"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
@@ -546,7 +547,7 @@ func (c *fakeDefinitionClient) GetCompiledWorkflow(_ context.Context, _, _ uuid.
 
 type fakeEligibilityChecker struct {
 	check      func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error)
-	batchCheck func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]bool, error)
+	batchCheck func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]port.EligibilityResult, error)
 }
 
 func (f *fakeEligibilityChecker) CheckEligibility(ctx context.Context, newUserID, departmentID uuid.UUID, requiredLevel string, actorID uuid.UUID) (bool, error) {
@@ -556,13 +557,13 @@ func (f *fakeEligibilityChecker) CheckEligibility(ctx context.Context, newUserID
 	return true, nil
 }
 
-func (f *fakeEligibilityChecker) CheckEligibilityBatch(ctx context.Context, requests []port.EligibilityCheckRequest, actorID uuid.UUID) ([]bool, error) {
+func (f *fakeEligibilityChecker) CheckEligibilityBatch(ctx context.Context, requests []port.EligibilityCheckRequest, actorID uuid.UUID) ([]port.EligibilityResult, error) {
 	if f.batchCheck != nil {
 		return f.batchCheck(ctx, requests, actorID)
 	}
-	results := make([]bool, len(requests))
+	results := make([]port.EligibilityResult, len(requests))
 	for i := range results {
-		results[i] = true
+		results[i] = port.EligibilityResult{Eligible: true}
 	}
 	return results, nil
 }
@@ -645,12 +646,21 @@ func (c *fakeIAMClient) GetUserStatus(_ context.Context, _, _ uuid.UUID) (port.U
 
 // --- EventValidator ---
 
-// noopValidator always accepts — these tests assert on repo/outbox state and
-// signal construction, not schema validation itself (already covered by
-// test/unit/eventbus).
-type noopValidator struct{}
-
-func (noopValidator) Validate(context.Context, string, json.RawMessage) error { return nil }
+// realValidator constructs the production JSON-schema validator so tests
+// that DO build a real outbound event payload assert against the actual
+// contract, not just against repo/outbox state — noopValidator alone missed
+// exactly this: workflow.task.created shipped "assignee_user_ids": null for
+// a whole class of tasks because no test ever ran the real schema check
+// against a constructed payload. No *testing.T needed: construction is
+// deterministic against the embedded schemas, so a failure here means the
+// build itself is broken, not this particular test case.
+func realValidator() port.EventValidator {
+	v, err := eventbus.NewSchemaValidator()
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
 
 // failingValidator always rejects — exercises BuildEnvelope's own error
 // path from a caller's perspective without needing a real JSON Schema.

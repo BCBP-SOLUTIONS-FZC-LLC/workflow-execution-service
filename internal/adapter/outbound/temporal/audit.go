@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -85,7 +86,7 @@ func (d *Deps) supersedeTask(ctx context.Context, tenantID, instanceID uuid.UUID
 	if err != nil {
 		return fmt.Errorf("list active assignments for task %s: %w", task.ID, err)
 	}
-	var assigneeUserIDs []uuid.UUID
+	assigneeUserIDs := []uuid.UUID{}
 	for _, a := range active {
 		if _, err := d.Assignments.Vacate(ctx, tenantID, a.ID); err != nil {
 			return fmt.Errorf("vacate assignment %s: %w", a.ID, err)
@@ -162,12 +163,21 @@ func (d *Deps) recordSLAEvent(
 		if err != nil {
 			return fmt.Errorf("list active assignments for task %s: %w", task.ID, err)
 		}
-		var assigneeUserIDs []uuid.UUID
+		assigneeUserIDs := []uuid.UUID{}
 		for _, a := range active {
 			assigneeUserIDs = append(assigneeUserIDs, a.UserID)
 		}
 		core := domain.CommonCore{WorkflowInstanceID: instanceID}
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
-		return d.enqueueInstanceEvent(ctx, tenantID, instanceID, eventType, buildPayload(core, taskCore, task))
+		if err := d.enqueueInstanceEvent(ctx, tenantID, instanceID, eventType, buildPayload(core, taskCore, task)); err != nil {
+			if errors.Is(err, domain.ErrAlreadyExists) {
+				// Lost the race against a concurrent attempt that reached
+				// ExistsForTask first — idx_outbox_events_sla_task_unique's
+				// backstop, not a real error.
+				return nil
+			}
+			return err
+		}
+		return nil
 	})
 }

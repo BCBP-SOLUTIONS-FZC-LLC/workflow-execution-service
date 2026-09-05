@@ -47,7 +47,7 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 	var connectorType *string
 	var resolvedInputs map[string]any
 	var outputMapping []dsl.IOVar
-	var assigneeUserIDs []uuid.UUID
+	assigneeUserIDs := []uuid.UUID{}
 	if stage.ConnectorType != "" {
 		connectorType = &stage.ConnectorType
 		task.ConnectorType = &stage.ConnectorType
@@ -90,7 +90,11 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 			}
 		}
 
-		core := domain.CommonCore{WorkflowInstanceID: instanceID}
+		inst, err := d.Instances.GetByID(ctx, tenantID, instanceID)
+		if err != nil {
+			return fmt.Errorf("get instance: %w", err)
+		}
+		core := domain.CommonCore{WorkflowInstanceID: instanceID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}
 		taskCore := domain.TaskScopedCore{
 			TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs,
 		}

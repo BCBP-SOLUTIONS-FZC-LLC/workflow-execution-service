@@ -312,7 +312,7 @@ func TestDeferTask_RegressionAssignmentCreateFails(t *testing.T) {
 func TestCreateTask_TasksCreateFails(t *testing.T) {
 	tasks := newFakeTaskRepo()
 	tasks.createErr = errBoom
-	deps := &outboundtemporal.Deps{Tasks: tasks, Assignments: newFakeAssignmentRepo(), Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{}}
+	deps := &outboundtemporal.Deps{Tasks: tasks, Assignments: newFakeAssignmentRepo(), Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator()}
 	compiled, _ := json.Marshal(dsl.StageDef{Type: "review"})
 
 	_, err := deps.CreateTask(context.Background(), port.CreateTaskInput{
@@ -325,7 +325,7 @@ func TestCreateTask_TasksCreateFails(t *testing.T) {
 func TestCreateTask_AssignmentsCreateFails(t *testing.T) {
 	assignments := newFakeAssignmentRepo()
 	assignments.createErr = errBoom
-	deps := &outboundtemporal.Deps{Tasks: newFakeTaskRepo(), Assignments: assignments, Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{}}
+	deps := &outboundtemporal.Deps{Tasks: newFakeTaskRepo(), Assignments: assignments, Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator()}
 	compiled, _ := json.Marshal(dsl.StageDef{Type: "review", DefaultAssignees: []string{uuid.New().String()}})
 
 	_, err := deps.CreateTask(context.Background(), port.CreateTaskInput{
@@ -341,7 +341,7 @@ func TestPauseInstance_InvalidAdminUserID_TreatedAsNilActor(t *testing.T) {
 	deps, outbox := newInstanceTestDeps(inst, nil, nil)
 
 	err := deps.PauseInstance(context.Background(), port.PauseInstanceInput{
-		InstanceID: instanceID.String(), TenantID: uuid.New().String(), AdminUserID: "not-a-uuid", RecordVersion: 1,
+		InstanceID: instanceID.String(), TenantID: uuid.New().String(), AdminUserID: "not-a-uuid", Initiator: domain.InitiatorAdmin, RecordVersion: 1,
 	})
 	require.NoError(t, err, "adminUserIDPtr degrades to a nil actor rather than failing pause")
 	require.Len(t, outbox.enqueued, 1)
@@ -461,7 +461,7 @@ func TestSupersedeBypassedTasks_UpdateStatusFails(t *testing.T) {
 	tasks.updateStatusErr = errBoom
 	deps := &outboundtemporal.Deps{
 		Instances: newFakeInstanceRepo(inst), Tasks: tasks, Assignments: newFakeAssignmentRepo(),
-		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: noopValidator{},
+		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 	err := deps.RecordForceRoute(context.Background(), port.RecordForceRouteInput{
 		InstanceID: instanceID.String(), TenantID: tenantID.String(),
@@ -589,7 +589,7 @@ func TestEnqueueInstanceEvent_OutboxEnqueueFails(t *testing.T) {
 	outbox.enqueueErr = errBoom
 
 	err := deps.PauseInstance(context.Background(), port.PauseInstanceInput{
-		InstanceID: instanceID.String(), TenantID: uuid.New().String(), AdminUserID: uuid.New().String(), RecordVersion: 1,
+		InstanceID: instanceID.String(), TenantID: uuid.New().String(), AdminUserID: uuid.New().String(), Initiator: domain.InitiatorAdmin, RecordVersion: 1,
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errBoom))

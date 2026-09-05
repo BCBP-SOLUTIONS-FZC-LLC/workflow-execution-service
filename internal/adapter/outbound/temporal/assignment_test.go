@@ -21,7 +21,7 @@ func newAssignmentTestDeps(tasks *fakeTaskRepo, assignments *fakeAssignmentRepo)
 		Assignments: assignments,
 		Outbox:      outbox,
 		Transactor:  fakeTransactor{},
-		Validator:   noopValidator{},
+		Validator:   realValidator(),
 	}
 	return deps, outbox
 }

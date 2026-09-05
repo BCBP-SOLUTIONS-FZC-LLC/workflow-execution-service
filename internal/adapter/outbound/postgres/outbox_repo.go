@@ -35,7 +35,7 @@ func (r *OutboxRepo) Enqueue(ctx context.Context, env events.Envelope[json.RawMe
 	if !ok {
 		return errors.New("outbox: Enqueue must be called inside a transaction — use Transactor.RunInTx")
 	}
-	return outbox.Enqueue(ctx, tx, env) //nolint:wrapcheck
+	return mapErr(outbox.Enqueue(ctx, tx, env))
 }
 
 // ExistsForTask reports whether eventType has already been enqueued for

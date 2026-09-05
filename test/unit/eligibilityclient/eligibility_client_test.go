@@ -233,25 +233,50 @@ func TestCheckEligibilityBatch(t *testing.T) {
 		results, err := client.CheckEligibilityBatch(context.Background(), requests, uuid.New())
 		require.NoError(t, err)
 		require.Len(t, results, 3)
-		for _, eligible := range results {
-			assert.True(t, eligible)
+		for _, result := range results {
+			assert.NoError(t, result.Err)
+			assert.True(t, result.Eligible)
 		}
 		assert.Equal(t, int32(3), atomic.LoadInt32(&calls))
 	})
 
-	t.Run("one request failing fails the whole batch", func(t *testing.T) {
+	t.Run("one request failing does not discard the others' results", func(t *testing.T) {
+		// One user's department (dept 1, below) always 500s; the other two
+		// succeed with different eligible/ineligible outcomes. A single
+		// failing request must not poison the whole batch (the fan-out's own
+		// prior all-or-nothing behavior, fixed as a real reliability gap).
+		failingDept := uuid.New()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusInternalServerError)
+			var body struct {
+				DepartmentID uuid.UUID `json:"department_id"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.DepartmentID == failingDept {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			eligible := body.DepartmentID != uuid.Nil
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]bool{"eligible": eligible})
 		}))
 		defer srv.Close()
 
 		client := httpadapter.NewEligibilityClient(srv.URL, 200*time.Millisecond)
+		eligibleDept := uuid.New()
 		requests := []port.EligibilityCheckRequest{
-			{NewUserID: uuid.New(), DepartmentID: uuid.New(), RequiredLevel: "reviewer"},
+			{NewUserID: uuid.New(), DepartmentID: eligibleDept, RequiredLevel: "reviewer"},
+			{NewUserID: uuid.New(), DepartmentID: failingDept, RequiredLevel: "reviewer"},
+			{NewUserID: uuid.New(), DepartmentID: uuid.Nil, RequiredLevel: "reviewer"},
 		}
 
-		_, err := client.CheckEligibilityBatch(context.Background(), requests, uuid.New())
-		assert.Error(t, err)
+		results, err := client.CheckEligibilityBatch(context.Background(), requests, uuid.New())
+		require.NoError(t, err, "a per-item failure must not surface as a whole-batch error")
+		require.Len(t, results, 3)
+		assert.NoError(t, results[0].Err)
+		assert.True(t, results[0].Eligible, "the eligible-department request must still succeed despite request 1 failing")
+		assert.Error(t, results[1].Err, "the failing request's own error must be reported on its own result")
+		assert.NoError(t, results[2].Err)
+		assert.False(t, results[2].Eligible, "the third request must resolve on its own, independent of request 1's failure")
 	})
 
 	t.Run("empty request list returns an empty, non-nil-error result", func(t *testing.T) {
