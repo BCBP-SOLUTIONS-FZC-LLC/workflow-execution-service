@@ -52,11 +52,11 @@ const (
 // switch and each category entrypoint's own smaller switch, so the two never
 // drift apart on the literal.
 const (
-	eventTypeDelegationStarted       = "delegation.started"
-	eventTypeDelegationEnded         = "delegation.ended"
-	eventTypeUserDeleted             = "user.deleted"
-	eventTypeUserAvailabilityChanged = "user.availability.changed"
-	eventTypeTenantStateChanged      = "tenant.state.changed"
+	eventTypeDelegationStarted       = "DelegationStarted"
+	eventTypeDelegationEnded         = "DelegationEnded"
+	eventTypeUserDeleted             = "UserDeleted"
+	eventTypeUserAvailabilityChanged = "UserAvailabilityChanged"
+	eventTypeTenantStateChanged      = "TenantStateChanged"
 )
 
 // parseEventID and parseTenantID share the "invalid event id"/"invalid
@@ -114,9 +114,8 @@ func (h *Handler) decodeEnvelope(c *gin.Context) (events.Envelope[json.RawMessag
 // unhandledType still returns 200 (an unrecognized type must never train the
 // upstream event bridge to retry forever), but records its own
 // "unhandled_type" result label rather than markOK's "ok" — folding it into
-// "ok" made a wire-format mismatch (like the DelegationStarted/
-// TenantStateChanged casing bug this handler once had) indistinguishable
-// from a real success in ingest metrics/dashboards.
+// "ok" made a wire-format mismatch (a wrong-cased or misspelled event type)
+// indistinguishable from a real success in ingest metrics/dashboards.
 func (h *Handler) unhandledType(c *gin.Context, eventType string) {
 	h.logWarn("internal events: ignoring unhandled type", map[string]any{"event_type": eventType})
 	incIngestTotal(eventType, "unhandled_type")
@@ -152,7 +151,7 @@ func (h *Handler) HandleInternalEvent(c *gin.Context) {
 }
 
 // HandleDelegationEvents is POST /events/delegation — event_consumer routes
-// delegation.started/.ended here directly (internal/forwarder/category.go).
+// DelegationStarted/DelegationEnded here directly (internal/forwarder/category.go).
 func (h *Handler) HandleDelegationEvents(c *gin.Context) {
 	env, ok := h.decodeEnvelope(c)
 	if !ok {
@@ -312,7 +311,7 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 	const eventType = eventTypeDelegationStarted
 	var p delegationStartedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
-		h.badPayload(c, eventType, "invalid delegation.started payload")
+		h.badPayload(c, eventType, "invalid DelegationStarted payload")
 		return
 	}
 	eventID, ok := h.parseEventID(c, eventType, env.ID)
@@ -394,7 +393,7 @@ func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json
 	const eventType = eventTypeDelegationEnded
 	var p delegationEndedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
-		h.badPayload(c, eventType, "invalid delegation.ended payload")
+		h.badPayload(c, eventType, "invalid DelegationEnded payload")
 		return
 	}
 	eventID, ok := h.parseEventID(c, eventType, env.ID)
@@ -643,7 +642,7 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 	const eventType = eventTypeTenantStateChanged
 	var p tenantStateChangedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
-		h.badPayload(c, eventType, "invalid tenant.state.changed payload")
+		h.badPayload(c, eventType, "invalid TenantStateChanged payload")
 		return
 	}
 	eventID, ok := h.parseEventID(c, eventType, env.ID)

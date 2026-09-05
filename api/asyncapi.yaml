@@ -92,8 +92,8 @@ channels:
             deadLetterQueue: { name: user-wf-dlq }
             maxReceiveCount: 5
     messages:
-      user.deleted:              { $ref: '#/components/messages/UserDeletedInbound' }
-      user.availability.changed: { $ref: '#/components/messages/UserAvailabilityChangedInbound' }
+      UserDeleted:              { $ref: '#/components/messages/UserDeletedInbound' }
+      UserAvailabilityChanged:  { $ref: '#/components/messages/UserAvailabilityChangedInbound' }
 
   self/task-dispatch:
     address: /api/v1/internal/events
@@ -426,10 +426,14 @@ components:
         non-active status other than offboarded pauses them (initiator=tenant_state);
         active-from-paused resumes them; a plan delta upserts the active_task_queues
         registry. Recency-guarded against out-of-order redelivery via changed_at.
+        Confirmed directly against IAM's own Org & Membership AsyncAPI spec
+        (OAM_asyncapi.yaml): published on iam-membership-events, delivered to
+        membership-workflow-q, documented there as the §7.1 EVT-16 relay of
+        TenantSuspended/Cancelled/Offboarded (from Billing) and TrialExpired.
       x-schema-owner: iam-org-membership
       payload: { $ref: '#/components/schemas/TenantStateChangedInbound' }
     UserDeletedInbound:
-      name: user.deleted
+      name: UserDeleted
       x-lifecycle: { status: active }
       title: User deleted (owned by IAM User Profile)
       description: >
@@ -440,7 +444,7 @@ components:
       x-schema-owner: iam-user-profile
       payload: { $ref: '#/components/schemas/UserDeletedInbound' }
     UserAvailabilityChangedInbound:
-      name: user.availability.changed
+      name: UserAvailabilityChanged
       x-lifecycle: { status: active }
       title: User availability changed (owned by IAM User Profile)
       description: >

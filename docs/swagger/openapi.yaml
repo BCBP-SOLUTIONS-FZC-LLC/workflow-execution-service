@@ -251,7 +251,7 @@ components:
           description: >
             Dotted-lowercase or PascalCase wire type, dispatched by the switch in
             internal_events.go (§6.2). One of: DelegationStarted, DelegationEnded,
-            TenantStateChanged, user.deleted, user.availability.changed. Any other
+            TenantStateChanged, UserDeleted, UserAvailabilityChanged. Any other
             value is accepted and ignored with 200.
           example: "DelegationStarted"
         subject:
@@ -2694,10 +2694,10 @@ paths:
     post:
       operationId: ingestDelegationEvent
       tags: [Internal (Events)]
-      summary: Ingest delegation.started / delegation.ended directly
+      summary: Ingest DelegationStarted / DelegationEnded directly
       description: >
         Same contract as ingestInternalEvent (§6.1), scoped to
-        delegation.started/delegation.ended. A type outside this category
+        DelegationStarted/DelegationEnded. A type outside this category
         (should the consumer ever send one) is accepted and ignored with 200,
         same as the catch-all's unrecognized-type behavior.
       security:
@@ -2733,10 +2733,10 @@ paths:
     post:
       operationId: ingestUserProfileEvent
       tags: [Internal (Events)]
-      summary: Ingest user.deleted / user.availability.changed directly
+      summary: Ingest UserDeleted / UserAvailabilityChanged directly
       description: >
         Same contract as ingestInternalEvent (§6.1), scoped to
-        user.deleted/user.availability.changed. A type outside this category
+        UserDeleted/UserAvailabilityChanged. A type outside this category
         is accepted and ignored with 200.
       security:
         - InternalServiceAuth: []
@@ -2771,10 +2771,10 @@ paths:
     post:
       operationId: ingestTenantEvent
       tags: [Internal (Events)]
-      summary: Ingest tenant.state.changed directly
+      summary: Ingest TenantStateChanged directly
       description: >
         Same contract as ingestInternalEvent (§6.1), scoped to
-        tenant.state.changed. A type outside this category is accepted and
+        TenantStateChanged. A type outside this category is accepted and
         ignored with 200.
       security:
         - InternalServiceAuth: []
