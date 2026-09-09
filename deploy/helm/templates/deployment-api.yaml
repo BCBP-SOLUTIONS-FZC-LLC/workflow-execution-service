@@ -1,8 +1,3 @@
-# NOTE: cmd/server is still a stub main (logs "not implemented" and exits) —
-# a composition root is later Tier-2 work, not this chart's. The probes and
-# rolling-update strategy below document the LLD's real target behavior
-# (§7.5, §7.6) for once that lands; deployed against today's stub binary,
-# the pod exits immediately and crash-loops — expected, not a chart defect.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

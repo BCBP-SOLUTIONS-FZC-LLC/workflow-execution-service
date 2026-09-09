@@ -23,6 +23,12 @@ const (
 	maxBackoff     = 10 * time.Second
 )
 
+// dispatchDedupTTL guards against re-executing the same task_id from two
+// separate Stream entries. Deliberately shorter than the default
+// claimMinIdle, so a genuine reclaim-driven retry of a crashed attempt isn't
+// blocked by its own first claim.
+const dispatchDedupTTL = 10 * time.Second
+
 // runDispatchLoop is cmd/connector-worker's main consume loop — the
 // equivalent of cmd/worker's pollQueueTopology goroutine. Ctx cancellation
 // stops picking up new work; in-flight dispatches are tracked via wg and
@@ -123,6 +129,12 @@ func dispatchEntry(ctx context.Context, d *deps, wg *sync.WaitGroup, entry valke
 		return
 	}
 
+	if !claimDispatch(ctx, d, job.taskID, wlog) {
+		wlog.Warn("connector-worker: duplicate dispatch entry for task_id, acking without re-executing", map[string]any{"task_id": job.taskID})
+		ackEntry(ctx, d, entry.ID, wlog)
+		return
+	}
+
 	pool, ok := d.pools[job.connectorType]
 	if !ok {
 		wlog.Error("connector-worker: unknown connector type", map[string]any{"connector_type": job.connectorType, "task_id": job.taskID})
@@ -180,6 +192,21 @@ func finishFailed(ctx context.Context, d *deps, job dispatchJob, entryID, errorC
 		return
 	}
 	ackEntry(ctx, d, entryID, wlog)
+}
+
+// claimDispatch reports whether this call is the first to claim taskID
+// within dispatchDedupTTL. A claim failure (cache unreachable) fails open —
+// proceeding with dispatch rather than blocking on a cache hiccup.
+func claimDispatch(ctx context.Context, d *deps, taskID uuid.UUID, wlog port.Logger) bool {
+	if d.dedup == nil {
+		return true
+	}
+	ok, err := d.dedup.SetNX(ctx, "connector-dispatch:"+taskID.String(), "1", dispatchDedupTTL)
+	if err != nil {
+		wlog.Warn("connector-worker: dispatch dedup check failed, proceeding fail-open", map[string]any{"task_id": taskID, "error": err.Error()})
+		return true
+	}
+	return ok
 }
 
 func ackEntry(ctx context.Context, d *deps, entryID string, wlog port.Logger) {

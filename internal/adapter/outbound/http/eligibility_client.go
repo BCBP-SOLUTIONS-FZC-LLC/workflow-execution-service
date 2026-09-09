@@ -21,6 +21,11 @@ var ErrUpstreamUnavailable = errors.New("upstream service unavailable")
 
 const maxEligibilityAttempts = 3
 
+// maxEligibilityBatchConcurrency caps CheckEligibilityBatch's fan-out — a
+// large batch must not open one goroutine (and one HTTP connection) per
+// item with no ceiling.
+const maxEligibilityBatchConcurrency = 20
+
 var _ port.EligibilityChecker = (*EligibilityClient)(nil)
 
 // EligibilityClient calls Org & Membership's assignee-eligibility endpoint.
@@ -57,10 +62,13 @@ func (c *EligibilityClient) CheckEligibilityBatch(
 ) ([]port.EligibilityResult, error) {
 	results := make([]port.EligibilityResult, len(requests))
 	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxEligibilityBatchConcurrency)
 	for i, req := range requests {
 		wg.Add(1)
+		sem <- struct{}{}
 		go func(i int, req port.EligibilityCheckRequest) {
 			defer wg.Done()
+			defer func() { <-sem }()
 			eligible, err := c.CheckEligibility(ctx, req.NewUserID, req.DepartmentID, req.RequiredLevel, actorID)
 			results[i] = port.EligibilityResult{Eligible: eligible, Err: err}
 		}(i, req)

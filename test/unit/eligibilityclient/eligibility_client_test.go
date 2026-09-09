@@ -285,4 +285,33 @@ func TestCheckEligibilityBatch(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, results)
 	})
+
+	t.Run("fan-out concurrency is capped, not one goroutine per request", func(t *testing.T) {
+		var inFlight, peak int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cur := atomic.AddInt32(&inFlight, 1)
+			defer atomic.AddInt32(&inFlight, -1)
+			for {
+				p := atomic.LoadInt32(&peak)
+				if cur <= p || atomic.CompareAndSwapInt32(&peak, p, cur) {
+					break
+				}
+			}
+			time.Sleep(10 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]bool{"eligible": true})
+		}))
+		defer srv.Close()
+
+		client := httpadapter.NewEligibilityClient(srv.URL, 5*time.Second)
+		requests := make([]port.EligibilityCheckRequest, 60)
+		for i := range requests {
+			requests[i] = port.EligibilityCheckRequest{NewUserID: uuid.New(), DepartmentID: uuid.New(), RequiredLevel: "reviewer"}
+		}
+
+		results, err := client.CheckEligibilityBatch(context.Background(), requests, uuid.New())
+		require.NoError(t, err)
+		require.Len(t, results, 60)
+		assert.LessOrEqual(t, atomic.LoadInt32(&peak), int32(20), "batch fan-out must stay under its concurrency cap, not open one goroutine per request")
+	})
 }

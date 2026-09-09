@@ -47,6 +47,16 @@ func TestLoad_MissingDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestLoad_InvalidIntEnvVarFailsFast(t *testing.T) {
+	setValidEnv(t)
+	t.Setenv("HTTP_PORT", "not-a-port")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for a malformed HTTP_PORT rather than silently booting on its default")
+	}
+}
+
 func TestValidate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -74,14 +84,19 @@ func TestValidate(t *testing.T) {
 		{"iam client timeout zero", func(c *Config) { c.IAMClientTimeout = 0 }, true},
 		{"queue topology poll interval zero", func(c *Config) { c.QueueTopologyPollInterval = 0 }, true},
 		{"internal api token required in prod", func(c *Config) { c.AppEnv = "prod" }, true},
+		{"internal api token required outside dev even when not prod", func(c *Config) {
+			c.AppEnv = "staging"
+			c.OutboxRelayDatabaseURL = "postgres://relay"
+		}, true},
 		{"internal api token set in prod", func(c *Config) {
 			c.AppEnv = "prod"
 			c.InternalAPIToken = "tok"
 			c.OutboxRelayDatabaseURL = "postgres://relay"
 		}, false},
-		{"outbox relay database url required outside dev", func(c *Config) { c.AppEnv = "staging" }, true},
+		{"outbox relay database url required outside dev", func(c *Config) { c.AppEnv = "staging"; c.InternalAPIToken = "tok" }, true},
 		{"outbox relay database url set outside dev", func(c *Config) {
 			c.AppEnv = "staging"
+			c.InternalAPIToken = "tok"
 			c.OutboxRelayDatabaseURL = "postgres://relay"
 		}, false},
 	}
@@ -154,57 +169,57 @@ func TestGetEnvOrDefault(t *testing.T) {
 
 func TestGetEnvIntOrDefault(t *testing.T) {
 	t.Setenv("TEST_INT_VAR", "42")
-	if got := getEnvIntOrDefault("TEST_INT_VAR", 1); got != 42 {
-		t.Errorf("getEnvIntOrDefault() = %d, want 42", got)
+	if got, err := getEnvIntOrDefault("TEST_INT_VAR", 1); got != 42 || err != nil {
+		t.Errorf("getEnvIntOrDefault() = (%d, %v), want (42, nil)", got, err)
 	}
 	t.Setenv("TEST_INT_VAR_BAD", "not-an-int")
-	if got := getEnvIntOrDefault("TEST_INT_VAR_BAD", 7); got != 7 {
-		t.Errorf("getEnvIntOrDefault() = %d, want fallback 7", got)
+	if got, err := getEnvIntOrDefault("TEST_INT_VAR_BAD", 7); got != 7 || err == nil {
+		t.Errorf("getEnvIntOrDefault() = (%d, %v), want (fallback 7, a parse error)", got, err)
 	}
-	if got := getEnvIntOrDefault("TEST_INT_VAR_UNSET", 9); got != 9 {
-		t.Errorf("getEnvIntOrDefault() = %d, want fallback 9", got)
+	if got, err := getEnvIntOrDefault("TEST_INT_VAR_UNSET", 9); got != 9 || err != nil {
+		t.Errorf("getEnvIntOrDefault() = (%d, %v), want (9, nil)", got, err)
 	}
 }
 
 func TestGetEnvBoolOrDefault(t *testing.T) {
 	t.Setenv("TEST_BOOL_VAR", "false")
-	if got := getEnvBoolOrDefault("TEST_BOOL_VAR", true); got {
-		t.Error("getEnvBoolOrDefault() = true, want false")
+	if got, err := getEnvBoolOrDefault("TEST_BOOL_VAR", true); got || err != nil {
+		t.Errorf("getEnvBoolOrDefault() = (%v, %v), want (false, nil)", got, err)
 	}
 	t.Setenv("TEST_BOOL_VAR_BAD", "not-a-bool")
-	if got := getEnvBoolOrDefault("TEST_BOOL_VAR_BAD", true); !got {
-		t.Error("getEnvBoolOrDefault() = false, want fallback true")
+	if got, err := getEnvBoolOrDefault("TEST_BOOL_VAR_BAD", true); !got || err == nil {
+		t.Errorf("getEnvBoolOrDefault() = (%v, %v), want (fallback true, a parse error)", got, err)
 	}
-	if got := getEnvBoolOrDefault("TEST_BOOL_VAR_UNSET", true); !got {
-		t.Error("getEnvBoolOrDefault() = false, want fallback true")
+	if got, err := getEnvBoolOrDefault("TEST_BOOL_VAR_UNSET", true); !got || err != nil {
+		t.Errorf("getEnvBoolOrDefault() = (%v, %v), want (true, nil)", got, err)
 	}
 }
 
 func TestGetEnvFloat64OrDefault(t *testing.T) {
 	t.Setenv("TEST_FLOAT_VAR", "0.5")
-	if got := getEnvFloat64OrDefault("TEST_FLOAT_VAR", 1.0); got != 0.5 {
-		t.Errorf("getEnvFloat64OrDefault() = %v, want 0.5", got)
+	if got, err := getEnvFloat64OrDefault("TEST_FLOAT_VAR", 1.0); got != 0.5 || err != nil {
+		t.Errorf("getEnvFloat64OrDefault() = (%v, %v), want (0.5, nil)", got, err)
 	}
 	t.Setenv("TEST_FLOAT_VAR_BAD", "not-a-float")
-	if got := getEnvFloat64OrDefault("TEST_FLOAT_VAR_BAD", 1.5); got != 1.5 {
-		t.Errorf("getEnvFloat64OrDefault() = %v, want fallback 1.5", got)
+	if got, err := getEnvFloat64OrDefault("TEST_FLOAT_VAR_BAD", 1.5); got != 1.5 || err == nil {
+		t.Errorf("getEnvFloat64OrDefault() = (%v, %v), want (fallback 1.5, a parse error)", got, err)
 	}
-	if got := getEnvFloat64OrDefault("TEST_FLOAT_VAR_UNSET", 2.5); got != 2.5 {
-		t.Errorf("getEnvFloat64OrDefault() = %v, want fallback 2.5", got)
+	if got, err := getEnvFloat64OrDefault("TEST_FLOAT_VAR_UNSET", 2.5); got != 2.5 || err != nil {
+		t.Errorf("getEnvFloat64OrDefault() = (%v, %v), want (2.5, nil)", got, err)
 	}
 }
 
 func TestGetEnvDurationOrDefault(t *testing.T) {
 	t.Setenv("TEST_DURATION_VAR", "2s")
-	if got := getEnvDurationOrDefault("TEST_DURATION_VAR", time.Second); got != 2*time.Second {
-		t.Errorf("getEnvDurationOrDefault() = %v, want 2s", got)
+	if got, err := getEnvDurationOrDefault("TEST_DURATION_VAR", time.Second); got != 2*time.Second || err != nil {
+		t.Errorf("getEnvDurationOrDefault() = (%v, %v), want (2s, nil)", got, err)
 	}
 	t.Setenv("TEST_DURATION_VAR_BAD", "not-a-duration")
 	want := 30 * time.Second
-	if got := getEnvDurationOrDefault("TEST_DURATION_VAR_BAD", want); got != want {
-		t.Errorf("getEnvDurationOrDefault() = %v, want fallback %v", got, want)
+	if got, err := getEnvDurationOrDefault("TEST_DURATION_VAR_BAD", want); got != want || err == nil {
+		t.Errorf("getEnvDurationOrDefault() = (%v, %v), want (fallback %v, a parse error)", got, err, want)
 	}
-	if got := getEnvDurationOrDefault("TEST_DURATION_VAR_UNSET", want); got != want {
-		t.Errorf("getEnvDurationOrDefault() = %v, want fallback %v", got, want)
+	if got, err := getEnvDurationOrDefault("TEST_DURATION_VAR_UNSET", want); got != want || err != nil {
+		t.Errorf("getEnvDurationOrDefault() = (%v, %v), want (%v, nil)", got, err, want)
 	}
 }

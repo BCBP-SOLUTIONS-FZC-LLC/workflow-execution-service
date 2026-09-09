@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -174,95 +175,126 @@ type Config struct {
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
+	var parseErrs []string
+	record := func(err error) {
+		if err != nil {
+			parseErrs = append(parseErrs, err.Error())
+		}
+	}
+	envInt := func(key string, fallback int) int {
+		v, err := getEnvIntOrDefault(key, fallback)
+		record(err)
+		return v
+	}
+	envBool := func(key string, fallback bool) bool {
+		v, err := getEnvBoolOrDefault(key, fallback)
+		record(err)
+		return v
+	}
+	envFloat64 := func(key string, fallback float64) float64 {
+		v, err := getEnvFloat64OrDefault(key, fallback)
+		record(err)
+		return v
+	}
+	envDuration := func(key string, fallback time.Duration) time.Duration {
+		v, err := getEnvDurationOrDefault(key, fallback)
+		record(err)
+		return v
+	}
+
 	cfg := &Config{
 		AppEnv:       getEnvOrDefault("APP_ENV", "dev"),
 		BuildVersion: getEnvOrDefault("BUILD_VERSION", "dev"),
 
-		HTTPPort:          getEnvIntOrDefault("HTTP_PORT", 8080),
-		GRPCPort:          getEnvIntOrDefault("GRPC_PORT", 9090),
-		MetricsPort:       getEnvIntOrDefault("METRICS_PORT", 9091),
-		WorkerHealthPort:  getEnvIntOrDefault("WORKER_HEALTH_PORT", 8081),
-		WorkerMetricsPort: getEnvIntOrDefault("WORKER_METRICS_PORT", 8082),
+		HTTPPort:          envInt("HTTP_PORT", 8080),
+		GRPCPort:          envInt("GRPC_PORT", 9090),
+		MetricsPort:       envInt("METRICS_PORT", 9091),
+		WorkerHealthPort:  envInt("WORKER_HEALTH_PORT", 8081),
+		WorkerMetricsPort: envInt("WORKER_METRICS_PORT", 8082),
 
 		OTELServiceName:        getEnvOrDefault("OTEL_SERVICE_NAME", "execution-service"),
 		OTELExporterEndpoint:   getEnvOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
-		OTELExporterInsecure:   getEnvBoolOrDefault("OTEL_EXPORTER_OTLP_INSECURE", true),
-		OTELTracesSamplerRatio: getEnvFloat64OrDefault("OTEL_TRACES_SAMPLER_RATIO", 1.0),
+		OTELExporterInsecure:   envBool("OTEL_EXPORTER_OTLP_INSECURE", true),
+		OTELTracesSamplerRatio: envFloat64("OTEL_TRACES_SAMPLER_RATIO", 1.0),
 
 		DatabaseURL:            getEnvOrDefault("DATABASE_URL", ""),
-		PGMaxConns:             int32(getEnvIntOrDefault("PG_MAX_CONNS", 10)),
-		PGMinConns:             int32(getEnvIntOrDefault("PG_MIN_CONNS", 2)),
-		PGSlowQueryThresholdMS: getEnvIntOrDefault("PG_SLOW_QUERY_THRESHOLD_MS", 200),
-		PGBouncerMode:          getEnvBoolOrDefault("PG_BOUNCER_MODE", false),
+		PGMaxConns:             int32(envInt("PG_MAX_CONNS", 10)),
+		PGMinConns:             int32(envInt("PG_MIN_CONNS", 2)),
+		PGSlowQueryThresholdMS: envInt("PG_SLOW_QUERY_THRESHOLD_MS", 200),
+		PGBouncerMode:          envBool("PG_BOUNCER_MODE", false),
 		MigrationDatabaseURL:   getEnvOrDefault("MIGRATION_DATABASE_URL", ""),
 
 		ValkeyAddr:         getEnvOrDefault("VALKEY_ADDR", "localhost:6379"),
 		ValkeyPassword:     getEnvOrDefault("VALKEY_PASSWORD", ""),
-		ValkeyDialTimeout:  getEnvDurationOrDefault("VALKEY_DIAL_TIMEOUT", 2*time.Second),
-		ValkeyReadTimeout:  getEnvDurationOrDefault("VALKEY_READ_TIMEOUT", 1*time.Second),
-		ValkeyWriteTimeout: getEnvDurationOrDefault("VALKEY_WRITE_TIMEOUT", 1*time.Second),
-		IdempotencyTTL:     getEnvDurationOrDefault("IDEMPOTENCY_TTL", 24*time.Hour),
+		ValkeyDialTimeout:  envDuration("VALKEY_DIAL_TIMEOUT", 2*time.Second),
+		ValkeyReadTimeout:  envDuration("VALKEY_READ_TIMEOUT", 1*time.Second),
+		ValkeyWriteTimeout: envDuration("VALKEY_WRITE_TIMEOUT", 1*time.Second),
+		IdempotencyTTL:     envDuration("IDEMPOTENCY_TTL", 24*time.Hour),
 
 		TemporalHostPort:  getEnvOrDefault("TEMPORAL_HOST_PORT", "localhost:7233"),
 		TemporalNamespace: getEnvOrDefault("TEMPORAL_NAMESPACE", "default"),
 		TemporalTaskQueue: getEnvOrDefault("TEMPORAL_TASK_QUEUE", "wf-queue-default"),
 
-		AWSUseStub:     getEnvBoolOrDefault("AWS_USE_STUB", true),
+		AWSUseStub:     envBool("AWS_USE_STUB", true),
 		AWSRegion:      getEnvOrDefault("AWS_REGION", "us-east-1"),
 		SNSTopicARN:    getEnvOrDefault("SNS_TOPIC_ARN", ""),
 		AWSEndpointURL: getEnvOrDefault("AWS_ENDPOINT_URL", ""),
 
-		OutboxPollInterval:     getEnvDurationOrDefault("OUTBOX_POLL_INTERVAL", 500*time.Millisecond),
-		OutboxBatchSize:        getEnvIntOrDefault("OUTBOX_BATCH_SIZE", 50),
+		OutboxPollInterval:     envDuration("OUTBOX_POLL_INTERVAL", 500*time.Millisecond),
+		OutboxBatchSize:        envInt("OUTBOX_BATCH_SIZE", 50),
 		OutboxRelayDatabaseURL: getEnvOrDefault("OUTBOX_RELAY_DATABASE_URL", ""),
 
 		DefinitionServiceAddr:   getEnvOrDefault("DEFINITION_SERVICE_ADDR", ""),
-		DefinitionClientTimeout: getEnvDurationOrDefault("DEFINITION_CLIENT_TIMEOUT", 5*time.Second),
+		DefinitionClientTimeout: envDuration("DEFINITION_CLIENT_TIMEOUT", 5*time.Second),
 
 		EligibilityBaseURL:       getEnvOrDefault("ELIGIBILITY_BASE_URL", ""),
-		EligibilityClientTimeout: getEnvDurationOrDefault("ELIGIBILITY_CLIENT_TIMEOUT", 5*time.Second),
+		EligibilityClientTimeout: envDuration("ELIGIBILITY_CLIENT_TIMEOUT", 5*time.Second),
 
 		IAMBaseURL:       getEnvOrDefault("IAM_BASE_URL", ""),
-		IAMClientTimeout: getEnvDurationOrDefault("IAM_CLIENT_TIMEOUT", 5*time.Second),
+		IAMClientTimeout: envDuration("IAM_CLIENT_TIMEOUT", 5*time.Second),
 
-		QueueTopologyPollInterval: getEnvDurationOrDefault("QUEUE_TOPOLOGY_POLL_INTERVAL", 60*time.Second),
+		QueueTopologyPollInterval: envDuration("QUEUE_TOPOLOGY_POLL_INTERVAL", 60*time.Second),
 
 		InternalAPIToken: getEnvOrDefault("INTERNAL_API_TOKEN", ""),
 
 		GlueRegistryName:   getEnvOrDefault("GLUE_REGISTRY_NAME", ""),
-		GlueSchemaCacheTTL: getEnvDurationOrDefault("GLUE_SCHEMA_CACHE_TTL", 5*time.Minute),
+		GlueSchemaCacheTTL: envDuration("GLUE_SCHEMA_CACHE_TTL", 5*time.Minute),
 
 		ConnectorStreamKey:          getEnvOrDefault("CONNECTOR_STREAM_KEY", "connector-tasks"),
 		ConnectorStreamGroup:        getEnvOrDefault("CONNECTOR_STREAM_GROUP", "connector-worker"),
 		ConnectorStreamConsumerName: getEnvOrDefault("CONNECTOR_STREAM_CONSUMER_NAME", ""),
-		ConnectorStreamBlockTimeout: getEnvDurationOrDefault("CONNECTOR_STREAM_BLOCK_TIMEOUT", 5*time.Second),
-		ConnectorStreamClaimMinIdle: getEnvDurationOrDefault("CONNECTOR_STREAM_CLAIM_MIN_IDLE", 30*time.Second),
-		ConnectorStreamBatchSize:    int64(getEnvIntOrDefault("CONNECTOR_STREAM_BATCH_SIZE", 10)),
+		ConnectorStreamBlockTimeout: envDuration("CONNECTOR_STREAM_BLOCK_TIMEOUT", 5*time.Second),
+		ConnectorStreamClaimMinIdle: envDuration("CONNECTOR_STREAM_CLAIM_MIN_IDLE", 30*time.Second),
+		ConnectorStreamBatchSize:    int64(envInt("CONNECTOR_STREAM_BATCH_SIZE", 10)),
 
 		OpenBaoAddr:    getEnvOrDefault("OPENBAO_ADDR", ""),
 		OpenBaoToken:   getEnvOrDefault("OPENBAO_TOKEN", ""),
 		OpenBaoMount:   getEnvOrDefault("OPENBAO_MOUNT", "secret"),
-		OpenBaoTimeout: getEnvDurationOrDefault("OPENBAO_TIMEOUT", 5*time.Second),
+		OpenBaoTimeout: envDuration("OPENBAO_TIMEOUT", 5*time.Second),
 
 		DefinitionServiceInternalHTTPAddr: getEnvOrDefault("DEFINITION_SERVICE_INTERNAL_HTTP_ADDR", ""),
-		ConnectorAliasFetchTimeout:        getEnvDurationOrDefault("CONNECTOR_ALIAS_FETCH_TIMEOUT", 10*time.Second),
+		ConnectorAliasFetchTimeout:        envDuration("CONNECTOR_ALIAS_FETCH_TIMEOUT", 10*time.Second),
 
-		ConnectorPoolSizeStorage:         getEnvIntOrDefault("CONNECTOR_POOL_SIZE_STORAGE", 10),
-		ConnectorPoolSizeSendEmail:       getEnvIntOrDefault("CONNECTOR_POOL_SIZE_SEND_EMAIL", 5),
-		ConnectorPoolSizeDocumentExtract: getEnvIntOrDefault("CONNECTOR_POOL_SIZE_DOCUMENT_EXTRACT", 10),
-		ConnectorPoolSizeRestCall:        getEnvIntOrDefault("CONNECTOR_POOL_SIZE_REST_CALL", 20),
-		ConnectorPoolSizeSQLQuery:        getEnvIntOrDefault("CONNECTOR_POOL_SIZE_SQL_QUERY", 15),
-		ConnectorPoolSizeChatNotify:      getEnvIntOrDefault("CONNECTOR_POOL_SIZE_CHAT_NOTIFY", 5),
+		ConnectorPoolSizeStorage:         envInt("CONNECTOR_POOL_SIZE_STORAGE", 10),
+		ConnectorPoolSizeSendEmail:       envInt("CONNECTOR_POOL_SIZE_SEND_EMAIL", 5),
+		ConnectorPoolSizeDocumentExtract: envInt("CONNECTOR_POOL_SIZE_DOCUMENT_EXTRACT", 10),
+		ConnectorPoolSizeRestCall:        envInt("CONNECTOR_POOL_SIZE_REST_CALL", 20),
+		ConnectorPoolSizeSQLQuery:        envInt("CONNECTOR_POOL_SIZE_SQL_QUERY", 15),
+		ConnectorPoolSizeChatNotify:      envInt("CONNECTOR_POOL_SIZE_CHAT_NOTIFY", 5),
 
-		ConnectorTimeoutStorage:         getEnvDurationOrDefault("CONNECTOR_TIMEOUT_STORAGE", 60*time.Second),
-		ConnectorTimeoutSendEmail:       getEnvDurationOrDefault("CONNECTOR_TIMEOUT_SEND_EMAIL", 10*time.Second),
-		ConnectorTimeoutDocumentExtract: getEnvDurationOrDefault("CONNECTOR_TIMEOUT_DOCUMENT_EXTRACT", 60*time.Second),
-		ConnectorTimeoutRestCall:        getEnvDurationOrDefault("CONNECTOR_TIMEOUT_REST_CALL", 30*time.Second),
-		ConnectorTimeoutSQLQuery:        getEnvDurationOrDefault("CONNECTOR_TIMEOUT_SQL_QUERY", 15*time.Second),
-		ConnectorTimeoutChatNotify:      getEnvDurationOrDefault("CONNECTOR_TIMEOUT_CHAT_NOTIFY", 10*time.Second),
+		ConnectorTimeoutStorage:         envDuration("CONNECTOR_TIMEOUT_STORAGE", 60*time.Second),
+		ConnectorTimeoutSendEmail:       envDuration("CONNECTOR_TIMEOUT_SEND_EMAIL", 10*time.Second),
+		ConnectorTimeoutDocumentExtract: envDuration("CONNECTOR_TIMEOUT_DOCUMENT_EXTRACT", 60*time.Second),
+		ConnectorTimeoutRestCall:        envDuration("CONNECTOR_TIMEOUT_REST_CALL", 30*time.Second),
+		ConnectorTimeoutSQLQuery:        envDuration("CONNECTOR_TIMEOUT_SQL_QUERY", 15*time.Second),
+		ConnectorTimeoutChatNotify:      envDuration("CONNECTOR_TIMEOUT_CHAT_NOTIFY", 10*time.Second),
 
 		ExecutionServiceInternalAddr: getEnvOrDefault("EXECUTION_SERVICE_INTERNAL_ADDR", ""),
-		ConnectorCompletionTimeout:   getEnvDurationOrDefault("CONNECTOR_COMPLETION_TIMEOUT", 5*time.Second),
+		ConnectorCompletionTimeout:   envDuration("CONNECTOR_COMPLETION_TIMEOUT", 5*time.Second),
+	}
+
+	if len(parseErrs) > 0 {
+		return nil, fmt.Errorf("invalid environment variable(s): %s", strings.Join(parseErrs, "; "))
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -329,8 +361,8 @@ func (c *Config) validate() error {
 	if c.QueueTopologyPollInterval <= 0 {
 		return fmt.Errorf("QUEUE_TOPOLOGY_POLL_INTERVAL must be > 0")
 	}
-	if c.AppEnv == "prod" && c.InternalAPIToken == "" {
-		return fmt.Errorf("INTERNAL_API_TOKEN is required when APP_ENV=prod")
+	if c.AppEnv != "dev" && c.InternalAPIToken == "" {
+		return fmt.Errorf("INTERNAL_API_TOKEN is required when APP_ENV != dev")
 	}
 	if c.AppEnv != "dev" && c.OutboxRelayDatabaseURL == "" {
 		return fmt.Errorf("OUTBOX_RELAY_DATABASE_URL is required when APP_ENV != dev — a missing relay DSN would silently fall back to the RLS-enforced app role and see zero rows forever")
@@ -370,50 +402,55 @@ func getEnvOrDefault(key, fallback string) string {
 	return fallback
 }
 
-func getEnvIntOrDefault(key string, fallback int) int {
+// getEnvIntOrDefault, getEnvBoolOrDefault, getEnvFloat64OrDefault, and
+// getEnvDurationOrDefault return a non-nil error alongside the fallback when
+// the variable is set but fails to parse — a typo'd value must fail config
+// loading, not silently boot with a default nobody asked for. Load's own
+// envInt/envBool/envFloat64/envDuration closures collect these.
+func getEnvIntOrDefault(key string, fallback int) (int, error) {
 	v := os.Getenv(key)
 	if v == "" {
-		return fallback
+		return fallback, nil
 	}
 	i, err := strconv.Atoi(v)
 	if err != nil {
-		return fallback
+		return fallback, fmt.Errorf("%s=%q: %w", key, v, err)
 	}
-	return i
+	return i, nil
 }
 
-func getEnvBoolOrDefault(key string, fallback bool) bool {
+func getEnvBoolOrDefault(key string, fallback bool) (bool, error) {
 	v := os.Getenv(key)
 	if v == "" {
-		return fallback
+		return fallback, nil
 	}
 	b, err := strconv.ParseBool(v)
 	if err != nil {
-		return fallback
+		return fallback, fmt.Errorf("%s=%q: %w", key, v, err)
 	}
-	return b
+	return b, nil
 }
 
-func getEnvFloat64OrDefault(key string, fallback float64) float64 {
+func getEnvFloat64OrDefault(key string, fallback float64) (float64, error) {
 	v := os.Getenv(key)
 	if v == "" {
-		return fallback
+		return fallback, nil
 	}
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
-		return fallback
+		return fallback, fmt.Errorf("%s=%q: %w", key, v, err)
 	}
-	return f
+	return f, nil
 }
 
-func getEnvDurationOrDefault(key string, fallback time.Duration) time.Duration {
+func getEnvDurationOrDefault(key string, fallback time.Duration) (time.Duration, error) {
 	v := os.Getenv(key)
 	if v == "" {
-		return fallback
+		return fallback, nil
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil {
-		return fallback
+		return fallback, fmt.Errorf("%s=%q: %w", key, v, err)
 	}
-	return d
+	return d, nil
 }

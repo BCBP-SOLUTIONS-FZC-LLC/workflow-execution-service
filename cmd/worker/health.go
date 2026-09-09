@@ -30,7 +30,13 @@ func newHealthServer(addr string, pool *pgcommon.Pool, sdk client.Client) *http.
 func newMetricsServer(addr string) *http.Server {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
-	return &http.Server{Addr: addr, Handler: mux}
+	return &http.Server{
+		Addr:         addr,
+		Handler:      mux,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
 }
 
 func readyzHandler(pool *pgcommon.Pool, sdk client.Client) http.HandlerFunc {

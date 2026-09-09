@@ -1,7 +1,3 @@
-# NOTE: cmd/worker is still a stub main (logs "not implemented" and exits) —
-# no Temporal client/worker registration exists yet. Same caveat as
-# deployment-api.yaml: these probes document the LLD's real target
-# behavior; deployed today, the pod exits immediately and crash-loops.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
