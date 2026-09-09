@@ -2,9 +2,8 @@ package workflow
 
 import "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 
-// nodeHistory is the append-only completedNodes stack backing force-back /
-// force-forward semantics (LLD §2.7). Workflow-local state, not directly
-// Query-visible.
+// nodeHistory is the append-only completed-nodes stack backing force-back/
+// force-forward. Workflow-local state, not directly Query-visible.
 type nodeHistory struct {
 	stack []domain.NodeKey
 }
@@ -52,7 +51,16 @@ func (h *nodeHistory) PopTo(target domain.NodeKey) []domain.NodeKey {
 
 // PreForkEntry returns the node key recorded immediately before a parallel
 // gateway forks. Force-back during an active parallel gateway pops to this
-// entry, never to any single branch's in-flight position (LLD §2.7 point 1).
+// entry, never to any single branch's in-flight position.
 func (h *nodeHistory) PreForkEntry() domain.NodeKey {
 	return h.Peek()
+}
+
+// PopOne pops exactly the top entry. ok is false when history is empty.
+func (h *nodeHistory) PopOne() (target domain.NodeKey, popped []domain.NodeKey, ok bool) {
+	top := h.Peek()
+	if top == "" {
+		return "", nil, false
+	}
+	return top, h.PopTo(top), true
 }

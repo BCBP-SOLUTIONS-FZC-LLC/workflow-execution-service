@@ -66,6 +66,38 @@ func TestNodeHistoryPopTo(t *testing.T) {
 	}
 }
 
+func TestNodeHistoryPopOne(t *testing.T) {
+	h := newNodeHistory()
+	h.Push("dept-a:prep")
+	h.Push("dept-a:review")
+	h.Push("dept-a:approve")
+
+	target, popped, ok := h.PopOne()
+	if !ok {
+		t.Fatalf("PopOne() ok = false, want true")
+	}
+	if target != "dept-a:approve" {
+		t.Errorf("PopOne() target = %q, want dept-a:approve", target)
+	}
+	if !reflect.DeepEqual(popped, []domain.NodeKey{"dept-a:approve"}) {
+		t.Errorf("PopOne() popped = %v, want exactly the top entry", popped)
+	}
+	if got := h.Peek(); got != "dept-a:review" {
+		t.Errorf("Peek() after PopOne() = %q, want dept-a:review (stack should shrink by exactly one)", got)
+	}
+}
+
+func TestNodeHistoryPopOneEmpty(t *testing.T) {
+	h := newNodeHistory()
+	target, popped, ok := h.PopOne()
+	if ok {
+		t.Fatalf("PopOne() on empty history: ok = true, want false")
+	}
+	if target != "" || popped != nil {
+		t.Errorf("PopOne() on empty history = (%q, %v), want (\"\", nil)", target, popped)
+	}
+}
+
 func TestNodeHistoryPreForkEntry(t *testing.T) {
 	h := newNodeHistory()
 	h.Push("dept-a:prep")

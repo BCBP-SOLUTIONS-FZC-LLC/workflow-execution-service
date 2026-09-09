@@ -136,9 +136,15 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 			steps = redirectSteps(original, deptFromNodeKey(sig.TargetNodeKey))
 
 		case SignalInstanceForceBack:
-			popped := in.history.PopTo(sig.TargetNodeKey)
+			// sig.TargetNodeKey is always empty here (only force-forward
+			// populates it), so pop the most recently completed node instead.
+			target, popped, ok := in.history.PopOne()
+			if !ok {
+				wf.GetLogger(ctx).Warn("instance-force-back: no completed node to return to; dropping")
+				continue
+			}
 			in.msgBuf.ResetSpan(popped)
-			steps = redirectSteps(original, deptFromNodeKey(sig.TargetNodeKey))
+			steps = redirectSteps(original, deptFromNodeKey(target))
 		}
 	}
 }
