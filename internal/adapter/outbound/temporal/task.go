@@ -40,8 +40,8 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 		NodeKey:            string(in.NodeKey),
 		DepartmentID:       deptUUID(in.IAMDepartmentID),
 		Status:             domain.TaskStatusReady,
-		DueAt:              parseCompiledDate(stage.DueDate),
-		FollowUpAt:         parseCompiledDate(stage.FollowUpDate),
+		DueAt:              d.parseCompiledDate(stage.DueDate),
+		FollowUpAt:         d.parseCompiledDate(stage.FollowUpDate),
 	}
 
 	var connectorType *string
@@ -144,12 +144,13 @@ func resolveAssignees(defaultAssignees []string, override string) ([]uuid.UUID, 
 	return ids, nil
 }
 
-func parseCompiledDate(s string) *time.Time {
+func (d *Deps) parseCompiledDate(s string) *time.Time {
 	if s == "" {
 		return nil
 	}
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
+		d.logger().Warn("dropping unparseable compiled date", map[string]any{"value": s, "error": err.Error()})
 		return nil
 	}
 	return &t

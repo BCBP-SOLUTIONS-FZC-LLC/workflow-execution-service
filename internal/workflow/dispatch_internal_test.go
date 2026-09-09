@@ -52,13 +52,13 @@ func TestRunStageSendReceiveTask(t *testing.T) {
 		in := newInterpreter("tenant", "instance", "", nil, nil)
 		plan := &dsl.CompiledPlan{Name: "main"}
 
-		k, err := in.runStage(ctx, plan, "sales", &dsl.StageDef{Type: "send_task", Extras: map[string]string{"message": "m"}})
+		k, _, err := in.runStage(ctx, plan, "sales", &dsl.StageDef{Type: "send_task", Extras: map[string]string{"message": "m"}})
 		if err != nil {
 			return err
 		}
 		sendKey = k
 
-		k2, err := in.runStage(ctx, plan, "shipping", &dsl.StageDef{Type: "receive_task", Extras: map[string]string{"message": "m"}})
+		k2, _, err := in.runStage(ctx, plan, "shipping", &dsl.StageDef{Type: "receive_task", Extras: map[string]string{"message": "m"}})
 		if err != nil {
 			return err
 		}
@@ -93,7 +93,7 @@ func TestRunTaskStage_AbandonedOnCancel(t *testing.T) {
 			cancel()
 		})
 
-		_, stageErr = in.runTaskStage(cctx, plan, "sales", &dsl.StageDef{Type: "approve", NodeID: "n1"}, "sales/n1")
+		_, _, stageErr = in.runTaskStage(cctx, plan, "sales", &dsl.StageDef{Type: "approve", NodeID: "n1"}, "sales/n1")
 		return nil
 	})
 	if err := env.GetWorkflowError(); err != nil {
@@ -120,7 +120,7 @@ func TestRunStageLogsEngineNoteForUnrecognizedType(t *testing.T) {
 		baseAdmin := wf.NewBufferedChannel(ctx, 1)
 		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
 		plan := &dsl.CompiledPlan{Name: "main"}
-		_, err := in.runStage(ctx, plan, "sales", &dsl.StageDef{
+		_, _, err := in.runStage(ctx, plan, "sales", &dsl.StageDef{
 			Type: "custom_role", Activity: "act",
 			EngineNote: "stage type 'custom_role' is not a defined class in the workflow engine",
 		})
@@ -139,11 +139,10 @@ func TestRunExclusiveTerminates(t *testing.T) {
 	var terminated bool
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		in := newInterpreter("tenant", "instance", "", nil, nil)
-		in.lastResultJSON = `{"decision":"reject"}`
 		plan := &dsl.CompiledPlan{Name: "main"}
 		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "reject"`, Terminates: true},
-		})
+		}, `{"decision":"reject"}`)
 		terminated = out.Terminated
 		return err
 	})
@@ -185,7 +184,6 @@ func TestRunExclusiveRevertPopsHistory(t *testing.T) {
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		in := newInterpreter("tenant", "instance", `{"decision":"rejected"}`, nil, nil)
-		in.lastResultJSON = `{"decision":"rejected"}`
 		in.history.Push("rework/prep")
 		admin := wf.NewBufferedChannel(ctx, 1)
 		baseAdmin := wf.NewBufferedChannel(ctx, 1)
@@ -197,7 +195,7 @@ func TestRunExclusiveRevertPopsHistory(t *testing.T) {
 		}
 		_, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "rejected"`, RevertToDept: "rework", RevertToStage: "prep"},
-		})
+		}, `{"decision":"rejected"}`)
 		if len(in.history.stack) != 1 {
 			return errBadHistoryLen(len(in.history.stack))
 		}
@@ -223,7 +221,6 @@ func TestRunExclusiveForwardFallsBackToTargetFromTop(t *testing.T) {
 	var lastNode domain.NodeKey
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		in := newInterpreter("tenant", "instance", "", nil, nil)
-		in.lastResultJSON = `{"decision":"approved"}`
 		admin := wf.NewBufferedChannel(ctx, 1)
 		baseAdmin := wf.NewBufferedChannel(ctx, 1)
 		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
@@ -234,7 +231,7 @@ func TestRunExclusiveForwardFallsBackToTargetFromTop(t *testing.T) {
 		}
 		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "approved"`, Target: "shipping"},
-		})
+		}, `{"decision":"approved"}`)
 		lastNode = out.LastNode
 		return err
 	})
@@ -279,7 +276,6 @@ func TestRunExclusiveUsesTargetStageToAvoidReRunningEarlierStage(t *testing.T) {
 	var lastNode domain.NodeKey
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		in := newInterpreter("tenant", "instance", "", nil, nil)
-		in.lastResultJSON = `{"decision":"approved"}`
 		admin := wf.NewBufferedChannel(ctx, 1)
 		baseAdmin := wf.NewBufferedChannel(ctx, 1)
 		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
@@ -296,7 +292,7 @@ func TestRunExclusiveUsesTargetStageToAvoidReRunningEarlierStage(t *testing.T) {
 		}
 		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "approved"`, Target: "billing", TargetStage: "invoice"},
-		})
+		}, `{"decision":"approved"}`)
 		lastNode = out.LastNode
 		return err
 	})
@@ -352,7 +348,6 @@ func TestRunExclusiveUsesTargetNodeIDToAvoidReRunningEarlierStage(t *testing.T) 
 	var lastNode domain.NodeKey
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		in := newInterpreter("tenant", "instance", "", nil, nil)
-		in.lastResultJSON = `{"notify":"true"}`
 		admin := wf.NewBufferedChannel(ctx, 1)
 		baseAdmin := wf.NewBufferedChannel(ctx, 1)
 		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
@@ -369,7 +364,7 @@ func TestRunExclusiveUsesTargetNodeIDToAvoidReRunningEarlierStage(t *testing.T) 
 		}
 		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `notify == "true"`, Target: "design", TargetStage: "send_task", TargetNodeID: "Task_send"},
-		})
+		}, `{"notify":"true"}`)
 		lastNode = out.LastNode
 		return err
 	})
@@ -422,7 +417,6 @@ func TestRunExclusiveRevertUsesRevertToNodeID(t *testing.T) {
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		in := newInterpreter("tenant", "instance", "", nil, nil)
-		in.lastResultJSON = `{"decision":"rejected"}`
 		in.history.Push("rework/Task_prep")
 		in.history.Push("rework/Task_approve")
 		admin := wf.NewBufferedChannel(ctx, 1)
@@ -441,7 +435,7 @@ func TestRunExclusiveRevertUsesRevertToNodeID(t *testing.T) {
 		}
 		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "rejected"`, RevertToDept: "rework", RevertToStage: "approve", RevertToNodeID: "Task_approve"},
-		})
+		}, `{"decision":"rejected"}`)
 		if err != nil {
 			return err
 		}
@@ -497,7 +491,6 @@ func TestRunExclusiveRevertUsesRevertToStage(t *testing.T) {
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		in := newInterpreter("tenant", "instance", "", nil, nil)
-		in.lastResultJSON = `{"decision":"rejected"}`
 		in.history.Push("rework/prep")
 		in.history.Push("rework/approve")
 		admin := wf.NewBufferedChannel(ctx, 1)
@@ -516,7 +509,7 @@ func TestRunExclusiveRevertUsesRevertToStage(t *testing.T) {
 		}
 		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "rejected"`, RevertToDept: "rework", RevertToStage: "approve"},
-		})
+		}, `{"decision":"rejected"}`)
 		if err != nil {
 			return err
 		}
@@ -791,7 +784,7 @@ func TestRunTaskStageInterruptingBoundaryTransfers(t *testing.T) {
 			Type: "approve", NodeID: "n1",
 			BoundaryTimer: &dsl.BoundaryTimer{Duration: "1h", Interrupting: true, TargetDept: "escalation"},
 		}
-		_, err := in.runTaskStage(ctx, plan, "sales", stage, "sales/n1")
+		_, _, err := in.runTaskStage(ctx, plan, "sales", stage, "sales/n1")
 		return err
 	})
 	if err := env.GetWorkflowError(); err != nil {
@@ -828,7 +821,7 @@ func TestRunTaskStageNonInterruptingBoundaryContinuesBoth(t *testing.T) {
 			Type: "approve", NodeID: "n1",
 			BoundaryTimer: &dsl.BoundaryTimer{Duration: "1h", Interrupting: false, TargetDept: "escalation"},
 		}
-		_, err := in.runTaskStage(ctx, plan, "sales", stage, "sales/n1")
+		_, _, err := in.runTaskStage(ctx, plan, "sales", stage, "sales/n1")
 		return err
 	})
 	if err := env.GetWorkflowError(); err != nil {

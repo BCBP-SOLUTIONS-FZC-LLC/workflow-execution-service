@@ -132,6 +132,7 @@ func (s *WorkflowClient) DelegateImpact(ctx context.Context, in port.DelegateImp
 	for _, a := range matched {
 		task, err := s.Tasks.GetByID(ctx, in.TenantID, a.TaskID)
 		if err != nil {
+			s.logger().Warn("skipping assignment with unreadable task", map[string]any{"assignment_id": a.ID, "error": err.Error()})
 			continue
 		}
 		if _, ok := seen[task.WorkflowInstanceID]; ok {

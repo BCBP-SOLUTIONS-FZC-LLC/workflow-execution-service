@@ -123,6 +123,24 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		assert.Empty(t, outbox.enqueued)
 	})
 
+	t.Run("department scope with an unreadable compiled plan is logged and excludes the row", func(t *testing.T) {
+		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
+		log := &fakeLogger{}
+		svc.Log = log
+		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+		definitions.err = assert.AnError
+
+		deptID := uuid.New().String()
+		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{
+			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, Scope: "department", ScopeID: &deptID,
+		})
+		require.NoError(t, err)
+		assert.True(t, assignments.byID[a.ID].IsActive, "a row whose compiled plan can't be read must survive untouched")
+		assert.Empty(t, outbox.enqueued)
+		assert.NotEmpty(t, log.warnCalls)
+	})
+
 	t.Run("department scope matches a task by its real IAMDepartmentID", func(t *testing.T) {
 		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()

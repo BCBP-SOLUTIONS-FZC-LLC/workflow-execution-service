@@ -52,7 +52,8 @@ func (in *interpreter) runSubWorkflow(ctx wf.Context, plan *dsl.CompiledPlan, sw
 
 	if fired.Interrupting {
 		cancelChild()
-		return in.runDepartment(ctx, plan, fired.TargetDept)
+		node, _, err := in.runDepartment(ctx, plan, fired.TargetDept)
+		return node, err
 	}
 
 	// Non-interrupting: both continue independently (LLD §2.2 step 5).

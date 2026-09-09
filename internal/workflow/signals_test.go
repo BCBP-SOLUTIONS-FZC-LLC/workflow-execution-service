@@ -116,7 +116,7 @@ func TestStageDeferOnPendingStageDoesNotWipeHistory(t *testing.T) {
 				Stages: []dsl.StageDef{{Type: "prep"}, {Type: "approve"}},
 			}},
 		}
-		_, err := in.runDepartmentFrom(ctx, plan, "deptA", 0)
+		_, _, err := in.runDepartmentFrom(ctx, plan, "deptA", 0)
 		if err != nil {
 			return err
 		}

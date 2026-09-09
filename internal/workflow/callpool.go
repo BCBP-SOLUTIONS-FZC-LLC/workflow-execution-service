@@ -39,7 +39,8 @@ func (in *interpreter) runCallPool(ctx wf.Context, callerPlan *dsl.CompiledPlan,
 			NodeID:   fmt.Sprintf("%s#%d", cp.Pool, in.callPoolVisits[cp.Pool]),
 			Role:     "tenant_admin",
 		}
-		return in.runStage(ctx, callerPlan, callerDeptForCallPool, adminStage)
+		node, _, err := in.runStage(ctx, callerPlan, callerDeptForCallPool, adminStage)
+		return node, err
 	}
 
 	out, err := in.runSteps(ctx, target, target.Execution.Steps, admin)

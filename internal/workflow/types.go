@@ -26,10 +26,12 @@ type ExecuteOutput struct {
 	Status domain.InstanceStatus
 }
 
-// stepOutcome is what runSteps returns: the last node reached, and whether an
-// ExclusiveBranch with Terminates:true ended the plan early.
+// stepOutcome is what runSteps returns: the last node reached, its result
+// (if any), and whether an ExclusiveBranch with Terminates:true ended the
+// plan early.
 type stepOutcome struct {
 	LastNode   domain.NodeKey
+	LastResult string
 	Terminated bool
 }
 
@@ -53,8 +55,7 @@ type interpreter struct {
 	msgBuf  *messageBuffer
 
 	// Instance-wide, not per-branch scoped (LLD §2.4).
-	contextJSON    string
-	lastResultJSON string
+	contextJSON string
 
 	// overrideMap is ExecuteInput.OverrideMap, carried as-is for the
 	// instance's entire lifetime and passed whole to every CreateTaskInput

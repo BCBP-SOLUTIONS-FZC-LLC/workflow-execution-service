@@ -151,7 +151,7 @@ func (s *DelegationReconciler) Reroute(ctx context.Context, in port.DelegationRe
 	plans := newCompiledPlanCache(s.Definitions)
 	scoped := make([]delegationCandidate, 0, len(candidates))
 	for _, c := range candidates {
-		if scopeMatches(ctx, plans, in.TenantID, c, in.Scope, in.ScopeID) {
+		if scopeMatches(ctx, s.logger(), plans, in.TenantID, c, in.Scope, in.ScopeID) {
 			scoped = append(scoped, c)
 		}
 	}

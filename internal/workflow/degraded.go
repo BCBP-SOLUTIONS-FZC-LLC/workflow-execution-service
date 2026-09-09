@@ -214,7 +214,7 @@ func (in *interpreter) handleParallelForceBack(ctx wf.Context, plan *dsl.Compile
 	in.msgBuf.ResetSpan(popped)
 	var err error
 	if preFork != "" {
-		_, err = in.runDepartment(ctx, plan, deptFromNodeKey(preFork))
+		_, _, err = in.runDepartment(ctx, plan, deptFromNodeKey(preFork))
 	}
 	for _, d := range deptIDs {
 		in.resumeDept(ctx, d)
@@ -279,7 +279,7 @@ func (in *interpreter) respawnBranch(ctx wf.Context, plan *dsl.CompiledPlan, fb 
 		return out.LastNode, err
 	}
 
-	node, err := in.runDepartmentFrom(ctx, plan, resumeDept, stageIndexAfter(dept, fb.LastCompletedNode))
+	node, _, err := in.runDepartmentFrom(ctx, plan, resumeDept, stageIndexAfter(dept, fb.LastCompletedNode))
 	if err != nil {
 		return node, err
 	}

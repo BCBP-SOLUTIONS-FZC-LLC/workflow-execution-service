@@ -208,7 +208,6 @@ func (in *interpreter) handleStageTransition(ctx wf.Context, sig stageTransition
 	if sig.NodeID == "" {
 		key = domain.NodeKey(sig.DeptID + "/" + sig.ToStage)
 	}
-	in.lastResultJSON = sig.ResultJSON
 	if ch, ok := in.pending[key]; ok {
 		ch.Send(ctx, sig)
 	} else {

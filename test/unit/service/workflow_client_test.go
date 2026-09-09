@@ -346,8 +346,10 @@ func TestWorkflowClient_DelegateImpact_Errors(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("an unreadable task is skipped from the preview", func(t *testing.T) {
+	t.Run("an unreadable task is logged and skipped from the preview", func(t *testing.T) {
 		svc, _, _, assignments, _ := newWorkflowClientHarness()
+		log := &fakeLogger{}
+		svc.Log = log
 		tenantID, delegate := uuid.New(), uuid.New()
 		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: uuid.New(), UserID: delegate, IsActive: true}
 		assignments.byID[a.ID] = a
@@ -355,6 +357,7 @@ func TestWorkflowClient_DelegateImpact_Errors(t *testing.T) {
 		result, err := svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: delegate})
 		require.NoError(t, err)
 		assert.Empty(t, result.WorkflowIDs.Items)
+		assert.NotEmpty(t, log.warnCalls)
 	})
 
 	t.Run("Page.Limit caps the previewed workflow IDs", func(t *testing.T) {

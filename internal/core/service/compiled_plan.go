@@ -12,7 +12,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-func scopeMatches(ctx context.Context, plans *compiledPlanCache, tenantID uuid.UUID, c delegationCandidate, scope string, scopeID *string) bool {
+func scopeMatches(ctx context.Context, log port.Logger, plans *compiledPlanCache, tenantID uuid.UUID, c delegationCandidate, scope string, scopeID *string) bool {
 	switch scope {
 	case "all":
 		return true
@@ -22,6 +22,7 @@ func scopeMatches(ctx context.Context, plans *compiledPlanCache, tenantID uuid.U
 		}
 		plan, err := plans.mainPlan(ctx, tenantID, c.instance.WorkflowVersionID)
 		if err != nil {
+			log.Warn("scope match: skipping candidate with unreadable compiled plan", map[string]any{"task_id": c.task.ID, "error": err.Error()})
 			return false
 		}
 		taskDeptID, _ := deptAndSuffix(c.task.NodeKey)

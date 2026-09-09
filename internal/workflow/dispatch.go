@@ -13,13 +13,18 @@ import (
 
 func (in *interpreter) runSteps(ctx wf.Context, plan *dsl.CompiledPlan, steps []dsl.ExecutionStep, admin wf.Channel) (stepOutcome, error) {
 	var last domain.NodeKey
+	// lastResult is scoped to this one runSteps call (goroutine-local for a
+	// Parallel branch's own nested call) — never a shared instance-wide
+	// field, so a concurrently-completing sibling branch can't overwrite the
+	// value this call's own Exclusive step reads.
+	var lastResult string
 	for i := range steps {
 		step := &steps[i]
 
 		if step.IOMapping != nil {
 			ctxJSON, err := applyIOMapping(in.contextJSON, step.IOMapping)
 			if err != nil {
-				return stepOutcome{LastNode: last}, err
+				return stepOutcome{LastNode: last, LastResult: lastResult}, err
 			}
 			in.contextJSON = ctxJSON
 		}
@@ -27,7 +32,7 @@ func (in *interpreter) runSteps(ctx wf.Context, plan *dsl.CompiledPlan, steps []
 		switch {
 		case len(step.Sequential) > 0:
 			for _, deptID := range step.Sequential {
-				node, err := in.runDepartment(ctx, plan, deptID)
+				node, result, err := in.runDepartment(ctx, plan, deptID)
 				// last only advances on success: a failing department's own
 				// (possibly empty, if its very first stage failed) return
 				// value must never overwrite the real last-completed node
@@ -35,9 +40,12 @@ func (in *interpreter) runSteps(ctx wf.Context, plan *dsl.CompiledPlan, steps []
 				// callers (DEGRADED respawn, RecordForceRoute's audit trail)
 				// depend on LastNode surviving a later sibling's failure.
 				if err != nil {
-					return stepOutcome{LastNode: last}, err
+					return stepOutcome{LastNode: last, LastResult: lastResult}, err
 				}
 				last = node
+				if result != "" {
+					lastResult = result
+				}
 			}
 
 		case len(step.Parallel) > 0:
@@ -48,8 +56,11 @@ func (in *interpreter) runSteps(ctx wf.Context, plan *dsl.CompiledPlan, steps []
 			}
 
 		case len(step.Exclusive) > 0:
-			out, err := in.runExclusive(ctx, plan, step.Exclusive)
+			out, err := in.runExclusive(ctx, plan, step.Exclusive, lastResult)
 			last = out.LastNode
+			if out.LastResult != "" {
+				lastResult = out.LastResult
+			}
 			if err != nil || out.Terminated {
 				return out, err
 			}
@@ -58,51 +69,55 @@ func (in *interpreter) runSteps(ctx wf.Context, plan *dsl.CompiledPlan, steps []
 			node, err := in.runSubWorkflow(ctx, plan, step.SubWorkflow, admin)
 			last = node
 			if err != nil {
-				return stepOutcome{LastNode: last}, err
+				return stepOutcome{LastNode: last, LastResult: lastResult}, err
 			}
 
 		case step.CallPool != nil:
 			node, err := in.runCallPool(ctx, plan, step.CallPool, admin)
 			last = node
 			if err != nil {
-				return stepOutcome{LastNode: last}, err
+				return stepOutcome{LastNode: last, LastResult: lastResult}, err
 			}
 
 		default:
-			return stepOutcome{LastNode: last}, fmt.Errorf("workflow: execution step has no populated variant")
+			return stepOutcome{LastNode: last, LastResult: lastResult}, fmt.Errorf("workflow: execution step has no populated variant")
 		}
 	}
-	return stepOutcome{LastNode: last}, nil
+	return stepOutcome{LastNode: last, LastResult: lastResult}, nil
 }
 
-func (in *interpreter) runDepartment(ctx wf.Context, plan *dsl.CompiledPlan, deptID string) (domain.NodeKey, error) {
+func (in *interpreter) runDepartment(ctx wf.Context, plan *dsl.CompiledPlan, deptID string) (domain.NodeKey, string, error) {
 	return in.runDepartmentFrom(ctx, plan, deptID, 0)
 }
 
 func (in *interpreter) spawnNonInterruptingTarget(ctx wf.Context, plan *dsl.CompiledPlan, targetDept string) {
 	wf.Go(ctx, func(gctx wf.Context) {
-		_, _ = in.runDepartment(gctx, plan, targetDept)
+		_, _, _ = in.runDepartment(gctx, plan, targetDept)
 	})
 }
 
-func (in *interpreter) runDepartmentFrom(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, startIdx int) (domain.NodeKey, error) {
+func (in *interpreter) runDepartmentFrom(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, startIdx int) (domain.NodeKey, string, error) {
 	dept := findDepartment(plan, deptID)
 	if dept == nil {
-		return "", fmt.Errorf("workflow: department %q not found in plan %q", deptID, plan.Name)
+		return "", "", fmt.Errorf("workflow: department %q not found in plan %q", deptID, plan.Name)
 	}
 	var last domain.NodeKey
+	var lastResult string
 	for i := startIdx; i < len(dept.Stages); i++ {
 		in.checkPaused(ctx, deptID)
-		node, err := in.runStage(ctx, plan, deptID, &dept.Stages[i])
+		node, result, err := in.runStage(ctx, plan, deptID, &dept.Stages[i])
 		if err != nil {
 			// last stays the prior stage — stageIndexAfter resumes AFTER
 			// whatever key is returned here; reporting the failed stage
 			// itself would skip retrying it on respawn.
-			return last, err
+			return last, lastResult, err
 		}
 		last = node
+		if result != "" {
+			lastResult = result
+		}
 	}
-	return last, nil
+	return last, lastResult, nil
 }
 
 func findDepartment(plan *dsl.CompiledPlan, id string) *dsl.DepartmentDef {
@@ -121,17 +136,17 @@ func findDepartment(plan *dsl.CompiledPlan, id string) *dsl.DepartmentDef {
 // can't express — a branch target that shares a department with a stage
 // already run earlier in the same plan, where starting at index 0 would
 // re-run it.
-func (in *interpreter) runDepartmentAtKey(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, key domain.NodeKey) (domain.NodeKey, error) {
+func (in *interpreter) runDepartmentAtKey(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, key domain.NodeKey) (domain.NodeKey, string, error) {
 	dept := findDepartment(plan, deptID)
 	if dept == nil {
-		return "", fmt.Errorf("workflow: department %q not found in plan %q", deptID, plan.Name)
+		return "", "", fmt.Errorf("workflow: department %q not found in plan %q", deptID, plan.Name)
 	}
 	for i := range dept.Stages {
 		if stageNodeKey(deptID, &dept.Stages[i]) == key {
 			return in.runDepartmentFrom(ctx, plan, deptID, i)
 		}
 	}
-	return "", fmt.Errorf("workflow: node %q not found in department %q stages", key, deptID)
+	return "", "", fmt.Errorf("workflow: node %q not found in department %q stages", key, deptID)
 }
 
 func findPlan(collab *dsl.CompiledCollaboration, name string) *dsl.CompiledPlan {
@@ -184,8 +199,11 @@ func stageIndexAfter(dept *dsl.DepartmentDef, lastCompletedNode domain.NodeKey) 
 	return 0
 }
 
-func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, branches []dsl.ExclusiveBranch) (stepOutcome, error) {
-	winner, err := selectBranch(branches, in.lastResultJSON)
+// resultJSON is the calling runSteps call's own accumulated last result,
+// never the shared instance state — a concurrently-completing sibling
+// Parallel branch's own result must never leak into this evaluation.
+func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, branches []dsl.ExclusiveBranch, resultJSON string) (stepOutcome, error) {
+	winner, err := selectBranch(branches, resultJSON)
 	if err != nil {
 		return stepOutcome{}, err
 	}
@@ -200,8 +218,8 @@ func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, bran
 	// transfer mechanism (execution LLD §2.6 point 4); a revert additionally
 	// pops history and resets the message buffer, matching force-back (§2.7).
 	if winner.RevertToDept != "" {
-		node, err := in.runExclusiveRevert(ctx, plan, winner)
-		return stepOutcome{LastNode: node}, err
+		node, result, err := in.runExclusiveRevert(ctx, plan, winner)
+		return stepOutcome{LastNode: node, LastResult: result}, err
 	}
 
 	// TargetNodeID, then TargetStage, give machine-addressable routing when
@@ -212,11 +230,11 @@ func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, bran
 		identifier = winner.TargetStage
 	}
 	if identifier == "" {
-		node, err := in.runDepartment(ctx, plan, winner.Target)
-		return stepOutcome{LastNode: node}, err
+		node, result, err := in.runDepartment(ctx, plan, winner.Target)
+		return stepOutcome{LastNode: node, LastResult: result}, err
 	}
-	node, err := in.runDepartmentAtKey(ctx, plan, winner.Target, domain.NodeKey(winner.Target+"/"+identifier))
-	return stepOutcome{LastNode: node}, err
+	node, result, err := in.runDepartmentAtKey(ctx, plan, winner.Target, domain.NodeKey(winner.Target+"/"+identifier))
+	return stepOutcome{LastNode: node, LastResult: result}, err
 }
 
 // runExclusiveRevert handles a condition-triggered back-edge: pop history
@@ -224,7 +242,7 @@ func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, bran
 // then dispatch — via RevertToNodeID, then RevertToStage, for precise
 // routing, else RevertToDept's department-from-the-top (same precedence as
 // the forward path, LLD §2.6).
-func (in *interpreter) runExclusiveRevert(ctx wf.Context, plan *dsl.CompiledPlan, winner *dsl.ExclusiveBranch) (domain.NodeKey, error) {
+func (in *interpreter) runExclusiveRevert(ctx wf.Context, plan *dsl.CompiledPlan, winner *dsl.ExclusiveBranch) (domain.NodeKey, string, error) {
 	deptID := winner.RevertToDept
 	identifier := winner.RevertToNodeID
 	if identifier == "" {
