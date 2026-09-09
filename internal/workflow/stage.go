@@ -26,7 +26,7 @@ func stageNodeKey(deptID string, stage *dsl.StageDef) domain.NodeKey {
 
 // stage.Type is a plain string, not enums.StageType: an unrecognized value
 // is a valid forward-compat passthrough, never a failure.
-func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, stage *dsl.StageDef) (domain.NodeKey, error) {
+func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, stage *dsl.StageDef) (domain.NodeKey, string, error) {
 	nodeKey := stageNodeKey(deptID, stage)
 
 	switch stage.Type {
@@ -34,13 +34,13 @@ func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID s
 		msgName := stage.Extras["message"]
 		in.msgBuf.Send(ctx, msgName, nodeKey)
 		in.history.Push(nodeKey)
-		return nodeKey, nil
+		return nodeKey, "", nil
 
 	case string(enums.StageTypeReceiveTask):
 		msgName := stage.Extras["message"]
 		in.msgBuf.Receive(ctx, msgName)
 		in.history.Push(nodeKey)
-		return nodeKey, nil
+		return nodeKey, "", nil
 
 	default:
 		if stage.EngineNote != "" {
@@ -50,10 +50,10 @@ func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID s
 	}
 }
 
-func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, stage *dsl.StageDef, nodeKey domain.NodeKey) (domain.NodeKey, error) {
+func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, stage *dsl.StageDef, nodeKey domain.NodeKey) (domain.NodeKey, string, error) {
 	compiledNode, err := json.Marshal(stage)
 	if err != nil {
-		return nodeKey, fmt.Errorf("workflow: marshaling stage %q: %w", nodeKey, err)
+		return nodeKey, "", fmt.Errorf("workflow: marshaling stage %q: %w", nodeKey, err)
 	}
 	in.taskVisits[nodeKey]++
 
@@ -73,12 +73,12 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 		IAMDepartmentID: iamDeptID,
 	})
 	if err != nil {
-		return nodeKey, err
+		return nodeKey, "", err
 	}
 	if err := updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{nodeKey},
 	}); err != nil {
-		return nodeKey, err
+		return nodeKey, "", err
 	}
 
 	resolveCh := wf.NewBufferedChannel(ctx, 1)
@@ -118,7 +118,7 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 
 	if abandoned {
 		cancelBoundaries()
-		return nodeKey, errStageAbandoned
+		return nodeKey, "", errStageAbandoned
 	}
 
 	if fired != nil {
@@ -146,27 +146,23 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	return in.resolveTaskStage(ctx, nodeKey, out, sig)
 }
 
-// CreateTaskOutput carries only TaskID, used here as the single-assignee
-// AssignmentID reference — multi-assignee claim/lead bookkeeping is a
-// separate path this doesn't need to invoke.
 func (in *interpreter) resolveTaskStage(
 	ctx wf.Context, nodeKey domain.NodeKey, out port.CreateTaskOutput, sig stageTransitionSignal,
-) (domain.NodeKey, error) {
+) (domain.NodeKey, string, error) {
 	if getVersion(ctx, stageFailChangeID) != wf.DefaultVersion && sig.Failed {
 		if err := updateTaskStatus(ctx, port.UpdateTaskStatusInput{
 			TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusFailed, RecordVersion: sig.RecordVersion,
 		}); err != nil {
-			return nodeKey, err
+			return nodeKey, "", err
 		}
-		return nodeKey, fmt.Errorf("workflow: stage %q failed: %s", nodeKey, sig.Reason)
+		return nodeKey, "", fmt.Errorf("workflow: stage %q failed: %s", nodeKey, sig.Reason)
 	}
 
 	if _, err := completeAssignment(ctx, port.CompleteAssignmentInput{
-		AssignmentID: out.TaskID, TenantID: in.tenantID, ResultJSON: sig.ResultJSON, RecordVersion: sig.RecordVersion,
+		TaskID: out.TaskID, UserID: sig.UserID, TenantID: in.tenantID, ResultJSON: sig.ResultJSON, RecordVersion: sig.RecordVersion,
 	}); err != nil {
-		return nodeKey, err
+		return nodeKey, "", err
 	}
-	in.lastResultJSON = sig.ResultJSON
 	in.history.Push(nodeKey)
-	return nodeKey, nil
+	return nodeKey, sig.ResultJSON, nil
 }

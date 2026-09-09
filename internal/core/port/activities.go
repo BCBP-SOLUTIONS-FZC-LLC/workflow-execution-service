@@ -87,7 +87,8 @@ type ClaimAssignmentInput struct {
 }
 
 type CompleteAssignmentInput struct {
-	AssignmentID  string
+	TaskID        string
+	UserID        string
 	TenantID      string
 	ResultJSON    string
 	RecordVersion int64

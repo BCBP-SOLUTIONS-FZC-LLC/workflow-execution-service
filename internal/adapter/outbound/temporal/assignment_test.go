@@ -65,7 +65,7 @@ func TestCompleteAssignment_AllDoneWhenNoActiveAssignmentsRemain(t *testing.T) {
 	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(assignment))
 
 	out, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
-		AssignmentID: assignment.ID.String(), TenantID: uuid.New().String(), ResultJSON: `{"decision":"approved"}`,
+		TaskID: taskID.String(), UserID: assignment.UserID.String(), TenantID: uuid.New().String(), ResultJSON: `{"decision":"approved"}`,
 	})
 	require.NoError(t, err)
 	assert.True(t, out.AllDone)
@@ -81,7 +81,7 @@ func TestCompleteAssignment_NotAllDoneWhenAnotherAssignmentStillActive(t *testin
 	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(completing, stillActive))
 
 	out, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
-		AssignmentID: completing.ID.String(), TenantID: uuid.New().String(), ResultJSON: `{}`,
+		TaskID: taskID.String(), UserID: completing.UserID.String(), TenantID: uuid.New().String(), ResultJSON: `{}`,
 	})
 	require.NoError(t, err)
 	assert.False(t, out.AllDone)
@@ -97,7 +97,7 @@ func TestCompleteAssignment_CompleteError(t *testing.T) {
 	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
 
 	_, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
-		AssignmentID: assignment.ID.String(), TenantID: uuid.New().String(), ResultJSON: `{}`,
+		TaskID: taskID.String(), UserID: assignment.UserID.String(), TenantID: uuid.New().String(), ResultJSON: `{}`,
 	})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "complete assignment")
@@ -142,7 +142,7 @@ func TestCompleteAssignment_RetriedCall_NoOp(t *testing.T) {
 	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
 	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(assignment))
 
-	in := port.CompleteAssignmentInput{AssignmentID: assignment.ID.String(), TenantID: uuid.New().String(), ResultJSON: `{"decision":"approved"}`}
+	in := port.CompleteAssignmentInput{TaskID: taskID.String(), UserID: assignment.UserID.String(), TenantID: uuid.New().String(), ResultJSON: `{"decision":"approved"}`}
 
 	out1, err := deps.CompleteAssignment(context.Background(), in)
 	require.NoError(t, err)
@@ -296,7 +296,7 @@ func TestReassignAssignment_VacatesOldInsertsNew(t *testing.T) {
 
 	err := deps.ReassignAssignment(context.Background(), port.ReassignAssignmentInput{
 		TaskID: taskID.String(), TenantID: uuid.New().String(), OldUserID: oldUser.String(),
-		NewUserID: newUser.String(), AdminUserID: adminUser.String(),
+		NewUserID: newUser.String(), AdminUserID: adminUser.String(), RecordVersion: 1,
 	})
 	require.NoError(t, err)
 	assert.False(t, oldAssignment.IsActive)
@@ -318,7 +318,7 @@ func TestReassignAssignment_RetriedCall_NoOp(t *testing.T) {
 
 	in := port.ReassignAssignmentInput{
 		TaskID: taskID.String(), TenantID: uuid.New().String(), OldUserID: oldUser.String(),
-		NewUserID: newUser.String(), AdminUserID: adminUser.String(),
+		NewUserID: newUser.String(), AdminUserID: adminUser.String(), RecordVersion: 1,
 	}
 
 	require.NoError(t, deps.ReassignAssignment(context.Background(), in))
@@ -332,6 +332,42 @@ func TestReassignAssignment_RetriedCall_NoOp(t *testing.T) {
 	}
 	assert.Equal(t, 1, newUserActiveCount, "retry must not create a second active assignment for newUser")
 	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.reassigned")
+}
+
+// Two concurrent reassign requests can share the same stale RecordVersion
+// and OldUserID; only the first may win.
+func TestReassignAssignment_ConcurrentOverridesShareStaleVersion_OnlyOneWins(t *testing.T) {
+	taskID, oldUser, userX, userY, adminA, adminB := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
+	oldAssignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: oldUser}
+	assignments := newFakeAssignmentRepo(oldAssignment)
+	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
+
+	// Both admins' requests captured the same pre-race record_version (1)
+	// and the same OldUserID (the original assignee, still active for both
+	// at HTTP-request time).
+	fromAdminA := port.ReassignAssignmentInput{
+		TaskID: taskID.String(), TenantID: uuid.New().String(), OldUserID: oldUser.String(),
+		NewUserID: userX.String(), AdminUserID: adminA.String(), RecordVersion: 1,
+	}
+	fromAdminB := port.ReassignAssignmentInput{
+		TaskID: taskID.String(), TenantID: uuid.New().String(), OldUserID: oldUser.String(),
+		NewUserID: userY.String(), AdminUserID: adminB.String(), RecordVersion: 1,
+	}
+
+	require.NoError(t, deps.ReassignAssignment(context.Background(), fromAdminA), "the first arrival should win the race")
+
+	err := deps.ReassignAssignment(context.Background(), fromAdminB)
+	require.Error(t, err, "the second arrival must be rejected, not silently create a second active assignee")
+
+	var activeUserIDs []uuid.UUID
+	for _, a := range assignments.byID {
+		if a.IsActive {
+			activeUserIDs = append(activeUserIDs, a.UserID)
+		}
+	}
+	assert.Equal(t, []uuid.UUID{userX}, activeUserIDs, "exactly one assignee (the race winner) must be active")
+	require.Len(t, outbox.enqueued, 1, "only the winning reassignment enqueues workflow.task.reassigned")
 }
 
 func TestUpdateTaskStatus_Failed_EnqueuesTaskFailed(t *testing.T) {

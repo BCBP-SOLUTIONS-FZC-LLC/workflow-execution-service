@@ -107,6 +107,7 @@ type fakeTaskRepo struct {
 	listErr         error
 	pages           [][]*domain.Task
 	pageCalls       int
+	bumpErr         error
 }
 
 func newFakeTaskRepo(tasks ...*domain.Task) *fakeTaskRepo {
@@ -201,6 +202,21 @@ func (r *fakeTaskRepo) GetByInstanceAndNode(_ context.Context, _, instanceID uui
 		}
 	}
 	return nil, domain.ErrNotFound
+}
+
+func (r *fakeTaskRepo) BumpRecordVersion(_ context.Context, _, id uuid.UUID, recordVersion int64) (*domain.Task, error) {
+	if r.bumpErr != nil {
+		return nil, r.bumpErr
+	}
+	task, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	if task.RecordVersion != recordVersion {
+		return nil, domain.ErrRecordVersionConflict
+	}
+	task.RecordVersion++
+	return task, nil
 }
 
 // fakeAssignmentRepo is an in-memory port.TaskAssignmentRepository. createErr,
@@ -412,3 +428,14 @@ func realValidator() port.EventValidator {
 }
 
 var errBoom = errors.New("boom")
+
+type fakeLogger struct {
+	warnCalls []string
+}
+
+func (l *fakeLogger) Debug(string, map[string]any) {}
+func (l *fakeLogger) Info(string, map[string]any)  {}
+func (l *fakeLogger) Warn(msg string, _ map[string]any) {
+	l.warnCalls = append(l.warnCalls, msg)
+}
+func (l *fakeLogger) Error(string, map[string]any) {}

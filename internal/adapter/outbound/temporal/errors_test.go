@@ -25,6 +25,8 @@ func (erroringValidator) Validate(context.Context, string, json.RawMessage) erro
 
 func TestCreateTask_ParsesValidAndIgnoresInvalidDueDate(t *testing.T) {
 	deps, tasks, _, _ := newTestDeps()
+	log := &fakeLogger{}
+	deps.Log = log
 
 	stage := dsl.StageDef{Type: "review", DueDate: "2026-01-01T00:00:00Z", FollowUpDate: "not-a-date"}
 	compiled, err := json.Marshal(stage)
@@ -37,6 +39,7 @@ func TestCreateTask_ParsesValidAndIgnoresInvalidDueDate(t *testing.T) {
 	task := tasks.byID[uuid.MustParse(out.TaskID)]
 	require.NotNil(t, task.DueAt)
 	assert.Nil(t, task.FollowUpAt, "an unparseable FollowUpDate is treated as absent, not an error")
+	assert.NotEmpty(t, log.warnCalls, "an unparseable date must be logged, not silently dropped")
 }
 
 func TestCreateTask_InvalidInstanceID_IsNonRetryable(t *testing.T) {
@@ -104,9 +107,11 @@ func TestClaimAssignment_AssignmentNotFound(t *testing.T) {
 
 func TestCompleteAssignment_InvalidIDs(t *testing.T) {
 	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(), newFakeAssignmentRepo())
-	_, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{TenantID: "bad", AssignmentID: uuid.New().String()})
+	_, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{TenantID: "bad", TaskID: uuid.New().String()})
 	require.Error(t, err)
-	_, err = deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{TenantID: uuid.New().String(), AssignmentID: "bad"})
+	_, err = deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{TenantID: uuid.New().String(), TaskID: "bad"})
+	require.Error(t, err)
+	_, err = deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{TenantID: uuid.New().String(), TaskID: uuid.New().String(), UserID: "bad"})
 	require.Error(t, err)
 }
 
@@ -347,19 +352,22 @@ func TestPauseInstance_InvalidAdminUserID_TreatedAsNilActor(t *testing.T) {
 	require.Len(t, outbox.enqueued, 1)
 }
 
-func TestCompleteAssignment_AssignmentNotFound(t *testing.T) {
-	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(), newFakeAssignmentRepo())
-	_, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
-		AssignmentID: uuid.New().String(), TenantID: uuid.New().String(),
+func TestCompleteAssignment_NoMatchingAssignmentForUser_NoOp(t *testing.T) {
+	task := &domain.Task{ID: uuid.New(), RecordVersion: 1}
+	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo())
+	out, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
+		TaskID: task.ID.String(), UserID: uuid.New().String(), TenantID: uuid.New().String(),
 	})
-	require.Error(t, err)
+	require.NoError(t, err)
+	assert.True(t, out.AllDone)
+	assert.Empty(t, outbox.enqueued)
 }
 
 func TestCompleteAssignment_TaskNotFound(t *testing.T) {
 	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: uuid.New(), UserID: uuid.New()}
 	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(), newFakeAssignmentRepo(assignment))
 	_, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
-		AssignmentID: assignment.ID.String(), TenantID: uuid.New().String(),
+		TaskID: assignment.TaskID.String(), UserID: assignment.UserID.String(), TenantID: uuid.New().String(),
 	})
 	require.Error(t, err)
 }
@@ -373,7 +381,7 @@ func TestCompleteAssignment_ListActiveByTaskFails_AlreadyCompletedNoOp(t *testin
 	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
 
 	_, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
-		AssignmentID: assignment.ID.String(), TenantID: uuid.New().String(),
+		TaskID: task.ID.String(), UserID: assignment.UserID.String(), TenantID: uuid.New().String(),
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errBoom))
@@ -387,7 +395,7 @@ func TestCompleteAssignment_ListActiveByTaskFails_AfterComplete(t *testing.T) {
 	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
 
 	_, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
-		AssignmentID: assignment.ID.String(), TenantID: uuid.New().String(), ResultJSON: `{}`,
+		TaskID: task.ID.String(), UserID: assignment.UserID.String(), TenantID: uuid.New().String(), ResultJSON: `{}`,
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errBoom))
@@ -417,7 +425,7 @@ func TestReassignAssignment_VacateFails(t *testing.T) {
 
 	err := deps.ReassignAssignment(context.Background(), port.ReassignAssignmentInput{
 		TaskID: taskID.String(), TenantID: uuid.New().String(), OldUserID: oldUser.String(),
-		NewUserID: uuid.New().String(), AdminUserID: uuid.New().String(),
+		NewUserID: uuid.New().String(), AdminUserID: uuid.New().String(), RecordVersion: 1,
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errBoom))
@@ -520,7 +528,7 @@ func TestReassignAssignment_TaskFoundButCreateFails(t *testing.T) {
 
 	err := deps.ReassignAssignment(context.Background(), port.ReassignAssignmentInput{
 		TaskID: taskID.String(), TenantID: uuid.New().String(), OldUserID: oldUser.String(),
-		NewUserID: uuid.New().String(), AdminUserID: uuid.New().String(),
+		NewUserID: uuid.New().String(), AdminUserID: uuid.New().String(), RecordVersion: 1,
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errBoom))

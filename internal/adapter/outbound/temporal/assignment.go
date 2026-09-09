@@ -11,15 +11,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-// ClaimAssignment is ClaimAssignmentActivity (LLD §3.1): establishes the lead
-// assignment on a multi-assignee (assignee_mode='all') task, then enqueues
-// workflow.task.claimed. Only meaningful for assignee_mode='all' tasks;
-// callers gate on that themselves (task-claim's own precondition).
-//
-// SetLead is now guarded by the task's own record_version (the LLD frames
-// the task, not the assignment, as claim/complete's contested resource) and
-// this activity no-ops — rather than reusing a stale version and retrying
-// forever — when a prior attempt already made existing the lead.
 func (d *Deps) ClaimAssignment(ctx context.Context, in port.ClaimAssignmentInput) error {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
@@ -53,58 +44,36 @@ func (d *Deps) ClaimAssignment(ctx context.Context, in port.ClaimAssignmentInput
 	})
 }
 
-// CompleteAssignment is CompleteAssignmentActivity (LLD §3.1): sets
-// claimed_at/completed_at on the assignment, enqueues workflow.task.completed,
-// and reports whether every assignment on the task has now completed.
-//
-// Complete is now guarded by the task's own record_version, same rationale
-// as ClaimAssignment above. Idempotent under retry: no-ops (recomputing
-// AllDone fresh, but skipping the event re-enqueue) when the assignment is
-// already completed from a prior attempt, rather than reusing a stale
-// version and retrying forever.
 func (d *Deps) CompleteAssignment(ctx context.Context, in port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
 		return port.CompleteAssignmentOutput{}, nonRetryable("ValidationError", fmt.Errorf("parse tenant_id: %w", err))
 	}
-	assignmentID, err := uuid.Parse(in.AssignmentID)
+	taskID, err := uuid.Parse(in.TaskID)
 	if err != nil {
-		return port.CompleteAssignmentOutput{}, nonRetryable("ValidationError", fmt.Errorf("parse assignment_id: %w", err))
+		return port.CompleteAssignmentOutput{}, nonRetryable("ValidationError", fmt.Errorf("parse task_id: %w", err))
+	}
+	var userID uuid.UUID
+	if in.UserID != "" {
+		userID, err = uuid.Parse(in.UserID)
+		if err != nil {
+			return port.CompleteAssignmentOutput{}, nonRetryable("ValidationError", fmt.Errorf("parse user_id: %w", err))
+		}
 	}
 
 	var out port.CompleteAssignmentOutput
 	ctx = withTenantGUC(ctx, tenantID)
 	err = d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
-		existing, err := d.Assignments.GetByID(ctx, tenantID, assignmentID)
-		if err != nil {
-			return fmt.Errorf("get assignment: %w", err)
-		}
-		task, err := d.Tasks.GetByID(ctx, tenantID, existing.TaskID)
+		task, err := d.Tasks.GetByID(ctx, tenantID, taskID)
 		if err != nil {
 			return fmt.Errorf("get task: %w", err)
 		}
-		if existing.CompletedAt != nil {
-			active, err := d.Assignments.ListActiveByTask(ctx, tenantID, existing.TaskID)
-			if err != nil {
-				return fmt.Errorf("list active assignments: %w", err)
-			}
-			out.AllDone = len(active) == 0
+		if in.UserID == "" {
+			out.AllDone = true
 			return nil
 		}
-		completed, err := d.Assignments.Complete(ctx, tenantID, assignmentID, []byte(in.ResultJSON), task.RecordVersion)
-		if err != nil {
-			return fmt.Errorf("complete assignment: %w", err)
-		}
-		active, err := d.Assignments.ListActiveByTask(ctx, tenantID, completed.TaskID)
-		if err != nil {
-			return fmt.Errorf("list active assignments: %w", err)
-		}
-		out.AllDone = len(active) == 0
-
-		core := domain.CommonCore{WorkflowInstanceID: task.WorkflowInstanceID}
-		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{completed.UserID}}
-		payload := domain.NewWorkflowTaskCompletedPayload(core, taskCore, completed.UserID)
-		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskCompleted, payload)
+		out, err = d.completeUserAssignment(ctx, tenantID, task, userID, in.ResultJSON)
+		return err
 	})
 	if err != nil {
 		return port.CompleteAssignmentOutput{}, err
@@ -112,10 +81,34 @@ func (d *Deps) CompleteAssignment(ctx context.Context, in port.CompleteAssignmen
 	return out, nil
 }
 
-// DeferTask is DeferTaskActivity (LLD §3.1): marks the task DEFERRED,
-// completes the deferring assignment, creates a regression task (same
-// department/node, fresh assignments from the same default-assignee set),
-// and enqueues workflow.task.deferred.
+func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, task *domain.Task, userID uuid.UUID, resultJSON string) (port.CompleteAssignmentOutput, error) {
+	active, err := d.Assignments.ListActiveByTask(ctx, tenantID, task.ID)
+	if err != nil {
+		return port.CompleteAssignmentOutput{}, fmt.Errorf("list active assignments: %w", err)
+	}
+	target := assignmentFor(active, userID)
+	if target == nil {
+		return port.CompleteAssignmentOutput{AllDone: len(active) == 0}, nil
+	}
+	completed, err := d.Assignments.Complete(ctx, tenantID, target.ID, []byte(resultJSON), task.RecordVersion)
+	if err != nil {
+		return port.CompleteAssignmentOutput{}, fmt.Errorf("complete assignment: %w", err)
+	}
+	remaining, err := d.Assignments.ListActiveByTask(ctx, tenantID, completed.TaskID)
+	if err != nil {
+		return port.CompleteAssignmentOutput{}, fmt.Errorf("list active assignments: %w", err)
+	}
+	out := port.CompleteAssignmentOutput{AllDone: len(remaining) == 0}
+
+	core := domain.CommonCore{WorkflowInstanceID: task.WorkflowInstanceID}
+	taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{completed.UserID}}
+	payload := domain.NewWorkflowTaskCompletedPayload(core, taskCore, completed.UserID)
+	if err := d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskCompleted, payload); err != nil {
+		return port.CompleteAssignmentOutput{}, err
+	}
+	return out, nil
+}
+
 func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) (port.DeferTaskOutput, error) {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
@@ -129,12 +122,6 @@ func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) (port.Defe
 	if err != nil {
 		return port.DeferTaskOutput{}, nonRetryable("ValidationError", fmt.Errorf("parse assignment_id: %w", err))
 	}
-	// The regression task's own assignee: no candidate other than the
-	// deferrer is available on this input (DeferTaskInput carries no
-	// DefaultAssignees) — signals.go's own handleStageDefer already flags
-	// its Task/AssignmentID convention here as a T1.1 simplification
-	// pending a real convention; this mirrors that same scope limit rather
-	// than inventing a resolution DeferTaskInput doesn't support.
 	deferrerUserID, err := uuid.Parse(in.UserID)
 	if err != nil {
 		return port.DeferTaskOutput{}, nonRetryable("ValidationError", fmt.Errorf("parse user_id: %w", err))
@@ -151,12 +138,8 @@ func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) (port.Defe
 		if err != nil {
 			return fmt.Errorf("get assignment: %w", err)
 		}
-		// A retry after a lost ack: the prior attempt already deferred the
-		// task and completed this assignment. createRegressionTask below is
-		// itself idempotent (deterministic ID) and still needs to run to
-		// resolve the (already-created) regression task for the output, but
-		// the deferred-event enqueue is skipped since the first attempt's
-		// event already went out.
+		// A retry after a lost ack skips re-deferring and re-completing, but
+		// still resolves the regression task below for the output.
 		alreadyDeferred := existing.CompletedAt != nil
 		if !alreadyDeferred {
 			updatedTask, err := d.Tasks.UpdateStatus(ctx, tenantID, taskID, domain.TaskStatusDeferred, task.RecordVersion)
@@ -188,15 +171,6 @@ func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) (port.Defe
 	return port.DeferTaskOutput{NewTaskID: newTask.ID.String()}, nil
 }
 
-// createRegressionTask inserts DeferTask's own replacement task (same
-// department/node, one fresh assignment for assigneeID) and returns it.
-//
-// Idempotent under retry, same rationale as CreateTask: newTask.ID is
-// derived deterministically from deferred.ID (not deferred.ID+NodeKey —
-// deterministicTaskID would collide, since a regression task deliberately
-// reuses its original's own NodeKey). A retry hits its own primary key,
-// classified by mapErr as domain.ErrAlreadyExists; this fetches and returns
-// the row a prior attempt already created instead of erroring.
 func (d *Deps) createRegressionTask(ctx context.Context, tenantID uuid.UUID, deferred *domain.Task, assigneeID uuid.UUID) (*domain.Task, error) {
 	newTaskID := deterministicRegressionTaskID(deferred.ID)
 	newTask := &domain.Task{
@@ -229,18 +203,6 @@ func (d *Deps) createRegressionTask(ctx context.Context, tenantID uuid.UUID, def
 	return newTask, nil
 }
 
-// ReassignAssignment is ReassignAssignmentActivity (LLD §3.1): vacates the
-// old assignment, inserts a new one for newUserID, and enqueues
-// workflow.task.reassigned.
-//
-// The vacate loop is already idempotent under retry (a retried attempt's
-// ListActiveByTask won't re-list an assignment the first attempt already
-// vacated). The Create for newUserID was not: a retry after a lost ack
-// would attempt a second insert, hit uq_workflow_task_assignment_active,
-// and — same unclassified-error/unbounded-retry shape as CancelInstance
-// above — retry forever. Checking active for an existing newUserID
-// assignment first, and no-oping (including skipping the event re-enqueue,
-// since the first attempt's event already went out) closes that.
 func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmentInput) error {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
@@ -278,6 +240,16 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 			// idempotent no-op, including skipping the event re-enqueue.
 			return nil
 		}
+		// Two concurrent reassign requests can both pass their own version
+		// check upstream before either commits; this bump lets only the
+		// first through — the second gets a permanent, non-retryable
+		// rejection rather than corrupting the assignment set.
+		if _, err := d.Tasks.BumpRecordVersion(ctx, tenantID, taskID, in.RecordVersion); err != nil {
+			if errors.Is(err, domain.ErrRecordVersionConflict) {
+				return nonRetryable("VersionConflict", fmt.Errorf("reassign: lost the record_version race: %w", err))
+			}
+			return fmt.Errorf("bump task record version: %w", err)
+		}
 		if err := vacateAssignmentsFor(ctx, d.Assignments, tenantID, active, oldUserID); err != nil {
 			return err
 		}
@@ -293,18 +265,19 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 	})
 }
 
-// assignmentActiveFor reports whether userID already has an active
-// assignment in active — ReassignAssignment's own idempotency check.
 func assignmentActiveFor(active []*domain.TaskAssignment, userID uuid.UUID) bool {
-	for _, a := range active {
-		if a.UserID == userID {
-			return true
-		}
-	}
-	return false
+	return assignmentFor(active, userID) != nil
 }
 
-// vacateAssignmentsFor vacates every active assignment belonging to userID —
+func assignmentFor(active []*domain.TaskAssignment, userID uuid.UUID) *domain.TaskAssignment {
+	for _, a := range active {
+		if a.UserID == userID {
+			return a
+		}
+	}
+	return nil
+}
+
 // naturally idempotent under retry, since a retried attempt's active list
 // won't include an assignment a prior attempt already vacated.
 func vacateAssignmentsFor(ctx context.Context, repo port.TaskAssignmentRepository, tenantID uuid.UUID, active []*domain.TaskAssignment, userID uuid.UUID) error {
@@ -319,9 +292,6 @@ func vacateAssignmentsFor(ctx context.Context, repo port.TaskAssignmentRepositor
 	return nil
 }
 
-// UpdateTaskStatus is UpdateTaskStatusActivity (chunk 8's stage-fail
-// addition): a task-status-only transition, enqueuing workflow.task.failed
-// when the new status is FAILED.
 func (d *Deps) UpdateTaskStatus(ctx context.Context, in port.UpdateTaskStatusInput) error {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
