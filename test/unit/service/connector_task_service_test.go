@@ -150,6 +150,48 @@ func TestConnectorTaskService_Complete_DedupPreventsSecondSignal(t *testing.T) {
 	assert.Len(t, temporal.signals, 1)
 }
 
+func TestConnectorTaskService_Complete_SignalFails_ReleasesReservation(t *testing.T) {
+	t.Parallel()
+
+	task := connectorTask("storage", domain.TaskStatusReady, "")
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz"}
+	temporal := &fakeTemporalClient{signalFunc: func(context.Context, string, uuid.UUID, string, any) error {
+		return errors.New("transient temporal error")
+	}}
+	cache := newFakeCacheStore()
+	svc := newConnectorTaskService(task, inst, temporal, cache)
+
+	err := svc.Complete(context.Background(), task.TenantID, task.ID, map[string]any{"x": 1})
+	require.Error(t, err)
+	assert.Empty(t, cache.values, "the dedup key must be released after a failed signal, not left standing for the full TTL")
+
+	// A retry after the transient failure clears must actually re-signal, not
+	// see a stale claim and silently no-op.
+	temporal.signalFunc = nil
+	require.NoError(t, svc.Complete(context.Background(), task.TenantID, task.ID, map[string]any{"x": 1}))
+	assert.Len(t, temporal.signals, 2, "the retry must re-attempt the signal, not be swallowed by a stale dedup claim")
+}
+
+func TestConnectorTaskService_Fail_SignalFails_ReleasesReservation(t *testing.T) {
+	t.Parallel()
+
+	task := connectorTask("send-email", domain.TaskStatusReady, "")
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz"}
+	temporal := &fakeTemporalClient{signalFunc: func(context.Context, string, uuid.UUID, string, any) error {
+		return errors.New("transient temporal error")
+	}}
+	cache := newFakeCacheStore()
+	svc := newConnectorTaskService(task, inst, temporal, cache)
+
+	err := svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error")
+	require.Error(t, err)
+	assert.Empty(t, cache.values, "the dedup key must be released after a failed signal, not left standing for the full TTL")
+
+	temporal.signalFunc = nil
+	require.NoError(t, svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error"))
+	assert.Len(t, temporal.signals, 2, "the retry must re-attempt the signal, not be swallowed by a stale dedup claim")
+}
+
 func TestConnectorTaskService_Fail_HappyPath(t *testing.T) {
 	t.Parallel()
 

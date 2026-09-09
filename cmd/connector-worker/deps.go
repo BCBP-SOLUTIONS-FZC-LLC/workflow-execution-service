@@ -9,10 +9,14 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/openbao"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkey"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkeystream"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/connectors"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/connectors/aliasconfig"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/connectors/sendemail"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/connectors/storage"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/registry"
 )
 
@@ -24,6 +28,7 @@ import (
 type deps struct {
 	valkeyClient *redis.Client
 	consumer     *valkeystream.Consumer
+	dedup        port.CacheStore
 	openbao      *openbao.Reader
 	aliases      aliasconfig.Config
 	pools        map[string]*typePool
@@ -69,16 +74,25 @@ func buildDeps(cfg *config.Config) (*deps, func(), error) {
 		return nil, nil, fmt.Errorf("ensure consumer group: %w", err)
 	}
 
-	// TODO: wire Config.StorageProviders/SendEmailProviders once workflow-connectors
-	// is pushed and go.mod is bumped past its pkg/connectors reorg (provider
-	// constructors moved out of pkg/connectors into their own subpackages) —
-	// that version predates storage.ProviderConstructor/storage.NewGocloudStorageProvider/
-	// storage.NewDriveStorageProvider and sendemail.ProviderConstructor/
-	// sendemail.NewSendGridProvider/sendemail.NewSESProvider/
-	// sendemail.NewGraphSendMailProvider/sendemail.NewGmailProvider.
+	// These keys are the compiled task's own IOMapping `provider` value, not
+	// names of our own choosing. `aws-s3`/`azure-blob`/`gcp-gcs` share one
+	// constructor, which re-reads `provider` from the same params to pick
+	// the driver; `google-drive` gets its own client.
 	connectorSet, err := connectors.New(connectors.Config{
 		Aliases:       aliases,
 		InternalToken: cfg.InternalAPIToken,
+		StorageProviders: map[string]storage.ProviderConstructor{
+			"aws-s3":       storage.NewGocloudStorageProvider,
+			"azure-blob":   storage.NewGocloudStorageProvider,
+			"gcp-gcs":      storage.NewGocloudStorageProvider,
+			"google-drive": storage.NewDriveStorageProvider,
+		},
+		SendEmailProviders: map[string]sendemail.ProviderConstructor{
+			"sendgrid":         sendemail.NewSendGridProvider,
+			"aws-ses":          sendemail.NewSESProvider,
+			"microsoft-365":    sendemail.NewGraphSendMailProvider,
+			"google-workspace": sendemail.NewGmailProvider,
+		},
 	})
 	if err != nil {
 		_ = valkeyClient.Close()
@@ -97,6 +111,7 @@ func buildDeps(cfg *config.Config) (*deps, func(), error) {
 	d := &deps{
 		valkeyClient: valkeyClient,
 		consumer:     consumer,
+		dedup:        valkey.NewCache(valkeyClient),
 		openbao:      openbao.NewReader(cfg.OpenBaoAddr, cfg.OpenBaoToken, cfg.OpenBaoMount, cfg.OpenBaoTimeout),
 		aliases:      aliases,
 		pools:        buildPools(cfg, connectorSet),
