@@ -23,6 +23,7 @@ ACTIONLINT_VERSION   := v1.7.12
 TESTCONTAINERS_POSTGRES_IMAGE    := postgres:18-alpine
 TESTCONTAINERS_LOCALSTACK_IMAGE  := localstack/localstack:3
 TESTCONTAINERS_VALKEY_IMAGE      := valkey/valkey:8-alpine
+TESTCONTAINERS_TEMPORAL_IMAGE    := temporalio/temporal:latest
 
 TOOLS_DIR          := .tools
 BIN_DIR            := bin
@@ -60,7 +61,7 @@ COVER_THRESHOLD    := 95
 COVER_PKG_FLOORS   := internal/workflow:88
 
 .PHONY: all tools tools-integration generate generate-proto generate-sqlc mock \
-        build migrate dev test test-integration test-ci merge-coverage \
+        build migrate dev test test-integration test-e2e test-ci merge-coverage \
         cover cover-func cover-gaps cover-html cover-check cover-check-pkg \
         arch-lint lint lint-fix vuln \
         tidy fmt-check fix check \
@@ -117,6 +118,7 @@ tools-integration:
 	docker pull $(TESTCONTAINERS_POSTGRES_IMAGE)
 	docker pull $(TESTCONTAINERS_LOCALSTACK_IMAGE)
 	docker pull $(TESTCONTAINERS_VALKEY_IMAGE)
+	docker pull $(TESTCONTAINERS_TEMPORAL_IMAGE)
 	@echo "✓ Docker images ready for integration tests"
 
 
@@ -186,6 +188,14 @@ test-integration:
 	    ./test/integration/...
 	@grep -v '$(COVER_EXCLUDE_FILE)' $(COVERAGE_DIR)/integration.out > $(COVERAGE_DIR)/integration.out.filtered && mv $(COVERAGE_DIR)/integration.out.filtered $(COVERAGE_DIR)/integration.out
 	@go tool cover -func=$(COVERAGE_DIR)/integration.out | tail -1
+
+## test-e2e: Run the real instantiate -> dispatch -> complete round trip against live Temporal + Postgres + HTTP (needs the Temporal image too — slower than test-integration, kept separate)
+test-e2e:
+	AWS_ACCESS_KEY_ID=test \
+	AWS_SECRET_ACCESS_KEY=test \
+	AWS_EC2_METADATA_DISABLED=true \
+	TESTCONTAINERS_RYUK_DISABLED=true \
+	go test -race -count=1 -tags e2e -timeout 5m ./test/e2e/...
 
 ## merge-coverage: Merge unit + integration profiles into coverage.out (max-count-per-block strategy)
 merge-coverage:
