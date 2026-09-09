@@ -34,6 +34,7 @@ type fakeInstanceRepo struct {
 	nextCursor        *port.Cursor
 	lastPageAfter     *port.Cursor
 	listByTenantCalls int
+	lastFilter        port.InstanceListFilter
 }
 
 func newFakeInstanceRepo(instances ...*domain.Instance) *fakeInstanceRepo {
@@ -101,6 +102,7 @@ func (r *fakeInstanceRepo) ListByTenant(_ context.Context, tenantID uuid.UUID, f
 	}
 	r.lastPageAfter = page.After
 	r.listByTenantCalls++
+	r.lastFilter = filter
 	var out []*domain.Instance
 	for _, inst := range r.byID {
 		if inst.TenantID != tenantID {
@@ -161,6 +163,7 @@ type fakeTaskRepo struct {
 	createErr       error
 	updateStatusErr error
 	listErr         error
+	lastFilter      port.TaskListFilter
 }
 
 func newFakeTaskRepo(tasks ...*domain.Task) *fakeTaskRepo {
@@ -218,6 +221,7 @@ func (r *fakeTaskRepo) ListByInstance(_ context.Context, _, instanceID uuid.UUID
 }
 
 func (r *fakeTaskRepo) ListByTenant(_ context.Context, tenantID uuid.UUID, filter port.TaskListFilter, _ port.PageRequest) ([]*domain.Task, *port.Cursor, error) {
+	r.lastFilter = filter
 	if r.listErr != nil {
 		return nil, nil, r.listErr
 	}
@@ -241,6 +245,18 @@ func (r *fakeTaskRepo) GetByInstanceAndNode(_ context.Context, _, instanceID uui
 		}
 	}
 	return nil, domain.ErrNotFound
+}
+
+func (r *fakeTaskRepo) BumpRecordVersion(_ context.Context, _, id uuid.UUID, recordVersion int64) (*domain.Task, error) {
+	task, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	if task.RecordVersion != recordVersion {
+		return nil, domain.ErrRecordVersionConflict
+	}
+	task.RecordVersion++
+	return task, nil
 }
 
 // --- TaskAssignmentRepository ---

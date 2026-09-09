@@ -118,6 +118,11 @@ func (r *InstanceRepo) ListByTenant(
 	if filter.StartedBefore != nil {
 		params.StartedBefore = toPgtypeTimestamptz(filter.StartedBefore)
 	}
+	if filter.Scope != nil {
+		params.EnforceScope = true
+		params.ScopeDepartmentIds = filter.Scope.DepartmentIDs
+		params.ScopeCallerUserID = filter.Scope.CallerUserID
+	}
 	if page.After != nil {
 		params.CursorCreatedAt = toPgtypeTimestamptz(&page.After.CreatedAt)
 		params.CursorID = toPgtypeUUID(&page.After.ID)

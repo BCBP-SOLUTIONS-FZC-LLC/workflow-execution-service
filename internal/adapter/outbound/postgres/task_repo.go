@@ -156,6 +156,11 @@ func (r *TaskRepo) ListByTenant(
 	if filter.DueBefore != nil {
 		params.DueBefore = toPgtypeTimestamptz(filter.DueBefore)
 	}
+	if filter.Scope != nil {
+		params.EnforceScope = true
+		params.ScopeDepartmentIds = filter.Scope.DepartmentIDs
+		params.ScopeCallerUserID = filter.Scope.CallerUserID
+	}
 	if page.After != nil {
 		params.CursorCreatedAt = toPgtypeTimestamptz(&page.After.CreatedAt)
 		params.CursorID = toPgtypeUUID(&page.After.ID)
@@ -179,6 +184,28 @@ func (r *TaskRepo) ListByTenant(
 		return nil
 	})
 	return tasks, next, err
+}
+
+func (r *TaskRepo) BumpRecordVersion(ctx context.Context, tenantID, id uuid.UUID, recordVersion int64) (*domain.Task, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var task *domain.Task
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		q := db.New(dbtx)
+		row, err := q.BumpWorkflowTaskRecordVersion(ctx, db.BumpWorkflowTaskRecordVersionParams{
+			ID:            id,
+			RecordVersion: recordVersion,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			_, probeErr := q.GetWorkflowTask(ctx, id)
+			return notFoundOrVersionConflict(probeErr)
+		}
+		if err != nil {
+			return mapErr(err)
+		}
+		task = taskFromDB(row)
+		return nil
+	})
+	return task, err
 }
 
 func (r *TaskRepo) GetByInstanceAndNode(ctx context.Context, tenantID, instanceID uuid.UUID, nodeKey string) (*domain.Task, error) {

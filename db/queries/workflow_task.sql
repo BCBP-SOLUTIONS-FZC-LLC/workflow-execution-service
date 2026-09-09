@@ -12,9 +12,9 @@ ORDER BY created_at DESC, id DESC
 LIMIT $2;
 
 -- name: ListWorkflowTasksByTenant :many
--- Backs TaskService.List's tenant-wide, filterable query (GET /tasks) —
--- every filter is optional (NULL = unfiltered); uses idx_workflow_task_tenant_keyset
--- for the base scan.
+-- Every filter is optional (NULL = unfiltered). enforce_scope=false is the
+-- admin/unscoped path; when true, a row is visible only if its department is
+-- in scope_department_ids or the caller has an active assignment on it.
 SELECT t.* FROM workflow_task t
 WHERE t.tenant_id = $1
   AND (sqlc.narg('status')::workflow_task_status IS NULL OR t.status = sqlc.narg('status')::workflow_task_status)
@@ -26,6 +26,14 @@ WHERE t.tenant_id = $1
     OR EXISTS (
       SELECT 1 FROM workflow_task_assignment a
       WHERE a.task_id = t.id AND a.user_id = sqlc.narg('assignee_user_id')::uuid AND a.is_active
+    )
+  )
+  AND (
+    NOT sqlc.arg('enforce_scope')::bool
+    OR t.department_id = ANY(sqlc.arg('scope_department_ids')::uuid[])
+    OR EXISTS (
+      SELECT 1 FROM workflow_task_assignment sa
+      WHERE sa.task_id = t.id AND sa.user_id = sqlc.arg('scope_caller_user_id')::uuid AND sa.is_active
     )
   )
   AND (

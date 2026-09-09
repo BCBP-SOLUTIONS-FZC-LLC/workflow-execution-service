@@ -298,6 +298,47 @@ func TestInstanceRepo_ListByTenant_Filters(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, items, 2, "both instances started before a future cutoff")
 	})
+
+	t.Run("scope filter restricts to instances with an in-scope task", func(t *testing.T) {
+		taskRepo := postgres.NewTaskRepo(appPool)
+		assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
+
+		runningTask := newTask(tenantA, running.ID)
+		require.NoError(t, taskRepo.Create(ctx, runningTask))
+
+		assignee := uuid.New()
+		pausedTask := newTask(tenantA, paused.ID)
+		require.NoError(t, taskRepo.Create(ctx, pausedTask))
+		require.NoError(t, assignmentRepo.Create(ctx, &domain.TaskAssignment{
+			ID: uuid.New(), TenantID: tenantA, TaskID: pausedTask.ID, UserID: assignee,
+		}))
+
+		t.Run("caller's own department sees only the instance with that department's task", func(t *testing.T) {
+			items, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{
+				Scope: &port.ScopeFilter{DepartmentIDs: []uuid.UUID{runningTask.DepartmentID}, CallerUserID: uuid.New()},
+			}, port.PageRequest{Limit: 10})
+			require.NoError(t, err)
+			require.Len(t, items, 1)
+			assert.Equal(t, running.ID, items[0].ID)
+		})
+
+		t.Run("caller with an active assignment sees that instance even outside their departments", func(t *testing.T) {
+			items, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{
+				Scope: &port.ScopeFilter{DepartmentIDs: []uuid.UUID{uuid.New()}, CallerUserID: assignee},
+			}, port.PageRequest{Limit: 10})
+			require.NoError(t, err)
+			require.Len(t, items, 1)
+			assert.Equal(t, paused.ID, items[0].ID)
+		})
+
+		t.Run("caller with no matching department or assignment sees nothing", func(t *testing.T) {
+			items, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{
+				Scope: &port.ScopeFilter{DepartmentIDs: []uuid.UUID{uuid.New()}, CallerUserID: uuid.New()},
+			}, port.PageRequest{Limit: 10})
+			require.NoError(t, err)
+			assert.Empty(t, items)
+		})
+	})
 }
 
 func TestInstanceRepo_CountActiveByWorkflow(t *testing.T) {

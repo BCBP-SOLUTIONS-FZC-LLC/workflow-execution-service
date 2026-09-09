@@ -15,11 +15,14 @@ var (
 	dbWriteActivityOptions = wf.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
 		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval:        time.Second,
-			BackoffCoefficient:     2.0,
-			MaximumInterval:        60 * time.Second,
-			MaximumAttempts:        0, // unlimited
-			NonRetryableErrorTypes: []string{"ValidationError", "NotFoundError"},
+			InitialInterval:    time.Second,
+			BackoffCoefficient: 2.0,
+			MaximumInterval:    60 * time.Second,
+			MaximumAttempts:    0, // unlimited
+			// VersionConflict is a permanent rejection for that attempt — a
+			// stale expected record_version can never start matching again on
+			// retry.
+			NonRetryableErrorTypes: []string{"ValidationError", "NotFoundError", "VersionConflict"},
 		},
 	}
 

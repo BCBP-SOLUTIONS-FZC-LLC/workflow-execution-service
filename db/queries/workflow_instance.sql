@@ -2,19 +2,36 @@
 SELECT * FROM workflow_instance WHERE id = $1;
 
 -- name: ListWorkflowInstancesByTenant :many
--- Backs InstanceService.List's filterable query (GET /instances) -- every
--- filter is optional (NULL = unfiltered).
-SELECT * FROM workflow_instance
-WHERE tenant_id = $1
-  AND (sqlc.narg('status')::workflow_instance_status IS NULL OR status = sqlc.narg('status')::workflow_instance_status)
-  AND (sqlc.narg('workflow_version_id')::uuid IS NULL OR workflow_version_id = sqlc.narg('workflow_version_id')::uuid)
-  AND (sqlc.narg('started_after')::timestamptz IS NULL OR started_at > sqlc.narg('started_after')::timestamptz)
-  AND (sqlc.narg('started_before')::timestamptz IS NULL OR started_at < sqlc.narg('started_before')::timestamptz)
+-- Every filter is optional (NULL = unfiltered). enforce_scope=false is the
+-- admin/unscoped path; when true, an instance is visible only if it has at
+-- least one task whose department is in scope_department_ids or the caller
+-- has an active assignment on it. Instances carry no department_id of their
+-- own, so scope is a join through workflow_task.
+SELECT wi.* FROM workflow_instance wi
+WHERE wi.tenant_id = $1
+  AND (sqlc.narg('status')::workflow_instance_status IS NULL OR wi.status = sqlc.narg('status')::workflow_instance_status)
+  AND (sqlc.narg('workflow_version_id')::uuid IS NULL OR wi.workflow_version_id = sqlc.narg('workflow_version_id')::uuid)
+  AND (sqlc.narg('started_after')::timestamptz IS NULL OR wi.started_at > sqlc.narg('started_after')::timestamptz)
+  AND (sqlc.narg('started_before')::timestamptz IS NULL OR wi.started_at < sqlc.narg('started_before')::timestamptz)
+  AND (
+    NOT sqlc.arg('enforce_scope')::bool
+    OR EXISTS (
+      SELECT 1 FROM workflow_task t
+      WHERE t.workflow_instance_id = wi.id
+        AND (
+          t.department_id = ANY(sqlc.arg('scope_department_ids')::uuid[])
+          OR EXISTS (
+            SELECT 1 FROM workflow_task_assignment a
+            WHERE a.task_id = t.id AND a.user_id = sqlc.arg('scope_caller_user_id')::uuid AND a.is_active
+          )
+        )
+    )
+  )
   AND (
     sqlc.narg('cursor_created_at')::timestamptz IS NULL
-    OR (created_at, id) < (sqlc.narg('cursor_created_at')::timestamptz, sqlc.narg('cursor_id')::uuid)
+    OR (wi.created_at, wi.id) < (sqlc.narg('cursor_created_at')::timestamptz, sqlc.narg('cursor_id')::uuid)
   )
-ORDER BY created_at DESC, id DESC
+ORDER BY wi.created_at DESC, wi.id DESC
 LIMIT $2;
 
 -- name: CreateWorkflowInstance :one

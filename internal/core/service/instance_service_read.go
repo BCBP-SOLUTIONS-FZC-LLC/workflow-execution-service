@@ -19,6 +19,9 @@ func (s *InstanceService) List(ctx context.Context, tenantID uuid.UUID, scope po
 		status := domain.InstanceStatus(*filter.Status)
 		repoFilter.Status = &status
 	}
+	if !scope.IsAdmin {
+		repoFilter.Scope = readScopeFilter(scope)
+	}
 
 	rows, next, err := s.Instances.ListByTenant(ctx, tenantID, repoFilter, port.PageRequest{After: pageAfter(page), Limit: page.Limit})
 	if err != nil {

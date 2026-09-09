@@ -53,6 +53,28 @@ func TestTaskService_List(t *testing.T) {
 		_, err := svc.List(context.Background(), uuid.New(), port.ReadScope{IsAdmin: true}, port.TaskFilter{}, port.Page{Limit: 10})
 		assert.Error(t, err)
 	})
+
+	t.Run("admin caller leaves the repo filter unscoped", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		_, err := svc.List(context.Background(), uuid.New(), port.ReadScope{IsAdmin: true}, port.TaskFilter{}, port.Page{Limit: 10})
+		require.NoError(t, err)
+		assert.Nil(t, tasks.lastFilter.Scope)
+	})
+
+	t.Run("non-admin caller's departments and identity reach the repo filter", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		callerUserID := uuid.New()
+		deptA, deptB := uuid.New(), uuid.New()
+		scope := port.ReadScope{
+			CallerUserID: callerUserID,
+			Departments:  []port.DepartmentRole{{DepartmentID: deptA, Role: "member"}, {DepartmentID: deptB, Role: "lead"}},
+		}
+		_, err := svc.List(context.Background(), uuid.New(), scope, port.TaskFilter{}, port.Page{Limit: 10})
+		require.NoError(t, err)
+		require.NotNil(t, tasks.lastFilter.Scope)
+		assert.Equal(t, callerUserID, tasks.lastFilter.Scope.CallerUserID)
+		assert.ElementsMatch(t, []uuid.UUID{deptA, deptB}, tasks.lastFilter.Scope.DepartmentIDs)
+	})
 }
 
 func TestTaskService_Get(t *testing.T) {

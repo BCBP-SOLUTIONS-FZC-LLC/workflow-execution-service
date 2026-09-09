@@ -141,6 +141,36 @@ func TestTaskRepo_UpdateStatus_InvalidEnumSurfacesError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestTaskRepo_BumpRecordVersion(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	instanceRepo := postgres.NewInstanceRepo(appPool)
+	taskRepo := postgres.NewTaskRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, instanceRepo.Create(ctx, inst))
+	task := newTask(tenantA, inst.ID)
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	t.Run("matching record_version succeeds and bumps it", func(t *testing.T) {
+		updated, err := taskRepo.BumpRecordVersion(ctx, tenantA, task.ID, task.RecordVersion)
+		require.NoError(t, err)
+		assert.Equal(t, task.RecordVersion+1, updated.RecordVersion)
+	})
+
+	t.Run("stale record_version returns a conflict, not not-found", func(t *testing.T) {
+		_, err := taskRepo.BumpRecordVersion(ctx, tenantA, task.ID, task.RecordVersion)
+		assert.ErrorIs(t, err, domain.ErrRecordVersionConflict)
+	})
+
+	t.Run("unknown task returns not-found, not a version conflict", func(t *testing.T) {
+		_, err := taskRepo.BumpRecordVersion(ctx, tenantA, uuid.New(), 1)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+}
+
 func TestTaskRepo_ListByInstance_KeysetPagination(t *testing.T) {
 	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
 	appPool := newAppRolePool(t, superPool, superDSN)
@@ -298,6 +328,34 @@ func TestTaskRepo_ListByTenant_Filters(t *testing.T) {
 		tasks, _, err := taskRepo.ListByTenant(ctx, tenantA, port.TaskListFilter{DepartmentID: &noMatch}, port.PageRequest{Limit: 10})
 		require.NoError(t, err)
 		assert.Empty(t, tasks)
+	})
+
+	t.Run("scope filter restricts to caller's departments and active assignments", func(t *testing.T) {
+		t.Run("caller's own department sees that department's task only", func(t *testing.T) {
+			tasks, _, err := taskRepo.ListByTenant(ctx, tenantA, port.TaskListFilter{
+				Scope: &port.ScopeFilter{DepartmentIDs: []uuid.UUID{ready.DepartmentID}, CallerUserID: uuid.New()},
+			}, port.PageRequest{Limit: 10})
+			require.NoError(t, err)
+			require.Len(t, tasks, 1)
+			assert.Equal(t, ready.ID, tasks[0].ID)
+		})
+
+		t.Run("caller with an active assignment sees that task even outside their departments", func(t *testing.T) {
+			tasks, _, err := taskRepo.ListByTenant(ctx, tenantA, port.TaskListFilter{
+				Scope: &port.ScopeFilter{DepartmentIDs: []uuid.UUID{uuid.New()}, CallerUserID: assignee},
+			}, port.PageRequest{Limit: 10})
+			require.NoError(t, err)
+			require.Len(t, tasks, 1)
+			assert.Equal(t, ready.ID, tasks[0].ID)
+		})
+
+		t.Run("caller with no matching department or assignment sees nothing", func(t *testing.T) {
+			tasks, _, err := taskRepo.ListByTenant(ctx, tenantA, port.TaskListFilter{
+				Scope: &port.ScopeFilter{DepartmentIDs: []uuid.UUID{uuid.New()}, CallerUserID: uuid.New()},
+			}, port.PageRequest{Limit: 10})
+			require.NoError(t, err)
+			assert.Empty(t, tasks)
+		})
 	})
 }
 

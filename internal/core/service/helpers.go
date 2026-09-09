@@ -23,8 +23,6 @@ func withTenantGUC(ctx context.Context, tenantID uuid.UUID) context.Context {
 	return pgcommon.WithGUCSet(ctx, pgdomain.GUCSet{TenantID: tenantID.String()})
 }
 
-// BuildEnvelope marshals payload, validates it against its registered JSON
-// Schema, and wraps it in an outbound events.Envelope
 func BuildEnvelope[T any](
 	ctx context.Context,
 	validator port.EventValidator,
@@ -58,6 +56,15 @@ type noopValidator struct{}
 
 func (noopValidator) Validate(_ context.Context, _ string, _ json.RawMessage) error {
 	return nil
+}
+
+// Callers must only invoke this when !scope.IsAdmin
+func readScopeFilter(scope port.ReadScope) *port.ScopeFilter {
+	deptIDs := make([]uuid.UUID, len(scope.Departments))
+	for i, d := range scope.Departments {
+		deptIDs[i] = d.DepartmentID
+	}
+	return &port.ScopeFilter{DepartmentIDs: deptIDs, CallerUserID: scope.CallerUserID}
 }
 
 func pageAfter(page port.Page) *port.Cursor {

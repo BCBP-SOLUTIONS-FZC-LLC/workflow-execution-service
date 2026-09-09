@@ -14,10 +14,8 @@ import (
 
 var _ port.TaskService = (*TaskService)(nil)
 
-// TaskService implements port.TaskService (LLD §5.4, §5.6, §5.10). Every
-// mutating method performs its own synchronous record_version/state
-// pre-check before forwarding a signal — the same pattern InstanceService
-// uses (LLD §5.10's "synchronous delivery of signal-detected 409s").
+// Every mutating method performs its own synchronous record_version/state
+// pre-check before forwarding a signal.
 type TaskService struct {
 	Instances   port.InstanceRepository
 	Tasks       port.TaskRepository
@@ -37,9 +35,6 @@ func (s *TaskService) logger() port.Logger {
 	return noopLogger{}
 }
 
-// reassignSignalWire mirrors internal/workflow/signals.go's own unexported
-// reassignSignal field-for-field (same duplication reason as
-// instance_service.go's adminSignalWire).
 type reassignSignalWire struct {
 	TaskID        string
 	OldUserID     string
@@ -67,6 +62,9 @@ func (s *TaskService) List(ctx context.Context, tenantID uuid.UUID, scope port.R
 	if filter.Status != nil {
 		status := domain.TaskStatus(*filter.Status)
 		repoFilter.Status = &status
+	}
+	if !scope.IsAdmin {
+		repoFilter.Scope = readScopeFilter(scope)
 	}
 
 	rows, next, err := s.Tasks.ListByTenant(ctx, tenantID, repoFilter, port.PageRequest{After: pageAfter(page), Limit: page.Limit})
