@@ -1,7 +1,6 @@
 # Tag-triggered release: generate → validate-quality + validate-test → build
 # → docker (semver-tagged, per-process, Cosign keyless signed) → deploy-gate
-# → release. Mirrors definition_service's release.yml shape, extended to two
-# independently-gated Deployments sharing one Helm release.
+# → release.
 name: Release
 
 on:
@@ -128,10 +127,6 @@ jobs:
             --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/release\.yml@refs/tags/.*$" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 
-  # A partial push (one target published, one not) blocks this entirely —
-  # needs: [docker] with a matrix means any failed matrix instance skips
-  # this job automatically, satisfying the "atomic upgrade must never
-  # reference a tag that didn't actually publish" rule.
   deploy-gate:
     name: Post-deploy health gate
     runs-on: ubuntu-latest
@@ -199,10 +194,7 @@ jobs:
           done
 
       # Two independent gates, since the API and Worker Deployments can each
-      # regress independently (LLD §10.3, §7.6). A breach rolls back only
-      # its own Deployment via `kubectl rollout undo` — NOT `helm rollback`,
-      # which would roll back the whole release (both Deployments) since
-      # Helm's rollback history is release-scoped, not per-resource.
+      # regress independently
       - name: Health gate — API 5xx rate < 1% for 2 minutes
         env:
           PROM_URL: ${{ vars.PROMETHEUS_URL }}

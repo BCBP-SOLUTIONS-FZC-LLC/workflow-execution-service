@@ -1,8 +1,3 @@
-# Reusable workflow — quality gate.
-# generate (buf + sqlc, inline — not a separate job) · fmt · tidy · vet ·
-# lint (golangci-lint) · vuln-check · buf lint · buf breaking · Dockerfile
-# digest-pin check · Helm chart lint + kubeconform validation · actionlint.
-# Called by ci.yml. Does not gate validate-test.yml — they run in parallel.
 name: Validate / Quality
 
 "on":
@@ -62,9 +57,6 @@ jobs:
       - name: Install dev tools
         run: make tools
 
-      # Duplicated inline in validate-test.yml too — only 2 jobs need generated
-      # code at this Tier, so no dedicated generate job/artifact yet. See
-      # .claude/CLAUDE.local.md for the threshold rule.
       - name: Generate (buf + sqlc)
         run: make generate
 
@@ -79,9 +71,6 @@ jobs:
             exit 1
           fi
 
-      # Warn-and-require-acknowledgment, not a static analyzer: a PR that
-      # changes internal/workflow's interpreter semantics without touching
-      # version.go must say so explicitly. See test/workflow/replay/README.md.
       - name: Interpreter semantics changeID check
         if: github.event_name == 'pull_request'
         env:
@@ -107,20 +96,12 @@ jobs:
       - name: Vulnerability check
         run: make vuln
 
-      # Uses the `buf` binary installed by bufbuild/buf-setup-action (on PATH),
-      # not .tools/buf — buf-setup-action already gives us a pinned version.
       - name: Proto lint
         run: buf lint
 
-      # LLD §6.9 commits to this gate; buf.yaml already configures
-      # `breaking: use: [FILE]` but nothing invoked it before this task.
       - name: Proto breaking-change check
         run: buf breaking --against '.git#branch=main'
 
-      # Enforce digest-pinned FROM lines in the Dockerfile. Floating tags
-      # (e.g. golang:1.26-alpine without @sha256:...) can be silently
-      # overwritten upstream, breaking supply-chain guarantees. Run
-      # `make pin-base-images` to update the pinned digests.
       - name: Dockerfile base image digest check
         run: |
           if grep -E '^FROM [^ @]+:[^ @]+( AS .+)?$' Dockerfile; then

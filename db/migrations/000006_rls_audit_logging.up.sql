@@ -77,11 +77,6 @@ CREATE POLICY tenant_isolation_policy ON workflow_task_assignment
     USING      (rls_check_tenant(tenant_id, 'workflow_task_assignment'))
     WITH CHECK (rls_check_tenant(tenant_id, 'workflow_task_assignment'));
 
-DROP POLICY tenant_isolation_policy ON workflow_data_keys;
-CREATE POLICY tenant_isolation_policy ON workflow_data_keys
-    USING      (rls_check_tenant(tenant_id, 'workflow_data_keys'))
-    WITH CHECK (rls_check_tenant(tenant_id, 'workflow_data_keys'));
-
 DROP POLICY tenant_isolation_policy ON assignee_overrides;
 CREATE POLICY tenant_isolation_policy ON assignee_overrides
     USING      (rls_check_tenant(tenant_id, 'assignee_overrides'))

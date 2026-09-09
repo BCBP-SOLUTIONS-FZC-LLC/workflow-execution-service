@@ -151,7 +151,7 @@ func TestRLSForceEnabledOnTenantTables(t *testing.T) {
 
 	policyBearing := []string{
 		"workflow_instance", "workflow_task", "workflow_task_assignment",
-		"workflow_data_keys", "assignee_overrides",
+		"assignee_overrides",
 	}
 	for _, table := range policyBearing {
 		enabled, forced := rlsFlags(t, superPool, ctx, table)
@@ -243,7 +243,7 @@ func TestRLSPoliciesUseCheckTenantFunction(t *testing.T) {
 
 	swapped := []string{
 		"workflow_instance", "workflow_task", "workflow_task_assignment",
-		"workflow_data_keys", "assignee_overrides", "outbox_events", "outbox_dead_letters",
+		"assignee_overrides", "outbox_events", "outbox_dead_letters",
 	}
 	for _, table := range swapped {
 		t.Run(table, func(t *testing.T) {

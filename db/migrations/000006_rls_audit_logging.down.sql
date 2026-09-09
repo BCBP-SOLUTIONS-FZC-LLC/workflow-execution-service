@@ -14,11 +14,6 @@ CREATE POLICY tenant_isolation_policy ON assignee_overrides
     USING      (tenant_id = app_tenant_id())
     WITH CHECK (tenant_id = app_tenant_id());
 
-DROP POLICY tenant_isolation_policy ON workflow_data_keys;
-CREATE POLICY tenant_isolation_policy ON workflow_data_keys
-    USING      (tenant_id = app_tenant_id())
-    WITH CHECK (tenant_id = app_tenant_id());
-
 DROP POLICY tenant_isolation_policy ON workflow_task_assignment;
 CREATE POLICY tenant_isolation_policy ON workflow_task_assignment
     USING      (tenant_id = app_tenant_id())

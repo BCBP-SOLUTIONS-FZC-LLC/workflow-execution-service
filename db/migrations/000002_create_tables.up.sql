@@ -87,19 +87,6 @@ CREATE TABLE processed_event (
     PRIMARY KEY (event_id, consumer)
 );
 
--- Per-user Data Encryption Keys backing crypto-shredding for content-risk jsonb
--- fields (LLD §4.12, §9.6). One row per (tenant_id, user_id), created lazily.
-CREATE TABLE workflow_data_keys (
-    tenant_id    UUID        NOT NULL,
-    user_id      UUID        NOT NULL,
-    wrapped_dek  BYTEA       NOT NULL,
-    kms_key_id   TEXT        NOT NULL,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    revoked_at   TIMESTAMPTZ,
-    PRIMARY KEY (tenant_id, user_id)
-);
-
 -- Node-override's own audit record (LLD §4.13, §5.4). Insert-only, immutable:
 -- no record_version/updated_at/deleted_at, same reasoning as every audit-bearing
 -- row in this schema.

@@ -1,18 +1,5 @@
 # CI for https://github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-execution-service
-#
-# Tier-0 shape, modeled on iam-user-profile's CI (no dedicated "generate" job —
-# buf/sqlc codegen runs as an inline step duplicated in each job that needs it,
-# same as iam duplicates its private-module-auth step). T1.12 flips the five
-# previously-stubbed jobs on: two images (server, worker) are built from one
-# multi-target Dockerfile, matrixed throughout.
-#
-# ci-gate: lets a draft PR (or a PR labeled "skip-ci") skip the expensive
-# jobs below while iterating — never applies on push (a merge to main),
-# since github.event.pull_request.* only exists on pull_request events.
-# Only the 3 root jobs (validate-quality, validate-test, build-image-cache)
-# need the gate directly — trivy-cve-scan/smoke-tests already `needs:` one
-# of these, and GitHub Actions cascades a skip to anything that needs a
-# skipped job, reporting success rather than leaving required checks pending.
+
 name: CI
 
 "on":
@@ -33,10 +20,6 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-  # GHCR image paths must be all-lowercase; github.repository_owner resolves
-  # to the org's mixed-case display name (BCBP-SOLUTIONS-FZC-LLC), which
-  # would break every push — hardcoded lowercase rather than a fragile
-  # expression-level tolower() workaround.
   IMAGE_BASE: ghcr.io/bcbp-solutions-fzc-llc/workflow-execution-service
 
 jobs:
@@ -101,10 +84,6 @@ jobs:
       - name: Install dev tools
         run: make tools
 
-      # Duplicated inline in validate-quality.yml/validate-test.yml too — the
-      # Docker build context needs gen/ and postgres/db/ on disk before
-      # `docker build`'s own COPY . . step, since neither buf nor sqlc runs
-      # inside the container.
       - name: Generate (buf + sqlc)
         run: make generate
 
@@ -146,8 +125,6 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      # Rebuilds from the GHA cache build-image-cache just populated — no
-      # re-fetch of Go modules, just the layer cache hit + local --load.
       - name: Rebuild ${{ matrix.target }} image from cache
         uses: docker/build-push-action@v6
         with:
@@ -169,15 +146,6 @@ jobs:
           severity: HIGH,CRITICAL
           cache-dir: .trivy-cache
 
-  # Deliberately minimal: cmd/server and cmd/worker are both still stub
-  # mains (no real listener, no /healthz, no Temporal client/worker wired) —
-  # a composition root is later Tier-2 work, not this task's. What's real
-  # today is checked for real: each image starts cleanly in its distroless
-  # runtime (no missing libs, correct nonroot permissions, correct
-  # entrypoint), and the `migrate` subcommand actually applies the schema.
-  # The instantiate/claim/complete/verify-event flow the LLD's §7.4
-  # describes needs that composition root before it can be written honestly
-  # — expand this job then, not before.
   smoke-tests:
     name: Smoke tests
     needs: [validate-test, build-image-cache]
@@ -221,9 +189,6 @@ jobs:
             -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable \
             "${{ env.IMAGE_BASE }}-server:${{ github.sha }}" migrate
 
-      # cmd/server's stub main still calls config.Load() before logging
-      # "not implemented", so DATABASE_URL must be set even here — it fails
-      # closed on missing required config, which is itself worth smoke-testing.
       - name: Each image starts and exits cleanly
         run: |
           docker run --rm \

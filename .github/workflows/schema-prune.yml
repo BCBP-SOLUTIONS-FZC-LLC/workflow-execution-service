@@ -1,45 +1,3 @@
-# Periodically prune orphaned (retired) schemas from the Glue Schema Registry.
-#
-# A schema is a prune candidate when it exists in Glue but has no corresponding
-# file in internal/eventschema/ — i.e. it has been retired and its JSON file
-# removed from the repo via the normal lifecycle process.
-#
-# Two modes:
-#   Dry-run (default): lists candidates and version counts. No AWS mutations.
-#   Execute          : archives all version definitions to docs/schema-archive/,
-#                      deletes the schema from Glue, commits the archive files.
-#
-# Archive layout committed to the repo:
-#   docs/schema-archive/
-#     {schema-name}/
-#       _meta.json  — provenance: schema, registry, environment, pruned_at
-#       v1.json     — raw JSON Schema definition as stored in Glue
-#       v2.json
-#       ...
-#
-# Triggers:
-#   schedule (monthly, 1st of month)  → staging dry-run report only
-#   workflow_dispatch                  → staging or production, dry-run or execute
-#
-# Design constraints:
-#   • Production pruning is NEVER scheduled — always requires a deliberate
-#     workflow_dispatch with environment=production. An operator must explicitly
-#     un-check dry_run to perform deletions.
-#   • The schedule produces a monthly candidate report. An operator reviews the
-#     output in the Actions log, then re-triggers manually with dry_run=false
-#     when ready to execute.
-#   • glue:DeleteSchema is permanent — once deleted, old consumers referencing
-#     a schema version UUID will receive an error from Glue. Only prune schemas
-#     that have been fully retired and all consumers confirmed migrated.
-#
-# Required GitHub environment secrets (staging / production):
-#   AWS_ACCESS_KEY_ID       — IAM key with glue:ListSchemas, glue:ListSchemaVersions
-#   AWS_SECRET_ACCESS_KEY     (plus glue:GetSchemaVersion + glue:DeleteSchema for execute)
-#
-# Required GitHub environment variables:
-#   AWS_REGION              — e.g. us-east-1
-#   GLUE_REGISTRY_NAME      — e.g. wf-workflow-events (staging), wf-workflow-events-prod (production)
-
 name: Schema Registry Prune
 
 "on":
@@ -67,9 +25,6 @@ env:
   SCHEMA_GOV_IMAGE: ghcr.io/bcbp-solutions-fzc-llc/platform-schemagov:0.4
 
 jobs:
-  # ── Staging ─────────────────────────────────────────────────────────────────
-  # Triggered by the monthly schedule (always dry-run) or workflow_dispatch
-  # targeting staging (dry-run or execute, per the input).
   prune-staging:
     name: Prune schemas → staging
     runs-on: ubuntu-latest
@@ -92,11 +47,8 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      # Schedule always runs dry-run (generates a monthly candidate report).
-      # workflow_dispatch respects the dry_run input; un-check to execute.
       - name: Prune orphaned schemas
         env:
-          # Treat any non-false value (including schedule's empty string) as dry-run.
           IS_SCHEDULE: ${{ github.event_name == 'schedule' }}
           DRY_RUN_INPUT: ${{ inputs.dry_run }}
         run: |
@@ -116,8 +68,6 @@ jobs:
             --output   /tmp/schema-prune-metrics.json \
             ${EXECUTE_FLAG}
 
-      # Commit the archive files produced by execute mode.
-      # Skip in dry-run and on schedule (both are read-only).
       - name: Commit archived schemas
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false }}
         env:
@@ -149,10 +99,6 @@ jobs:
             git rebase origin/main || { git rebase --abort || true; break; }
           done
 
-  # ── Production ──────────────────────────────────────────────────────────────
-  # NEVER triggered by schedule — only by explicit workflow_dispatch with
-  # environment=production. Defaults to dry_run=true so an operator must
-  # deliberately un-check the dry-run box to perform actual Glue deletions.
   prune-production:
     name: Prune schemas → production
     runs-on: ubuntu-latest

@@ -1,10 +1,3 @@
-# Reusable workflow — test gate.
-# generate (buf + sqlc, inline — duplicated from validate-quality.yml, not a
-# separate job) · build · unit + integration tests (race + coverage, includes
-# the test/integration/postgres RLS negative-path suite via testcontainers) ·
-# coverage gate · arch-lint.
-# Called by ci.yml. Runs in parallel with validate-quality.yml — neither needs
-# the other.
 name: Validate / Test
 
 "on":
@@ -61,8 +54,6 @@ jobs:
       - name: Install dev tools
         run: make tools
 
-      # Duplicated inline in validate-quality.yml too — only 2 jobs need
-      # generated code at this Tier, so no dedicated generate job/artifact yet.
       - name: Generate (buf + sqlc)
         run: make generate
 

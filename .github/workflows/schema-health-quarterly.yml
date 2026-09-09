@@ -1,28 +1,4 @@
 name: Schema Health Quarterly Review
-# Scheduled review prompt for schema registry health — version accumulation,
-# overdue deprecations, and stale lifecycle annotations.
-#
-# This workflow never mutates anything.  Its only output is a GitHub Step
-# Summary that an operator reads and acts on manually.  Subsequent cleanup
-# actions go through the appropriate dedicated workflows:
-#
-#   schema-prune.yml      — retire orphaned schemas (monthly dry-run + manual execute)
-#   schema-registry.yml   — re-register / validate schemas
-#
-# Lifecycle lint runs schema-gov validate (Pass 4) via the platform-schemagov
-# Docker image — the same check enforced in CI on every push.
-#
-# Thresholds (repository variables — override via vars.*):
-#   SCHEMA_VERSIONS_ALERT_THRESHOLD  — Glue version count that flags a schema for
-#                                      compaction review (default: 10)
-#
-# Required environment variables (staging environment):
-#   AWS_REGION         — AWS region
-#   GLUE_REGISTRY_NAME — Glue registry name
-#
-# Required environment secrets (staging environment):
-#   AWS_ACCESS_KEY_ID      — IAM key with glue:ListSchemas + glue:ListSchemaVersions
-#   AWS_SECRET_ACCESS_KEY
 
 "on":
   schedule:
@@ -61,14 +37,6 @@ jobs:
 
       - name: Pull schema-gov image
         run: docker pull "${{ env.SCHEMA_GOV_IMAGE }}"
-
-      # Runs schema-gov validate (all 8 passes, including Pass 4 lifecycle) via
-      # the platform-schemagov Docker image — the same check enforced in CI on
-      # every push.  Surfaces: overdue retire-after dates, missing annotations,
-      # deprecated schemas without a replacement pointer, enum drift, Draft-07
-      # violations, and AsyncAPI coverage gaps.
-      # Runs unconditionally on a quarterly schedule so the team sees the full
-      # picture even when no schema changes were pushed this quarter.
       - name: Lifecycle lint
         id: lifecycle
         run: |
@@ -88,9 +56,6 @@ jobs:
               "$(grep -c '✘' /tmp/lifecycle-output.txt 2>/dev/null || echo '?')"
           fi
 
-      # Lists every schema in the Glue registry and flags those whose version
-      # count exceeds the threshold.  High version counts signal schemas that
-      # have been evolving in-place — compaction-protocol candidates.
       - name: Version accumulation scan
         id: version_scan
         env:
@@ -148,9 +113,9 @@ jobs:
 
             printf '## 1. Lifecycle annotations\n\n'
             if [ "${LIFECYCLE_EXIT}" -eq 0 ]; then
-              printf '✅ All lifecycle annotations are valid — no violations.\n\n'
+              printf 'All lifecycle annotations are valid — no violations.\n\n'
             else
-              printf '❌ **Violations found** — see full output below. Fix before next release.\n\n'
+              printf '**Violations found** — see full output below. Fix before next release.\n\n'
             fi
             printf '<details><summary>Full lifecycle lint output</summary>\n\n```\n'
             cat /tmp/lifecycle-output.txt 2>/dev/null || echo "(no output)"
@@ -159,7 +124,7 @@ jobs:
             printf '## 2. Version accumulation\n\n'
             printf '**Threshold:** Glue version > `%s` → compaction candidate\n\n' "${THRESHOLD}"
             if [ "${CANDIDATE_COUNT:-0}" -eq 0 ]; then
-              printf '✅ All schemas are within the version threshold.\n\n'
+              printf 'All schemas are within the version threshold.\n\n'
             else
               printf '⚠ **%d schema(s) exceed the version threshold:**\n\n```\n' "${CANDIDATE_COUNT}"
               cat /tmp/version-candidates.txt 2>/dev/null
@@ -172,13 +137,13 @@ jobs:
             printf '| Priority | Action | Workflow |\n'
             printf '|----------|--------|----------|\n'
             if [ "${LIFECYCLE_EXIT}" -ne 0 ]; then
-              printf '| 🔴 High | Fix lifecycle violations (overdue retirements, stale overrides) | Push a fix to `main` — CI Pass 4 enforces |\n'
+              printf '| High | Fix lifecycle violations (overdue retirements, stale overrides) | Push a fix to `main` — CI Pass 4 enforces |\n'
             fi
             if [ "${CANDIDATE_COUNT:-0}" -gt 0 ]; then
-              printf '| 🟡 Medium | Compaction review for version-accumulated schemas | Follow `x-version-governance.compaction-protocol` |\n'
+              printf '| Medium | Compaction review for version-accumulated schemas | Follow `x-version-governance.compaction-protocol` |\n'
             fi
-            printf '| 🟢 Low | Orphan cleanup (schemas in Glue with no repo file) | Trigger `schema-prune.yml` (dry-run first) |\n'
-            printf '| 🟢 Low | Review COLD events — consider deprecating low-activity schemas | `schema-gov usage-check` output in `schema-registry.yml` |\n'
+            printf '| Low | Orphan cleanup (schemas in Glue with no repo file) | Trigger `schema-prune.yml` (dry-run first) |\n'
+            printf '| Low | Review COLD events — consider deprecating low-activity schemas | `schema-gov usage-check` output in `schema-registry.yml` |\n'
 
             printf '\n---\n'
             printf '_Quarterly watchdog · Run [%s](%s/%s/actions/runs/%s)_\n' \

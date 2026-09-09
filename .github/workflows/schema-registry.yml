@@ -1,57 +1,3 @@
-# Auto-registers wf-workflow-events JSON schemas in AWS Glue Schema Registry.
-#
-# Source of truth for schemas
-# ────────────────────────────
-# api/asyncapi.yaml  →  make extract-schemas  →  internal/eventschema/*.json
-#
-# Triggers:
-#   pull_request → main (schema files changed)    → pr-check  (validate + diff; read-only)
-#   push → main  (schema files changed)           → staging   (validate + diff + register)
-#   release published                             → production
-#   workflow_dispatch                             → chosen environment
-#
-# Step order — staging / production jobs (full pipeline):
-#   1. Validate schemas        — 8 passes: JSON syntax, draft-07 meta-schema, enum semantic
-#                                drift, lifecycle annotations, open-schema guard, strict-mode scan,
-#                                AsyncAPI↔schema coverage, AsyncAPI structure
-#   2. Check schema freeze     — blocks AWS steps when SCHEMA_FREEZE=true
-#   3. Configure credentials   — AWS IAM credentials for Glue / CloudWatch
-#   4. Detect orphaned schemas — warn on Glue schemas without a repo file (never deletes)
-#   5. Assess event usage      — Prometheus per-event activity (or skipped if PROMETHEUS_URL unset); classify ACTIVE/COLD/NEVER_SEEN
-#   6. Enforce usage→lifecycle — Rule 1: NEVER_SEEN+active→deprecated; Rule 2: NEVER_SEEN+deprecated→retired
-#   7. Diff vs. registry       — fail on breaking changes before any upload
-#   8. Register schemas        — idempotent create/update (registry ensured inside this step)
-#   9. Update schema changelog — prepend dated entry; commit + push
-#  10. Emit metrics            — CloudWatch + Prometheus + logs (always runs)
-#
-# Step order — pr-check job (read-only):
-#   1. Validate schemas
-#   2. Configure credentials   — read-only access to staging registry
-#   3. Diff vs. staging registry
-#   4. Emit metrics
-#
-# Note (execution_service-specific): the 5 inbound (receive-only) messages in
-# api/asyncapi.yaml (DelegationStarted, DelegationEnded, TenantStateChanged,
-# UserDeleted, UserAvailabilityChanged) are owned and registered by their
-# producing services, not by this pipeline — their
-# component schemas are deliberately not "...Payload"-suffixed so extract/
-# validate never pull them into internal/eventschema/.
-#
-# Required GitHub environment secrets (per environment: staging / production):
-#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
-#
-# Optional secrets:
-#   PUSHGATEWAY_URL, ALARM_SNS_ARN
-#
-# Required GitHub environment variables:
-#   AWS_REGION, GLUE_REGISTRY_NAME
-#
-# Optional variables:
-#   SCHEMA_FREEZE, ORPHAN_ALERT_THRESHOLD, REGISTRATIONS_SPIKE_THRESHOLD,
-#   SCHEMA_VERSIONS_ALERT_THRESHOLD, USAGE_METRIC_NAME, USAGE_METRIC_DIMENSION,
-#   USAGE_LOOKBACK_DAYS, USAGE_COLD_THRESHOLD_DAYS, UNUSED_EVENTS_ALERT_THRESHOLD
-#   PROMETHEUS_URL       — Prometheus base URL for event usage classification (--source prometheus)
-#                          if unset, usage-check runs with --source disabled and lifecycle enforcement is skipped
 name: Glue Schema Registry
 
 "on":
@@ -90,7 +36,6 @@ env:
   SCHEMA_GOV_IMAGE: ghcr.io/bcbp-solutions-fzc-llc/platform-schemagov:0.4
 
 jobs:
-  # ── Staging ─────────────────────────────────────────────────────────────────
   staging:
     name: Register schemas → staging
     runs-on: ubuntu-latest
@@ -126,8 +71,6 @@ jobs:
             --asyncapi   api/asyncapi.yaml \
             --schema-dir internal/eventschema
 
-      # Runs before AWS credentials are configured so frozen environments skip
-      # credential setup entirely. Override with force=true on workflow_dispatch.
       - name: Check schema freeze
         env:
           SCHEMA_FREEZE: ${{ vars.SCHEMA_FREEZE }}
@@ -148,8 +91,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      # Dry-run prune: lists Glue schemas without a local repo file.
-      # Never blocks CI — orphan remediation is a manual operator action via schema-prune.yml.
       - name: Detect orphaned schemas
         run: |
           docker run --rm \
@@ -163,9 +104,6 @@ jobs:
             --env      staging \
             --output   /tmp/schema-prune-metrics.json
 
-      # Source selection (v0.4+):
-      #   PROMETHEUS_URL set → --source prometheus  (no AWS needed)
-      #   not set            → --source disabled   (enforce-lifecycle no-ops)
       - name: Assess event usage
         env:
           PROMETHEUS_URL: ${{ vars.PROMETHEUS_URL }}
@@ -200,9 +138,6 @@ jobs:
             --usage-file /tmp/schema-usage-metrics.json \
             --asyncapi   api/asyncapi.yaml
 
-      # Fetches current Glue definition per-schema (aws CLI) then diffs via the
-      # container. Runs MAX_PARALLEL diffs concurrently; output is buffered and
-      # printed in deterministic order. Fails on any breaking change.
       - name: Diff schemas against registry
         env:
           REGISTRY_NAME: ${{ vars.GLUE_REGISTRY_NAME }}
@@ -280,7 +215,6 @@ jobs:
             exit 1
           fi
 
-      # Registry creation is handled inside the register command (GlueAdapter.ensure_registry).
       - name: Register schemas
         env:
           SCHEMA_FREEZE: ${{ vars.SCHEMA_FREEZE }}
@@ -355,7 +289,6 @@ jobs:
             --unused-threshold "${{ vars.UNUSED_EVENTS_ALERT_THRESHOLD || '1' }}" \
             --metrics-dir      /tmp
 
-  # ── Production ───────────────────────────────────────────────────────────────
   production:
     name: Register schemas → production
     runs-on: ubuntu-latest
@@ -425,9 +358,6 @@ jobs:
             --env      production \
             --output   /tmp/schema-prune-metrics.json
 
-      # Source selection (v0.4+):
-      #   PROMETHEUS_URL set → --source prometheus  (no AWS needed)
-      #   not set            → --source disabled   (enforce-lifecycle no-ops)
       - name: Assess event usage
         env:
           PROMETHEUS_URL: ${{ vars.PROMETHEUS_URL }}
@@ -560,8 +490,6 @@ jobs:
             --output      /tmp/schema-versions.json \
             $FORCE_FLAG
 
-      # Production checks out the release tag (detached HEAD), so push targets
-      # refs/heads/main explicitly. Same concurrency guard as staging.
       - name: Update schema changelog
         env:
           SCHEMA_GOV_IMAGE: ${{ env.SCHEMA_GOV_IMAGE }}
@@ -615,15 +543,6 @@ jobs:
             --unused-threshold "${{ vars.UNUSED_EVENTS_ALERT_THRESHOLD || '1' }}" \
             --metrics-dir      /tmp
 
-  # ── PR check (read-only) ─────────────────────────────────────────────────────
-  # Validates and diffs against the staging registry before merge so developers
-  # see breaking-change failures without waiting for a post-merge push to main.
-  # The AWS-dependent steps (credentials + registry diff) are individually
-  # skipped — not failed — when AWS credentials aren't configured for the
-  # staging environment (e.g. fork PRs, which don't receive repo/environment
-  # secrets, or repos where these secrets haven't been set up yet). GitHub
-  # Actions does not expose the `secrets` context in job-level `if:`, so the
-  # job itself always runs; schema validation (no AWS needed) always runs too.
   pr-check:
     name: Schema diff check (PR → staging)
     runs-on: ubuntu-latest
@@ -655,8 +574,6 @@ jobs:
             --asyncapi   api/asyncapi.yaml \
             --schema-dir internal/eventschema
 
-      # secrets.* cannot be referenced directly in `if:` conditions (GitHub Actions
-      # restriction) — pipe them into env here so later steps can branch on it.
       - name: Check AWS credentials configured
         id: aws_check
         env:
