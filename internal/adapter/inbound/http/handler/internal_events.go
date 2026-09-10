@@ -57,6 +57,7 @@ const (
 	eventTypeUserDeleted             = "UserDeleted"
 	eventTypeUserAvailabilityChanged = "UserAvailabilityChanged"
 	eventTypeTenantStateChanged      = "TenantStateChanged"
+	eventTypeWorkflowTaskCreated     = "workflow.task.created"
 )
 
 // parseEventID and parseTenantID share the "invalid event id"/"invalid
@@ -123,33 +124,6 @@ func (h *Handler) unhandledType(c *gin.Context, eventType string) {
 	c.Status(http.StatusOK)
 }
 
-// HandleInternalEvent is the legacy catch-all — POST /internal/events, kept
-// registered alongside the category-scoped routes below (LLD §6.1) so
-// workflow.task.created and any future/unrecognized type are never dropped.
-func (h *Handler) HandleInternalEvent(c *gin.Context) {
-	env, ok := h.decodeEnvelope(c)
-	if !ok {
-		return
-	}
-
-	switch env.Type {
-	case eventTypeDelegationStarted:
-		h.handleDelegationStarted(c, env)
-	case eventTypeDelegationEnded:
-		h.handleDelegationEnded(c, env)
-	case eventTypeUserDeleted:
-		h.handleUserDeleted(c, env)
-	case eventTypeUserAvailabilityChanged:
-		h.handleUserAvailabilityChanged(c, env)
-	case eventTypeTenantStateChanged:
-		h.handleTenantStateChanged(c, env)
-	case "workflow.task.created":
-		h.handleWorkflowTaskCreated(c, env)
-	default:
-		h.unhandledType(c, env.Type)
-	}
-}
-
 // HandleDelegationEvents is POST /events/delegation — event_consumer routes
 // DelegationStarted/DelegationEnded here directly (internal/forwarder/category.go).
 func (h *Handler) HandleDelegationEvents(c *gin.Context) {
@@ -192,6 +166,25 @@ func (h *Handler) HandleTenantEvents(c *gin.Context) {
 	switch env.Type {
 	case eventTypeTenantStateChanged:
 		h.handleTenantStateChanged(c, env)
+	default:
+		h.unhandledType(c, env.Type)
+	}
+}
+
+// HandleWorkflowTaskEvents is POST /events/workflow-task — event_consumer
+// routes workflow.task.created here directly (internal/forwarder/category.go).
+// Unlike the other three category routes, this one has no legacy generic
+// /events fallback to fall back to (removed once every routed event type had
+// its own dedicated subpath) — a new event type must be wired here and in
+// event_consumer's category map together before it can reach execution.
+func (h *Handler) HandleWorkflowTaskEvents(c *gin.Context) {
+	env, ok := h.decodeEnvelope(c)
+	if !ok {
+		return
+	}
+	switch env.Type {
+	case eventTypeWorkflowTaskCreated:
+		h.handleWorkflowTaskCreated(c, env)
 	default:
 		h.unhandledType(c, env.Type)
 	}

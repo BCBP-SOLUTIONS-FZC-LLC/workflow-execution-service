@@ -725,10 +725,10 @@ func newInternalRouter(h *handler.Handler) *gin.Engine {
 	workflows.POST("/cancel-by-delegate", h.Idempotent(h.CancelByDelegate))
 	workflows.GET("/delegate-impact", h.DelegateImpact)
 
-	rg.POST("/events", h.HandleInternalEvent)
 	rg.POST("/events/delegation", h.HandleDelegationEvents)
 	rg.POST("/events/user-profile", h.HandleUserProfileEvents)
 	rg.POST("/events/tenant", h.HandleTenantEvents)
+	rg.POST("/events/workflow-task", h.HandleWorkflowTaskEvents)
 
 	connectorTasks := rg.Group("/connector-tasks")
 	connectorTasks.POST("/:id/complete", h.CompleteConnectorTask)

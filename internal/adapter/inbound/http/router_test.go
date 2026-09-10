@@ -95,7 +95,7 @@ func TestNewRouter_InternalRoutesRequireToken(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	router.engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/internal/events", nil))
+	router.engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/internal/events/workflow-task", nil))
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code, "a missing x-internal-token must be rejected before reaching the handler")
 }

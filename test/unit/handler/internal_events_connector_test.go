@@ -139,7 +139,7 @@ func TestHandleWorkflowTaskCreated_MalformedPayload_Returns400(t *testing.T) {
 	fakes := newEventsFakes()
 	router := newInternalRouter(newConnectorEventsHandler(fakes, &fakeConnectorEventPublisher{}))
 
-	w := do(router, internalReq(http.MethodPost, "/api/v1/internal/events", map[string]any{
+	w := do(router, internalReq(http.MethodPost, "/api/v1/internal/events/workflow-task", map[string]any{
 		"id":        uuid.New().String(),
 		"type":      "workflow.task.created",
 		"tenant_id": testTenantID.String(),
@@ -158,7 +158,7 @@ func TestHandleWorkflowTaskCreated_InvalidEventID_Returns400(t *testing.T) {
 	body := envelope("workflow.task.created", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType))
 	body["id"] = "not-a-uuid"
 
-	w := do(router, internalReq(http.MethodPost, "/api/v1/internal/events", body))
+	w := do(router, internalReq(http.MethodPost, "/api/v1/internal/events/workflow-task", body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
@@ -170,7 +170,7 @@ func TestHandleWorkflowTaskCreated_InvalidTenantID_Returns400(t *testing.T) {
 	body := envelope("workflow.task.created", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType))
 	body["tenant_id"] = "not-a-uuid"
 
-	w := do(router, internalReq(http.MethodPost, "/api/v1/internal/events", body))
+	w := do(router, internalReq(http.MethodPost, "/api/v1/internal/events/workflow-task", body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 

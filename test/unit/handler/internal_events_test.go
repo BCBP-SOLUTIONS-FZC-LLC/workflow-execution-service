@@ -37,8 +37,22 @@ func envelope(eventType string, eventID uuid.UUID, tenantID uuid.UUID, at time.T
 	}
 }
 
+func eventRoute(eventType string) string {
+	switch eventType {
+	case "DelegationStarted", "DelegationEnded":
+		return "/api/v1/internal/events/delegation"
+	case "UserDeleted", "UserAvailabilityChanged":
+		return "/api/v1/internal/events/user-profile"
+	case "TenantStateChanged":
+		return "/api/v1/internal/events/tenant"
+	default:
+		return "/api/v1/internal/events/workflow-task"
+	}
+}
+
 func postEvent(router *gin.Engine, body map[string]any) *httptest.ResponseRecorder {
-	return do(router, internalReq(http.MethodPost, "/api/v1/internal/events", body))
+	eventType, _ := body["type"].(string)
+	return do(router, internalReq(http.MethodPost, eventRoute(eventType), body))
 }
 
 // --- dispatch / envelope-level edge cases ---
@@ -82,7 +96,7 @@ func TestHandleInternalEvent_MalformedEnvelope_Returns400(t *testing.T) {
 	fakes := newEventsFakes()
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	r := internalReq(http.MethodPost, "/api/v1/internal/events", nil)
+	r := internalReq(http.MethodPost, "/api/v1/internal/events/workflow-task", nil)
 	r.Body = http.NoBody
 	w := do(router, r)
 
@@ -93,7 +107,7 @@ func TestHandleInternalEvent_UnsupportedMediaType(t *testing.T) {
 	fakes := newEventsFakes()
 	router := newInternalRouter(newEventsHandler(fakes))
 
-	r := internalReq(http.MethodPost, "/api/v1/internal/events",
+	r := internalReq(http.MethodPost, "/api/v1/internal/events/workflow-task",
 		envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{}))
 	r.Header.Set("Content-Type", "text/plain")
 	w := do(router, r)
