@@ -179,7 +179,7 @@ components:
               MessageAttributes below carry the routing keys consumer filter
               policies match on.
             properties:
-              EventType:  { type: string, description: 'Dotted wire type, e.g. workflow.instance.started' }
+              EventType:  { type: string, description: 'PascalCase wire type, e.g. WorkflowInstanceStarted' }
               TenantID:   { type: string, format: uuid }
               Source:     { type: string, const: workflow-execution-svc }
               EventID:    { type: string, format: uuid }
@@ -188,7 +188,7 @@ components:
   messages:
     WorkflowInstanceStarted:
       name: WorkflowInstanceStarted
-      title: Workflow instance started (wire type workflow.instance.started)
+      title: Workflow instance started (wire type WorkflowInstanceStarted)
       description: >
         Fires when InstanceService.Start commits the new workflow_instance row (RUNNING)
         and issues StartWorkflow. Consumed by Audit (instantiation record); not routed to
@@ -200,7 +200,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowInstanceStartedEnvelope' }
     WorkflowInstancePaused:
       name: WorkflowInstancePaused
-      title: Workflow instance paused (workflow.instance.paused)
+      title: Workflow instance paused (WorkflowInstancePaused)
       description: >
         Fires when instance-pause is processed — an admin action, a TenantStateChanged
         non-active dispatch, or a safety-net/OOO pause. Consumed by Audit, Notification,
@@ -211,7 +211,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowInstancePausedEnvelope' }
     WorkflowInstanceResumed:
       name: WorkflowInstanceResumed
-      title: Workflow instance resumed (workflow.instance.resumed)
+      title: Workflow instance resumed (WorkflowInstanceResumed)
       description: >
         Fires when instance-resume is processed — an admin action, a TenantStateChanged
         active-from-paused dispatch, an OOO-availability-restored dispatch, or a DEGRADED
@@ -223,7 +223,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowInstanceResumedEnvelope' }
     WorkflowInstanceCancelled:
       name: WorkflowInstanceCancelled
-      title: Workflow instance cancelled (workflow.instance.cancelled)
+      title: Workflow instance cancelled (WorkflowInstanceCancelled)
       description: >
         Fires when instance-cancel's graceful shutdown completes — every active task marked
         FAILED and vacated, the instance transitioned to TERMINATED. Consumed by Audit,
@@ -234,7 +234,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowInstanceCancelledEnvelope' }
     WorkflowInstanceTerminated:
       name: WorkflowInstanceTerminated
-      title: Workflow instance terminated (workflow.instance.terminated)
+      title: Workflow instance terminated (WorkflowInstanceTerminated)
       description: >
         Fires alongside instance-terminate's direct TerminateWorkflow call — a service-layer
         transaction marks the instance TERMINATED and its open tasks FAILED before Temporal
@@ -246,7 +246,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowInstanceTerminatedEnvelope' }
     WorkflowInstanceDegraded:
       name: WorkflowInstanceDegraded
-      title: Workflow instance degraded — a parallel branch failed (workflow.instance.degraded)
+      title: Workflow instance degraded — a parallel branch failed (WorkflowInstanceDegraded)
       description: >
         Fires when a Parallel branch's activity exhausts retries on a non-retryable error and
         the aggregation point parks the instance for admin resolution (force-forward,
@@ -258,7 +258,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowInstanceDegradedEnvelope' }
     WorkflowInstanceFailed:
       name: WorkflowInstanceFailed
-      title: Workflow instance failed on the main path (workflow.instance.failed)
+      title: Workflow instance failed on the main path (WorkflowInstanceFailed)
       description: >
         Fires when a non-retryable activity failure on the main/Sequential path (outside any
         Parallel branch, with no sibling work to preserve) transitions the instance to
@@ -270,7 +270,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowInstanceFailedEnvelope' }
     WorkflowInstanceFinished:
       name: WorkflowInstanceFinished
-      title: Workflow instance finished cleanly (workflow.instance.finished)
+      title: Workflow instance finished cleanly (WorkflowInstanceFinished)
       description: >
         Fires when runSteps returns cleanly at the BPMN terminal node, writing completed_at
         automatically. Consumed by Tender Service as a post-hoc finalization notification only
@@ -283,7 +283,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowInstanceFinishedEnvelope' }
     WorkflowInstanceForceRouted:
       name: WorkflowInstanceForceRouted
-      title: Admin force-forward/force-back reroute (workflow.instance.force-routed)
+      title: Admin force-forward/force-back reroute (WorkflowInstanceForceRouted)
       description: >
         Fires when an admin's instance-force-forward/-force-back signal completes, paired
         with a WorkflowTaskSuperseded event per bypassed task. Consumed by Audit as the
@@ -294,7 +294,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowInstanceForceRoutedEnvelope' }
     WorkflowTaskCreated:
       name: WorkflowTaskCreated
-      title: Task created (workflow.task.created)
+      title: Task created (WorkflowTaskCreated)
       description: >
         Fires when CreateTaskActivity inserts a new workflow_task and its assignments.
         Consumed by Notification (assignee alert), LLM Service (draft-context pre-warm),
@@ -305,7 +305,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowTaskCreatedEnvelope' }
     WorkflowTaskClaimed:
       name: WorkflowTaskClaimed
-      title: Task claimed by its lead assignee (workflow.task.claimed)
+      title: Task claimed by its lead assignee (WorkflowTaskClaimed)
       description: >
         Fires when ClaimAssignmentActivity marks a multi-assignee task's claiming
         assignment as lead (is_lead=true) — never fires for single-assignee tasks, since
@@ -317,7 +317,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowTaskClaimedEnvelope' }
     WorkflowTaskCompleted:
       name: WorkflowTaskCompleted
-      title: Task completed (workflow.task.completed)
+      title: Task completed (WorkflowTaskCompleted)
       description: >
         Fires when CompleteAssignmentActivity records a stage-transition (including a
         caller-agnostic Complete, e.g. BE-for-UI's approval/signing flow). Consumed by
@@ -328,7 +328,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowTaskCompletedEnvelope' }
     WorkflowTaskDeferred:
       name: WorkflowTaskDeferred
-      title: Task deferred to an earlier node (workflow.task.deferred)
+      title: Task deferred to an earlier node (WorkflowTaskDeferred)
       description: >
         Fires when DeferTaskActivity regresses a task to an earlier node via stage-defer.
         Consumed by Notification (tells the preparator a reviewer sent it back) and the
@@ -339,7 +339,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowTaskDeferredEnvelope' }
     WorkflowTaskReassigned:
       name: WorkflowTaskReassigned
-      title: Task reassigned — admin / node-override / delegation (workflow.task.reassigned)
+      title: Task reassigned — admin / node-override / delegation (WorkflowTaskReassigned)
       description: >
         Fires when ReassignAssignmentActivity vacates the old assignment and creates a new
         one — an admin instance-reassign, a node-override, or a delegation reroute. Consumed
@@ -351,7 +351,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowTaskReassignedEnvelope' }
     WorkflowTaskSuperseded:
       name: WorkflowTaskSuperseded
-      title: Task superseded by a force-forward bypass (workflow.task.superseded)
+      title: Task superseded by a force-forward bypass (WorkflowTaskSuperseded)
       description: >
         Fires when RecordForceRouteActivity marks a bypassed task SUPERSEDED during an
         instance-force-forward, paired with the instance-level WorkflowInstanceForceRouted
@@ -362,7 +362,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowTaskSupersededEnvelope' }
     WorkflowTaskFailed:
       name: WorkflowTaskFailed
-      title: Task failed via a cancel/terminate/instance-fail cascade (workflow.task.failed)
+      title: Task failed via a cancel/terminate/instance-fail cascade (WorkflowTaskFailed)
       description: >
         Fires when a task is swept into FAILED as a side effect of an instance-cancel,
         instance-terminate, or instance-FAILED cascade — never an independent per-task
@@ -374,7 +374,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowTaskFailedEnvelope' }
     WorkflowTaskSlaWarning:
       name: WorkflowTaskSlaWarning
-      title: Task follow-up SLA warning fired (workflow.task.sla-warning)
+      title: Task follow-up SLA warning fired (WorkflowTaskSlaWarning)
       description: >
         Fires when a task's FollowUpDate Temporal Timer elapses before the task resolves
         (RecordSLAWarningActivity, audit-only, no status change). Consumed by Notification
@@ -385,7 +385,7 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowTaskSlaWarningEnvelope' }
     WorkflowTaskSlaBreached:
       name: WorkflowTaskSlaBreached
-      title: Task due-date SLA breached (workflow.task.sla-breached)
+      title: Task due-date SLA breached (WorkflowTaskSlaBreached)
       description: >
         Fires when a task's DueDate Temporal Timer elapses before the task resolves
         (RecordSLABreachActivity, audit-only, no status change). Consumed by Notification
@@ -468,7 +468,7 @@ components:
         tenant_id:     { type: string, format: uuid }
         trace_id:      { type: string, description: OTel trace context when a valid span exists }
         specversion:   { type: string, description: 'Schema version, WithSchemaVersion(1)' }
-        type:          { type: string, description: Dotted wire type; also the SNS EventType attribute }
+        type:          { type: string, description: PascalCase wire type; also the SNS EventType attribute }
         time:          { type: string, format: date-time, description: UTC creation time (CloudEvents time) }
         subject:       { type: string, description: 'instances/{instanceID}[/tasks/{taskID}]' }
         actor:         { type: string, description: Identity that caused the event (user UUID); user-initiated events only }

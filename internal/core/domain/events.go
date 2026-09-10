@@ -15,26 +15,28 @@ import (
 
 const EventSource = "workflow-execution-svc"
 
-// Outbound wire-type constants (LLD §6.4).
+// Outbound wire-type constants (LLD §6.4). PascalCase, platform-wide
+// convention (design/IAM/event-naming-conventions.md) — the SNS `EventType`
+// attribute and the envelope `type` field both carry this exact string.
 const (
-	EventWorkflowInstanceStarted     = "workflow.instance.started"
-	EventWorkflowInstancePaused      = "workflow.instance.paused"
-	EventWorkflowInstanceResumed     = "workflow.instance.resumed"
-	EventWorkflowInstanceCancelled   = "workflow.instance.cancelled"
-	EventWorkflowInstanceTerminated  = "workflow.instance.terminated"
-	EventWorkflowInstanceDegraded    = "workflow.instance.degraded"
-	EventWorkflowInstanceFailed      = "workflow.instance.failed"
-	EventWorkflowInstanceFinished    = "workflow.instance.finished"
-	EventWorkflowTaskCreated         = "workflow.task.created"
-	EventWorkflowTaskClaimed         = "workflow.task.claimed"
-	EventWorkflowTaskCompleted       = "workflow.task.completed"
-	EventWorkflowTaskDeferred        = "workflow.task.deferred"
-	EventWorkflowTaskReassigned      = "workflow.task.reassigned"
-	EventWorkflowTaskSuperseded      = "workflow.task.superseded"
-	EventWorkflowTaskFailed          = "workflow.task.failed"
-	EventWorkflowInstanceForceRouted = "workflow.instance.force-routed"
-	EventWorkflowTaskSLAWarning      = "workflow.task.sla-warning"
-	EventWorkflowTaskSLABreached     = "workflow.task.sla-breached"
+	EventWorkflowInstanceStarted     = "WorkflowInstanceStarted"
+	EventWorkflowInstancePaused      = "WorkflowInstancePaused"
+	EventWorkflowInstanceResumed     = "WorkflowInstanceResumed"
+	EventWorkflowInstanceCancelled   = "WorkflowInstanceCancelled"
+	EventWorkflowInstanceTerminated  = "WorkflowInstanceTerminated"
+	EventWorkflowInstanceDegraded    = "WorkflowInstanceDegraded"
+	EventWorkflowInstanceFailed      = "WorkflowInstanceFailed"
+	EventWorkflowInstanceFinished    = "WorkflowInstanceFinished"
+	EventWorkflowTaskCreated         = "WorkflowTaskCreated"
+	EventWorkflowTaskClaimed         = "WorkflowTaskClaimed"
+	EventWorkflowTaskCompleted       = "WorkflowTaskCompleted"
+	EventWorkflowTaskDeferred        = "WorkflowTaskDeferred"
+	EventWorkflowTaskReassigned      = "WorkflowTaskReassigned"
+	EventWorkflowTaskSuperseded      = "WorkflowTaskSuperseded"
+	EventWorkflowTaskFailed          = "WorkflowTaskFailed"
+	EventWorkflowInstanceForceRouted = "WorkflowInstanceForceRouted"
+	EventWorkflowTaskSLAWarning      = "WorkflowTaskSlaWarning"
+	EventWorkflowTaskSLABreached     = "WorkflowTaskSlaBreached"
 )
 
 // Initiator values for workflow.instance.paused/.resumed (LLD §6.4 table).
@@ -91,51 +93,14 @@ type FailedBranch struct {
 	LastNodeKey  string    `json:"last_node_key"`
 }
 
-// MessageName maps a wire event-type constant to its PascalCase
+// MessageName maps a wire event-type constant to its
 // api/asyncapi.yaml components.messages key. Doc/test cross-referencing
 // only - it has no runtime role in Glue schema resolution, which uses the
-// wire type string directly (see internal/adapter/outbound/glue.Codec).
+// wire type string directly (see internal/adapter/outbound/glue.Codec). Now
+// that the wire type constants are themselves PascalCase, the AsyncAPI
+// message key is identical to the wire type — this is an identity function.
 func MessageName(eventType string) string {
-	switch eventType {
-	case EventWorkflowInstanceStarted:
-		return "WorkflowInstanceStarted"
-	case EventWorkflowInstancePaused:
-		return "WorkflowInstancePaused"
-	case EventWorkflowInstanceResumed:
-		return "WorkflowInstanceResumed"
-	case EventWorkflowInstanceCancelled:
-		return "WorkflowInstanceCancelled"
-	case EventWorkflowInstanceTerminated:
-		return "WorkflowInstanceTerminated"
-	case EventWorkflowInstanceDegraded:
-		return "WorkflowInstanceDegraded"
-	case EventWorkflowInstanceFailed:
-		return "WorkflowInstanceFailed"
-	case EventWorkflowInstanceFinished:
-		return "WorkflowInstanceFinished"
-	case EventWorkflowTaskCreated:
-		return "WorkflowTaskCreated"
-	case EventWorkflowTaskClaimed:
-		return "WorkflowTaskClaimed"
-	case EventWorkflowTaskCompleted:
-		return "WorkflowTaskCompleted"
-	case EventWorkflowTaskDeferred:
-		return "WorkflowTaskDeferred"
-	case EventWorkflowTaskReassigned:
-		return "WorkflowTaskReassigned"
-	case EventWorkflowTaskSuperseded:
-		return "WorkflowTaskSuperseded"
-	case EventWorkflowTaskFailed:
-		return "WorkflowTaskFailed"
-	case EventWorkflowInstanceForceRouted:
-		return "WorkflowInstanceForceRouted"
-	case EventWorkflowTaskSLAWarning:
-		return "WorkflowTaskSlaWarning"
-	case EventWorkflowTaskSLABreached:
-		return "WorkflowTaskSlaBreached"
-	default:
-		return eventType
-	}
+	return eventType
 }
 
 type WorkflowInstanceStartedPayload struct {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/glue"
@@ -122,14 +123,29 @@ func prependGlueHeader(versionID string, payload []byte) ([]byte, error) {
 	return out, nil
 }
 
-// registrySchemaName converts a dotted wire event type (e.g.
-// "workflow.task.created") to the underscored form platform-schemagov's
-// register command actually uses in Glue - the JSON schema filename stem
+// registrySchemaName converts a PascalCase wire event type (e.g.
+// "WorkflowTaskCreated") to the snake_case form platform-schemagov's register
+// command actually uses in Glue - the JSON schema filename stem
 // (internal/eventschema/workflow_task_created.json), verbatim. There is no
 // name-override in platform-schemagov's register command, so this is the
-// only naming convention that matches what's really registered.
+// only naming convention that matches what's really registered. platform-
+// schemagov's own coverage check folds the same way when no SNS event_type
+// attribute value is declared (execution_service's own case) — a plain
+// CamelCase→snake_case split on each uppercase letter, e.g. "Sla" within
+// "WorkflowTaskSlaWarning" folds to "_sla", not "_s_l_a".
 func registrySchemaName(eventType string) string {
-	return strings.ReplaceAll(eventType, ".", "_")
+	var b strings.Builder
+	for i, r := range eventType {
+		if unicode.IsUpper(r) {
+			if i > 0 {
+				b.WriteByte('_')
+			}
+			b.WriteRune(unicode.ToLower(r))
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func (c *Codec) getSchemaVersionID(ctx context.Context, schemaName string) (string, error) {

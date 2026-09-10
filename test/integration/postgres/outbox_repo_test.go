@@ -23,7 +23,7 @@ import (
 
 func instanceEventEnvelope(tenantID, instanceID uuid.UUID) events.Envelope[json.RawMessage] {
 	payload, _ := json.Marshal(map[string]any{"workflow_instance_id": instanceID.String()})
-	return events.NewEnvelope("workflow.task.created", "execution-service", json.RawMessage(payload), events.WithTenantID(tenantID.String()))
+	return events.NewEnvelope("WorkflowTaskCreated", "execution-service", json.RawMessage(payload), events.WithTenantID(tenantID.String()))
 }
 
 func taskEventEnvelope(tenantID, taskID uuid.UUID, eventType string) events.Envelope[json.RawMessage] {
@@ -74,30 +74,30 @@ func TestOutboxRepo_ExistsForTask(t *testing.T) {
 	taskID := uuid.New()
 
 	t.Run("false before anything is enqueued", func(t *testing.T) {
-		exists, err := outboxRepo.ExistsForTask(ctx, "workflow.task.sla-warning", taskID)
+		exists, err := outboxRepo.ExistsForTask(ctx, "WorkflowTaskSlaWarning", taskID)
 		require.NoError(t, err)
 		assert.False(t, exists)
 	})
 
-	env := taskEventEnvelope(tenantA, taskID, "workflow.task.sla-warning")
+	env := taskEventEnvelope(tenantA, taskID, "WorkflowTaskSlaWarning")
 	require.NoError(t, transactor.RunInTx(withGUC(ctx, tenantA), func(ctx context.Context) error {
 		return outboxRepo.Enqueue(ctx, env)
 	}))
 
 	t.Run("true for the exact type+task recorded", func(t *testing.T) {
-		exists, err := outboxRepo.ExistsForTask(ctx, "workflow.task.sla-warning", taskID)
+		exists, err := outboxRepo.ExistsForTask(ctx, "WorkflowTaskSlaWarning", taskID)
 		require.NoError(t, err)
 		assert.True(t, exists)
 	})
 
 	t.Run("false for a different event type on the same task", func(t *testing.T) {
-		exists, err := outboxRepo.ExistsForTask(ctx, "workflow.task.sla-breached", taskID)
+		exists, err := outboxRepo.ExistsForTask(ctx, "WorkflowTaskSlaBreached", taskID)
 		require.NoError(t, err)
 		assert.False(t, exists)
 	})
 
 	t.Run("false for the same event type on a different task", func(t *testing.T) {
-		exists, err := outboxRepo.ExistsForTask(ctx, "workflow.task.sla-warning", uuid.New())
+		exists, err := outboxRepo.ExistsForTask(ctx, "WorkflowTaskSlaWarning", uuid.New())
 		require.NoError(t, err)
 		assert.False(t, exists)
 	})

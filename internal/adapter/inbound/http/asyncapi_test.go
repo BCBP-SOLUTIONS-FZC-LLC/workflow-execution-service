@@ -477,12 +477,12 @@ bindings:
   sns:
     messageAttributes:
       event_type:
-        value: workflow.instance.started
+        value: WorkflowInstanceStarted
 `), &h)
 		if err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
-		if got := snsEventType(&h.Bindings); got != "workflow.instance.started" {
+		if got := snsEventType(&h.Bindings); got != "WorkflowInstanceStarted" {
 			t.Errorf("got %q", got)
 		}
 	})

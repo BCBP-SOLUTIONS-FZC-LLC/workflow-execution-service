@@ -248,7 +248,7 @@ func e2ePollInstance(t *testing.T, httpClient *http.Client, baseURL string, tena
 }
 
 // e2ePostWorkflowTaskCreated stands in for event_consumer's forward of a
-// workflow.task.created event onto POST /api/v1/internal/events/workflow-task
+// WorkflowTaskCreated event onto POST /api/v1/internal/events/workflow-task
 // — everything upstream of that HTTP call (the outbox relay, SNS, the
 // consumer's own routing) is exercised elsewhere; this test's own scope
 // starts at the point a connector-typed task actually needs to reach the
@@ -257,7 +257,7 @@ func e2ePostWorkflowTaskCreated(t *testing.T, httpClient *http.Client, baseURL s
 	t.Helper()
 	body := map[string]any{
 		"id":        uuid.NewString(),
-		"type":      "workflow.task.created",
+		"type":      "WorkflowTaskCreated",
 		"tenant_id": tenantID.String(),
 		"time":      time.Now().Format(time.RFC3339),
 		"data": map[string]any{
@@ -272,7 +272,7 @@ func e2ePostWorkflowTaskCreated(t *testing.T, httpClient *http.Client, baseURL s
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
-		t.Fatalf("marshal workflow.task.created event: %v", err)
+		t.Fatalf("marshal WorkflowTaskCreated event: %v", err)
 	}
 	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/internal/events/workflow-task", bytes.NewReader(raw))
 	if err != nil {
@@ -422,7 +422,7 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 	})
 	task := detail.Tasks[0]
 
-	// Simulate event_consumer's own forward of the real workflow.task.created
+	// Simulate event_consumer's own forward of the real WorkflowTaskCreated
 	// event onto the endpoint that pushes onto the real Valkey Stream.
 	e2ePostWorkflowTaskCreated(t, httpClient, execSrv.URL, tenantID, task, map[string]any{"endpointAlias": "echo"})
 

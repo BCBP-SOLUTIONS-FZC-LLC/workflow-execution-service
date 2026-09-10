@@ -23,15 +23,15 @@ func TestProcessedEventRepo_RecordIfNew(t *testing.T) {
 
 	eventID := uuid.New()
 
-	isNew, err := repo.RecordIfNew(ctx, eventID, "membership-execution", "workflow.task.created")
+	isNew, err := repo.RecordIfNew(ctx, eventID, "membership-execution", "WorkflowTaskCreated")
 	require.NoError(t, err)
 	assert.True(t, isNew, "first record should be new")
 
-	isNew, err = repo.RecordIfNew(ctx, eventID, "membership-execution", "workflow.task.created")
+	isNew, err = repo.RecordIfNew(ctx, eventID, "membership-execution", "WorkflowTaskCreated")
 	require.NoError(t, err)
 	assert.False(t, isNew, "redelivery of the same (event_id, consumer) should not be new")
 
-	isNew, err = repo.RecordIfNew(ctx, eventID, "user-execution", "workflow.task.created")
+	isNew, err = repo.RecordIfNew(ctx, eventID, "user-execution", "WorkflowTaskCreated")
 	require.NoError(t, err)
 	assert.True(t, isNew, "same event_id under a different consumer dedups independently")
 }

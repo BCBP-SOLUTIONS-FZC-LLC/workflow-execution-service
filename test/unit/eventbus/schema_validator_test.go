@@ -40,13 +40,13 @@ type eventCase struct {
 
 var allEvents = []eventCase{
 	{
-		name:      "workflow.instance.started",
+		name:      "WorkflowInstanceStarted",
 		eventType: domain.EventWorkflowInstanceStarted,
 		payload:   func() any { return domain.NewWorkflowInstanceStartedPayload(testCore(), uuid.New()) },
 		dropField: "started_by_user_id",
 	},
 	{
-		name:      "workflow.instance.paused",
+		name:      "WorkflowInstancePaused",
 		eventType: domain.EventWorkflowInstancePaused,
 		payload: func() any {
 			return domain.NewWorkflowInstancePausedPayload(testCore(), uuid.New(), domain.InitiatorAdmin, nil)
@@ -54,7 +54,7 @@ var allEvents = []eventCase{
 		dropField: "initiator",
 	},
 	{
-		name:      "workflow.instance.resumed",
+		name:      "WorkflowInstanceResumed",
 		eventType: domain.EventWorkflowInstanceResumed,
 		payload: func() any {
 			return domain.NewWorkflowInstanceResumedPayload(testCore(), uuid.New(), domain.InitiatorAdmin, nil)
@@ -62,7 +62,7 @@ var allEvents = []eventCase{
 		dropField: "initiator",
 	},
 	{
-		name:      "workflow.instance.cancelled",
+		name:      "WorkflowInstanceCancelled",
 		eventType: domain.EventWorkflowInstanceCancelled,
 		payload: func() any {
 			return domain.NewWorkflowInstanceCancelledPayload(testCore(), uuid.New(), uuid.New(), nil)
@@ -70,7 +70,7 @@ var allEvents = []eventCase{
 		dropField: "actor_user_id",
 	},
 	{
-		name:      "workflow.instance.terminated",
+		name:      "WorkflowInstanceTerminated",
 		eventType: domain.EventWorkflowInstanceTerminated,
 		payload: func() any {
 			return domain.NewWorkflowInstanceTerminatedPayload(testCore(), uuid.New(), domain.TerminatedInitiatorAdmin, nil)
@@ -78,7 +78,7 @@ var allEvents = []eventCase{
 		dropField: "initiator",
 	},
 	{
-		name:      "workflow.instance.degraded",
+		name:      "WorkflowInstanceDegraded",
 		eventType: domain.EventWorkflowInstanceDegraded,
 		payload: func() any {
 			return domain.NewWorkflowInstanceDegradedPayload(testCore(), []domain.FailedBranch{{DepartmentID: uuid.New(), LastNodeKey: "review_legal"}})
@@ -86,13 +86,13 @@ var allEvents = []eventCase{
 		dropField: "failed_branches",
 	},
 	{
-		name:      "workflow.instance.failed",
+		name:      "WorkflowInstanceFailed",
 		eventType: domain.EventWorkflowInstanceFailed,
 		payload:   func() any { return domain.NewWorkflowInstanceFailedPayload(testCore(), "TemporalActivityError") },
 		dropField: "error_class",
 	},
 	{
-		name:      "workflow.instance.finished",
+		name:      "WorkflowInstanceFinished",
 		eventType: domain.EventWorkflowInstanceFinished,
 		payload: func() any {
 			return domain.NewWorkflowInstanceFinishedPayload(testCore(), uuid.New(), time.Now().UTC())
@@ -100,7 +100,7 @@ var allEvents = []eventCase{
 		dropField: "completed_at",
 	},
 	{
-		name:      "workflow.instance.force-routed",
+		name:      "WorkflowInstanceForceRouted",
 		eventType: domain.EventWorkflowInstanceForceRouted,
 		payload: func() any {
 			return domain.NewWorkflowInstanceForceRoutedPayload(testCore(), uuid.New(), []string{"review_finance"}, "review_legal", domain.ForceRouteDirectionForward)
@@ -108,7 +108,7 @@ var allEvents = []eventCase{
 		dropField: "direction",
 	},
 	{
-		name:      "workflow.task.created",
+		name:      "WorkflowTaskCreated",
 		eventType: domain.EventWorkflowTaskCreated,
 		payload: func() any {
 			return domain.NewWorkflowTaskCreatedPayload(testCore(), testTaskCore(), "review", nil, nil, nil, nil, nil)
@@ -116,7 +116,7 @@ var allEvents = []eventCase{
 		dropField: "stage_type",
 	},
 	{
-		name:      "workflow.task.claimed",
+		name:      "WorkflowTaskClaimed",
 		eventType: domain.EventWorkflowTaskClaimed,
 		payload: func() any {
 			return domain.NewWorkflowTaskClaimedPayload(testCore(), testTaskCore(), uuid.New())
@@ -124,7 +124,7 @@ var allEvents = []eventCase{
 		dropField: "claimed_by_user_id",
 	},
 	{
-		name:      "workflow.task.completed",
+		name:      "WorkflowTaskCompleted",
 		eventType: domain.EventWorkflowTaskCompleted,
 		payload: func() any {
 			return domain.NewWorkflowTaskCompletedPayload(testCore(), testTaskCore(), uuid.New())
@@ -132,7 +132,7 @@ var allEvents = []eventCase{
 		dropField: "completed_by_user_id",
 	},
 	{
-		name:      "workflow.task.deferred",
+		name:      "WorkflowTaskDeferred",
 		eventType: domain.EventWorkflowTaskDeferred,
 		payload: func() any {
 			return domain.NewWorkflowTaskDeferredPayload(testCore(), testTaskCore(), "review_finance", nil, nil)
@@ -140,7 +140,7 @@ var allEvents = []eventCase{
 		dropField: "deferred_to_node_key",
 	},
 	{
-		name:      "workflow.task.reassigned",
+		name:      "WorkflowTaskReassigned",
 		eventType: domain.EventWorkflowTaskReassigned,
 		payload: func() any {
 			return domain.NewWorkflowTaskReassignedPayload(testCore(), testTaskCore(), uuid.New(), uuid.New(), domain.ReassignInitiatorAdmin, nil)
@@ -148,7 +148,7 @@ var allEvents = []eventCase{
 		dropField: "new_user_id",
 	},
 	{
-		name:      "workflow.task.superseded",
+		name:      "WorkflowTaskSuperseded",
 		eventType: domain.EventWorkflowTaskSuperseded,
 		payload: func() any {
 			return domain.NewWorkflowTaskSupersededPayload(testCore(), testTaskCore(), uuid.New())
@@ -156,7 +156,7 @@ var allEvents = []eventCase{
 		dropField: "actor_user_id",
 	},
 	{
-		name:      "workflow.task.failed",
+		name:      "WorkflowTaskFailed",
 		eventType: domain.EventWorkflowTaskFailed,
 		payload: func() any {
 			return domain.NewWorkflowTaskFailedPayload(testCore(), testTaskCore(), "instance_terminated")
@@ -164,7 +164,7 @@ var allEvents = []eventCase{
 		dropField: "cascade_source",
 	},
 	{
-		name:      "workflow.task.sla-warning",
+		name:      "WorkflowTaskSlaWarning",
 		eventType: domain.EventWorkflowTaskSLAWarning,
 		payload: func() any {
 			return domain.NewWorkflowTaskSLAWarningPayload(testCore(), testTaskCore(), time.Now().UTC())
@@ -172,7 +172,7 @@ var allEvents = []eventCase{
 		dropField: "follow_up_at",
 	},
 	{
-		name:      "workflow.task.sla-breached",
+		name:      "WorkflowTaskSlaBreached",
 		eventType: domain.EventWorkflowTaskSLABreached,
 		payload: func() any {
 			return domain.NewWorkflowTaskSLABreachedPayload(testCore(), testTaskCore(), time.Now().UTC())

@@ -59,7 +59,7 @@ func TestHandleWorkflowTaskCreated_ConnectorTyped_Publishes(t *testing.T) {
 	router := newInternalRouter(newConnectorEventsHandler(fakes, publisher))
 
 	connectorType := "storage"
-	w := postEvent(router, envelope("workflow.task.created", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType)))
+	w := postEvent(router, envelope("WorkflowTaskCreated", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType)))
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	require.Len(t, publisher.published, 1)
@@ -73,7 +73,7 @@ func TestHandleWorkflowTaskCreated_NonConnector_SkipsPublish(t *testing.T) {
 	publisher := &fakeConnectorEventPublisher{}
 	router := newInternalRouter(newConnectorEventsHandler(fakes, publisher))
 
-	w := postEvent(router, envelope("workflow.task.created", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(nil)))
+	w := postEvent(router, envelope("WorkflowTaskCreated", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(nil)))
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Empty(t, publisher.published)
@@ -84,7 +84,7 @@ func TestHandleWorkflowTaskCreated_NoPublisherConfigured_FailsOpen(t *testing.T)
 	router := newInternalRouter(newConnectorEventsHandler(fakes, nil))
 
 	connectorType := "storage"
-	w := postEvent(router, envelope("workflow.task.created", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType)))
+	w := postEvent(router, envelope("WorkflowTaskCreated", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType)))
 
 	assert.Equal(t, http.StatusOK, w.Code)
 }
@@ -97,7 +97,7 @@ func TestHandleWorkflowTaskCreated_PublisherError_Returns500(t *testing.T) {
 	router := newInternalRouter(newConnectorEventsHandler(fakes, publisher))
 
 	connectorType := "storage"
-	w := postEvent(router, envelope("workflow.task.created", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType)))
+	w := postEvent(router, envelope("WorkflowTaskCreated", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType)))
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
@@ -111,11 +111,11 @@ func TestHandleWorkflowTaskCreated_AlreadyProcessed_SkipsPublish(t *testing.T) {
 	eventID := uuid.New()
 	body := connectorTaskCreatedPayload(&connectorType)
 
-	w1 := postEvent(router, envelope("workflow.task.created", eventID, testTenantID, time.Now(), body))
+	w1 := postEvent(router, envelope("WorkflowTaskCreated", eventID, testTenantID, time.Now(), body))
 	require.Equal(t, http.StatusOK, w1.Code)
 	require.Len(t, publisher.published, 1)
 
-	w2 := postEvent(router, envelope("workflow.task.created", eventID, testTenantID, time.Now(), body))
+	w2 := postEvent(router, envelope("WorkflowTaskCreated", eventID, testTenantID, time.Now(), body))
 	assert.Equal(t, http.StatusOK, w2.Code)
 	assert.Len(t, publisher.published, 1, "a replayed event must not publish a second time")
 }
@@ -129,7 +129,7 @@ func TestHandleWorkflowTaskCreated_InvalidTaskID_Returns400(t *testing.T) {
 	body := connectorTaskCreatedPayload(&connectorType)
 	body["task_id"] = "not-a-uuid"
 
-	w := postEvent(router, envelope("workflow.task.created", uuid.New(), testTenantID, time.Now(), body))
+	w := postEvent(router, envelope("WorkflowTaskCreated", uuid.New(), testTenantID, time.Now(), body))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Empty(t, publisher.published)
@@ -141,7 +141,7 @@ func TestHandleWorkflowTaskCreated_MalformedPayload_Returns400(t *testing.T) {
 
 	w := do(router, internalReq(http.MethodPost, "/api/v1/internal/events/workflow-task", map[string]any{
 		"id":        uuid.New().String(),
-		"type":      "workflow.task.created",
+		"type":      "WorkflowTaskCreated",
 		"tenant_id": testTenantID.String(),
 		"time":      time.Now().Format(time.RFC3339),
 		"data":      "not-an-object",
@@ -155,7 +155,7 @@ func TestHandleWorkflowTaskCreated_InvalidEventID_Returns400(t *testing.T) {
 	router := newInternalRouter(newConnectorEventsHandler(fakes, &fakeConnectorEventPublisher{}))
 
 	connectorType := "storage"
-	body := envelope("workflow.task.created", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType))
+	body := envelope("WorkflowTaskCreated", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType))
 	body["id"] = "not-a-uuid"
 
 	w := do(router, internalReq(http.MethodPost, "/api/v1/internal/events/workflow-task", body))
@@ -167,7 +167,7 @@ func TestHandleWorkflowTaskCreated_InvalidTenantID_Returns400(t *testing.T) {
 	router := newInternalRouter(newConnectorEventsHandler(fakes, &fakeConnectorEventPublisher{}))
 
 	connectorType := "storage"
-	body := envelope("workflow.task.created", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType))
+	body := envelope("WorkflowTaskCreated", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType))
 	body["tenant_id"] = "not-a-uuid"
 
 	w := do(router, internalReq(http.MethodPost, "/api/v1/internal/events/workflow-task", body))
@@ -183,7 +183,7 @@ func TestHandleWorkflowTaskCreated_InvalidInstanceID_Returns400(t *testing.T) {
 	body := connectorTaskCreatedPayload(&connectorType)
 	body["workflow_instance_id"] = "not-a-uuid"
 
-	w := postEvent(router, envelope("workflow.task.created", uuid.New(), testTenantID, time.Now(), body))
+	w := postEvent(router, envelope("WorkflowTaskCreated", uuid.New(), testTenantID, time.Now(), body))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Empty(t, publisher.published)
@@ -198,7 +198,7 @@ func TestHandleWorkflowTaskCreated_InvalidDepartmentID_Returns400(t *testing.T) 
 	body := connectorTaskCreatedPayload(&connectorType)
 	body["department_id"] = "not-a-uuid"
 
-	w := postEvent(router, envelope("workflow.task.created", uuid.New(), testTenantID, time.Now(), body))
+	w := postEvent(router, envelope("WorkflowTaskCreated", uuid.New(), testTenantID, time.Now(), body))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Empty(t, publisher.published)

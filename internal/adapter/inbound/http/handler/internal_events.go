@@ -57,7 +57,7 @@ const (
 	eventTypeUserDeleted             = "UserDeleted"
 	eventTypeUserAvailabilityChanged = "UserAvailabilityChanged"
 	eventTypeTenantStateChanged      = "TenantStateChanged"
-	eventTypeWorkflowTaskCreated     = "workflow.task.created"
+	eventTypeWorkflowTaskCreated     = "WorkflowTaskCreated"
 )
 
 // parseEventID and parseTenantID share the "invalid event id"/"invalid
@@ -172,7 +172,7 @@ func (h *Handler) HandleTenantEvents(c *gin.Context) {
 }
 
 // HandleWorkflowTaskEvents is POST /events/workflow-task — event_consumer
-// routes workflow.task.created here directly (internal/forwarder/category.go).
+// routes WorkflowTaskCreated here directly (internal/forwarder/category.go).
 // Unlike the other three category routes, this one has no legacy generic
 // /events fallback to fall back to (removed once every routed event type had
 // its own dedicated subpath) — a new event type must be wired here and in

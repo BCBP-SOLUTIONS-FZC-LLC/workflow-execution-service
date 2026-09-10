@@ -12,24 +12,8 @@ func TestMessageName(t *testing.T) {
 		want      string
 	}{
 		{EventWorkflowInstanceStarted, "WorkflowInstanceStarted"},
-		{EventWorkflowInstancePaused, "WorkflowInstancePaused"},
-		{EventWorkflowInstanceResumed, "WorkflowInstanceResumed"},
-		{EventWorkflowInstanceCancelled, "WorkflowInstanceCancelled"},
-		{EventWorkflowInstanceTerminated, "WorkflowInstanceTerminated"},
-		{EventWorkflowInstanceDegraded, "WorkflowInstanceDegraded"},
-		{EventWorkflowInstanceFailed, "WorkflowInstanceFailed"},
-		{EventWorkflowInstanceFinished, "WorkflowInstanceFinished"},
-		{EventWorkflowTaskCreated, "WorkflowTaskCreated"},
-		{EventWorkflowTaskClaimed, "WorkflowTaskClaimed"},
-		{EventWorkflowTaskCompleted, "WorkflowTaskCompleted"},
-		{EventWorkflowTaskDeferred, "WorkflowTaskDeferred"},
-		{EventWorkflowTaskReassigned, "WorkflowTaskReassigned"},
-		{EventWorkflowTaskSuperseded, "WorkflowTaskSuperseded"},
-		{EventWorkflowTaskFailed, "WorkflowTaskFailed"},
-		{EventWorkflowInstanceForceRouted, "WorkflowInstanceForceRouted"},
 		{EventWorkflowTaskSLAWarning, "WorkflowTaskSlaWarning"},
-		{EventWorkflowTaskSLABreached, "WorkflowTaskSlaBreached"},
-		{"workflow.task.message-sent", "workflow.task.message-sent"}, // removed event: passes through unchanged
+		{"AnyOtherType", "AnyOtherType"}, // unknown/removed event: passes through unchanged
 	}
 
 	for _, tt := range tests {
