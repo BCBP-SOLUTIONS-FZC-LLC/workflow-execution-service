@@ -76,7 +76,17 @@ func TestOOOAvailabilityReconciler_Apply(t *testing.T) {
 		assert.Contains(t, string(b), `"Initiator":"`+domain.InitiatorOOO+`"`, "the signal must carry ooo as its initiator, not fall back to admin")
 	})
 
-	t.Run("status available skips a RUNNING instance", func(t *testing.T) {
+	t.Run("status available still signals a RUNNING instance — the workflow's own precondition is the only gate", func(t *testing.T) {
+		// Deliberately does NOT pre-check inst.Status before signaling: two
+		// concurrent, conflicting UserAvailabilityChanged deliveries for the
+		// same user (LLD §6.3) serialize under RecencyGuard's lock, but the
+		// first's *effect* (e.g. a pause signal already sent) can still be
+		// in flight — not yet reflected here — when the second reads this
+		// table. A stale-read skip would then wrongly drop a resume that
+		// should fire, leaving the instance stuck PAUSED with nothing left
+		// to un-pause it. Found via a genuine concurrent e2e run
+		// (test/e2e/reconciler_events_test.go); signalPreconditions
+		// (signals.go) is the real, always-current gate.
 		svc, instances, tasks, assignments, temporal := newOOOAvailabilityHarness()
 		tenantID, userID := uuid.New(), uuid.New()
 		instanceID := uuid.New()
@@ -87,7 +97,8 @@ func TestOOOAvailabilityReconciler_Apply(t *testing.T) {
 
 		err := svc.Apply(context.Background(), port.UserAvailabilityInput{TenantID: tenantID, UserID: userID, Status: "available"})
 		require.NoError(t, err)
-		assert.Empty(t, temporal.signals)
+		require.Len(t, temporal.signals, 1)
+		assert.Equal(t, port.SignalInstanceResume, temporal.signals[0].SignalName)
 	})
 
 	t.Run("unknown status is a no-op", func(t *testing.T) {
