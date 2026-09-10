@@ -12,6 +12,14 @@ exclude:
   - "vendor"
   - "test"
 
+# cmd/connector-worker's own e2e test files import test/fixtures for their
+# real Postgres/Temporal/Valkey testcontainers, the same fixtures test/e2e
+# uses — test/e2e is exempt via the top-level "test" exclude above, but
+# these files live under the tracked cmd component, so they need their own
+# narrow exemption rather than loosening cmd's real dependency rules below.
+excludeFiles:
+  - "cmd/connector-worker/e2e.*_test\\.go$"
+
 allow:
   # Only check inter-component project imports; vendor packages are unrestricted.
   depOnAnyVendor: true

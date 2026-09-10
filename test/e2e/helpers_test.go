@@ -141,6 +141,10 @@ func buildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, definitio
 	tasks := postgres.NewTaskRepo(pool)
 	assignments := postgres.NewTaskAssignmentRepo(pool)
 	outboxRepo := postgres.NewOutboxRepo(pool)
+	overrides := postgres.NewAssigneeOverrideRepo(pool)
+	processedEvents := postgres.NewProcessedEventRepo(pool)
+	recency := postgres.NewRecencyGuardRepo(pool)
+	queues := postgres.NewActiveTaskQueueRepo(pool)
 	transactor := postgres.NewTransactor(pool)
 
 	validator, err := eventbus.NewSchemaValidator()
@@ -156,12 +160,28 @@ func buildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, definitio
 		Validator: validator,
 	}
 	taskService := &service.TaskService{
-		Instances: instances, Tasks: tasks, Assignments: assignments,
+		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides,
 		Temporal: temporal, Eligibility: eligibility, Definitions: definitions,
+	}
+	tenantLifecycleReconciler := &service.TenantLifecycleReconciler{
+		Instances: instances, Tasks: tasks, Assignments: assignments, Queues: queues, Outbox: outboxRepo,
+		Transactor: transactor, Temporal: temporal, Validator: validator,
+	}
+	userSafetyNetReconciler := &service.UserSafetyNetReconciler{Assignments: assignments}
+	oooAvailabilityReconciler := &service.OOOAvailabilityReconciler{
+		Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal,
+	}
+	delegationReconciler := &service.DelegationReconciler{
+		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
+		Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
+		Validator: validator,
 	}
 
 	h := handler.New(handler.Services{
 		Tasks: taskService, Instances: instanceService, Eligibility: eligibility,
+		ProcessedEvents: processedEvents, Recency: recency,
+		TenantLifecycle: tenantLifecycleReconciler, UserSafetyNet: userSafetyNetReconciler, OOOAvailability: oooAvailabilityReconciler,
+		Delegation: delegationReconciler,
 	})
 	return httpadapter.NewRouter(httpadapter.RouterConfig{
 		GinConfig: gincommon.Config{ServiceName: "execution-service-e2e-test", BuildVersion: "test"},

@@ -71,14 +71,16 @@ func mustMarshalAny(t *testing.T, v any) []byte {
 }
 
 type taskSummary struct {
-	ID            uuid.UUID `json:"id"`
-	Status        string    `json:"status"`
-	RecordVersion int64     `json:"record_version"`
+	ID                 uuid.UUID  `json:"id"`
+	Status             string     `json:"status"`
+	RecordVersion      int64      `json:"record_version"`
+	DeferredFromTaskID *uuid.UUID `json:"deferred_from_task_id,omitempty"`
 }
 
 type instanceDetail struct {
-	Status string        `json:"status"`
-	Tasks  []taskSummary `json:"tasks"`
+	Status        string        `json:"status"`
+	RecordVersion int64         `json:"record_version"`
+	Tasks         []taskSummary `json:"tasks"`
 }
 
 // pollInstance polls GET /instances/:id until ready reports true or
