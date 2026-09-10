@@ -111,7 +111,7 @@ func TestRunStageLogsEngineNoteForUnrecognizedType(t *testing.T) {
 	env := newTestEnv()
 
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "sales", ToStage: "custom_role", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "sales", ToStage: "custom_role", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
@@ -179,7 +179,7 @@ func TestRunExclusiveRevertPopsHistory(t *testing.T) {
 	)
 
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", ToStage: "prep", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
@@ -215,7 +215,7 @@ func TestRunExclusiveForwardFallsBackToTargetFromTop(t *testing.T) {
 	env := newTestEnv()
 
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "shipping", NodeID: "Task_ship", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "shipping", NodeID: "Task_ship", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 
 	var lastNode domain.NodeKey
@@ -270,7 +270,7 @@ func TestRunExclusiveUsesTargetStageToAvoidReRunningEarlierStage(t *testing.T) {
 	)
 
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "billing", ToStage: "invoice", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "billing", ToStage: "invoice", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 
 	var lastNode domain.NodeKey
@@ -342,7 +342,7 @@ func TestRunExclusiveUsesTargetNodeIDToAvoidReRunningEarlierStage(t *testing.T) 
 	// this lets the buggy run resolve Task_prep instead of hanging — the
 	// real assertion is on createdNodeKeys below, not on this firing.
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "design", NodeID: "Task_prep", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "design", NodeID: "Task_prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 
 	var lastNode domain.NodeKey
@@ -409,10 +409,10 @@ func TestRunExclusiveRevertUsesRevertToNodeID(t *testing.T) {
 
 	// Safety net only, same rationale as the forward test above.
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", NodeID: "Task_prep", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", NodeID: "Task_prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", NodeID: "Task_approve", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", NodeID: "Task_approve", ResultJSON: "{}", VisitCount: 1})
 	}, 2*time.Millisecond)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
@@ -483,10 +483,10 @@ func TestRunExclusiveRevertUsesRevertToStage(t *testing.T) {
 	)
 
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", ToStage: "prep", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", ToStage: "approve", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", ToStage: "approve", ResultJSON: "{}", VisitCount: 1})
 	}, 2*time.Millisecond)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
@@ -607,7 +607,7 @@ func TestRunStepsSequentialPreservesLastNodeOnLaterFailure(t *testing.T) {
 	)
 
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "dept1", ToStage: "prep", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "dept1", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 
 	var lastNode domain.NodeKey
@@ -767,7 +767,7 @@ func TestRunTaskStageInterruptingBoundaryTransfers(t *testing.T) {
 	)
 
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "escalation", ToStage: "prep", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "escalation", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
 	}, 2*time.Hour)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
@@ -804,7 +804,7 @@ func TestRunTaskStageNonInterruptingBoundaryContinuesBoth(t *testing.T) {
 	env.SetStartTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "sales", ToStage: "approve", NodeID: "n1", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "sales", ToStage: "approve", NodeID: "n1", ResultJSON: "{}", VisitCount: 1})
 	}, 2*time.Hour)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {

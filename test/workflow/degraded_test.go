@@ -51,7 +51,7 @@ func TestExecute_ParallelBranchFailureDegradesThenForceForwardResolves(t *testin
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 
@@ -116,7 +116,7 @@ func TestExecute_DegradedFailedBranchUsesRealIAMDepartmentID(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 
@@ -163,7 +163,7 @@ func TestExecute_ParallelBranchFailureDegradesThenForceBackRespawns(t *testing.T
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 
@@ -173,9 +173,13 @@ func TestExecute_ParallelBranchFailureDegradesThenForceBackRespawns(t *testing.T
 		})
 	}, 10*time.Millisecond)
 
+	// The respawned attempt is billing/prep's second visit (the first,
+	// failed CreateTask call never reached the pending-signal registration
+	// at all, since runTaskStage returns before that point on activity
+	// error) — VisitCount: 2 matches taskVisits after the respawn.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "billing", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "billing", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
 	}, 20*time.Millisecond)
 
@@ -262,12 +266,12 @@ func TestExecute_ParallelBranchRespawnResumesPastLastCompletedDeptNotFromScratch
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "billing_charge", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "billing_charge", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 2*time.Millisecond)
 
@@ -277,9 +281,11 @@ func TestExecute_ParallelBranchRespawnResumesPastLastCompletedDeptNotFromScratch
 			AdminUserID: "admin-1", TargetDeptID: "billing_charge", RecordVersion: 1,
 		})
 	}, 10*time.Millisecond)
+	// billing_invoice/prep's respawned (second) attempt — the first, failed
+	// CreateTask call never reached pending-signal registration.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "billing_invoice", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "billing_invoice", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
 	}, 20*time.Millisecond)
 
@@ -348,7 +354,7 @@ func TestExecute_ActiveParallelForceForwardSupersedesOneBranch(t *testing.T) {
 	// not merely fail an assertion.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 10*time.Millisecond)
 
@@ -401,7 +407,7 @@ func TestExecute_ActiveParallelForceForwardDuplicateSignalIsNoOp(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 10*time.Millisecond)
 
@@ -438,7 +444,7 @@ func TestExecute_DEGRADEDRejectsInstancePause(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 

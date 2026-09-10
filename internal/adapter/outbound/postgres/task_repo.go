@@ -40,6 +40,7 @@ func (r *TaskRepo) Create(ctx context.Context, task *domain.Task) error {
 			DeferredFromTaskID: toPgtypeUUID(task.DeferredFromTaskID),
 			DueAt:              toPgtypeTimestamptz(task.DueAt),
 			FollowUpAt:         toPgtypeTimestamptz(task.FollowUpAt),
+			VisitCount:         task.VisitCount,
 		})
 		if err != nil {
 			return mapErr(err)

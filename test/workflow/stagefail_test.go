@@ -37,7 +37,7 @@ func TestExecute_StageFailSignalFailsTaskNotAssignment(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-fail:instance-1", stageFailWire{
-			DeptID: "sales", NodeID: "connector", ErrorClass: "provider timeout", RecordVersion: 1,
+			DeptID: "sales", NodeID: "connector", ErrorClass: "provider timeout", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 

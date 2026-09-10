@@ -25,7 +25,7 @@ func TestExecute_SequentialDispatchCompletes(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "sales", ToStage: "approve", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1,
+			DeptID: "sales", ToStage: "approve", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 
@@ -82,12 +82,12 @@ func TestExecute_ExclusiveGatewayRoutesOnCondition(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "review", ToStage: "review", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1,
+			DeptID: "review", ToStage: "review", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "shipping", ToStage: "prep", ResultJSON: `{}`, RecordVersion: 1,
+			DeptID: "shipping", ToStage: "prep", ResultJSON: `{}`, RecordVersion: 1, VisitCount: 1,
 		})
 	}, 2*time.Millisecond)
 
@@ -127,7 +127,7 @@ func TestExecute_OverrideMapReachesCreateTask(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "sales", ToStage: "approve", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1,
+			DeptID: "sales", ToStage: "approve", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 

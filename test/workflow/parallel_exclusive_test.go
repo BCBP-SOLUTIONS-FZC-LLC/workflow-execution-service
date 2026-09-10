@@ -70,22 +70,22 @@ func TestExecute_ParallelBranchesResolveTheirOwnExclusiveGate(t *testing.T) {
 	// process first.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptB", ToStage: "prep", ResultJSON: `{"decision":"beta"}`, RecordVersion: 1,
+			DeptID: "deptB", ToStage: "prep", ResultJSON: `{"decision":"beta"}`, RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptA", ToStage: "prep", ResultJSON: `{"decision":"alpha"}`, RecordVersion: 1,
+			DeptID: "deptA", ToStage: "prep", ResultJSON: `{"decision":"alpha"}`, RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptA2", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptA2", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 2*time.Millisecond)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptB2", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptB2", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 2*time.Millisecond)
 

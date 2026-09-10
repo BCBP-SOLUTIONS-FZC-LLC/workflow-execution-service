@@ -40,6 +40,7 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 		NodeKey:            string(in.NodeKey),
 		DepartmentID:       deptUUID(in.IAMDepartmentID),
 		Status:             domain.TaskStatusReady,
+		VisitCount:         in.VisitCount,
 		DueAt:              d.parseCompiledDate(stage.DueDate),
 		FollowUpAt:         d.parseCompiledDate(stage.FollowUpDate),
 	}

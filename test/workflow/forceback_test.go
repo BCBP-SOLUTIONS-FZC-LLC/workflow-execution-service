@@ -47,7 +47,7 @@ func TestExecute_BaseForceBackRegressesAndContinues(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 
@@ -57,17 +57,23 @@ func TestExecute_BaseForceBackRegressesAndContinues(t *testing.T) {
 		})
 	}, 5*time.Millisecond)
 
-	// Regressed deptA must be completed again.
+	// Regressed deptA must be completed again — its second visit, so
+	// VisitCount: 2 (the interpreter's own taskVisits counter for
+	// deptA/prep after the force-back re-run).
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
 	}, 10*time.Millisecond)
 
-	// The plan must still continue on to deptB afterward.
+	// The plan must still continue on to deptB afterward — its own second
+	// visit too: force-back's cancelRun() (workflow.go) abandons the
+	// original, still-pending deptB/prep attempt rather than completing it,
+	// so the re-run after the deptA regression creates a genuinely fresh
+	// deptB/prep task.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
 	}, 15*time.Millisecond)
 
@@ -112,7 +118,7 @@ func TestExecute_ForceBackRevisit_GetsDistinctTaskID(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 
@@ -124,13 +130,15 @@ func TestExecute_ForceBackRevisit_GetsDistinctTaskID(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
 	}, 10*time.Millisecond)
 
+	// deptB/prep's own second visit — same reasoning as the sibling test
+	// above (force-back abandons the original pending attempt).
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
 	}, 15*time.Millisecond)
 
@@ -195,7 +203,7 @@ func TestExecute_BaseForceForwardSkipsWithoutWipingHistory(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 
@@ -211,7 +219,7 @@ func TestExecute_BaseForceForwardSkipsWithoutWipingHistory(t *testing.T) {
 	// default execution timeout, not merely fail an assertion.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptC", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptC", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 10*time.Millisecond)
 
@@ -405,12 +413,12 @@ func TestExecute_InstanceReassignCallsActivity(t *testing.T) {
 	}, time.Millisecond)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 2*time.Millisecond)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 3*time.Millisecond)
 
@@ -488,7 +496,7 @@ func TestExecute_StageDeferOnPendingStageDoesNotDisruptFlow(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 
@@ -505,7 +513,7 @@ func TestExecute_StageDeferOnPendingStageDoesNotDisruptFlow(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 10*time.Millisecond)
 
@@ -565,7 +573,7 @@ func TestExecute_ActiveParallelForceBackPausesAndResumes(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "intake", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "intake", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 
@@ -577,21 +585,21 @@ func TestExecute_ActiveParallelForceBackPausesAndResumes(t *testing.T) {
 		})
 	}, 5*time.Millisecond)
 
-	// Regressed intake must be completed again before the branches resume.
+	// Regressed intake must be completed again — its second visit.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "intake", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "intake", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
 	}, 10*time.Millisecond)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 15*time.Millisecond)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "billing", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "billing", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 20*time.Millisecond)
 

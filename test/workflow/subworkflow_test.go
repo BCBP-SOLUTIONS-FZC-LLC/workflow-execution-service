@@ -45,7 +45,7 @@ func TestExecute_SubWorkflowRunsInline(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "review", ToStage: "review", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "review", ToStage: "review", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 
@@ -108,7 +108,7 @@ func TestExecute_SubWorkflowInterruptingTimerBoundary(t *testing.T) {
 	// instead and transfer control to escalation.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "escalation", ToStage: "approve", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "escalation", ToStage: "approve", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 2*time.Hour)
 

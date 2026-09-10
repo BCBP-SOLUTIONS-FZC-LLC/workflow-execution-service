@@ -174,8 +174,8 @@ func deptUUID(iamDeptID string) uuid.UUID {
 // Assumes one department runs directly per ParallelBranch
 func (in *interpreter) currentPendingNode(deptID string) domain.NodeKey {
 	for key := range in.pending {
-		if deptFromNodeKey(key) == deptID {
-			return key
+		if deptFromNodeKey(key.Node) == deptID {
+			return key.Node
 		}
 	}
 	return ""

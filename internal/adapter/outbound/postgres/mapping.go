@@ -101,6 +101,7 @@ func taskFromDB(row db.WorkflowTask) *domain.Task {
 		DepartmentID:       row.DepartmentID,
 		Status:             domain.TaskStatus(row.Status),
 		RecordVersion:      row.RecordVersion,
+		VisitCount:         row.VisitCount,
 		AssigneeMode:       row.AssigneeMode,
 		ConnectorType:      fromPgtypeTextPtr(row.ConnectorType),
 		ExtrasJSON:         row.ExtrasJson,

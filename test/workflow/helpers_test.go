@@ -219,6 +219,7 @@ type stageTransitionWire struct {
 	RecordVersion int64
 	Failed        bool
 	Reason        string
+	VisitCount    int64
 }
 
 // stageFailWire mirrors internal/workflow's unexported stageFailSignal
@@ -230,6 +231,7 @@ type stageFailWire struct {
 	ConnectorType string `json:"connector_type"`
 	ErrorClass    string `json:"error_class"`
 	RecordVersion int64  `json:"record_version"`
+	VisitCount    int64  `json:"visit_count"`
 }
 
 // adminSignalWire mirrors internal/workflow's unexported adminSignal payload.

@@ -58,9 +58,9 @@ LIMIT 1;
 INSERT INTO workflow_task (
     id, tenant_id, workflow_instance_id, node_key, department_id,
     status, assignee_mode, connector_type, extras_json, deferred_from_task_id,
-    due_at, follow_up_at
+    due_at, follow_up_at, visit_count
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 )
 RETURNING *;
 

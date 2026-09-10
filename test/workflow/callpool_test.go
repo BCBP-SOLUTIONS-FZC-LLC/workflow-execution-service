@@ -42,7 +42,7 @@ func TestExecute_CallPoolIgnoredCreatesAdminStubTask(t *testing.T) {
 		// NodeID is visit-qualified ("vendor-pool#1") so two concurrent
 		// branches calling the same pool never collide on one NodeKey.
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "call_pool", ToStage: "approve", NodeID: "vendor-pool#1", ResultJSON: "{}", RecordVersion: 1,
+			DeptID: "call_pool", ToStage: "approve", NodeID: "vendor-pool#1", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 

@@ -43,6 +43,14 @@ type branchOutcome struct {
 	Err      error
 }
 
+// nodeVisitKey identifies one specific visit to a node — see pending's own
+// doc comment for why a bare domain.NodeKey isn't enough to key the
+// resolution maps below.
+type nodeVisitKey struct {
+	Node  domain.NodeKey
+	Visit int64
+}
+
 // interpreter is the workflow-local state for one instance: not safe to
 // share outside its own workflow execution (fine, since Temporal coroutines
 // are cooperatively scheduled, never truly concurrent).
@@ -62,12 +70,22 @@ type interpreter struct {
 	// (LLD §5.4's node-key -> user-ID override).
 	overrideMap map[string]string
 
-	// pending: node key -> the channel a runTaskStage call is blocked on.
-	pending map[domain.NodeKey]wf.Channel
+	// pending: (node key, visit) -> the channel a runTaskStage call is
+	// blocked on. Keyed by nodeVisitKey, not bare NodeKey, so a stale signal
+	// left over from an earlier visit to the same node (see pendingSignals
+	// below) can never resolve a later, unrelated revisit.
+	pending map[nodeVisitKey]wf.Channel
 
 	// pendingSignals buffers a stage-transition signal that arrives before
-	// its runTaskStage call has registered in pending.
-	pendingSignals map[domain.NodeKey]stageTransitionSignal
+	// its runTaskStage call has registered in pending. Keyed by
+	// (NodeKey, VisitCount) — the sender (TaskService.Complete/
+	// ConnectorTaskService.Complete/Fail) reads VisitCount off the task row
+	// it loaded (domain.Task.VisitCount) and carries it on the wire
+	// (stageTransitionWire/stageFailWire), so a duplicate/late redelivery of
+	// an OLD visit's signal can only ever buffer under that old visit's own
+	// key, never collide with a later revisit's fresh registration — closing
+	// the stale-signal bug known_issues.md tracks.
+	pendingSignals map[nodeVisitKey]stageTransitionSignal
 
 	// taskVisits counts runTaskStage calls per NodeKey within this
 	// instance's lifetime — CreateTaskInput.VisitCount's source. A node
@@ -111,8 +129,8 @@ func newInterpreter(tenantID, instanceID, initialContextJSON string, collab *dsl
 		msgBuf:         newMessageBuffer(),
 		contextJSON:    initialContextJSON,
 		overrideMap:    overrideMap,
-		pending:        make(map[domain.NodeKey]wf.Channel),
-		pendingSignals: make(map[domain.NodeKey]stageTransitionSignal),
+		pending:        make(map[nodeVisitKey]wf.Channel),
+		pendingSignals: make(map[nodeVisitKey]stageTransitionSignal),
 		taskVisits:     make(map[domain.NodeKey]int64),
 		pauseGates:     make(map[string]wf.Channel),
 		callPoolVisits: make(map[string]int64),

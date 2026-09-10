@@ -39,6 +39,9 @@ type stageFailWire struct {
 	ConnectorType string `json:"connector_type"`
 	ErrorClass    string `json:"error_class"`
 	RecordVersion int64  `json:"record_version"`
+	// VisitCount mirrors stageTransitionWire's own field (task_service.go) —
+	// see domain.Task.VisitCount's doc comment.
+	VisitCount int64 `json:"visit_count"`
 }
 
 func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID uuid.UUID, output map[string]any) error {
@@ -63,6 +66,7 @@ func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID uu
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-transition", stageTransitionWire{
 		DeptID: deptID, NodeID: nodeID, ResultJSON: string(resultJSON), RecordVersion: task.RecordVersion,
+		VisitCount: task.VisitCount,
 	}); err != nil {
 		s.releaseSignalReservation(ctx, taskID)
 		return fmt.Errorf("signal stage-transition: %w", err)
@@ -87,6 +91,7 @@ func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.U
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-fail", stageFailWire{
 		DeptID: deptID, NodeID: nodeID, ConnectorType: *task.ConnectorType, ErrorClass: errorClass, RecordVersion: task.RecordVersion,
+		VisitCount: task.VisitCount,
 	}); err != nil {
 		s.releaseSignalReservation(ctx, taskID)
 		return fmt.Errorf("signal stage-fail: %w", err)

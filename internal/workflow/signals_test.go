@@ -94,13 +94,13 @@ func TestStageDeferOnPendingStageDoesNotWipeHistory(t *testing.T) {
 	)
 
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "deptA", ToStage: "prep", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-defer:instance", stageDeferSignal{DeptID: "deptA", FromStage: "approve", Reason: "need more info", UserID: "user-1"})
 	}, 2*time.Millisecond)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "deptA", ToStage: "approve", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "deptA", ToStage: "approve", ResultJSON: "{}", VisitCount: 1})
 	}, 3*time.Millisecond)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {

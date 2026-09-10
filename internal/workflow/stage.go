@@ -81,13 +81,18 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 		return nodeKey, "", err
 	}
 
+	visit := int64(0)
+	if getVersion(ctx, nodeVisitKeyChangeID) != wf.DefaultVersion {
+		visit = in.taskVisits[nodeKey]
+	}
+	visitKey := nodeVisitKey{Node: nodeKey, Visit: visit}
 	resolveCh := wf.NewBufferedChannel(ctx, 1)
-	if buffered, ok := in.pendingSignals[nodeKey]; ok {
-		delete(in.pendingSignals, nodeKey)
+	if buffered, ok := in.pendingSignals[visitKey]; ok {
+		delete(in.pendingSignals, visitKey)
 		resolveCh.Send(ctx, buffered)
 	}
-	in.pending[nodeKey] = resolveCh
-	defer delete(in.pending, nodeKey)
+	in.pending[visitKey] = resolveCh
+	defer delete(in.pending, visitKey)
 
 	sel := wf.NewSelector(ctx)
 	var resolved, abandoned bool
@@ -124,7 +129,7 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	if fired != nil {
 		cancelBoundaries()
 		if fired.Interrupting {
-			delete(in.pending, nodeKey)
+			delete(in.pending, visitKey)
 			// The task row createTask created above is now abandoned — mark
 			// it SUPERSEDED so it doesn't sit open/claimable forever with no
 			// terminal status. Best-effort: an error here would abort the

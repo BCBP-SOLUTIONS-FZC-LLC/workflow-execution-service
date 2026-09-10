@@ -256,6 +256,10 @@ type stageTransitionWire struct {
 	RecordVersion int64
 	Failed        bool
 	Reason        string
+	// VisitCount lets the interpreter tell this signal apart from a stale
+	// leftover buffered signal from an earlier visit to the same node (see
+	// domain.Task.VisitCount's own doc comment).
+	VisitCount int64
 }
 
 func (s *TaskService) Complete(ctx context.Context, tenantID, taskID, userID uuid.UUID, resultJSON json.RawMessage, recordVersion int64) (*port.Task, error) {
@@ -271,6 +275,7 @@ func (s *TaskService) Complete(ctx context.Context, tenantID, taskID, userID uui
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-transition", stageTransitionWire{
 		DeptID: deptID, NodeID: nodeID, UserID: userID.String(), ResultJSON: string(resultJSON), RecordVersion: recordVersion,
+		VisitCount: task.VisitCount,
 	}); err != nil {
 		return nil, fmt.Errorf("signal stage-transition: %w", err)
 	}
@@ -285,10 +290,20 @@ type stageDeferWire struct {
 	Reason        string
 	UserID        string
 	RecordVersion int64
+	// TaskID/AssignmentID are the real rows DeferTaskActivity operates on —
+	// the interpreter's own signal-router goroutine (signals.go's
+	// handleStageDefer) has no other way to resolve them, since it only
+	// ever sees DeptID/FromStage off the wire, not a real UUID.
+	TaskID       string
+	AssignmentID string
 }
 
 func (s *TaskService) Defer(ctx context.Context, tenantID, taskID, userID uuid.UUID, reason string, recordVersion int64) (*port.Task, error) {
 	task, err := s.precheckTaskAction(ctx, tenantID, taskID, userID, recordVersion)
+	if err != nil {
+		return nil, err
+	}
+	assignment, err := s.currentAssignee(ctx, tenantID, task, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -300,6 +315,7 @@ func (s *TaskService) Defer(ctx context.Context, tenantID, taskID, userID uuid.U
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-defer", stageDeferWire{
 		DeptID: deptID, FromStage: nodeID, Reason: reason, UserID: userID.String(), RecordVersion: recordVersion,
+		TaskID: task.ID.String(), AssignmentID: assignment.ID.String(),
 	}); err != nil {
 		return nil, fmt.Errorf("signal stage-defer: %w", err)
 	}

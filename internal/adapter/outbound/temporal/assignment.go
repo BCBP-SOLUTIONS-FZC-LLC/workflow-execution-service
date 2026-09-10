@@ -182,6 +182,12 @@ func (d *Deps) createRegressionTask(ctx context.Context, tenantID uuid.UUID, def
 		Status:             domain.TaskStatusReady,
 		AssigneeMode:       deferred.AssigneeMode,
 		DeferredFromTaskID: &deferred.ID,
+		// Continues the same in-flight runTaskStage visit the deferred task
+		// belonged to (the interpreter never re-registers on a defer — see
+		// signals.go's handleStageDefer) — the eventual completion signal's
+		// VisitCount must match the still-pending registration's, or it
+		// resolves nothing and the workflow hangs.
+		VisitCount: deferred.VisitCount,
 	}
 	if err := d.Tasks.Create(ctx, newTask); err != nil {
 		if errors.Is(err, domain.ErrAlreadyExists) {

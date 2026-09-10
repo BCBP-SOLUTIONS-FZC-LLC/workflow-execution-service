@@ -34,6 +34,13 @@ CREATE TABLE workflow_task (
     status                workflow_task_status NOT NULL,
     record_version        BIGINT               NOT NULL DEFAULT 1 CHECK (record_version > 0),
     assignee_mode         TEXT                 NOT NULL,  -- 'single' | 'all'
+    -- The interpreter's own per-NodeKey taskVisits counter at creation time
+    -- (internal/workflow/stage.go) — 1 for a node's first visit, 2+ for a
+    -- legitimate revisit (force-back, an exclusive-gateway back-edge).
+    -- Threaded back onto the completion signal so the interpreter can tell
+    -- a stale, leftover signal from an earlier visit apart from the current
+    -- one's own resolution.
+    visit_count           BIGINT               NOT NULL DEFAULT 0 CHECK (visit_count >= 0),
     -- Connector name for a connector-typed task (design/LLD/workflow_connectors.md
     -- §5.2) — a real column, not extras_json, for the same query-efficiency
     -- reason department_id is already a real column.

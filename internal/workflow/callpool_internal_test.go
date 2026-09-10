@@ -41,10 +41,10 @@ func TestRunCallPoolIgnoredVisitsGetDistinctNodeKeys(t *testing.T) {
 	)
 
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "call_pool", NodeID: "vendor-pool#1", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "call_pool", NodeID: "vendor-pool#1", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "call_pool", NodeID: "vendor-pool#2", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "call_pool", NodeID: "vendor-pool#2", ResultJSON: "{}", VisitCount: 1})
 	}, 2*time.Millisecond)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
@@ -88,7 +88,7 @@ func TestRunCallPoolRecursesInlineWhenNotIgnored(t *testing.T) {
 	env := newTestEnv()
 
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "vendor", ToStage: "prep", ResultJSON: "{}"})
+		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "vendor", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {

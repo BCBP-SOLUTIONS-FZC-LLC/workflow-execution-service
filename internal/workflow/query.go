@@ -35,7 +35,7 @@ func (in *interpreter) registerStatusQuery(ctx wf.Context) error {
 	err := wf.SetQueryHandler(ctx, QueryGetWorkflowStatus, func() (WorkflowStatusQuery, error) {
 		keys := make([]domain.NodeKey, 0, len(in.pending))
 		for k := range in.pending {
-			keys = append(keys, k)
+			keys = append(keys, k.Node)
 		}
 		saved := make([]string, 0, len(in.pauseGates))
 		for dept := range in.pauseGates {

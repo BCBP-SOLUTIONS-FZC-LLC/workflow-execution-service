@@ -74,6 +74,10 @@ type stageTransitionSignal struct {
 	RecordVersion int64
 	Failed        bool
 	Reason        string
+	// VisitCount identifies which visit to this node the signal resolves —
+	// see domain.Task.VisitCount's doc comment and pending/pendingSignals'
+	// own (types.go).
+	VisitCount int64
 }
 
 // stageFailSignal is the wire payload of SignalStageFail — execution_service.md
@@ -92,15 +96,20 @@ type stageFailSignal struct {
 	ConnectorType string `json:"connector_type"`
 	ErrorClass    string `json:"error_class"`
 	RecordVersion int64  `json:"record_version"`
+	VisitCount    int64  `json:"visit_count"`
 }
 
-// stageDeferSignal is the payload of SignalStageDefer (LLD §3.1).
+// stageDeferSignal is the payload of SignalStageDefer (LLD §3.1). TaskID/
+// AssignmentID are the real rows DeferTaskActivity operates on — this
+// package has no other way to resolve them from DeptID/FromStage alone.
 type stageDeferSignal struct {
 	DeptID        string
 	FromStage     string
 	Reason        string
 	UserID        string
 	RecordVersion int64
+	TaskID        string
+	AssignmentID  string
 }
 
 // reassignSignal is the payload of SignalInstanceReassign (LLD §3.1): unlike
@@ -208,13 +217,18 @@ func (in *interpreter) handleStageTransition(ctx wf.Context, sig stageTransition
 	if sig.NodeID == "" {
 		key = domain.NodeKey(sig.DeptID + "/" + sig.ToStage)
 	}
-	if ch, ok := in.pending[key]; ok {
+	visit := int64(0)
+	if getVersion(ctx, nodeVisitKeyChangeID) != wf.DefaultVersion {
+		visit = sig.VisitCount
+	}
+	visitKey := nodeVisitKey{Node: key, Visit: visit}
+	if ch, ok := in.pending[visitKey]; ok {
 		ch.Send(ctx, sig)
 	} else {
 		// No runTaskStage call has registered for this node yet —
 		// buffer it so a later registration picks it up immediately
 		// instead of silently missing a resolution that arrived first.
-		in.pendingSignals[key] = sig
+		in.pendingSignals[visitKey] = sig
 	}
 }
 
@@ -235,12 +249,18 @@ func (in *interpreter) handleStageFail(ctx wf.Context, sig stageFailSignal) {
 	}
 	transition := stageTransitionSignal{
 		DeptID: sig.DeptID, NodeID: sig.NodeID, Failed: true, Reason: sig.ErrorClass, RecordVersion: sig.RecordVersion,
+		VisitCount: sig.VisitCount,
 	}
 	key := domain.NodeKey(sig.DeptID + "/" + sig.NodeID)
-	if ch, ok := in.pending[key]; ok {
+	visit := int64(0)
+	if getVersion(ctx, nodeVisitKeyChangeID) != wf.DefaultVersion {
+		visit = sig.VisitCount
+	}
+	visitKey := nodeVisitKey{Node: key, Visit: visit}
+	if ch, ok := in.pending[visitKey]; ok {
 		ch.Send(ctx, transition)
 	} else {
-		in.pendingSignals[key] = transition
+		in.pendingSignals[visitKey] = transition
 	}
 }
 
@@ -251,21 +271,15 @@ func (in *interpreter) handleStageDefer(ctx wf.Context, sig stageDeferSignal) {
 		wf.GetLogger(ctx).Warn("dropping stage-defer signal", "error", err)
 		return
 	}
-	// fromNode names the currently-pending stage being deferred — never yet
-	// in history.Push'd (that only happens once a stage completes, stage.go),
-	// so there's nothing of its own to PopTo here: an earlier version of
-	// this handler called history.PopTo(fromNode) anyway, and PopTo's own
-	// not-found fallback then wiped the ENTIRE history stack, including
-	// unrelated already-completed nodes. Any regression-task bookkeeping
-	// belongs to DeferTaskActivity itself (a persistence-layer concern, not
-	// yet built).
-	fromNode := domain.NodeKey(sig.DeptID + "/" + sig.FromStage)
-	// Simplification: uses the from-node key as a stand-in Task/AssignmentID
-	// (same as runTaskStage's CompleteAssignmentActivity call) until the
-	// persistence-layer sibling task defines the real convention.
+	// The deferred stage itself is never history.Push'd (that only happens
+	// once a stage completes, stage.go), so there's nothing of its own to
+	// PopTo here: an earlier version of this handler called
+	// history.PopTo(fromNode) anyway, and PopTo's own not-found fallback
+	// then wiped the ENTIRE history stack, including unrelated
+	// already-completed nodes.
 	_, _ = deferTask(ctx, port.DeferTaskInput{
-		TaskID: string(fromNode), TenantID: in.tenantID, UserID: sig.UserID,
-		AssignmentID: string(fromNode), Reason: sig.Reason, RecordVersion: sig.RecordVersion,
+		TaskID: sig.TaskID, TenantID: in.tenantID, UserID: sig.UserID,
+		AssignmentID: sig.AssignmentID, Reason: sig.Reason, RecordVersion: sig.RecordVersion,
 	})
 }
 
