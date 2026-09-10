@@ -189,13 +189,13 @@ test-integration:
 	@grep -v '$(COVER_EXCLUDE_FILE)' $(COVERAGE_DIR)/integration.out > $(COVERAGE_DIR)/integration.out.filtered && mv $(COVERAGE_DIR)/integration.out.filtered $(COVERAGE_DIR)/integration.out
 	@go tool cover -func=$(COVERAGE_DIR)/integration.out | tail -1
 
-## test-e2e: Run the real instantiate -> dispatch -> complete round trip against live Temporal + Postgres + HTTP (needs the Temporal image too — slower than test-integration, kept separate)
+## test-e2e: Run the real instantiate -> dispatch -> complete round trip against live Temporal + Postgres + HTTP, plus cmd/connector-worker's own real dispatch/completion round trip against live Valkey too (needs the Temporal image too — slower than test-integration, kept separate)
 test-e2e:
 	AWS_ACCESS_KEY_ID=test \
 	AWS_SECRET_ACCESS_KEY=test \
 	AWS_EC2_METADATA_DISABLED=true \
 	TESTCONTAINERS_RYUK_DISABLED=true \
-	go test -race -count=1 -tags e2e -timeout 5m ./test/e2e/...
+	go test -race -count=1 -tags e2e -timeout 5m ./test/e2e/... ./cmd/connector-worker/...
 
 ## merge-coverage: Merge unit + integration profiles into coverage.out (max-count-per-block strategy)
 merge-coverage:

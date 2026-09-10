@@ -13,7 +13,7 @@ import (
 )
 
 // completionClient calls execution_service's own
-// POST /internal/connector-tasks/:id/{complete,fail} endpoints — the one
+// POST /api/v1/internal/connector-tasks/:id/{complete,fail} endpoints — the one
 // place this binary reaches back into the workflow, since it never touches
 // the Temporal SDK directly (LLD workflow_connectors.md §6.1 Decision #2).
 type completionClient struct {
@@ -41,7 +41,7 @@ func (c *completionClient) Complete(ctx context.Context, tenantID, taskID uuid.U
 	if err != nil {
 		return fmt.Errorf("encode complete request: %w", err)
 	}
-	return c.post(ctx, fmt.Sprintf("/internal/connector-tasks/%s/complete", taskID), body)
+	return c.post(ctx, fmt.Sprintf("/api/v1/internal/connector-tasks/%s/complete", taskID), body)
 }
 
 func (c *completionClient) Fail(ctx context.Context, tenantID, taskID uuid.UUID, errorClass string) error {
@@ -49,7 +49,7 @@ func (c *completionClient) Fail(ctx context.Context, tenantID, taskID uuid.UUID,
 	if err != nil {
 		return fmt.Errorf("encode fail request: %w", err)
 	}
-	return c.post(ctx, fmt.Sprintf("/internal/connector-tasks/%s/fail", taskID), body)
+	return c.post(ctx, fmt.Sprintf("/api/v1/internal/connector-tasks/%s/fail", taskID), body)
 }
 
 func (c *completionClient) post(ctx context.Context, path string, body []byte) error {

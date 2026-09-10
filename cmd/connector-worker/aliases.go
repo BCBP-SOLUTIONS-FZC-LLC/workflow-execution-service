@@ -15,7 +15,7 @@ func fetchAliases(ctx context.Context, addr, internalToken string, timeout time.
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	url := strings.TrimRight(addr, "/") + "/internal/connector-aliases"
+	url := strings.TrimRight(addr, "/") + "/api/v1/internal/connector-aliases"
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
 		return aliasconfig.Config{}, fmt.Errorf("build alias fetch request: %w", err)

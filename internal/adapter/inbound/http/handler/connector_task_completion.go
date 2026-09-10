@@ -26,7 +26,7 @@ type failConnectorTaskReq struct {
 	ErrorClass string    `json:"error_class" binding:"required"`
 }
 
-// CompleteConnectorTask is POST /internal/connector-tasks/:id/complete.
+// CompleteConnectorTask is POST /api/v1/internal/connector-tasks/:id/complete.
 func (h *Handler) CompleteConnectorTask(c *gin.Context) {
 	taskID, ok := parseIDParam(c)
 	if !ok {
@@ -44,7 +44,7 @@ func (h *Handler) CompleteConnectorTask(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// FailConnectorTask is POST /internal/connector-tasks/:id/fail.
+// FailConnectorTask is POST /api/v1/internal/connector-tasks/:id/fail.
 func (h *Handler) FailConnectorTask(c *gin.Context) {
 	taskID, ok := parseIDParam(c)
 	if !ok {

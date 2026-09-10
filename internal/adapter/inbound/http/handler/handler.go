@@ -81,7 +81,7 @@ type Services struct {
 	// until a real events.Codec is wired up in cmd/server, no producer sets
 	// SchemaID, so this stays unused in practice today.
 	EventDecoder port.EventDecoder
-	// ConnectorTasks backs the new POST /internal/connector-tasks/:id/{complete,fail}
+	// ConnectorTasks backs the new POST /api/v1/internal/connector-tasks/:id/{complete,fail}
 	// endpoints cmd/connector-worker calls.
 	ConnectorTasks port.ConnectorTaskService
 	// ConnectorEvents is nil-safe: handleWorkflowTaskCreated logs and drops a

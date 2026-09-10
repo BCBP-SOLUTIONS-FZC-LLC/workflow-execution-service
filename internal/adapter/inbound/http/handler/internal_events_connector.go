@@ -34,7 +34,7 @@ type workflowTaskCreatedPayload struct {
 }
 
 func (h *Handler) handleWorkflowTaskCreated(c *gin.Context, env events.Envelope[json.RawMessage]) {
-	const eventType = "workflow.task.created"
+	const eventType = eventTypeWorkflowTaskCreated
 	var p workflowTaskCreatedPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		h.badPayload(c, eventType, "invalid workflow.task.created payload")

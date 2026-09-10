@@ -137,7 +137,7 @@ type Config struct {
 
 	// DefinitionServiceInternalHTTPAddr/ConnectorAliasFetchTimeout:
 	// cmd/connector-worker fetches the endpointAlias/queryAlias registry from
-	// definition_service's GET /internal/connector-aliases once at startup
+	// definition_service's GET /api/v1/internal/connector-aliases once at startup
 	// (definition_service owns it now, not a static file — LLD Decision #21),
 	// authenticated the same x-internal-token way as ExecutionServiceInternalAddr
 	// below. connector-worker-only, not validated here. Distinct from
@@ -165,7 +165,7 @@ type Config struct {
 
 	// ExecutionServiceInternalAddr/ConnectorCompletionTimeout: where
 	// cmd/connector-worker calls the new
-	// POST /internal/connector-tasks/:id/{complete,fail} endpoints.
+	// POST /api/v1/internal/connector-tasks/:id/{complete,fail} endpoints.
 	// Reuses the existing InternalAPIToken field as the shared secret those
 	// endpoints already check — connector-worker-only, not validated here.
 	ExecutionServiceInternalAddr string

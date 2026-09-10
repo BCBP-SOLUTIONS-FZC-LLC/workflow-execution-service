@@ -45,7 +45,7 @@ type deps struct {
 // buildDeps is cmd/connector-worker's composition root (mirrors cmd/worker's
 // buildDeps/cmd/server's newApp convention). It never dials Temporal — this
 // binary reaches the workflow only through completionClient's HTTP calls
-// into execution_service's own /internal/connector-tasks endpoints (LLD
+// into execution_service's own /api/v1/internal/connector-tasks endpoints (LLD
 // workflow_connectors.md §6.1 Decision #2).
 func buildDeps(cfg *config.Config) (*deps, func(), error) {
 	aliases, err := fetchAliases(context.Background(), cfg.DefinitionServiceInternalHTTPAddr, cfg.InternalAPIToken, cfg.ConnectorAliasFetchTimeout)

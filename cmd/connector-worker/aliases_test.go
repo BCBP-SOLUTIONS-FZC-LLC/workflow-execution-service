@@ -13,7 +13,7 @@ import (
 
 func TestFetchAliases_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/internal/connector-aliases", r.URL.Path)
+		assert.Equal(t, "/api/v1/internal/connector-aliases", r.URL.Path)
 		assert.Equal(t, "test-token", r.Header.Get("x-internal-token"))
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"version":1,"restCall":[{"alias":"a","method":"GET","baseURL":"http://x","pathTemplate":"/y","timeout":5000000000}],"sqlQuery":[]}`))

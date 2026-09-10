@@ -2,7 +2,7 @@
 // Valkey Stream execution_service's internal-events handler pushes
 // connector-typed workflow.task.created events onto, dispatches to a real
 // workflow-connectors.Connector, and reports the outcome back via
-// execution_service's own /internal/connector-tasks HTTP endpoints.
+// execution_service's own /api/v1/internal/connector-tasks HTTP endpoints.
 //
 // This binary never imports go.temporal.io/sdk — see design/LLD/
 // workflow_connectors.md §6.1 Decision #2. It reaches the workflow only
