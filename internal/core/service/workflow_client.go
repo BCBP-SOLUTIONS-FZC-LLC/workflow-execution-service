@@ -120,6 +120,12 @@ func (s *WorkflowClient) CancelByDelegate(ctx context.Context, in port.CancelByD
 	return count, nil
 }
 
+// DelegateImpact previews the delegate's own resulting workload
+// (ListActiveByUser keyed on in.DelegateUserID), never the delegator's —
+// deliberate, matching ReassignDelegate/CancelByDelegate's own delegate-
+// centric scope, but never chases a chain onward if that delegate has
+// themselves delegated further (single-hop, same limit as
+// DelegationReconciler's Reroute/Reverse).
 func (s *WorkflowClient) DelegateImpact(ctx context.Context, in port.DelegateImpactInput) (port.DelegateImpactResult, error) {
 	active, err := s.Assignments.ListActiveByUser(ctx, in.TenantID, in.DelegateUserID)
 	if err != nil {

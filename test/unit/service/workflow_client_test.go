@@ -394,3 +394,42 @@ func TestWorkflowClient_DelegateImpact(t *testing.T) {
 	require.Len(t, result.WorkflowIDs.Items, 1, "two tasks on the same instance must dedupe to one workflow id")
 	assert.Equal(t, instanceID, result.WorkflowIDs.Items[0])
 }
+
+// TestWorkflowClient_DelegateImpact_ChainedDelegate proves the delegate-
+// centric scoping documented on DelegateImpact itself: previewing impact for
+// a delegate who has themselves delegated onward (A -> B -> C) only ever
+// reflects C's own current holdings, never chasing back to A's original
+// grant.
+func TestWorkflowClient_DelegateImpact_ChainedDelegate(t *testing.T) {
+	svc, _, tasks, assignments, _ := newWorkflowClientHarness()
+	tenantID := uuid.New()
+	grantorA, delegateB, delegateC := uuid.New(), uuid.New(), uuid.New()
+	delegationID1, delegationID2 := uuid.New(), uuid.New()
+
+	// A -> B: vacated, no longer an active assignment for B.
+	taskAB := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: uuid.New()}
+	tasks.byID[taskAB.ID] = taskAB
+	assignments.byID[uuid.New()] = &domain.TaskAssignment{
+		ID: uuid.New(), TenantID: tenantID, TaskID: taskAB.ID, UserID: delegateB,
+		IsActive: false, Reason: "delegation:" + delegationID1.String(),
+	}
+
+	// B -> C: the only currently active assignment in this chain.
+	taskBC := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: uuid.New()}
+	tasks.byID[taskBC.ID] = taskBC
+	assignments.byID[uuid.New()] = &domain.TaskAssignment{
+		ID: uuid.New(), TenantID: tenantID, TaskID: taskBC.ID, UserID: delegateC,
+		IsActive: true, Reason: "delegation:" + delegationID2.String(),
+	}
+
+	resultForC, err := svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: delegateC, Page: port.Page{Limit: 10}})
+	require.NoError(t, err)
+	assert.Equal(t, 1, resultForC.ReassignedCount, "C's preview must only reflect C's own current holdings")
+	require.Len(t, resultForC.WorkflowIDs.Items, 1)
+	assert.Equal(t, taskBC.WorkflowInstanceID, resultForC.WorkflowIDs.Items[0])
+
+	resultForA, err := svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: grantorA, Page: port.Page{Limit: 10}})
+	require.NoError(t, err)
+	assert.Zero(t, resultForA.ReassignedCount, "the original grantor's preview must not chase the chain forward to C")
+	assert.Empty(t, resultForA.WorkflowIDs.Items)
+}
