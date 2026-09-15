@@ -64,6 +64,13 @@ func validateSignal(status domain.InstanceStatus, signal string) error {
 	return fmt.Errorf("workflow: signal %q rejected: instance status is %s, requires one of %v", signal, status, allowed)
 }
 
+func canResume(pausedBy, resumeInitiator string) bool {
+	if resumeInitiator == domain.InitiatorAdmin || resumeInitiator == "" {
+		return true
+	}
+	return resumeInitiator == pausedBy
+}
+
 // stageTransitionSignal is the payload of SignalStageTransition (LLD §3.1).
 type stageTransitionSignal struct {
 	DeptID        string
@@ -188,6 +195,11 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 			case SignalInstancePause:
 				in.handleInstancePause(ctx, sig)
 			case SignalInstanceResume:
+				if !canResume(in.pauseInitiator, sig.Initiator) {
+					logger.Warn("dropping instance-resume signal: initiator does not own this pause",
+						"resume_initiator", sig.Initiator, "paused_by", in.pauseInitiator)
+					return
+				}
 				in.handleInstanceResume(ctx, sig)
 			default:
 				// instance-cancel, instance-force-forward, instance-force-back.
@@ -308,6 +320,7 @@ func (in *interpreter) handleInstanceReassign(ctx wf.Context, sig reassignSignal
 // already synchronously version-checked at the HTTP layer before being sent.
 func (in *interpreter) handleInstancePause(ctx wf.Context, sig adminSignal) {
 	in.status = domain.InstanceStatusPaused
+	in.pauseInitiator = sig.Initiator
 	if err := pauseInstance(ctx, port.PauseInstanceInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID,
 		AdminUserID: sig.AdminUserID, Initiator: sig.Initiator, RecordVersion: sig.RecordVersion,
@@ -319,6 +332,7 @@ func (in *interpreter) handleInstancePause(ctx wf.Context, sig adminSignal) {
 // handleInstanceResume is handleInstancePause's mirror image.
 func (in *interpreter) handleInstanceResume(ctx wf.Context, sig adminSignal) {
 	in.status = domain.InstanceStatusRunning
+	in.pauseInitiator = ""
 	if err := resumeInstance(ctx, port.ResumeInstanceInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID,
 		AdminUserID: sig.AdminUserID, Initiator: sig.Initiator, RecordVersion: sig.RecordVersion,

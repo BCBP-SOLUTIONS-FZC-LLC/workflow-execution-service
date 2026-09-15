@@ -89,6 +89,49 @@ func TestTenantLifecycleReconciler_Apply_StatusTransitions(t *testing.T) {
 		assert.Contains(t, string(b), `"Initiator":"`+domain.InitiatorTenantState+`"`, "the signal must carry tenant_state as its initiator, not fall back to admin")
 	})
 
+	// Regression coverage for the out-of-order race: these sweeps must not
+	// pre-filter on the status the signal expects. Two conflicting
+	// TenantStateChanged deliveries serialize under RecencyGuard, but the
+	// first one's effect is written asynchronously by the workflow's own
+	// activity — so the second can still read the pre-transition status here.
+	// Skipping on that stale read left the instance stranded with no further
+	// event to undo it. The workflow's own signalPreconditions/canResume is
+	// the gate instead, exactly as OOOAvailabilityReconciler was fixed to do.
+	t.Run("transition to active still signals a RUNNING instance whose pause has not landed yet", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		stillRunning := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
+		instances.byID[stillRunning.ID] = stillRunning
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "suspended"})
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1, "the resume must be sent regardless of the status this sweep happens to read")
+		assert.Equal(t, port.SignalInstanceResume, temporal.signals[0].SignalName)
+	})
+
+	t.Run("transition to suspended still signals a PAUSED instance whose resume has not landed yet", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		stillPaused := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusPaused, TemporalWorkflowID: "tenant:paused", RecordVersion: 1}
+		instances.byID[stillPaused.ID] = stillPaused
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"})
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1, "the pause must be sent regardless of the status this sweep happens to read")
+		assert.Equal(t, port.SignalInstancePause, temporal.signals[0].SignalName)
+	})
+
+	t.Run("a DEGRADED instance is swept too, and rejected at the workflow's own signal gate", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		degraded := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusDegraded, TemporalWorkflowID: "tenant:degraded", RecordVersion: 1}
+		instances.byID[degraded.ID] = degraded
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"})
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1, "DEGRADED is non-terminal, so it is selected; validateSignal rejects the pause on the workflow side (LLD §7.2 test #5)")
+	})
+
 	t.Run("status unchanged is a no-op", func(t *testing.T) {
 		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
 		tenantID := uuid.New()

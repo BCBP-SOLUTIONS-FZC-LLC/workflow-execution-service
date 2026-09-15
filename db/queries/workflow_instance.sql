@@ -10,6 +10,19 @@ SELECT * FROM workflow_instance WHERE id = $1;
 SELECT wi.* FROM workflow_instance wi
 WHERE wi.tenant_id = $1
   AND (sqlc.narg('status')::workflow_instance_status IS NULL OR wi.status = sqlc.narg('status')::workflow_instance_status)
+  -- statuses is the set form of status, for sweeps that must select every
+  -- non-terminal instance in ONE query: splitting that into a query per
+  -- status lets an instance changing status between two of those queries
+  -- fall through both. Empty array = unfiltered.
+  --
+  -- text[] rather than workflow_instance_status[]: pgx has no encode plan
+  -- for an array of a custom enum unless that enum's OID is registered on
+  -- the connection, and the driver reports it only at query time, as
+  -- "unable to encode ... unknown type (OID ...)".
+  AND (
+    cardinality(sqlc.arg('statuses')::text[]) = 0
+    OR wi.status::text = ANY(sqlc.arg('statuses')::text[])
+  )
   AND (sqlc.narg('workflow_version_id')::uuid IS NULL OR wi.workflow_version_id = sqlc.narg('workflow_version_id')::uuid)
   AND (sqlc.narg('started_after')::timestamptz IS NULL OR wi.started_at > sqlc.narg('started_after')::timestamptz)
   AND (sqlc.narg('started_before')::timestamptz IS NULL OR wi.started_at < sqlc.narg('started_before')::timestamptz)

@@ -27,6 +27,7 @@ require (
 	go.temporal.io/api v1.63.0
 	go.temporal.io/sdk v1.46.0
 	go.temporal.io/sdk/contrib/opentelemetry v0.8.1
+	go.uber.org/mock v0.6.0
 	google.golang.org/grpc v1.83.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1

@@ -28,6 +28,7 @@ type ScopeFilter struct {
 
 type InstanceListFilter struct {
 	Status            *domain.InstanceStatus
+	Statuses          []domain.InstanceStatus
 	WorkflowVersionID *uuid.UUID
 	StartedAfter      *time.Time
 	StartedBefore     *time.Time

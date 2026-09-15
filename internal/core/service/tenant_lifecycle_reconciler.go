@@ -62,18 +62,21 @@ func (s *TenantLifecycleReconciler) applyStatusTransition(ctx context.Context, i
 	case "offboarded":
 		return s.terminateAllNonTerminal(ctx, in.TenantID)
 	case "active":
-		return s.signalAllByStatus(ctx, in.TenantID, domain.InstanceStatusPaused, port.SignalInstanceResume)
+		return s.signalAllNonTerminal(ctx, in.TenantID, port.SignalInstanceResume)
 	default:
-		return s.signalAllByStatus(ctx, in.TenantID, domain.InstanceStatusRunning, port.SignalInstancePause)
+		return s.signalAllNonTerminal(ctx, in.TenantID, port.SignalInstancePause)
 	}
 }
 
-// allInstancesByStatus pages through every one of tenantID's instances
-// currently in status want — a tenant-wide sweep, unlike
-// OOOAvailabilityReconciler's per-user-assignment establish step.
-func allInstancesByStatus(ctx context.Context, instances port.InstanceRepository, tenantID uuid.UUID, want domain.InstanceStatus) ([]*domain.Instance, error) {
+var nonTerminalInstanceStatuses = []domain.InstanceStatus{
+	domain.InstanceStatusRunning,
+	domain.InstanceStatusPaused,
+	domain.InstanceStatusDegraded,
+}
+
+func allNonTerminalInstances(ctx context.Context, instances port.InstanceRepository, tenantID uuid.UUID) ([]*domain.Instance, error) {
 	var out []*domain.Instance
-	filter := port.InstanceListFilter{Status: &want}
+	filter := port.InstanceListFilter{Statuses: nonTerminalInstanceStatuses}
 	var after *port.Cursor
 	for {
 		page, next, err := instances.ListByTenant(ctx, tenantID, filter, port.PageRequest{After: after, Limit: 100})
@@ -89,13 +92,8 @@ func allInstancesByStatus(ctx context.Context, instances port.InstanceRepository
 	return out, nil
 }
 
-// signalAllByStatus is the tenant-wide pause/resume sweep (LLD §6.2 item 4
-// dispatch branches 2-3). Same best-effort "every instance currently in the
-// given status, not filtered by which initiator actually paused it"
-// simplification OOOAvailabilityReconciler documents — neither
-// PauseInstanceInput nor ResumeInstanceInput persists an initiator today.
-func (s *TenantLifecycleReconciler) signalAllByStatus(ctx context.Context, tenantID uuid.UUID, want domain.InstanceStatus, signalName string) error {
-	instances, err := allInstancesByStatus(ctx, s.Instances, tenantID, want)
+func (s *TenantLifecycleReconciler) signalAllNonTerminal(ctx context.Context, tenantID uuid.UUID, signalName string) error {
+	instances, err := allNonTerminalInstances(ctx, s.Instances, tenantID)
 	if err != nil {
 		return err
 	}
@@ -110,13 +108,9 @@ func (s *TenantLifecycleReconciler) signalAllByStatus(ctx context.Context, tenan
 }
 
 func (s *TenantLifecycleReconciler) terminateAllNonTerminal(ctx context.Context, tenantID uuid.UUID) error {
-	var toTerminate []*domain.Instance
-	for _, status := range []domain.InstanceStatus{domain.InstanceStatusRunning, domain.InstanceStatusPaused, domain.InstanceStatusDegraded} {
-		rows, err := allInstancesByStatus(ctx, s.Instances, tenantID, status)
-		if err != nil {
-			return err
-		}
-		toTerminate = append(toTerminate, rows...)
+	toTerminate, err := allNonTerminalInstances(ctx, s.Instances, tenantID)
+	if err != nil {
+		return err
 	}
 	for _, inst := range toTerminate {
 		if err := s.terminateOne(ctx, tenantID, inst); err != nil {

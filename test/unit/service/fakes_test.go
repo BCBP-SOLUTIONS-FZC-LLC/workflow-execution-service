@@ -96,6 +96,15 @@ func (r *fakeInstanceRepo) UpdateStatus(_ context.Context, _, id uuid.UUID, stat
 	return inst, nil
 }
 
+func containsInstanceStatus(statuses []domain.InstanceStatus, want domain.InstanceStatus) bool {
+	for _, s := range statuses {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *fakeInstanceRepo) ListByTenant(_ context.Context, tenantID uuid.UUID, filter port.InstanceListFilter, page port.PageRequest) ([]*domain.Instance, *port.Cursor, error) {
 	if r.listErr != nil {
 		return nil, nil, r.listErr
@@ -111,6 +120,9 @@ func (r *fakeInstanceRepo) ListByTenant(_ context.Context, tenantID uuid.UUID, f
 		if filter.Status != nil && inst.Status != *filter.Status {
 			continue
 		}
+		if len(filter.Statuses) > 0 && !containsInstanceStatus(filter.Statuses, inst.Status) {
+			continue
+		}
 		if filter.WorkflowVersionID != nil && inst.WorkflowVersionID != *filter.WorkflowVersionID {
 			continue
 		}
@@ -119,7 +131,7 @@ func (r *fakeInstanceRepo) ListByTenant(_ context.Context, tenantID uuid.UUID, f
 	// nextCursor is consumed on its first use — a real second page would
 	// return distinct rows and eventually a nil cursor; this fake has no
 	// notion of "already returned" rows, so returning the same non-nil
-	// cursor forever would spin allInstancesByStatus's pagination loop.
+	// cursor forever would spin allNonTerminalInstances's pagination loop.
 	cursor := r.nextCursor
 	r.nextCursor = nil
 	return out, cursor, nil

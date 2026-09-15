@@ -59,6 +59,41 @@ func TestValidateSignal(t *testing.T) {
 	}
 }
 
+func TestCanResume(t *testing.T) {
+	tests := []struct {
+		name            string
+		pausedBy        string
+		resumeInitiator string
+		want            bool
+	}{
+		{name: "tenant reactivation resumes its own tenant_state pause", pausedBy: domain.InitiatorTenantState, resumeInitiator: domain.InitiatorTenantState, want: true},
+		{name: "OOO availability resumes its own ooo pause", pausedBy: domain.InitiatorOOO, resumeInitiator: domain.InitiatorOOO, want: true},
+		{
+			name:            "tenant reactivation must NOT resume an ooo pause",
+			pausedBy:        domain.InitiatorOOO,
+			resumeInitiator: domain.InitiatorTenantState,
+			want:            false,
+		},
+		{name: "tenant reactivation must NOT resume a deliberate admin pause", pausedBy: domain.InitiatorAdmin, resumeInitiator: domain.InitiatorTenantState, want: false},
+		{name: "OOO availability must NOT resume a tenant_state pause", pausedBy: domain.InitiatorTenantState, resumeInitiator: domain.InitiatorOOO, want: false},
+		{
+			name:            "an admin resume overrides a safety_net pause",
+			pausedBy:        domain.InitiatorSafetyNet,
+			resumeInitiator: domain.InitiatorAdmin,
+			want:            true,
+		},
+		{name: "an admin resume overrides an ooo pause", pausedBy: domain.InitiatorOOO, resumeInitiator: domain.InitiatorAdmin, want: true},
+		{name: "an unattributed resume is treated as an admin override", pausedBy: domain.InitiatorOOO, resumeInitiator: "", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := canResume(tt.pausedBy, tt.resumeInitiator); got != tt.want {
+				t.Errorf("canResume(pausedBy=%q, resumeInitiator=%q) = %v, want %v", tt.pausedBy, tt.resumeInitiator, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestStageDeferOnPendingStageDoesNotWipeHistory is regression coverage for
 // a bug where SignalStageDefer called history.PopTo on the currently-pending
 // stage being deferred — a node never yet in history (history.Push only

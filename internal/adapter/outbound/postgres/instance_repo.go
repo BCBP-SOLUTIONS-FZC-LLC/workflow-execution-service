@@ -109,6 +109,10 @@ func (r *InstanceRepo) ListByTenant(
 	if filter.Status != nil {
 		params.Status = db.NullWorkflowInstanceStatus{WorkflowInstanceStatus: db.WorkflowInstanceStatus(*filter.Status), Valid: true}
 	}
+	params.Statuses = make([]string, len(filter.Statuses))
+	for i, s := range filter.Statuses {
+		params.Statuses[i] = string(s)
+	}
 	if filter.WorkflowVersionID != nil {
 		params.WorkflowVersionID = toPgtypeUUID(filter.WorkflowVersionID)
 	}
