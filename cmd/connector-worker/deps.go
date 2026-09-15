@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -135,8 +136,22 @@ type typePool struct {
 	connectorType string
 	sem           chan struct{}
 	timeout       time.Duration
-	connector     connectors.Connector
 	retry         registry.RetryPolicy
+
+	mu        sync.RWMutex
+	connector connectors.Connector
+}
+
+func (p *typePool) currentConnector() connectors.Connector {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.connector
+}
+
+func (p *typePool) setConnector(c connectors.Connector) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.connector = c
 }
 
 func buildPools(cfg *config.Config, connectorSet map[string]connectors.Connector) map[string]*typePool {

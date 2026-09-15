@@ -173,7 +173,7 @@ func runJob(ctx context.Context, d *deps, pool *typePool, job dispatchJob, entry
 	execCtx = connectors.WithDepartments(execCtx, []string{job.departmentID.String()})
 	retryable := isRetryable(pool.retry, job.connectorType, input, d.aliases)
 
-	output, err := runWithRetry(execCtx, pool.connector, retryable, input)
+	output, err := runWithRetry(execCtx, pool.currentConnector(), retryable, input)
 	if err != nil {
 		finishFailed(ctx, d, job, entryID, classifyError(err), wlog)
 		return

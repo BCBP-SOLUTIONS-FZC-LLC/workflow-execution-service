@@ -144,6 +144,7 @@ type Config struct {
 	// DefinitionServiceAddr above, which is the gRPC port (9090), not HTTP.
 	DefinitionServiceInternalHTTPAddr string
 	ConnectorAliasFetchTimeout        time.Duration
+	ConnectorAliasRefreshInterval     time.Duration
 
 	// Per-connector-type dispatch pool sizing + internal execution timeout
 	// (LLD §6.5 step 2 — one bounded pool + one timeout per connector type).
@@ -274,6 +275,7 @@ func Load() (*Config, error) {
 
 		DefinitionServiceInternalHTTPAddr: getEnvOrDefault("DEFINITION_SERVICE_INTERNAL_HTTP_ADDR", ""),
 		ConnectorAliasFetchTimeout:        envDuration("CONNECTOR_ALIAS_FETCH_TIMEOUT", 10*time.Second),
+		ConnectorAliasRefreshInterval:     envDuration("CONNECTOR_ALIAS_REFRESH_INTERVAL", 5*time.Minute),
 
 		ConnectorPoolSizeStorage:         envInt("CONNECTOR_POOL_SIZE_STORAGE", 10),
 		ConnectorPoolSizeSendEmail:       envInt("CONNECTOR_POOL_SIZE_SEND_EMAIL", 5),
@@ -453,4 +455,14 @@ func getEnvDurationOrDefault(key string, fallback time.Duration) (time.Duration,
 		return fallback, fmt.Errorf("%s=%q: %w", key, v, err)
 	}
 	return d, nil
+}
+
+// VersionRequested reports whether the process was invoked as
+// `<binary> version`. Callers check it before Load, so the subcommand works
+// on an image carrying no environment at all — which is what makes it
+// usable as CI's "this image's binary starts" smoke check. Every other
+// entrypoint legitimately needs DATABASE_URL and friends, so none of them
+// can serve that purpose.
+func VersionRequested() bool {
+	return len(os.Args) > 1 && os.Args[1] == "version"
 }

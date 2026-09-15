@@ -28,7 +28,16 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
+// version is stamped at build time by the Dockerfile's
+// -ldflags "-X main.version=${BUILD_VERSION}".
+var version = "dev"
+
 func main() {
+	if config.VersionRequested() {
+		fmt.Println(version)
+		return
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
@@ -57,6 +66,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	go runDispatchLoop(ctx, deps, &wg, wlog)
+	go runAliasRefreshLoop(ctx, deps, cfg, wlog)
 
 	healthSrv := newHealthServer(fmt.Sprintf(":%d", cfg.WorkerHealthPort), deps)
 	go func() {
