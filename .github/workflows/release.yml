@@ -73,7 +73,7 @@ jobs:
     needs: [build]
     strategy:
       matrix:
-        target: [server, worker]
+        target: [server, worker, connector-worker]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -175,6 +175,12 @@ jobs:
           IMAGE_VERSION: ${{ needs.docker.outputs.version }}
           K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE || 'workflow-app' }}
         run: |
+          # connector-worker is built, scanned and pushed by the matrix above,
+          # but connectorWorker.enabled defaults to false so no such Deployment
+          # exists to verify. When a deployment turns it on, add
+          # --set connectorWorker.enabled=true (plus its OPENBAO_TOKEN /
+          # INTERNAL_API_TOKEN secrets) to the helm upgrade above AND
+          # connector-worker:connector-worker to this loop.
           for target in server:api worker:worker; do
             image="${target%%:*}"; component="${target##*:}"
             expected=$(docker buildx imagetools inspect \

@@ -318,8 +318,8 @@ vuln:
 
 IMAGE_TAG ?= local
 
-## docker-build: Build both the server and worker container images (requires GO_PRIVATE_TOKEN in env)
-docker-build: docker-build-server docker-build-worker
+## docker-build: Build all three container images (requires GO_PRIVATE_TOKEN in env)
+docker-build: docker-build-server docker-build-worker docker-build-connector-worker
 
 ## docker-build-server: Build only the cmd/server image (--target server)
 docker-build-server:
@@ -338,6 +338,15 @@ docker-build-worker:
 	  --build-arg BUILD_VERSION=$(IMAGE_TAG) \
 	  --load \
 	  -t execution-service-worker:$(IMAGE_TAG) .
+
+## docker-build-connector-worker: Build only the cmd/connector-worker image (--target connector-worker)
+docker-build-connector-worker:
+	docker buildx build \
+	  --target connector-worker \
+	  --secret id=go_private_token,env=GO_PRIVATE_TOKEN \
+	  --build-arg BUILD_VERSION=$(IMAGE_TAG) \
+	  --load \
+	  -t execution-service-connector-worker:$(IMAGE_TAG) .
 
 ## docker-lint: Lint Dockerfile with Hadolint (run 'make tools' to install)
 docker-lint:

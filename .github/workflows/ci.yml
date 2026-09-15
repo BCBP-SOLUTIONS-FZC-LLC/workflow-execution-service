@@ -58,7 +58,7 @@ jobs:
     if: needs.ci-gate.outputs.run == 'true'
     strategy:
       matrix:
-        target: [server, worker]
+        target: [server, worker, connector-worker]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -113,7 +113,7 @@ jobs:
     needs: [build-image-cache]
     strategy:
       matrix:
-        target: [server, worker]
+        target: [server, worker, connector-worker]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -171,11 +171,11 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Rebuild both images from cache
+      - name: Rebuild all images from cache
         env:
           GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
         run: |
-          for t in server worker; do
+          for t in server worker connector-worker; do
             docker buildx build --target "$t" --load \
               --build-arg BUILD_VERSION=${{ github.sha }} \
               --secret id=go_private_token,env=GO_PRIVATE_TOKEN \
@@ -189,12 +189,16 @@ jobs:
             -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable \
             "${{ env.IMAGE_BASE }}-server:${{ github.sha }}" migrate
 
-      - name: Each image starts and exits cleanly
+      # `version` is handled before any configuration is read, so this needs
+      # no environment: it checks the one thing this step is for — the
+      # entrypoint resolves and the binary loads in its runtime stage. Every
+      # other entrypoint legitimately requires DATABASE_URL and friends and
+      # would exit 1 here regardless of image health.
+      - name: Each image's entrypoint runs
         run: |
-          docker run --rm \
-            -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable \
-            "${{ env.IMAGE_BASE }}-server:${{ github.sha }}"
-          docker run --rm "${{ env.IMAGE_BASE }}-worker:${{ github.sha }}"
+          for t in server worker connector-worker; do
+            docker run --rm "${{ env.IMAGE_BASE }}-$t:${{ github.sha }}" version
+          done
 
   push-image-ghcr:
     name: Push image → GHCR
@@ -202,7 +206,7 @@ jobs:
     needs: [validate-test, validate-quality, trivy-cve-scan, smoke-tests]
     strategy:
       matrix:
-        target: [server, worker]
+        target: [server, worker, connector-worker]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -257,4 +261,4 @@ jobs:
     needs: [ci-gate, validate-quality, validate-test, build-image-cache, trivy-cve-scan, smoke-tests]
     runs-on: ubuntu-latest
     steps:
-      - run: echo "All CI gates are real as of T1.12 — build, scan, and smoke-test both images (ci-gate run=${{ needs.ci-gate.outputs.run }})"
+      - run: echo "All CI gates are real as of T1.12 — build, scan, and smoke-test all images (ci-gate run=${{ needs.ci-gate.outputs.run }})"

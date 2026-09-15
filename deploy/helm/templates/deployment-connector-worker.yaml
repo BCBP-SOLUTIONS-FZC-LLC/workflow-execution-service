@@ -1,0 +1,110 @@
+{{- if .Values.connectorWorker.enabled }}
+{{- if not .Values.secret.existingSecretName }}
+{{- range list "OPENBAO_TOKEN" "INTERNAL_API_TOKEN" }}
+{{- if not (index $.Values.secret.secretValues .) }}
+{{- fail (printf "secret.secretValues.%s is required when connectorWorker.enabled is true" .) }}
+{{- end }}
+{{- end }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "workflow-execution-service.connectorWorkerFullname" . }}
+  labels:
+    {{- include "workflow-execution-service.connectorWorkerSelectorLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.connectorWorker.replicas }}
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "workflow-execution-service.connectorWorkerSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "workflow-execution-service.connectorWorkerSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "workflow-execution-service.connectorWorkerFullname" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  {{- include "workflow-execution-service.connectorWorkerSelectorLabels" . | nindent 18 }}
+      containers:
+        - name: connector-worker
+          image: "{{ .Values.image.repository }}-connector-worker:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.connectorWorker.healthPort }}
+          env:
+            - name: WORKER_HEALTH_PORT
+              value: {{ .Values.connectorWorker.healthPort | quote }}
+            - name: APP_ENV
+              value: {{ .Values.env.appEnv | quote }}
+            - name: BUILD_VERSION
+              value: {{ .Values.image.tag | default .Chart.AppVersion | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ printf "%s-connector-worker" .Values.env.otelServiceName | quote }}
+            - name: CONNECTOR_STREAM_KEY
+              value: {{ .Values.connectorWorker.streamKey | quote }}
+            - name: CONNECTOR_STREAM_GROUP
+              value: {{ .Values.connectorWorker.streamGroup | quote }}
+            - name: DEFINITION_SERVICE_INTERNAL_HTTP_ADDR
+              value: {{ .Values.connectorWorker.definitionServiceInternalHTTPAddr | quote }}
+            - name: EXECUTION_SERVICE_INTERNAL_ADDR
+              value: {{ .Values.connectorWorker.executionServiceInternalAddr | quote }}
+            - name: OPENBAO_ADDR
+              value: {{ .Values.connectorWorker.openBaoAddr | quote }}
+            - name: OPENBAO_MOUNT
+              value: {{ .Values.connectorWorker.openBaoMount | quote }}
+            - name: VALKEY_ADDR
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: VALKEY_ADDR
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: VALKEY_PASSWORD
+                  optional: true
+            - name: CONNECTOR_STREAM_CONSUMER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: OPENBAO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: OPENBAO_TOKEN
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: INTERNAL_API_TOKEN
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.connectorWorker.resources | nindent 12 }}
+{{- end }}

@@ -70,6 +70,57 @@ worker:
     # falls back to CPU/memory alone (see hpa-worker.yaml).
     targetBacklogPerReplica: ""
 
+connectorWorker:
+  enabled: false
+  replicas: 2
+  healthPort: 8081
+  streamKey: connector-tasks
+  streamGroup: connector-worker
+  executionServiceInternalAddr: http://workflow-execution-service-api:8080
+  definitionServiceInternalHTTPAddr: http://workflow-definition-service:8080
+  openBaoAddr: ""
+  openBaoMount: secret
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+ingress:
+  enabled: false
+  type: HTTPRoute
+
+  hosts:
+    - host: workflow-execution-service.example.com
+      paths:
+        - path: /api/v1
+          pathType: PathPrefix
+
+  gateway:
+    name: ""              # required when ingress.enabled and type is HTTPRoute
+    namespace: ""         # optional — defaults to the release namespace
+    sectionName: ""       # optional — target a specific listener (e.g. "https")
+
+  securityPolicy:
+    enabled: false
+    cors:
+      enabled: false
+      allowOrigins: []
+      allowMethods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+      allowHeaders:
+        - Authorization
+        - Content-Type
+        - X-Idempotency-Key
+      maxAge: "86400"
+
 podDisruptionBudget:
   minAvailable: 1
 
@@ -121,6 +172,8 @@ secret:
     TEMPORAL_HOST_PORT: ""
     SNS_TOPIC_ARN: ""
     DEFINITION_SERVICE_ADDR: ""
+    OPENBAO_TOKEN: ""
+    INTERNAL_API_TOKEN: ""
 
 # LLD §7.5's mTLS/namespace-bootstrap note: registering the Temporal
 # namespace and provisioning mTLS material are cluster-operator actions this

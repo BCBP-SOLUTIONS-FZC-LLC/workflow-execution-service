@@ -32,6 +32,10 @@ Per-process fullname, e.g. "<fullname>-api" / "<fullname>-worker".
 {{- printf "%s-worker" (include "workflow-execution-service.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{- define "workflow-execution-service.connectorWorkerFullname" -}}
+{{- printf "%s-connector-worker" (include "workflow-execution-service.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
 {{- define "workflow-execution-service.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
@@ -64,6 +68,11 @@ app.kubernetes.io/component: api
 {{- define "workflow-execution-service.workerSelectorLabels" -}}
 {{ include "workflow-execution-service.selectorLabels" . }}
 app.kubernetes.io/component: worker
+{{- end }}
+
+{{- define "workflow-execution-service.connectorWorkerSelectorLabels" -}}
+{{ include "workflow-execution-service.selectorLabels" . }}
+app.kubernetes.io/component: connector-worker
 {{- end }}
 
 {{/*
