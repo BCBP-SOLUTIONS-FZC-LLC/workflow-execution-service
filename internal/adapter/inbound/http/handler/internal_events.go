@@ -56,7 +56,9 @@ const (
 	eventTypeDelegationEnded         = "DelegationEnded"
 	eventTypeUserDeleted             = "UserDeleted"
 	eventTypeUserAvailabilityChanged = "UserAvailabilityChanged"
+	eventTypeMembershipRevoked       = "MembershipRevoked"
 	eventTypeTenantStateChanged      = "TenantStateChanged"
+	eventTypeTenantMembershipsPurged = "TenantMembershipsPurged"
 	eventTypeWorkflowTaskCreated     = "WorkflowTaskCreated"
 )
 
@@ -152,6 +154,8 @@ func (h *Handler) HandleUserProfileEvents(c *gin.Context) {
 		h.handleUserDeleted(c, env)
 	case eventTypeUserAvailabilityChanged:
 		h.handleUserAvailabilityChanged(c, env)
+	case eventTypeMembershipRevoked:
+		h.handleMembershipRevoked(c, env)
 	default:
 		h.unhandledType(c, env.Type)
 	}
@@ -166,6 +170,8 @@ func (h *Handler) HandleTenantEvents(c *gin.Context) {
 	switch env.Type {
 	case eventTypeTenantStateChanged:
 		h.handleTenantStateChanged(c, env)
+	case eventTypeTenantMembershipsPurged:
+		h.handleTenantMembershipsPurged(c, env)
 	default:
 		h.unhandledType(c, env.Type)
 	}
@@ -629,6 +635,76 @@ type tenantStateChangedPayload struct {
 	ChangedAt      string `json:"changed_at"`
 	// Cause is the source lifecycle event type, e.g. "TenantSuspended".
 	Cause string `json:"cause"`
+}
+
+type membershipRevokedPayload struct {
+	UserID string `json:"user_id"`
+}
+
+func (h *Handler) handleMembershipRevoked(c *gin.Context, env events.Envelope[json.RawMessage]) {
+	const eventType = eventTypeMembershipRevoked
+	var p membershipRevokedPayload
+	if err := json.Unmarshal(env.Payload, &p); err != nil {
+		h.badPayload(c, eventType, "invalid MembershipRevoked payload")
+		return
+	}
+	eventID, ok := h.parseEventID(c, eventType, env.ID)
+	if !ok {
+		return
+	}
+	tenantID, ok := h.parseTenantID(c, eventType, env.TenantID)
+	if !ok {
+		return
+	}
+	userID, err := uuid.Parse(p.UserID)
+	if err != nil {
+		h.badPayload(c, eventType, "invalid user_id in payload")
+		return
+	}
+
+	if h.alreadyProcessed(c, eventID, consumerMembership, eventType) {
+		return
+	}
+
+	ctx := guCtx(c, env.TenantID)
+	if err := h.userSafetyNet.VacateAssignments(ctx, port.UserDeletedInput{
+		TenantID:  tenantID,
+		UserID:    userID,
+		DeletedAt: env.Timestamp,
+	}); err != nil {
+		h.reconcilerError(c, eventType, err)
+		return
+	}
+
+	h.respondOK(c, eventID, consumerMembership, eventType)
+}
+
+func (h *Handler) handleTenantMembershipsPurged(c *gin.Context, env events.Envelope[json.RawMessage]) {
+	const eventType = eventTypeTenantMembershipsPurged
+	eventID, ok := h.parseEventID(c, eventType, env.ID)
+	if !ok {
+		return
+	}
+	tenantID, ok := h.parseTenantID(c, eventType, env.TenantID)
+	if !ok {
+		return
+	}
+
+	if h.alreadyProcessed(c, eventID, consumerMembership, eventType) {
+		return
+	}
+
+	ctx := guCtx(c, env.TenantID)
+	if err := h.tenantLifecycle.Apply(ctx, port.TenantLifecycleInput{
+		TenantID:       tenantID,
+		Status:         "offboarded",
+		PreviousStatus: "active",
+	}); err != nil {
+		h.reconcilerError(c, eventType, err)
+		return
+	}
+
+	h.respondOK(c, eventID, consumerMembership, eventType)
 }
 
 func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[json.RawMessage]) {

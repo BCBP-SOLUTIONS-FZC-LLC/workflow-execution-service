@@ -41,9 +41,9 @@ func eventRoute(eventType string) string {
 	switch eventType {
 	case "DelegationStarted", "DelegationEnded":
 		return "/api/v1/internal/events/delegation"
-	case "UserDeleted", "UserAvailabilityChanged":
+	case "UserDeleted", "UserAvailabilityChanged", "MembershipRevoked":
 		return "/api/v1/internal/events/user-profile"
-	case "TenantStateChanged":
+	case "TenantStateChanged", "TenantMembershipsPurged":
 		return "/api/v1/internal/events/tenant"
 	default:
 		return "/api/v1/internal/events/workflow-task"
@@ -459,6 +459,65 @@ func TestHandleInternalEvent_UserDeleted_BadPayload(t *testing.T) {
 	}))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// --- MembershipRevoked (IAM's tenant-level removal) ---
+
+// A user removed from a tenant can no longer act on anything in it, so every
+// active assignment they hold is vacated — the same effect UserDeleted has,
+// reusing the same reconciler. Before this was handled the event fell
+// through to the unhandled-type branch and was answered 200 with no side
+// effects, leaving the departed user holding live tasks.
+func TestHandleInternalEvent_MembershipRevoked_VacatesAssignments(t *testing.T) {
+	fakes := newEventsFakes()
+	var gotIn port.UserDeletedInput
+	called := false
+	fakes.userSafetyNet.vacateAssignments = func(_ context.Context, in port.UserDeletedInput) error {
+		gotIn, called = in, true
+		return nil
+	}
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEvent(router, envelope("MembershipRevoked", uuid.New(), testTenantID, time.Now(), map[string]any{
+		"user_id": testUserID.String(),
+	}))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, called, "MembershipRevoked must vacate the user's assignments, not be acknowledged as unhandled")
+	assert.Equal(t, testUserID, gotIn.UserID)
+	assert.Equal(t, testTenantID, gotIn.TenantID)
+}
+
+func TestHandleInternalEvent_MembershipRevoked_BadUserID(t *testing.T) {
+	fakes := newEventsFakes()
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEvent(router, envelope("MembershipRevoked", uuid.New(), testTenantID, time.Now(), map[string]any{
+		"user_id": "not-a-uuid",
+	}))
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// --- TenantMembershipsPurged (IAM Core's offboarding cascade signal) ---
+
+func TestHandleInternalEvent_TenantMembershipsPurged_DrivesOffboard(t *testing.T) {
+	fakes := newEventsFakes()
+	var gotIn port.TenantLifecycleInput
+	called := false
+	fakes.tenantLifecycle.apply = func(_ context.Context, in port.TenantLifecycleInput) error {
+		gotIn, called = in, true
+		return nil
+	}
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEvent(router, envelope("TenantMembershipsPurged", uuid.New(), testTenantID, time.Now(), map[string]any{}))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, called, "the purge signal must drive the offboard cascade")
+	assert.Equal(t, testTenantID, gotIn.TenantID)
+	assert.Equal(t, "offboarded", gotIn.Status,
+		"it must reuse TenantStateChanged's own terminate-everything branch, not a second cascade")
 }
 
 // --- UserAvailabilityChanged ---
@@ -1395,4 +1454,90 @@ func metricLabel(m *dto.Metric, name string) string {
 		}
 	}
 	return ""
+}
+
+// --- MembershipRevoked / TenantMembershipsPurged: the paths a duplicate or
+// a failing reconciler takes ---
+
+func TestHandleInternalEvent_MembershipRevoked_ReconcilerError_500(t *testing.T) {
+	fakes := newEventsFakes()
+	fakes.userSafetyNet.vacateAssignments = func(context.Context, port.UserDeletedInput) error {
+		return errors.New("boom")
+	}
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	eventID := uuid.New()
+	w := postEvent(router, envelope("MembershipRevoked", eventID, testTenantID, time.Now(), map[string]any{
+		"user_id": testUserID.String(),
+	}))
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	processed, _ := fakes.processedEvents.IsProcessed(context.Background(), eventID, "membership-execution")
+	assert.False(t, processed, "a failed vacate must stay redeliverable, not be marked processed")
+}
+
+func TestHandleInternalEvent_MembershipRevoked_MalformedPayload(t *testing.T) {
+	fakes := newEventsFakes()
+	called := false
+	fakes.userSafetyNet.vacateAssignments = func(context.Context, port.UserDeletedInput) error {
+		called = true
+		return nil
+	}
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	body := envelope("MembershipRevoked", uuid.New(), testTenantID, time.Now(), nil)
+	body["data"] = "not-an-object"
+	w := postEvent(router, body)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.False(t, called, "a payload that cannot be read must not reach the reconciler")
+}
+
+func TestHandleInternalEvent_MembershipRevoked_DuplicateDeliveryIsNoOp(t *testing.T) {
+	fakes := newEventsFakes()
+	calls := 0
+	fakes.userSafetyNet.vacateAssignments = func(context.Context, port.UserDeletedInput) error {
+		calls++
+		return nil
+	}
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	body := envelope("MembershipRevoked", uuid.New(), testTenantID, time.Now(), map[string]any{
+		"user_id": testUserID.String(),
+	})
+	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
+	require.Equal(t, 1, calls)
+	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
+	assert.Equal(t, 1, calls, "a redelivered MembershipRevoked must not vacate twice")
+}
+
+func TestHandleInternalEvent_TenantMembershipsPurged_ReconcilerError_500(t *testing.T) {
+	fakes := newEventsFakes()
+	fakes.tenantLifecycle.apply = func(context.Context, port.TenantLifecycleInput) error {
+		return errors.New("boom")
+	}
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	eventID := uuid.New()
+	w := postEvent(router, envelope("TenantMembershipsPurged", eventID, testTenantID, time.Now(), map[string]any{}))
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	processed, _ := fakes.processedEvents.IsProcessed(context.Background(), eventID, "membership-execution")
+	assert.False(t, processed, "a failed offboard cascade must stay redeliverable")
+}
+
+func TestHandleInternalEvent_TenantMembershipsPurged_DuplicateDeliveryIsNoOp(t *testing.T) {
+	fakes := newEventsFakes()
+	calls := 0
+	fakes.tenantLifecycle.apply = func(context.Context, port.TenantLifecycleInput) error {
+		calls++
+		return nil
+	}
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	body := envelope("TenantMembershipsPurged", uuid.New(), testTenantID, time.Now(), map[string]any{})
+	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
+	require.Equal(t, 1, calls)
+	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
+	assert.Equal(t, 1, calls, "a redelivered purge signal must not run the cascade twice")
 }
