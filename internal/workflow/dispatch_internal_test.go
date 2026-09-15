@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -203,6 +204,124 @@ func TestRunExclusiveRevertPopsHistory(t *testing.T) {
 	})
 	if err := env.GetWorkflowError(); err != nil {
 		t.Fatalf("workflow returned error: %v", err)
+	}
+}
+
+func TestRunExclusiveHonoursASecondRejection(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	var createdTasks []string
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			createdTasks = append(createdTasks, string(in.NodeKey))
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCreateTask},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.UpdateInstanceNodesInput) error { return nil },
+		activity.RegisterOptions{Name: port.ActivityUpdateInstanceNodes},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
+			return port.CompleteAssignmentOutput{AllDone: true}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
+	)
+
+	for i, result := range []string{`{"decision":"rejected"}`, `{"decision":"approved"}`, `{"decision":"approved"}`} {
+		visit, res := int64(i+1), result
+		env.RegisterDelayedCallback(func() {
+			env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{
+				DeptID: "prepare", ToStage: "draft", ResultJSON: res, VisitCount: visit,
+			})
+		}, time.Duration(i+1)*time.Millisecond)
+	}
+
+	var settled stepOutcome
+	env.ExecuteWorkflow(func(ctx wf.Context) error {
+		in := newInterpreter("tenant", "instance", "", nil, nil)
+		in.history.Push("prepare/draft")
+		admin := wf.NewBufferedChannel(ctx, 1)
+		baseAdmin := wf.NewBufferedChannel(ctx, 1)
+		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
+
+		plan := &dsl.CompiledPlan{
+			Name:        "main",
+			Departments: []dsl.DepartmentDef{{ID: "prepare", Stages: []dsl.StageDef{{Type: "draft"}}}},
+		}
+		var err error
+		settled, err = in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
+			{ConditionExpression: `decision == "rejected"`, RevertToDept: "prepare", RevertToStage: "draft"},
+			{ConditionExpression: `decision == "approved"`, Target: "prepare", TargetStage: "draft"},
+		}, `{"decision":"rejected"}`)
+		return err
+	})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	if len(createdTasks) != 3 {
+		t.Errorf("CreateTaskActivity called %d times (%v), want 3 — revert, revert again, then forward", len(createdTasks), createdTasks)
+	}
+	if settled.LastResult != `{"decision":"approved"}` {
+		t.Errorf("settled LastResult = %q, want the approving result that ended the loop", settled.LastResult)
+	}
+}
+
+func TestRunExclusiveRevertCapFailsClosed(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCreateTask},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.UpdateInstanceNodesInput) error { return nil },
+		activity.RegisterOptions{Name: port.ActivityUpdateInstanceNodes},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
+			return port.CompleteAssignmentOutput{AllDone: true}, nil
+		},
+		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
+	)
+
+	for i := 1; i <= maxRevertCycles+2; i++ {
+		visit := int64(i)
+		env.RegisterDelayedCallback(func() {
+			env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{
+				DeptID: "prepare", ToStage: "draft", ResultJSON: `{"decision":"rejected"}`, VisitCount: visit,
+			})
+		}, time.Duration(i)*time.Millisecond)
+	}
+
+	env.ExecuteWorkflow(func(ctx wf.Context) error {
+		in := newInterpreter("tenant", "instance", "", nil, nil)
+		in.history.Push("prepare/draft")
+		admin := wf.NewBufferedChannel(ctx, 1)
+		baseAdmin := wf.NewBufferedChannel(ctx, 1)
+		wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
+
+		plan := &dsl.CompiledPlan{
+			Name:        "main",
+			Departments: []dsl.DepartmentDef{{ID: "prepare", Stages: []dsl.StageDef{{Type: "draft"}}}},
+		}
+		_, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
+			{ConditionExpression: `decision == "rejected"`, RevertToDept: "prepare", RevertToStage: "draft"},
+			{ConditionExpression: `decision == "approved"`, Target: "prepare", TargetStage: "draft"},
+		}, `{"decision":"rejected"}`)
+		return err
+	})
+	err := env.GetWorkflowError()
+	if err == nil {
+		t.Fatal("expected the revert cap to fail the instance, got a clean completion")
+	}
+	if !strings.Contains(err.Error(), "failing closed") {
+		t.Errorf("error = %v, want the revert-cap failure", err)
 	}
 }
 

@@ -208,20 +208,18 @@ func exclusiveRevertPlan(assigneeUserID uuid.UUID) *dsl.CompiledCollaboration {
 			Execution: dsl.ExecutionPlan{
 				// Mirrors the real compiler's own shape for "single forward
 				// branch + reverts" (definition_service's
-				// handleSingleForwardWithReverts): the forward branch's own
-				// continuation is a SEPARATE, later Steps entry, appended by
-				// continuing compile-time traversal from the forward
-				// target — not something runExclusive re-evaluates after a
-				// revert resolves. A revert only re-runs the reverted-to
-				// stage once and returns; it does not re-check the gate's
-				// conditions again, so the plan always proceeds to this
-				// next step once the (possibly re-visited) gate stage
-				// completes, regardless of which branch produced that
-				// completion.
+				// handleSingleForwardWithReverts): the forward path is a
+				// SEPARATE, later Steps entry, appended by continuing
+				// compile-time traversal from the forward target, and the
+				// forward branch therefore names no target of its own —
+				// matching it just advances the plan to that step. The gate
+				// is re-entered after every revert resolves, so a second
+				// "rework" sends the work back a second time instead of
+				// falling through to the forward path unread.
 				Steps: []dsl.ExecutionStep{
 					{Sequential: []string{"gate"}},
 					{Exclusive: []dsl.ExclusiveBranch{
-						{Target: "approved", ConditionExpression: `decision == "approved"`},
+						{ConditionExpression: `decision == "approved"`},
 						{RevertToDept: "gate", RevertToNodeID: "review", ConditionExpression: `decision == "rework"`},
 					}},
 					{Sequential: []string{"approved"}},
@@ -231,10 +229,16 @@ func exclusiveRevertPlan(assigneeUserID uuid.UUID) *dsl.CompiledCollaboration {
 	}
 }
 
-// TestE2E_ExclusiveGatewayRevertThenForward drives the revert branch first
-// (a real revisit of "gate/review"), then the forward branch on the second
-// visit, against a real Temporal server.
-func TestE2E_ExclusiveGatewayRevertThenForward(t *testing.T) {
+// exclusiveRevertFixture starts one exclusiveRevertPlan instance against a
+// real Temporal server and a real database.
+type exclusiveRevertFixture struct {
+	admin      *apiClient
+	assignee   *apiClient
+	instanceID uuid.UUID
+}
+
+func newExclusiveRevertFixture(t *testing.T) *exclusiveRevertFixture {
+	t.Helper()
 	pool := fixtures.NewTestPool(t)
 	sdk := fixtures.NewTestTemporalServer(t)
 
@@ -277,7 +281,87 @@ func TestE2E_ExclusiveGatewayRevertThenForward(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /instances status = %d, want 201", resp.StatusCode)
 	}
-	instanceID := startResp.ID
+	return &exclusiveRevertFixture{admin: admin, assignee: assignee, instanceID: startResp.ID}
+}
+
+// completeGateVisit completes the one READY task and waits for the instance
+// to settle at wantTasks total tasks, returning the detail at that point.
+func completeGateVisit(t *testing.T, f *exclusiveRevertFixture, task taskSummary, decision string, wantTasks int) instanceDetail {
+	t.Helper()
+	resp := f.assignee.do(http.MethodPost, "/api/v1/tasks/"+task.ID.String()+"/complete", map[string]any{
+		"result_json":    json.RawMessage(`{"decision":"` + decision + `"}`),
+		"record_version": task.RecordVersion,
+	}, nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("POST /tasks/:id/complete (%s) status = %d, want 202", decision, resp.StatusCode)
+	}
+	return pollInstance(t, f.admin, f.instanceID, func(d instanceDetail) bool {
+		return len(d.Tasks) == wantTasks
+	})
+}
+
+// newTaskSince returns the one task in detail that is not already in seen.
+func newTaskSince(t *testing.T, detail instanceDetail, seen map[uuid.UUID]bool) taskSummary {
+	t.Helper()
+	for _, task := range detail.Tasks {
+		if !seen[task.ID] {
+			seen[task.ID] = true
+			return task
+		}
+	}
+	t.Fatalf("no new task appeared; got %+v", detail.Tasks)
+	return taskSummary{}
+}
+
+// TestE2E_ExclusiveGatewaySecondRejectionRevertsAgain is item #25 against a
+// real Temporal server: a rework loop must honour every rejection, not just
+// the first. Before the gate was re-entered after a revert resolved, the
+// second "rework" was never read — the instance advanced to the forward
+// department as though it had been approved, which on a tender workflow is
+// silent wrong-path execution rather than a missing convenience.
+func TestE2E_ExclusiveGatewaySecondRejectionRevertsAgain(t *testing.T) {
+	f := newExclusiveRevertFixture(t)
+
+	detail := pollInstance(t, f.admin, f.instanceID, func(d instanceDetail) bool {
+		return len(d.Tasks) > 0 && d.Tasks[0].Status == "READY"
+	})
+	seen := map[uuid.UUID]bool{}
+	visit := newTaskSince(t, detail, seen)
+
+	// Two rejections in a row: each must produce another gate/review visit.
+	for i := 2; i <= 3; i++ {
+		detail = completeGateVisit(t, f, visit, "rework", i)
+		visit = newTaskSince(t, detail, seen)
+	}
+
+	// Only now, on the third visit, does an approval release the work.
+	detail = completeGateVisit(t, f, visit, "approved", 4)
+	forward := newTaskSince(t, detail, seen)
+
+	resp := f.assignee.do(http.MethodPost, "/api/v1/tasks/"+forward.ID.String()+"/complete", map[string]any{
+		"result_json":    json.RawMessage(`{}`),
+		"record_version": forward.RecordVersion,
+	}, nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("POST /tasks/:id/complete (forward) status = %d, want 202", resp.StatusCode)
+	}
+	detail = pollInstance(t, f.admin, f.instanceID, func(d instanceDetail) bool {
+		return d.Status == "COMPLETED"
+	})
+	// Four tasks exactly: three gate visits and one forward department. A
+	// fifth would mean the forward department ran twice — once from the
+	// gateway branch and once from the continuation step.
+	if len(detail.Tasks) != 4 {
+		t.Errorf("instance ended with %d tasks, want 4 (gate ×3 + the forward department once): %+v", len(detail.Tasks), detail.Tasks)
+	}
+}
+
+// TestE2E_ExclusiveGatewayRevertThenForward drives the revert branch first
+// (a real revisit of "gate/review"), then the forward branch on the second
+// visit, against a real Temporal server.
+func TestE2E_ExclusiveGatewayRevertThenForward(t *testing.T) {
+	f := newExclusiveRevertFixture(t)
+	admin, assignee, instanceID := f.admin, f.assignee, f.instanceID
 
 	detail := pollInstance(t, admin, instanceID, func(d instanceDetail) bool {
 		return len(d.Tasks) > 0 && d.Tasks[0].Status == "READY"
@@ -286,7 +370,7 @@ func TestE2E_ExclusiveGatewayRevertThenForward(t *testing.T) {
 
 	// decision=rework selects the revert branch — must regress to a fresh
 	// gate/review task, not reuse or wipe the original.
-	resp = assignee.do(http.MethodPost, "/api/v1/tasks/"+firstVisit.ID.String()+"/complete", map[string]any{
+	resp := assignee.do(http.MethodPost, "/api/v1/tasks/"+firstVisit.ID.String()+"/complete", map[string]any{
 		"result_json":    json.RawMessage(`{"decision":"rework"}`),
 		"record_version": firstVisit.RecordVersion,
 	}, nil)

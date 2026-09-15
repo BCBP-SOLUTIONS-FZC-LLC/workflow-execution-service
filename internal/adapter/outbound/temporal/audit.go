@@ -44,7 +44,11 @@ func (d *Deps) RecordForceRoute(ctx context.Context, in port.RecordForceRouteInp
 		for i, k := range in.OldNodeKeys {
 			fromKeys[i] = string(k)
 		}
-		payload := domain.NewWorkflowInstanceForceRoutedPayload(core, adminUserID, fromKeys, in.TargetNodeID, domain.ForceRouteDirectionForward)
+		direction := in.Direction
+		if direction == "" {
+			direction = domain.ForceRouteDirectionForward
+		}
+		payload := domain.NewWorkflowInstanceForceRoutedPayload(core, adminUserID, fromKeys, in.TargetNodeID, direction)
 		return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowInstanceForceRouted, payload)
 	})
 }

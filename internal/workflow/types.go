@@ -107,7 +107,8 @@ type interpreter struct {
 	// the same pool never collide on one NodeKey.
 	callPoolVisits map[string]int64
 
-	status domain.InstanceStatus
+	status         domain.InstanceStatus
+	pauseInitiator string
 
 	// parallelDepth >0 while a Parallel gateway is aggregating; routes each
 	// admin signal to admin (runParallel/enterDegraded) or baseAdmin

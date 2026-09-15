@@ -115,6 +115,7 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 			c.Receive(ctx, &envelope)
 		})
 		sel.Select(ctx)
+		abandonedNodes := in.currentPendingNodes()
 		cancelRun()
 
 		if done {
@@ -128,11 +129,7 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 
 		case SignalInstanceForceFwd:
 			// Unlike force-back, this must never call history.PopTo.
-			var oldKeys []domain.NodeKey
-			if last := in.history.Peek(); last != "" {
-				oldKeys = []domain.NodeKey{last}
-			}
-			in.recordAndRedirect(ctx, oldKeys, sig)
+			in.recordAndRedirect(ctx, abandonedNodes, sig.TargetNodeKey, domain.ForceRouteDirectionForward, sig)
 			steps = redirectSteps(original, deptFromNodeKey(sig.TargetNodeKey))
 
 		case SignalInstanceForceBack:
@@ -144,6 +141,7 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 				continue
 			}
 			in.msgBuf.ResetSpan(popped)
+			in.recordAndRedirect(ctx, abandonedNodes, target, domain.ForceRouteDirectionBack, sig)
 			steps = redirectSteps(original, deptFromNodeKey(target))
 		}
 	}
@@ -152,14 +150,18 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 // Errors are deliberately swallowed: both already retry unlimited on any
 // retryable failure, so an error here is non-retryable and best ignored
 // rather than aborting the instance over a best-effort audit write.
-func (in *interpreter) recordAndRedirect(ctx wf.Context, oldNodeKeys []domain.NodeKey, sig adminSignal) {
+func (in *interpreter) recordAndRedirect(ctx wf.Context, oldNodeKeys []domain.NodeKey, target domain.NodeKey, direction string, sig adminSignal) {
+	in.recordForceRouteAudit(ctx, oldNodeKeys, target, direction, sig)
+	_ = updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
+		InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{target},
+	})
+}
+
+func (in *interpreter) recordForceRouteAudit(ctx wf.Context, oldNodeKeys []domain.NodeKey, target domain.NodeKey, direction string, sig adminSignal) {
 	_ = recordForceRoute(ctx, port.RecordForceRouteInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID,
-		OldNodeKeys: oldNodeKeys, TargetNodeID: string(sig.TargetNodeKey),
+		OldNodeKeys: oldNodeKeys, TargetNodeID: string(target), Direction: direction,
 		AdminUserID: sig.AdminUserID, RecordVersion: sig.RecordVersion,
-	})
-	_ = updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
-		InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{sig.TargetNodeKey},
 	})
 }
 

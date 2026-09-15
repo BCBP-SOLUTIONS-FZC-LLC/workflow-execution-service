@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -181,6 +182,15 @@ func (in *interpreter) currentPendingNode(deptID string) domain.NodeKey {
 	return ""
 }
 
+func (in *interpreter) currentPendingNodes() []domain.NodeKey {
+	keys := make([]domain.NodeKey, 0, len(in.pending))
+	for key := range in.pending {
+		keys = append(keys, key.Node)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	return keys
+}
+
 func containsDept(deptIDs []string, deptID string) bool {
 	for _, d := range deptIDs {
 		if d == deptID {
@@ -199,27 +209,75 @@ func stageIndexAfter(dept *dsl.DepartmentDef, lastCompletedNode domain.NodeKey) 
 	return 0
 }
 
+// maxRevertCycles bounds how many times one exclusive gateway may send work
+// back before the instance fails closed. A BPMN rework loop (Prepare ->
+// Review -> Approve -> "No" -> Prepare) gates every cycle on a real human
+// completing a real task, so this is not a runaway-loop guard — it exists
+// because each cycle appends to the Temporal event history, which is
+// finite. Generous on purpose: a genuine process that bounces this many
+// times is broken in a way an operator needs to see.
+//
+// A compile-time constant rather than config: a workflow that read mutable
+// configuration mid-execution would replay non-deterministically if the
+// value changed under it.
+const maxRevertCycles = 50
+
 // resultJSON is the calling runSteps call's own accumulated last result,
 // never the shared instance state — a concurrently-completing sibling
 // Parallel branch's own result must never leak into this evaluation.
+
+func (in *interpreter) settleReverts(
+	ctx wf.Context, plan *dsl.CompiledPlan, branches []dsl.ExclusiveBranch, resultJSON string,
+) (winner *dsl.ExclusiveBranch, outcome stepOutcome, done bool, err error) {
+	var lastNode domain.NodeKey
+	for cycle := 0; ; cycle++ {
+		winner, err = selectBranch(branches, resultJSON)
+		if err != nil {
+			return nil, stepOutcome{}, true, err
+		}
+		if winner == nil {
+			if cycle == 0 {
+				return nil, stepOutcome{}, true, fmt.Errorf("workflow: no exclusive branch matched and no implicit else exists")
+			}
+			return nil, stepOutcome{LastNode: lastNode, LastResult: resultJSON}, true, nil
+		}
+		if winner.Terminates {
+			return nil, stepOutcome{Terminated: true}, true, nil
+		}
+		if winner.RevertToDept == "" {
+			return winner, stepOutcome{LastNode: lastNode, LastResult: resultJSON}, false, nil
+		}
+		if cycle >= maxRevertCycles {
+			return nil, stepOutcome{LastNode: lastNode, LastResult: resultJSON}, true, fmt.Errorf(
+				"workflow: exclusive gateway reverted to %q more than %d times; failing closed rather than taking the forward branch the condition did not select",
+				winner.RevertToDept, maxRevertCycles)
+		}
+
+		// Forward Target and condition-triggered RevertTo share the same
+		// transfer mechanism (execution LLD §2.6 point 4); a revert
+		// additionally pops history and resets the message buffer, matching
+		// force-back (§2.7).
+		node, result, rerr := in.runExclusiveRevert(ctx, plan, winner)
+		if rerr != nil {
+			return nil, stepOutcome{LastNode: node, LastResult: result}, true, rerr
+		}
+		lastNode, resultJSON = node, result
+	}
+}
+
 func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, branches []dsl.ExclusiveBranch, resultJSON string) (stepOutcome, error) {
-	winner, err := selectBranch(branches, resultJSON)
-	if err != nil {
-		return stepOutcome{}, err
-	}
-	if winner == nil {
-		return stepOutcome{}, fmt.Errorf("workflow: no exclusive branch matched and no implicit else exists")
-	}
-	if winner.Terminates {
-		return stepOutcome{Terminated: true}, nil
+	winner, outcome, done, err := in.settleReverts(ctx, plan, branches, resultJSON)
+	if done || err != nil {
+		return outcome, err
 	}
 
-	// Forward Target and condition-triggered RevertTo share the same
-	// transfer mechanism (execution LLD §2.6 point 4); a revert additionally
-	// pops history and resets the message buffer, matching force-back (§2.7).
-	if winner.RevertToDept != "" {
-		node, result, err := in.runExclusiveRevert(ctx, plan, winner)
-		return stepOutcome{LastNode: node, LastResult: result}, err
+	// A branch with no Target routes nowhere of its own: the path it selects
+	// is already compiled as the steps that follow this one, so matching it
+	// simply advances the plan. Dispatching here as well would run that
+	// department twice. This is the shape definition_service emits for a
+	// gateway with one forward exit and one or more send-back edges.
+	if winner.Target == "" {
+		return outcome, nil
 	}
 
 	// TargetNodeID, then TargetStage, give machine-addressable routing when

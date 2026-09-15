@@ -115,21 +115,12 @@ func newAdminOverrideFixture(t *testing.T) *adminOverrideFixture {
 // against a real Temporal server, bypassing task 1 (still pending, never
 // completed) straight to task 2.
 //
-// Real, observed behavior — not what the original coverage-plan assumed:
-// task 1 stays READY, never SUPERSEDED. workflow.go's base (non-Parallel)
-// SignalInstanceForceFwd case records RecordForceRouteActivity's own
-// OldNodeKeys from in.history.Peek() — the last *completed* node — not the
-// currently-pending bypassed one; test/workflow/forceback_test.go's
-// TestExecute_BaseForceForwardSkipsWithoutWipingHistory already asserts this
-// exact shape deliberately (OldNodeKeys is the prior department, not the
-// skipped one), unlike the Parallel/DEGRADED force-forward path
-// (degraded.go's handleActiveParallelForceForward), which correctly
-// resolves the actual bypassed node via currentPendingNode. Harmless for
-// workflow correctness (a stale completion of task 1 is simply never
-// consumed — no runTaskStage call is registered for it once abandoned), but
-// task 1 is left permanently open/actionable with no audit closure — logged
-// in the coverage-plan review doc as a real, un-fixed gap, not silently
-// treated as this test's expectation.
+// Task 1 must end SUPERSEDED, per LLD §3.4's READY/IN_PROGRESS -> SUPERSEDED
+// row: a force-forward-bypassed task is neither a failure nor the assignee's
+// own send-back, so it gets its own terminal status rather than being left
+// open and claimable forever. The base (non-Parallel) path resolves the
+// bypassed node from the live pending map the same way the Parallel/DEGRADED
+// path always has.
 func TestE2E_InstanceForceForward(t *testing.T) {
 	f := newAdminOverrideFixture(t)
 
@@ -154,8 +145,8 @@ func TestE2E_InstanceForceForward(t *testing.T) {
 	if first == nil || second == nil {
 		t.Fatalf("expected the original task plus a new one, got %+v", detail.Tasks)
 	}
-	if first.Status != "READY" {
-		t.Errorf("task 1 status = %q, want READY (see this test's own doc comment — a real gap, not this test's expectation)", first.Status)
+	if first.Status != "SUPERSEDED" {
+		t.Errorf("task 1 status = %q, want SUPERSEDED (bypassed by force-forward, LLD §3.4)", first.Status)
 	}
 	if second.Status != "READY" {
 		t.Errorf("task 2 status = %q, want READY", second.Status)
@@ -213,11 +204,9 @@ func TestE2E_InstanceForceBack(t *testing.T) {
 	}
 
 	// Stage 1 must be regressed: a new task at "sales/review", distinct from
-	// the original (deterministic-task-ID's VisitCount-derived ID) — poll for
-	// a 3rd task row rather than any READY status, since force-back's
-	// cancelRun() abandons stage 2's original attempt without marking it
-	// SUPERSEDED, leaving it stuck READY too (a real, pre-existing gap this
-	// test's own bookkeeping has to route around, not evidence of a new bug).
+	// the original (deterministic-task-ID's VisitCount-derived ID). Poll on
+	// the 3rd task row appearing, which is the signal that the regression
+	// actually happened.
 	detail = pollInstance(t, f.admin, f.instanceID, func(d instanceDetail) bool {
 		return len(d.Tasks) == 3
 	})
@@ -231,6 +220,16 @@ func TestE2E_InstanceForceBack(t *testing.T) {
 		t.Fatalf("expected a new (3rd) task row after force-back, got %+v", detail.Tasks)
 	}
 	seen[regressed.ID] = true
+
+	// Stage 2's original attempt was abandoned by force-back's cancelRun, so
+	// it must be closed out SUPERSEDED for the same reason a force-forward-
+	// bypassed task is — not left open and claimable alongside its own
+	// replacement.
+	for _, task := range detail.Tasks {
+		if task.ID == stage2.ID && task.Status != "SUPERSEDED" {
+			t.Errorf("stage 2's abandoned task status = %q, want SUPERSEDED (regressed by force-back)", task.Status)
+		}
+	}
 
 	resp = f.assignee.do(http.MethodPost, "/api/v1/tasks/"+regressed.ID.String()+"/complete", map[string]any{
 		"result_json":    json.RawMessage(`{"decision":"approved"}`),

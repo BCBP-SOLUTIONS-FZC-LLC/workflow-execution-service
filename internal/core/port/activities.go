@@ -132,6 +132,7 @@ type RecordForceRouteInput struct {
 	TenantID      string
 	OldNodeKeys   []domain.NodeKey
 	TargetNodeID  string
+	Direction     string
 	AdminUserID   string
 	RecordVersion int64
 }

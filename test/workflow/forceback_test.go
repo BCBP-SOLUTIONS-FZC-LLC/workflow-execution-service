@@ -193,11 +193,13 @@ func TestExecute_BaseForceForwardSkipsWithoutWipingHistory(t *testing.T) {
 
 	collab := threeDeptCollaboration()
 	var recordedOldNodeKeys []string
+	var recordedDirection string
 	registerFakeActivities(env, collab, &activityHooks{
 		recordForceRoute: func(in port.RecordForceRouteInput) {
 			for _, k := range in.OldNodeKeys {
 				recordedOldNodeKeys = append(recordedOldNodeKeys, string(k))
 			}
+			recordedDirection = in.Direction
 		},
 	})
 
@@ -230,8 +232,16 @@ func TestExecute_BaseForceForwardSkipsWithoutWipingHistory(t *testing.T) {
 	if err := env.GetWorkflowError(); err != nil {
 		t.Fatalf("workflow returned error: %v", err)
 	}
-	if len(recordedOldNodeKeys) != 1 || recordedOldNodeKeys[0] != "deptA/prep" {
-		t.Errorf("RecordForceRouteActivity's OldNodeKeys = %v, want exactly [deptA/prep] (the bypassed position, not the whole history)", recordedOldNodeKeys)
+	// deptB/prep — the task actually left pending and bypassed — not
+	// deptA/prep, the last *completed* node. Naming the completed node here
+	// is what previously left the bypassed task stuck READY forever:
+	// RecordForceRouteActivity only supersedes tasks still READY/IN_PROGRESS,
+	// so a completed node's key matches nothing and closes nothing.
+	if len(recordedOldNodeKeys) != 1 || recordedOldNodeKeys[0] != "deptB/prep" {
+		t.Errorf("RecordForceRouteActivity's OldNodeKeys = %v, want exactly [deptB/prep] (the bypassed pending node, not the last completed one)", recordedOldNodeKeys)
+	}
+	if recordedDirection != domain.ForceRouteDirectionForward {
+		t.Errorf("RecordForceRouteActivity's Direction = %q, want %q", recordedDirection, domain.ForceRouteDirectionForward)
 	}
 	var out wfengine.ExecuteOutput
 	if err := env.GetWorkflowResult(&out); err != nil {

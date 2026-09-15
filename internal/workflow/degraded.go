@@ -198,7 +198,7 @@ func (in *interpreter) handleParallelForceForward(ctx wf.Context, deptIDs []stri
 	if node := in.currentPendingNode(deptID); node != "" {
 		oldKeys = []domain.NodeKey{node}
 	}
-	in.recordAndRedirect(ctx, oldKeys, sig)
+	in.recordAndRedirect(ctx, oldKeys, sig.TargetNodeKey, domain.ForceRouteDirectionForward, sig)
 	if cancel, ok := cancels[deptID]; ok {
 		cancel()
 	}
@@ -230,7 +230,7 @@ func (in *interpreter) handleDegradedForceForward(ctx wf.Context, failed []faile
 		return failed, completedBranch{}, false
 	}
 	fb := failed[idx]
-	in.recordAndRedirect(ctx, []domain.NodeKey{fb.LastCompletedNode}, sig)
+	in.recordAndRedirect(ctx, []domain.NodeKey{fb.LastCompletedNode}, sig.TargetNodeKey, domain.ForceRouteDirectionForward, sig)
 	return removeFailedBranch(failed, idx), completedBranch{DeptID: fb.DeptID, LastNode: sig.TargetNodeKey}, true
 }
 
@@ -243,6 +243,7 @@ func (in *interpreter) handleDegradedForceBack(ctx wf.Context, plan *dsl.Compile
 	}
 	fb := failed[idx]
 	failed = removeFailedBranch(failed, idx)
+	in.recordForceRouteAudit(ctx, nil, fb.LastCompletedNode, domain.ForceRouteDirectionBack, sig)
 	in.msgBuf.ResetSpan([]domain.NodeKey{fb.LastCompletedNode})
 	wf.Go(ctx, func(gctx wf.Context) {
 		node, err := in.respawnBranch(gctx, plan, fb, admin)
