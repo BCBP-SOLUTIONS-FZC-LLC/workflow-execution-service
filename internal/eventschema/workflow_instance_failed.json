@@ -3,9 +3,10 @@
   "title": "WorkflowInstanceFailedPayload",
   "type": "object",
   "additionalProperties": true,
-  "required": ["workflow_instance_id", "business_key", "workflow_version_id", "error_class"],
+  "required": ["workflow_instance_id", "subject_id", "business_key", "workflow_version_id", "error_class"],
   "properties": {
     "workflow_instance_id": { "type": "string", "format": "uuid" },
+    "subject_id": { "type": "string" },
     "business_key": { "type": "string" },
     "workflow_version_id": { "type": "string", "format": "uuid" },
     "error_class": { "type": "string" }

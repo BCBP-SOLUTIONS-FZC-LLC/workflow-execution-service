@@ -89,7 +89,7 @@ func (noopLogger) Warn(string, map[string]any)  { /* no-op fallback */ }
 func (noopLogger) Error(string, map[string]any) { /* no-op fallback */ }
 
 func instanceCore(inst *domain.Instance) domain.CommonCore {
-	return domain.CommonCore{WorkflowInstanceID: inst.ID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}
+	return domain.CommonCore{WorkflowInstanceID: inst.ID, SubjectID: inst.SubjectID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}
 }
 
 type instanceEventSink struct {

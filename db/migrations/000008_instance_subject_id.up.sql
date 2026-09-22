@@ -19,8 +19,7 @@ CREATE UNIQUE INDEX uq_workflow_instance_business_key
     ON workflow_instance (tenant_id, subject_id, business_key)
     WHERE status NOT IN ('COMPLETED', 'TERMINATED', 'FAILED');
 
--- "Every live instance for this subject" as an index scan. Same predicate as
--- the uniqueness rule, so one subject's live set is exactly what it constrains.
-CREATE INDEX idx_workflow_instance_subject
-    ON workflow_instance (tenant_id, subject_id)
-    WHERE status NOT IN ('COMPLETED', 'TERMINATED', 'FAILED');
+-- No separate index for "every live instance for this subject": the unique
+-- index above leads on (tenant_id, subject_id) over the identical predicate, so
+-- it already serves that read. A second one would only cost a write per insert
+-- and per status change.

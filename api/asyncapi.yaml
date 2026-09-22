@@ -493,25 +493,27 @@ components:
     WorkflowTaskSlaWarningEnvelope:     { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowTaskSlaWarningPayload' } } } ] }
     WorkflowTaskSlaBreachedEnvelope:    { allOf: [ { $ref: '#/components/schemas/EventEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/WorkflowTaskSlaBreachedPayload' } } } ] }
 
-    # Every payload inlines the common core {workflow_instance_id, business_key,
-    # workflow_version_id}; task-scoped payloads also inline {task_id, node_key,
+    # Every payload inlines the common core {workflow_instance_id, subject_id,
+    # business_key, workflow_version_id}; task-scoped payloads also inline {task_id, node_key,
     # department_id, assignee_user_ids}. Kept flat + additionalProperties:true because
     # schema-gov extracts by "Payload" suffix and does NOT dereference $ref.
     WorkflowInstanceStartedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, started_by_user_id]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string, description: opaque domain-scoped identifier }
         workflow_version_id:  { type: string, format: uuid }
         started_by_user_id:   { type: string, format: uuid }
     WorkflowInstancePausedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, started_by_user_id, initiator]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, initiator]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         started_by_user_id:   { type: string, format: uuid, description: 'Dashboard Stream Gateway routing key' }
@@ -520,9 +522,10 @@ components:
     WorkflowInstanceResumedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, started_by_user_id, initiator]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, initiator]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         started_by_user_id:   { type: string, format: uuid, description: 'Dashboard Stream Gateway routing key' }
@@ -531,9 +534,10 @@ components:
     WorkflowInstanceCancelledPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, started_by_user_id, actor_user_id]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, actor_user_id]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         started_by_user_id:   { type: string, format: uuid, description: 'Dashboard Stream Gateway routing key' }
@@ -542,9 +546,10 @@ components:
     WorkflowInstanceTerminatedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, started_by_user_id, initiator]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, initiator]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         started_by_user_id:   { type: string, format: uuid, description: 'Dashboard Stream Gateway routing key' }
@@ -553,9 +558,10 @@ components:
     WorkflowInstanceDegradedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, failed_branches]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, failed_branches]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         failed_branches:
@@ -569,18 +575,20 @@ components:
     WorkflowInstanceFailedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, error_class]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, error_class]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         error_class:          { type: string }
     WorkflowInstanceFinishedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, started_by_user_id, completed_at]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, completed_at]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         started_by_user_id:   { type: string, format: uuid, description: 'Dashboard Stream Gateway routing key' }
@@ -588,9 +596,10 @@ components:
     WorkflowInstanceForceRoutedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, actor_user_id, from_node_keys, to_node_key, direction]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, actor_user_id, from_node_keys, to_node_key, direction]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         actor_user_id:        { type: string, format: uuid }
@@ -600,9 +609,10 @@ components:
     WorkflowTaskCreatedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, stage_type]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, stage_type]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         task_id:              { type: string, format: uuid }
@@ -625,9 +635,10 @@ components:
     WorkflowTaskClaimedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, claimed_by_user_id]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, claimed_by_user_id]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         task_id:              { type: string, format: uuid }
@@ -638,9 +649,10 @@ components:
     WorkflowTaskCompletedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, completed_by_user_id]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, completed_by_user_id]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         task_id:              { type: string, format: uuid }
@@ -651,9 +663,10 @@ components:
     WorkflowTaskDeferredPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, deferred_to_node_key]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, deferred_to_node_key]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         task_id:              { type: string, format: uuid }
@@ -666,9 +679,10 @@ components:
     WorkflowTaskReassignedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, old_user_id, new_user_id, initiator]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, old_user_id, new_user_id, initiator]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         task_id:              { type: string, format: uuid }
@@ -682,9 +696,10 @@ components:
     WorkflowTaskSupersededPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, actor_user_id]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, actor_user_id]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         task_id:              { type: string, format: uuid }
@@ -695,9 +710,10 @@ components:
     WorkflowTaskFailedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, cascade_source]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, cascade_source]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         task_id:              { type: string, format: uuid }
@@ -708,9 +724,10 @@ components:
     WorkflowTaskSlaWarningPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, follow_up_at]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, follow_up_at]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         task_id:              { type: string, format: uuid }
@@ -721,9 +738,10 @@ components:
     WorkflowTaskSlaBreachedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, due_at]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, due_at]
       properties:
         workflow_instance_id: { type: string, format: uuid }
+        subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
         workflow_version_id:  { type: string, format: uuid }
         task_id:              { type: string, format: uuid }

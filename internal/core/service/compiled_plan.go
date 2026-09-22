@@ -9,6 +9,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
@@ -34,7 +35,17 @@ func scopeMatches(ctx context.Context, log port.Logger, plans *compiledPlanCache
 		}
 		return false
 	default:
-		return scopeID != nil && c.instance.BusinessKey == *scopeID
+		// Org & Membership mints a subject-scoped delegation's scope_id as the bare
+		// subject identifier, which is what subject_id holds (LLD §4.2). A scope this
+		// service has no case for takes the same branch by design, counted so an
+		// addition to that enum is visible here (LLD §5).
+		if observability.DelegationScopeUnhandledTotal != nil {
+			observability.DelegationScopeUnhandledTotal.WithLabelValues(scope).Inc()
+		}
+		log.Warn("scope match: delegation scope has no explicit case, matching on subject", map[string]any{
+			"scope": scope, "task_id": c.task.ID,
+		})
+		return scopeID != nil && c.instance.SubjectID == *scopeID
 	}
 }
 

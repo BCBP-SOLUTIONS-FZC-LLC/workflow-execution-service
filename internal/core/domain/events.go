@@ -73,8 +73,13 @@ const (
 // flat object even though the Go struct is composed.
 type CommonCore struct {
 	WorkflowInstanceID uuid.UUID `json:"workflow_instance_id"`
-	BusinessKey        string    `json:"business_key"`
-	WorkflowVersionID  uuid.UUID `json:"workflow_version_id"`
+	// SubjectID and BusinessKey travel together because an instance's identity is
+	// the pair: the key identifies one instance within its subject, so a consumer
+	// correlating on the key alone would group every subject's instance of the
+	// same stage (LLD §4.2).
+	SubjectID         string    `json:"subject_id"`
+	BusinessKey       string    `json:"business_key"`
+	WorkflowVersionID uuid.UUID `json:"workflow_version_id"`
 }
 
 // TaskScopedCore is additionally embedded in the 9 workflow.task.* events

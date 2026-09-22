@@ -392,6 +392,7 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 		ID uuid.UUID `json:"id"`
 	}
 	startReq, err := http.NewRequest(http.MethodPost, execSrv.URL+"/api/v1/instances", bytes.NewReader(mustMarshalPlanBody(t, map[string]any{
+		"subject_id":          "connector-e2e-subject-" + uuid.NewString(),
 		"business_key":        "connector-e2e-" + uuid.NewString(),
 		"workflow_version_id": versionID,
 		"context_json":        map[string]any{"aliasVar": "echo"},

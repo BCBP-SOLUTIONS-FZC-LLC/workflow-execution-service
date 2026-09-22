@@ -3,9 +3,10 @@
   "title": "WorkflowTaskReassignedPayload",
   "type": "object",
   "additionalProperties": true,
-  "required": ["workflow_instance_id", "business_key", "workflow_version_id", "task_id", "node_key", "department_id", "assignee_user_ids", "old_user_id", "new_user_id", "initiator"],
+  "required": ["workflow_instance_id", "subject_id", "business_key", "workflow_version_id", "task_id", "node_key", "department_id", "assignee_user_ids", "old_user_id", "new_user_id", "initiator"],
   "properties": {
     "workflow_instance_id": { "type": "string", "format": "uuid" },
+    "subject_id": { "type": "string" },
     "business_key": { "type": "string" },
     "workflow_version_id": { "type": "string", "format": "uuid" },
     "task_id": { "type": "string", "format": "uuid" },

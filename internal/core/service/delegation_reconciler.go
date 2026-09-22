@@ -100,7 +100,7 @@ func (s *DelegationReconciler) eligibleCandidates(ctx context.Context, tenantID,
 }
 
 func (s *DelegationReconciler) enqueueTaskReassigned(ctx context.Context, c delegationCandidate, oldUserID, newUserID uuid.UUID, delegationID *uuid.UUID) error {
-	core := domain.CommonCore{WorkflowInstanceID: c.instance.ID, BusinessKey: c.instance.BusinessKey, WorkflowVersionID: c.instance.WorkflowVersionID}
+	core := domain.CommonCore{WorkflowInstanceID: c.instance.ID, SubjectID: c.instance.SubjectID, BusinessKey: c.instance.BusinessKey, WorkflowVersionID: c.instance.WorkflowVersionID}
 	taskCore := domain.TaskScopedCore{TaskID: c.task.ID, NodeKey: c.task.NodeKey, DepartmentID: c.task.DepartmentID, AssigneeUserIDs: []uuid.UUID{newUserID}}
 	payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, oldUserID, newUserID, domain.ReassignInitiatorDelegation, delegationID)
 	subject := "instances/" + c.instance.ID.String() + "/tasks/" + c.task.ID.String()
@@ -117,7 +117,13 @@ func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID
 			if _, err := s.Assignments.Vacate(ctx, tenantID, c.assignment.ID); err != nil {
 				return err
 			}
-			newAssignment := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: c.task.ID, UserID: newUserID, Reason: reason}
+			// IsLead carries across: an assignee_mode="all" task the delegator had
+			// claimed would otherwise come out of the reroute with no lead row, and
+			// the action path reads that as nobody being able to act on it (LLD §3.1).
+			newAssignment := &domain.TaskAssignment{
+				ID: uuid.New(), TenantID: tenantID, TaskID: c.task.ID, UserID: newUserID,
+				Reason: reason, IsLead: c.assignment.IsLead,
+			}
 			if err := s.Assignments.Create(ctx, newAssignment); err != nil {
 				return err
 			}

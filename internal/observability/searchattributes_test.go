@@ -18,7 +18,7 @@ type searchAttributeReadback struct {
 }
 
 func upsertAndReadBackWorkflow(ctx workflow.Context) (searchAttributeReadback, error) {
-	if err := observability.UpsertInstanceSearchAttributes(ctx, "tenant-1", "DEGRADED", "wf-version-42", "order-123"); err != nil {
+	if err := observability.UpsertInstanceSearchAttributes(ctx, "tenant-1", "DEGRADED", "wf-version-42", "customer-7", "order-123"); err != nil {
 		return searchAttributeReadback{}, err
 	}
 
@@ -31,7 +31,7 @@ func upsertAndReadBackWorkflow(ctx workflow.Context) (searchAttributeReadback, e
 	return out, nil
 }
 
-func TestUpsertInstanceSearchAttributes_SetsAllFourTypedKeys(t *testing.T) {
+func TestUpsertInstanceSearchAttributes_SetsEveryTypedKey(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflow(upsertAndReadBackWorkflow)

@@ -55,7 +55,8 @@ func seedDelegationFixture(instances *fakeInstanceRepo, tasks *fakeTaskRepo, ass
 	versionID := uuid.New()
 	definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, stage))
 
-	inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: businessKey, TemporalWorkflowID: tenantID.String() + ":" + businessKey}
+	subjectID := "subject-of-" + businessKey
+	inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, WorkflowVersionID: versionID, SubjectID: subjectID, BusinessKey: businessKey, TemporalWorkflowID: tenantID.String() + ":" + subjectID + ":" + businessKey}
 	instances.byID[inst.ID] = inst
 
 	nodeKey := "finance/" + stage.NodeID
@@ -165,7 +166,21 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		require.Len(t, outbox.enqueued, 1)
 	})
 
-	t.Run("default scope matches on business_key", func(t *testing.T) {
+	t.Run("a subject-scoped delegation matches on subject_id", func(t *testing.T) {
+		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
+		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "tender-42", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+
+		subjectID := "subject-of-tender-42"
+		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{
+			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, Scope: "tender", ScopeID: &subjectID,
+		})
+		require.NoError(t, err)
+		assert.False(t, assignments.byID[a.ID].IsActive)
+		require.Len(t, outbox.enqueued, 1)
+	})
+
+	t.Run("a subject-scoped delegation does not match on the business key", func(t *testing.T) {
 		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "tender-42", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
@@ -175,7 +190,48 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, Scope: "tender", ScopeID: &businessKey,
 		})
 		require.NoError(t, err)
-		assert.False(t, assignments.byID[a.ID].IsActive)
+		assert.True(t, assignments.byID[a.ID].IsActive, "the key identifies an instance within a subject, not the subject")
+		assert.Empty(t, outbox.enqueued)
+	})
+
+	t.Run("a delegated task keeps its lead", func(t *testing.T) {
+		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
+		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		_, task, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "tender-42", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+		a.IsLead = true
+
+		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{
+			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, Scope: "all",
+		})
+		require.NoError(t, err)
+
+		var delegateAssignment *domain.TaskAssignment
+		for _, got := range assignments.byID {
+			if got.TaskID == task.ID && got.UserID == delegateID && got.IsActive {
+				delegateAssignment = got
+			}
+		}
+		require.NotNil(t, delegateAssignment, "the delegate must hold the assignment")
+		assert.True(t, delegateAssignment.IsLead,
+			"an assignee_mode=all task with no lead row is actionable by nobody, the delegate included")
+		require.Len(t, outbox.enqueued, 1)
+	})
+
+	t.Run("a delegated task the delegator had not claimed gains no lead", func(t *testing.T) {
+		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
+		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		_, task, _ := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "tender-42", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+
+		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{
+			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, Scope: "all",
+		})
+		require.NoError(t, err)
+
+		for _, got := range assignments.byID {
+			if got.TaskID == task.ID && got.UserID == delegateID && got.IsActive {
+				assert.False(t, got.IsLead, "delegation must not invent a claim the delegator never made")
+			}
+		}
 		require.Len(t, outbox.enqueued, 1)
 	})
 

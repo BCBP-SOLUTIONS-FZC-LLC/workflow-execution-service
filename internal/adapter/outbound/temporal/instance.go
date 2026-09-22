@@ -48,7 +48,7 @@ func (d *Deps) UpdateInstanceStatus(ctx context.Context, in port.UpdateInstanceS
 			return fmt.Errorf("update instance status: %w", err)
 		}
 
-		core := domain.CommonCore{WorkflowInstanceID: instanceID, BusinessKey: updated.BusinessKey, WorkflowVersionID: updated.WorkflowVersionID}
+		core := domain.CommonCore{WorkflowInstanceID: instanceID, SubjectID: updated.SubjectID, BusinessKey: updated.BusinessKey, WorkflowVersionID: updated.WorkflowVersionID}
 		switch in.Status {
 		case domain.InstanceStatusCompleted:
 			completedAt := updated.UpdatedAt
@@ -142,7 +142,7 @@ func (d *Deps) CancelInstance(ctx context.Context, in port.CancelInstanceInput) 
 		if err != nil {
 			return fmt.Errorf("update instance status: %w", err)
 		}
-		core := domain.CommonCore{WorkflowInstanceID: instanceID, BusinessKey: updated.BusinessKey, WorkflowVersionID: updated.WorkflowVersionID}
+		core := domain.CommonCore{WorkflowInstanceID: instanceID, SubjectID: updated.SubjectID, BusinessKey: updated.BusinessKey, WorkflowVersionID: updated.WorkflowVersionID}
 		payload := domain.NewWorkflowInstanceCancelledPayload(core, updated.StartedByUserID, adminUserID, in.Reason)
 		return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowInstanceCancelled, payload)
 	})
@@ -183,7 +183,7 @@ func (d *Deps) instanceLifecycleEvent(
 		if err != nil {
 			return fmt.Errorf("update instance status: %w", err)
 		}
-		core := domain.CommonCore{WorkflowInstanceID: instanceID, BusinessKey: updated.BusinessKey, WorkflowVersionID: updated.WorkflowVersionID}
+		core := domain.CommonCore{WorkflowInstanceID: instanceID, SubjectID: updated.SubjectID, BusinessKey: updated.BusinessKey, WorkflowVersionID: updated.WorkflowVersionID}
 		return d.enqueueInstanceEvent(ctx, tenantID, instanceID, eventType, buildPayload(core, updated.StartedByUserID))
 	})
 }

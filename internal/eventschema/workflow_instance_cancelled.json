@@ -3,9 +3,10 @@
   "title": "WorkflowInstanceCancelledPayload",
   "type": "object",
   "additionalProperties": true,
-  "required": ["workflow_instance_id", "business_key", "workflow_version_id", "started_by_user_id", "actor_user_id"],
+  "required": ["workflow_instance_id", "subject_id", "business_key", "workflow_version_id", "started_by_user_id", "actor_user_id"],
   "properties": {
     "workflow_instance_id": { "type": "string", "format": "uuid" },
+    "subject_id": { "type": "string" },
     "business_key": { "type": "string" },
     "workflow_version_id": { "type": "string", "format": "uuid" },
     "started_by_user_id": { "type": "string", "format": "uuid" },

@@ -39,7 +39,7 @@ func (d *Deps) RecordForceRoute(ctx context.Context, in port.RecordForceRouteInp
 		if err != nil {
 			return fmt.Errorf("get instance: %w", err)
 		}
-		core := domain.CommonCore{WorkflowInstanceID: instanceID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}
+		core := domain.CommonCore{WorkflowInstanceID: instanceID, SubjectID: inst.SubjectID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}
 		fromKeys := make([]string, len(in.OldNodeKeys))
 		for i, k := range in.OldNodeKeys {
 			fromKeys[i] = string(k)

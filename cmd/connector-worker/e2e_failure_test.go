@@ -30,6 +30,7 @@ import (
 func e2eStartInstance(t *testing.T, httpClient *http.Client, execSrvURL string, tenantID, versionID uuid.UUID, aliasVar string) uuid.UUID {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, execSrvURL+"/api/v1/instances", bytes.NewReader(mustMarshalPlanBody(t, map[string]any{
+		"subject_id":          "connector-e2e-subject-" + uuid.NewString(),
 		"business_key":        "connector-e2e-" + uuid.NewString(),
 		"workflow_version_id": versionID,
 		"context_json":        map[string]any{"aliasVar": aliasVar},

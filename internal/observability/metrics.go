@@ -51,6 +51,7 @@ var (
 	InstanceDegradedOldestAgeSeconds    *prometheus.GaugeVec
 	WorkerQueueLastPollTimestamp        *prometheus.GaugeVec
 	SLABreachesTotal                    *prometheus.CounterVec
+	DelegationScopeUnhandledTotal       *prometheus.CounterVec
 	OldestReadyTaskAgeSeconds           *prometheus.GaugeVec
 	UpstreamDependencyErrorsTotal       *prometheus.CounterVec
 
@@ -88,6 +89,11 @@ func register() {
 		Name: "internal_events_ingest_total",
 		Help: "Total internal event ingest calls, by event_type and result.",
 	}, []string{"event_type", "result"})
+
+	DelegationScopeUnhandledTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "delegation_scope_unhandled_total",
+		Help: "Delegations arriving with a scope this service has no case for, by scope. Still matched against subject_id.",
+	}, []string{"scope"})
 
 	DelegationRerouteDurationSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "delegation_reroute_duration_seconds",
@@ -191,6 +197,7 @@ func register() {
 	gincommon.MetricsRegisterer().MustRegister(
 		RecordVersionConflictTotal,
 		InternalEventsIngestTotal,
+		DelegationScopeUnhandledTotal,
 		DelegationRerouteDurationSeconds,
 		TaskSignalDurationSeconds,
 		InstanceStartDurationSeconds,

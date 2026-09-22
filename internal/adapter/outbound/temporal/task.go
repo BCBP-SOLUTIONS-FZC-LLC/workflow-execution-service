@@ -95,7 +95,7 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 		if err != nil {
 			return fmt.Errorf("get instance: %w", err)
 		}
-		core := domain.CommonCore{WorkflowInstanceID: instanceID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}
+		core := domain.CommonCore{WorkflowInstanceID: instanceID, SubjectID: inst.SubjectID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}
 		taskCore := domain.TaskScopedCore{
 			TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs,
 		}
