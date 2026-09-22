@@ -74,6 +74,7 @@ func instanceFromDB(row db.WorkflowInstance) *domain.Instance {
 		TenantID:           row.TenantID,
 		WorkflowID:         row.WorkflowID,
 		WorkflowVersionID:  row.WorkflowVersionID,
+		SubjectID:          row.SubjectID,
 		BusinessKey:        row.BusinessKey,
 		TemporalWorkflowID: row.TemporalWorkflowID,
 		TemporalRunID:      fromPgtypeText(row.TemporalRunID),

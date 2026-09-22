@@ -14,10 +14,18 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/enums"
 )
 
 // compiledPlanJSON builds a minimal, valid CompiledCollaboration JSON fixture
 // with one main plan, one department ("finance"), and the given stages.
+// assignedStage is a human stage that names a default assignee — the shape a
+// published plan is required to have. A stage naming nobody is rejected at
+// instantiation, so it is a fixture only for the tests that assert that.
+func assignedStage(nodeID string) dsl.StageDef {
+	return dsl.StageDef{Type: "userTask", NodeID: nodeID, DefaultAssignees: []string{uuid.NewString()}}
+}
+
 func compiledPlanJSON(t *testing.T, stages ...dsl.StageDef) string {
 	t.Helper()
 	collab := dsl.CompiledCollaboration{
@@ -68,20 +76,20 @@ func publishedCompiledWorkflow(workflowID, versionID uuid.UUID, planJSON string)
 }
 
 func TestInstanceService_Start(t *testing.T) {
-	t.Run("success with no default assignees", func(t *testing.T) {
+	t.Run("success with a default assignee", func(t *testing.T) {
 		svc, instances, _, _, outbox, temporal, definitions, _ := newInstanceServiceHarness()
 		workflowID, versionID, tenantID := uuid.New(), uuid.New(), uuid.New()
-		definitions.resp = publishedCompiledWorkflow(workflowID, versionID, compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review"}))
+		definitions.resp = publishedCompiledWorkflow(workflowID, versionID, compiledPlanJSON(t, assignedStage("review")))
 
 		got, err := svc.Start(context.Background(), port.StartInstanceInput{
-			TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "TND-001",
+			TenantID: tenantID, WorkflowVersionID: versionID, SubjectID: "SUBJ-1", BusinessKey: "TND-001",
 			ContextJSON: json.RawMessage(`{}`), StartedByUserID: uuid.New(),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "TND-001", got.BusinessKey)
 		assert.Equal(t, workflowID, got.WorkflowID)
 		assert.Equal(t, port.InstanceStatusRunning, got.Status)
-		assert.Equal(t, tenantID.String()+":TND-001", got.TemporalWorkflowID)
+		assert.Equal(t, tenantID.String()+":SUBJ-1:TND-001", got.TemporalWorkflowID)
 		assert.Len(t, instances.byID, 1, "the instance row must be committed")
 		assert.Len(t, outbox.enqueued, 1, "WorkflowInstanceStarted must be enqueued")
 		assert.Equal(t, domain.EventWorkflowInstanceStarted, outbox.enqueued[0].Type)
@@ -105,7 +113,7 @@ func TestInstanceService_Start(t *testing.T) {
 		}
 
 		_, err := svc.Start(context.Background(), port.StartInstanceInput{
-			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), BusinessKey: "TND-002", StartedByUserID: uuid.New(),
+			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-002", StartedByUserID: uuid.New(),
 		})
 		require.NoError(t, err)
 		require.Len(t, gotRequests, 1)
@@ -122,7 +130,7 @@ func TestInstanceService_Start(t *testing.T) {
 		}
 
 		_, err := svc.Start(context.Background(), port.StartInstanceInput{
-			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), BusinessKey: "TND-003", StartedByUserID: uuid.New(),
+			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-003", StartedByUserID: uuid.New(),
 		})
 		require.Error(t, err)
 		var ineligible *port.AssigneeIneligibleError
@@ -141,7 +149,7 @@ func TestInstanceService_Start(t *testing.T) {
 		}
 
 		_, err := svc.Start(context.Background(), port.StartInstanceInput{
-			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), BusinessKey: "TND-004", StartedByUserID: uuid.New(),
+			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-004", StartedByUserID: uuid.New(),
 		})
 		require.NoError(t, err)
 		assert.False(t, called, "connector-typed stages have no human assignee to check")
@@ -161,7 +169,7 @@ func TestInstanceService_Start(t *testing.T) {
 		}
 
 		_, err := svc.Start(context.Background(), port.StartInstanceInput{
-			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), BusinessKey: "TND-005", StartedByUserID: uuid.New(),
+			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-005", StartedByUserID: uuid.New(),
 			OverrideMap: map[string]uuid.UUID{"finance/review": overrideUser},
 		})
 		require.NoError(t, err)
@@ -170,10 +178,10 @@ func TestInstanceService_Start(t *testing.T) {
 
 	t.Run("override_map naming an unknown node is rejected", func(t *testing.T) {
 		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
-		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review"}))
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t, assignedStage("review")))
 
 		_, err := svc.Start(context.Background(), port.StartInstanceInput{
-			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), BusinessKey: "TND-006", StartedByUserID: uuid.New(),
+			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-006", StartedByUserID: uuid.New(),
 			OverrideMap: map[string]uuid.UUID{"finance/does-not-exist": uuid.New()},
 		})
 		assert.ErrorIs(t, err, port.ErrOverrideMapInvalid)
@@ -182,21 +190,21 @@ func TestInstanceService_Start(t *testing.T) {
 	t.Run("version not published", func(t *testing.T) {
 		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
 		definitions.resp = &port.CompiledWorkflow{Status: "DRAFT", IsValid: true}
-		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: uuid.New(), WorkflowVersionID: uuid.New(), BusinessKey: "TND-007", StartedByUserID: uuid.New()})
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-007", StartedByUserID: uuid.New()})
 		assert.ErrorIs(t, err, port.ErrVersionNotPublished)
 	})
 
 	t.Run("version invalid", func(t *testing.T) {
 		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
 		definitions.resp = &port.CompiledWorkflow{Status: "PUBLISHED", IsValid: false}
-		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: uuid.New(), WorkflowVersionID: uuid.New(), BusinessKey: "TND-008", StartedByUserID: uuid.New()})
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-008", StartedByUserID: uuid.New()})
 		assert.ErrorIs(t, err, port.ErrVersionInvalid)
 	})
 
 	t.Run("definition service unavailable passes through", func(t *testing.T) {
 		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
 		definitions.err = errors.New("upstream unavailable")
-		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: uuid.New(), WorkflowVersionID: uuid.New(), BusinessKey: "TND-009", StartedByUserID: uuid.New()})
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-009", StartedByUserID: uuid.New()})
 		require.Error(t, err)
 	})
 
@@ -204,11 +212,54 @@ func TestInstanceService_Start(t *testing.T) {
 		svc, instances, _, _, _, _, definitions, _ := newInstanceServiceHarness()
 		tenantID := uuid.New()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t))
-		existing := &domain.Instance{ID: uuid.New(), TenantID: tenantID, BusinessKey: "TND-010", Status: domain.InstanceStatusRunning}
+		existing := &domain.Instance{ID: uuid.New(), TenantID: tenantID, SubjectID: "SUBJ-1", BusinessKey: "TND-010", Status: domain.InstanceStatusRunning}
 		instances.byID[existing.ID] = existing
 
-		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: tenantID, WorkflowVersionID: uuid.New(), BusinessKey: "TND-010", StartedByUserID: uuid.New()})
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: tenantID, WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-010", StartedByUserID: uuid.New()})
 		assert.ErrorIs(t, err, port.ErrDuplicateBusinessKey)
+	})
+
+	t.Run("one subject holds several concurrent instances", func(t *testing.T) {
+		svc, instances, _, _, _, _, definitions, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t))
+
+		for _, key := range []string{"stage-prequalification", "stage-bid-no-bid"} {
+			_, err := svc.Start(context.Background(), port.StartInstanceInput{
+				TenantID: tenantID, WorkflowVersionID: uuid.New(),
+				SubjectID: "TND-001", BusinessKey: key, StartedByUserID: uuid.New(),
+			})
+			require.NoError(t, err, "a second workflow for the same subject must start")
+		}
+		assert.Len(t, instances.byID, 2)
+	})
+
+	t.Run("the same business key under a different subject does not collide", func(t *testing.T) {
+		svc, instances, _, _, _, _, definitions, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t))
+
+		for _, subject := range []string{"TND-001", "TND-002"} {
+			_, err := svc.Start(context.Background(), port.StartInstanceInput{
+				TenantID: tenantID, WorkflowVersionID: uuid.New(),
+				SubjectID: subject, BusinessKey: "stage-prequalification", StartedByUserID: uuid.New(),
+			})
+			require.NoError(t, err)
+		}
+		assert.Len(t, instances.byID, 2)
+	})
+
+	t.Run("the Temporal id carries subject and key", func(t *testing.T) {
+		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t))
+
+		got, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: tenantID, WorkflowVersionID: uuid.New(),
+			SubjectID: "TND-001", BusinessKey: "stage-bid-no-bid", StartedByUserID: uuid.New(),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, tenantID.String()+":TND-001:stage-bid-no-bid", got.TemporalWorkflowID)
 	})
 
 	t.Run("StartWorkflow failure after commit is returned, instance stays committed", func(t *testing.T) {
@@ -218,18 +269,90 @@ func TestInstanceService_Start(t *testing.T) {
 			return port.StartWorkflowOutput{}, errors.New("temporal frontend unreachable")
 		}
 
-		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: uuid.New(), WorkflowVersionID: uuid.New(), BusinessKey: "TND-011", StartedByUserID: uuid.New()})
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-011", StartedByUserID: uuid.New()})
 		require.Error(t, err)
 		assert.Len(t, instances.byID, 1, "the DB write is not rolled back on a post-commit StartWorkflow failure")
 	})
 
 	t.Run("a stage with no NodeID keys on its Type instead", func(t *testing.T) {
 		svc, _, _, _, outbox, _, definitions, _ := newInstanceServiceHarness()
-		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t, dsl.StageDef{Type: "gateway"}))
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t, dsl.StageDef{Type: "gateway", DefaultAssignees: []string{uuid.NewString()}}))
 
-		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: uuid.New(), WorkflowVersionID: uuid.New(), BusinessKey: "TND-012", StartedByUserID: uuid.New()})
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-012", StartedByUserID: uuid.New()})
 		require.NoError(t, err)
 		require.Len(t, outbox.enqueued, 1)
+	})
+
+	t.Run("a stage naming no default assignee is rejected and named", func(t *testing.T) {
+		svc, instances, _, _, _, _, definitions, _ := newInstanceServiceHarness()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t,
+			assignedStage("review"),
+			dsl.StageDef{Type: "userTask", NodeID: "approve"},
+		))
+
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-013", StartedByUserID: uuid.New(),
+		})
+
+		var ineligible *port.AssigneeIneligibleError
+		require.ErrorAs(t, err, &ineligible)
+		assert.Equal(t, []string{"finance/approve"}, ineligible.Nodes,
+			"the offending node is named, and the assigned one is not")
+		assert.Empty(t, instances.byID, "no instance row is written")
+	})
+
+	t.Run("a stage whose only default assignee is unparseable is rejected", func(t *testing.T) {
+		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t,
+			dsl.StageDef{Type: "userTask", NodeID: "review", DefaultAssignees: []string{"not-a-uuid"}},
+		))
+
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-014", StartedByUserID: uuid.New(),
+		})
+
+		var ineligible *port.AssigneeIneligibleError
+		require.ErrorAs(t, err, &ineligible)
+		assert.Equal(t, []string{"finance/review"}, ineligible.Nodes)
+	})
+
+	t.Run("an override supplies the assignee a stage lacks", func(t *testing.T) {
+		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t,
+			dsl.StageDef{Type: "userTask", NodeID: "review"},
+		))
+
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-015", StartedByUserID: uuid.New(),
+			OverrideMap: map[string]uuid.UUID{"finance/review": uuid.New()},
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("send and receive stages need no assignee", func(t *testing.T) {
+		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t,
+			assignedStage("review"),
+			dsl.StageDef{Type: string(enums.StageTypeSendTask), NodeID: "notify"},
+			dsl.StageDef{Type: string(enums.StageTypeReceiveTask), NodeID: "await-reply"},
+		))
+
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-016", StartedByUserID: uuid.New(),
+		})
+		require.NoError(t, err, "message stages resolve through the message buffer and create no task")
+	})
+
+	t.Run("a connector stage needs no assignee", func(t *testing.T) {
+		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t,
+			dsl.StageDef{Type: "serviceTask", NodeID: "fetch", ConnectorType: "rest-call"},
+		))
+
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-017", StartedByUserID: uuid.New(),
+		})
+		require.NoError(t, err)
 	})
 
 	t.Run("a BuildEnvelope failure fails Start", func(t *testing.T) {
@@ -242,7 +365,7 @@ func TestInstanceService_Start(t *testing.T) {
 		}
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t))
 
-		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: uuid.New(), WorkflowVersionID: uuid.New(), BusinessKey: "TND-013", StartedByUserID: uuid.New()})
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-013", StartedByUserID: uuid.New()})
 		assert.Error(t, err)
 		assert.Empty(t, outbox.enqueued, "the event never reaches Outbox.Enqueue when BuildEnvelope itself fails")
 	})
@@ -715,7 +838,7 @@ func TestInstanceService_Start_CompiledPlanCache(t *testing.T) {
 		svc.Cache = cache
 		tenantID, versionID := uuid.New(), uuid.New()
 
-		cached := publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review"}))
+		cached := publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
 		raw, err := json.Marshal(cached)
 		require.NoError(t, err)
 		cache.values["compiled_plan:"+tenantID.String()+":"+versionID.String()] = string(raw)
@@ -732,7 +855,7 @@ func TestInstanceService_Start_CompiledPlanCache(t *testing.T) {
 		cache := newFakeCacheStore()
 		svc.Cache = cache
 		tenantID, versionID := uuid.New(), uuid.New()
-		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review"}))
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
 
 		_, err := svc.Start(context.Background(), port.StartInstanceInput{
 			TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "TND-CACHE-2", StartedByUserID: uuid.New(),
@@ -751,7 +874,7 @@ func TestInstanceService_Start_CompiledPlanCache(t *testing.T) {
 		cache := newFakeCacheStore()
 		svc.Cache = cache
 		tenantID, versionID := uuid.New(), uuid.New()
-		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review"}))
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
 
 		_, err := svc.Start(context.Background(), port.StartInstanceInput{
 			TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "TND-CACHE-4", StartedByUserID: uuid.New(),
@@ -775,7 +898,7 @@ func TestInstanceService_Start_CompiledPlanCache(t *testing.T) {
 		log := &fakeLogger{}
 		svc.Log = log
 		tenantID, versionID := uuid.New(), uuid.New()
-		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review"}))
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
 
 		_, err := svc.Start(context.Background(), port.StartInstanceInput{
 			TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "TND-CACHE-6", StartedByUserID: uuid.New(),
@@ -792,7 +915,7 @@ func TestInstanceService_Start_CompiledPlanCache(t *testing.T) {
 		log := &fakeLogger{}
 		svc.Log = log
 		tenantID, versionID := uuid.New(), uuid.New()
-		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review"}))
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
 
 		_, err := svc.Start(context.Background(), port.StartInstanceInput{
 			TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "TND-CACHE-3", StartedByUserID: uuid.New(),

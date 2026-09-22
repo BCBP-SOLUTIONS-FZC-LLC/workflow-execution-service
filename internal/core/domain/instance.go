@@ -15,6 +15,7 @@ type Instance struct {
 	TenantID           uuid.UUID
 	WorkflowID         uuid.UUID
 	WorkflowVersionID  uuid.UUID
+	SubjectID          string
 	BusinessKey        string
 	TemporalWorkflowID string
 	TemporalRunID      string

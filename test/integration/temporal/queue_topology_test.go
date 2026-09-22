@@ -189,7 +189,7 @@ func TestQueueTopology_DynamicRegistrationPicksUpIsolatedQueue(t *testing.T) {
 	}
 
 	inst, err := instanceService.Start(context.Background(), port.StartInstanceInput{
-		TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "topology-" + uuid.NewString(),
+		TenantID: tenantID, WorkflowVersionID: versionID, SubjectID: "subj-" + uuid.NewString(), BusinessKey: "topology-" + uuid.NewString(),
 		StartedByUserID: assigneeUserID,
 	})
 	if err != nil {

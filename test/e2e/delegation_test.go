@@ -65,6 +65,7 @@ func TestE2E_DelegationStartedThenEnded(t *testing.T) {
 		ID uuid.UUID `json:"id"`
 	}
 	resp := admin.do(http.MethodPost, "/api/v1/instances", map[string]any{
+		"subject_id":          "e2e-subject-" + uuid.NewString(),
 		"business_key":        "e2e-delegation-" + uuid.NewString(),
 		"workflow_version_id": versionID,
 	}, &startResp)

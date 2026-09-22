@@ -34,7 +34,7 @@ const WorkflowTypeExecute = "Execute"
 // StartWorkflowOptions fields (TemporalWorkflowID, TaskQueue) that never
 // cross into the workflow's own input argument.
 type StartWorkflowInput struct {
-	// TemporalWorkflowID is {tenantID}:{businessKey} — becomes
+	// TemporalWorkflowID is {tenantID}:{subjectID}:{businessKey} — becomes
 	// client.StartWorkflowOptions.ID, the identity StartWorkflow/
 	// SignalWorkflow/TerminateWorkflow all route by.
 	TemporalWorkflowID string
@@ -69,7 +69,7 @@ type TemporalClient interface {
 	// (internal/workflow/signals.go's own channel-naming convention).
 	// temporalWorkflowID and instanceID are deliberately two separate
 	// parameters, not the same value under two names: temporalWorkflowID
-	// (Instance.TemporalWorkflowID, "{tenantID}:{businessKey}") is what
+	// (Instance.TemporalWorkflowID, "{tenantID}:{subjectID}:{businessKey}") is what
 	// routes the SDK's SignalWorkflow call to the right execution;
 	// instanceID (Instance.ID) is what the interpreter's own signal router
 	// keys its channel name on. Conflating the two silently no-ops the

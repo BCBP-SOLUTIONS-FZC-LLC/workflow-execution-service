@@ -93,7 +93,7 @@ func TestClaim_SecondLeadAttemptRejectedAgainstLiveWorkflow(t *testing.T) {
 	}
 
 	inst, err := instanceService.Start(context.Background(), port.StartInstanceInput{
-		TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "claim-race-" + uuid.NewString(),
+		TenantID: tenantID, WorkflowVersionID: versionID, SubjectID: "subj-" + uuid.NewString(), BusinessKey: "claim-race-" + uuid.NewString(),
 		StartedByUserID: userA,
 	})
 	if err != nil {

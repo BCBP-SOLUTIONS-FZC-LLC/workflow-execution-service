@@ -20,6 +20,7 @@ func toPortInstance(inst *domain.Instance) *port.Instance {
 		TenantID:           inst.TenantID,
 		WorkflowID:         inst.WorkflowID,
 		WorkflowVersionID:  inst.WorkflowVersionID,
+		SubjectID:          inst.SubjectID,
 		BusinessKey:        inst.BusinessKey,
 		TemporalWorkflowID: inst.TemporalWorkflowID,
 		TemporalRunID:      inst.TemporalRunID,

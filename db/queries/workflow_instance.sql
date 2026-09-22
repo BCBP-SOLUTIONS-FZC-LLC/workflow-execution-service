@@ -24,6 +24,7 @@ WHERE wi.tenant_id = $1
     OR wi.status::text = ANY(sqlc.arg('statuses')::text[])
   )
   AND (sqlc.narg('workflow_version_id')::uuid IS NULL OR wi.workflow_version_id = sqlc.narg('workflow_version_id')::uuid)
+  AND (sqlc.narg('subject_id')::text IS NULL OR wi.subject_id = sqlc.narg('subject_id')::text)
   AND (sqlc.narg('started_after')::timestamptz IS NULL OR wi.started_at > sqlc.narg('started_after')::timestamptz)
   AND (sqlc.narg('started_before')::timestamptz IS NULL OR wi.started_at < sqlc.narg('started_before')::timestamptz)
   AND (
@@ -49,11 +50,11 @@ LIMIT $2;
 
 -- name: CreateWorkflowInstance :one
 INSERT INTO workflow_instance (
-    id, tenant_id, workflow_id, workflow_version_id, business_key,
+    id, tenant_id, workflow_id, workflow_version_id, subject_id, business_key,
     temporal_workflow_id, temporal_run_id, status, current_node_keys,
     context_json, override_map, task_queue, started_by_user_id, started_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 )
 RETURNING *;
 

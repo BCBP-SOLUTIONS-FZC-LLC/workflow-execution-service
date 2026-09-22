@@ -64,6 +64,7 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 		ID uuid.UUID `json:"id"`
 	}
 	resp := admin.do(http.MethodPost, "/api/v1/instances", map[string]any{
+		"subject_id":          "e2e-subject-" + uuid.NewString(),
 		"business_key":        "e2e-lifecycle-" + uuid.NewString(),
 		"workflow_version_id": versionID,
 	}, &startResp)

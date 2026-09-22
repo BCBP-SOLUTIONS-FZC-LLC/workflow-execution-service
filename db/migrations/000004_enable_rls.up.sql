@@ -42,4 +42,4 @@ CREATE POLICY tenant_isolation_policy ON assignee_overrides
 
 -- NO RLS on processed_event, and no tenant_id column at all (LLD §4.7, §4.8):
 -- infrastructure dedup state keyed by a globally-unique envelope ID, not tenant
--- business data. Matches Definition Service's own processed_event table exactly.
+-- business data.

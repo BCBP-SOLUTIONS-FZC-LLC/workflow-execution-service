@@ -11,6 +11,7 @@ import (
 
 func (s *InstanceService) List(ctx context.Context, tenantID uuid.UUID, scope port.ReadScope, filter port.InstanceFilter, page port.Page) (port.PageResult[*port.Instance], error) {
 	repoFilter := port.InstanceListFilter{
+		SubjectID:         filter.SubjectID,
 		WorkflowVersionID: filter.WorkflowVersionID,
 		StartedAfter:      filter.StartedAfter,
 		StartedBefore:     filter.StartedBefore,

@@ -28,6 +28,7 @@ type Instance struct {
 	TenantID           uuid.UUID
 	WorkflowID         uuid.UUID
 	WorkflowVersionID  uuid.UUID
+	SubjectID          string
 	BusinessKey        string
 	TemporalWorkflowID string
 	TemporalRunID      string
@@ -47,6 +48,7 @@ type Instance struct {
 
 type InstanceFilter struct {
 	Status            *InstanceStatus
+	SubjectID         *string
 	WorkflowVersionID *uuid.UUID
 	StartedAfter      *time.Time
 	StartedBefore     *time.Time
@@ -58,6 +60,7 @@ type InstanceFilter struct {
 type StartInstanceInput struct {
 	TenantID          uuid.UUID
 	WorkflowVersionID uuid.UUID
+	SubjectID         string
 	BusinessKey       string
 	ContextJSON       json.RawMessage
 	OverrideMap       map[string]uuid.UUID

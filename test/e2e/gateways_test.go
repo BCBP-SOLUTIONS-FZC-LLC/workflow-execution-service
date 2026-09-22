@@ -91,6 +91,7 @@ func runParallelBranchTest(t *testing.T, firstDept, secondDept string) {
 		ID uuid.UUID `json:"id"`
 	}
 	resp := admin.do(http.MethodPost, "/api/v1/instances", map[string]any{
+		"subject_id":          "e2e-subject-" + uuid.NewString(),
 		"business_key":        "e2e-parallel-" + uuid.NewString(),
 		"workflow_version_id": versionID,
 	}, &startResp)
@@ -275,6 +276,7 @@ func newExclusiveRevertFixture(t *testing.T) *exclusiveRevertFixture {
 		ID uuid.UUID `json:"id"`
 	}
 	resp := admin.do(http.MethodPost, "/api/v1/instances", map[string]any{
+		"subject_id":          "e2e-subject-" + uuid.NewString(),
 		"business_key":        "e2e-exclusive-" + uuid.NewString(),
 		"workflow_version_id": versionID,
 	}, &startResp)

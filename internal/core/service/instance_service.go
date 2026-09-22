@@ -115,12 +115,13 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 	}
 
 	instanceID := uuid.New()
-	temporalWorkflowID := in.TenantID.String() + ":" + in.BusinessKey
+	temporalWorkflowID := in.TenantID.String() + ":" + in.SubjectID + ":" + in.BusinessKey
 	inst := &domain.Instance{
 		ID:                 instanceID,
 		TenantID:           in.TenantID,
 		WorkflowID:         compiled.WorkflowID,
 		WorkflowVersionID:  in.WorkflowVersionID,
+		SubjectID:          in.SubjectID,
 		BusinessKey:        in.BusinessKey,
 		TemporalWorkflowID: temporalWorkflowID,
 		Status:             domain.InstanceStatusRunning,

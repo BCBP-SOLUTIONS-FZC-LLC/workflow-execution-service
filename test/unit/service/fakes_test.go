@@ -53,7 +53,10 @@ func (r *fakeInstanceRepo) Create(_ context.Context, inst *domain.Instance) erro
 		return domain.ErrAlreadyExists
 	}
 	for _, existing := range r.byID {
-		if existing.TenantID == inst.TenantID && existing.BusinessKey == inst.BusinessKey &&
+		// Mirrors uq_workflow_instance_business_key: the triple, over non-terminal
+		// instances only. DEGRADED still holds its key.
+		if existing.TenantID == inst.TenantID && existing.SubjectID == inst.SubjectID &&
+			existing.BusinessKey == inst.BusinessKey &&
 			existing.Status != domain.InstanceStatusCompleted && existing.Status != domain.InstanceStatusTerminated && existing.Status != domain.InstanceStatusFailed {
 			return domain.ErrDuplicateBusinessKey
 		}

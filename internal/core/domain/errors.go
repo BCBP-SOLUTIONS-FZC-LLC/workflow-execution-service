@@ -7,7 +7,7 @@ var (
 	// wrong-tenant are indistinguishable at this layer.
 	ErrNotFound = errors.New("not found")
 
-	ErrDuplicateBusinessKey      = errors.New("business key already active for this tenant")
+	ErrDuplicateBusinessKey      = errors.New("business key already active for this subject")
 	ErrRecordVersionConflict     = errors.New("record version conflict")
 	ErrDuplicateActiveAssignment = errors.New("an active assignment already exists for this task and user")
 	// ErrAlreadyExists marks a primary-key conflict on a row given a

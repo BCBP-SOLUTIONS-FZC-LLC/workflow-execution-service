@@ -58,7 +58,7 @@ func TestStartInstance_Success(t *testing.T) {
 
 	overrideUser := uuid.New()
 	w := do(router, req(http.MethodPost, instancesPath(), map[string]any{
-		"business_key": "TND-001", "workflow_version_id": versionID,
+		"subject_id": "SUBJ-1", "business_key": "TND-001", "workflow_version_id": versionID,
 		"override_map": map[string]string{"review": overrideUser.String()},
 	}))
 
@@ -95,7 +95,7 @@ func TestStartInstance_MalformedOverrideMapValue(t *testing.T) {
 	}
 	router := newRouter(newInstanceHandler(fake))
 	w := do(router, req(http.MethodPost, instancesPath(), map[string]any{
-		"business_key": "TND-001", "workflow_version_id": uuid.New(),
+		"subject_id": "SUBJ-1", "business_key": "TND-001", "workflow_version_id": uuid.New(),
 		"override_map": map[string]string{"review": "not-a-uuid"},
 	}))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -125,7 +125,7 @@ func TestStartInstance_ContextJSONNotAnObject(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			body := []byte(`{"business_key":"TND-001","workflow_version_id":"` + uuid.New().String() + `","context_json":` + tc.contextJSON + `}`)
+			body := []byte(`{"subject_id":"SUBJ-1","business_key":"TND-001","workflow_version_id":"` + uuid.New().String() + `","context_json":` + tc.contextJSON + `}`)
 			w := do(router, req(http.MethodPost, instancesPath(), json.RawMessage(body)))
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 		})
@@ -143,7 +143,7 @@ func TestStartInstance_ContextJSONObject_Accepted(t *testing.T) {
 	router := newRouter(newInstanceHandler(fake))
 
 	w := do(router, req(http.MethodPost, instancesPath(), map[string]any{
-		"business_key": "TND-001", "workflow_version_id": uuid.New(),
+		"subject_id": "SUBJ-1", "business_key": "TND-001", "workflow_version_id": uuid.New(),
 		"context_json": map[string]any{"applicant_email": "a@example.com"},
 	}))
 	require.Equal(t, http.StatusCreated, w.Code)
@@ -176,7 +176,7 @@ func TestStartInstance_ErrorCodes(t *testing.T) {
 			}
 			router := newRouter(newInstanceHandler(fake))
 			w := do(router, req(http.MethodPost, instancesPath(), map[string]any{
-				"business_key": "TND-001", "workflow_version_id": uuid.New(),
+				"subject_id": "SUBJ-1", "business_key": "TND-001", "workflow_version_id": uuid.New(),
 			}))
 			require.Equal(t, tc.status, w.Code)
 			var body problemBody
@@ -194,7 +194,7 @@ func TestStartInstance_AssigneeIneligible_PopulatesInvalidParams(t *testing.T) {
 	}
 	router := newRouter(newInstanceHandler(fake))
 	w := do(router, req(http.MethodPost, instancesPath(), map[string]any{
-		"business_key": "TND-001", "workflow_version_id": uuid.New(),
+		"subject_id": "SUBJ-1", "business_key": "TND-001", "workflow_version_id": uuid.New(),
 	}))
 
 	require.Equal(t, http.StatusUnprocessableEntity, w.Code)
@@ -217,7 +217,7 @@ func TestStartInstance_IdempotencyReplay_SameBody(t *testing.T) {
 	}
 	router := newRouter(newInstanceHandlerWithCache(fake, newFakeCacheStore()))
 
-	body := map[string]any{"business_key": "TND-100", "workflow_version_id": uuid.New()}
+	body := map[string]any{"subject_id": "SUBJ-1", "business_key": "TND-100", "workflow_version_id": uuid.New()}
 	r1 := req(http.MethodPost, instancesPath(), body)
 	r1.Header.Set("Idempotency-Key", "key-1")
 	w1 := do(router, r1)
@@ -241,12 +241,12 @@ func TestStartInstance_IdempotencyReplay_DifferentBody(t *testing.T) {
 	router := newRouter(newInstanceHandlerWithCache(fake, newFakeCacheStore()))
 
 	versionID := uuid.New()
-	r1 := req(http.MethodPost, instancesPath(), map[string]any{"business_key": "TND-100", "workflow_version_id": versionID})
+	r1 := req(http.MethodPost, instancesPath(), map[string]any{"subject_id": "SUBJ-1", "business_key": "TND-100", "workflow_version_id": versionID})
 	r1.Header.Set("Idempotency-Key", "key-2")
 	w1 := do(router, r1)
 	require.Equal(t, http.StatusCreated, w1.Code)
 
-	r2 := req(http.MethodPost, instancesPath(), map[string]any{"business_key": "TND-200", "workflow_version_id": versionID})
+	r2 := req(http.MethodPost, instancesPath(), map[string]any{"subject_id": "SUBJ-1", "business_key": "TND-200", "workflow_version_id": versionID})
 	r2.Header.Set("Idempotency-Key", "key-2")
 	w2 := do(router, r2)
 	require.Equal(t, http.StatusConflict, w2.Code)
@@ -268,7 +268,7 @@ func TestStartInstance_IdempotencyKey_DoesNotCrossTenants(t *testing.T) {
 
 	// Neither business_key nor workflow_version_id carries tenant_id, so two
 	// tenants can legitimately submit an identical body.
-	body := map[string]any{"business_key": "TND-100", "workflow_version_id": uuid.New()}
+	body := map[string]any{"subject_id": "SUBJ-1", "business_key": "TND-100", "workflow_version_id": uuid.New()}
 
 	r1 := req(http.MethodPost, instancesPath(), body)
 	r1.Header.Set("Idempotency-Key", "shared-key")
@@ -303,13 +303,15 @@ func TestListInstances_FiltersAndPaging(t *testing.T) {
 	}
 	router := newRouter(newInstanceHandler(fake))
 
-	url := instancesPath() + "?status=RUNNING&workflow_version_id=" + versionID.String() +
+	url := instancesPath() + "?status=RUNNING&subject_id=TND-001&workflow_version_id=" + versionID.String() +
 		"&started_after=" + after.Format(time.RFC3339) + "&started_before=" + before.Format(time.RFC3339)
 	w := do(router, asAdmin(req(http.MethodGet, url, nil)))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	require.NotNil(t, gotFilter.Status)
 	assert.Equal(t, port.InstanceStatusRunning, *gotFilter.Status)
+	require.NotNil(t, gotFilter.SubjectID)
+	assert.Equal(t, "TND-001", *gotFilter.SubjectID)
 	require.NotNil(t, gotFilter.WorkflowVersionID)
 	assert.Equal(t, versionID, *gotFilter.WorkflowVersionID)
 	require.NotNil(t, gotFilter.StartedAfter)
@@ -328,6 +330,20 @@ func TestListInstances_FiltersAndPaging(t *testing.T) {
 	require.Len(t, body.Items, 1)
 	assert.Equal(t, testInstID, body.Items[0].ID)
 	assert.Equal(t, "next", body.NextCursor)
+}
+
+func TestListInstances_SubjectIDOmittedLeavesFilterUnset(t *testing.T) {
+	var gotFilter port.InstanceFilter
+	fake := &fakeInstanceService{
+		list: func(_ context.Context, _ uuid.UUID, _ port.ReadScope, filter port.InstanceFilter, _ port.Page) (port.PageResult[*port.Instance], error) {
+			gotFilter = filter
+			return port.PageResult[*port.Instance]{}, nil
+		},
+	}
+	w := do(newRouter(newInstanceHandler(fake)), asAdmin(req(http.MethodGet, instancesPath(), nil)))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Nil(t, gotFilter.SubjectID, "an absent subject_id must not narrow the page")
 }
 
 func TestListInstances_InvalidWorkflowVersionID(t *testing.T) {

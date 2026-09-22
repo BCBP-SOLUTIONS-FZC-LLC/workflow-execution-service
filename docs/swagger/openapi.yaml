@@ -391,6 +391,7 @@ components:
         - tenant_id
         - workflow_id
         - workflow_version_id
+        - subject_id
         - business_key
         - status
         - started_by_user_id
@@ -411,10 +412,19 @@ components:
           description: >
             UUID of the parent workflow record in the Definition Service.
             Snapshotted from the GetCompiledWorkflow response at instance creation; immutable.
+        subject_id:
+          type: string
+          description: >
+            Caller-supplied identifier of the entity this instance is about, opaque to the
+            engine. One subject holds as many concurrent instances as it has distinct
+            business keys.
+          example: "tender-abc-001"
         business_key:
           type: string
-          description: Caller-supplied unique key for this instance; unique among RUNNING/PAUSED instances per tenant.
-          example: "tender-abc-001"
+          description: >
+            Caller-supplied key identifying this instance within its subject; the pair is
+            unique among RUNNING/PAUSED instances per tenant.
+          example: "stage-prequalification"
         workflow_version_id:
           type: string
           format: uuid
@@ -995,8 +1005,8 @@ paths:
       description: >
         Validates that the referenced version is PUBLISHED and is_valid=true, then starts
         a Temporal workflow execution and inserts the instance record transactionally.
-        Returns 409 if an active instance (RUNNING or PAUSED) with the same business_key
-        already exists for this tenant.
+        Returns 409 if an active instance (RUNNING or PAUSED) with the same
+        subject_id and business_key already exists for this tenant.
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
         - $ref: "#/components/parameters/UserIdHeader"
@@ -1010,16 +1020,27 @@ paths:
           application/json:
             schema:
               type: object
-              required: [business_key, workflow_version_id]
+              required: [subject_id, business_key, workflow_version_id]
               properties:
+                subject_id:
+                  type: string
+                  minLength: 2
+                  maxLength: 64
+                  description: >
+                    The entity this run is about, opaque to the engine. Addressable on its
+                    own: it is what a subject-scoped delegation resolves against and what
+                    GET /instances?subject_id= filters on.
+                  example: "tender-abc-001"
                 business_key:
                   type: string
                   minLength: 2
                   maxLength: 64
                   description: >
-                    Caller-supplied unique key for this run. Must be unique among
-                    RUNNING and PAUSED instances for this tenant.
-                  example: "tender-abc-001"
+                    Caller-supplied key for this run within its subject. The pair must be
+                    unique among RUNNING and PAUSED instances for this tenant. A caller
+                    running one instance per subject sets this to a constant of its own
+                    choosing.
+                  example: "stage-prequalification"
                 workflow_version_id:
                   type: string
                   format: uuid
@@ -1047,7 +1068,7 @@ paths:
           description: >
             State conflict. See code field:
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body;
-            DUPLICATE_BUSINESS_KEY — an active instance for this business_key already exists;
+            DUPLICATE_BUSINESS_KEY — an active instance for this subject_id and business_key already exists;
             VERSION_NOT_PUBLISHED — the referenced version is DRAFT or ARCHIVED;
             VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked);
             TENANT_NOT_ACTIVE — the tenant's current status is not active or trial.
@@ -1153,6 +1174,15 @@ paths:
           schema:
             $ref: "#/components/schemas/InstanceStatus"
           description: Filter by instance status.
+        - name: subject_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Filter to one subject's instances. Combined with status, this is how a calling
+            domain reads back the runs it currently has live for one of its own entities.
+            Composes with the department/assignee scoping every list read already applies.
         - name: workflow_version_id
           in: query
           required: false

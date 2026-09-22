@@ -151,7 +151,7 @@ func setupDegradedInstance(t *testing.T) *degradedFixture {
 	}
 
 	inst, err := instanceService.Start(context.Background(), port.StartInstanceInput{
-		TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "degraded-" + uuid.NewString(),
+		TenantID: tenantID, WorkflowVersionID: versionID, SubjectID: "subj-" + uuid.NewString(), BusinessKey: "degraded-" + uuid.NewString(),
 		StartedByUserID: assigneeUserID,
 	})
 	if err != nil {

@@ -27,7 +27,7 @@ var (
 	// The sentinels below are InstanceService's own failure modes (LLD §5.10).
 	ErrInstanceNotFound        = errors.New("instance not found")
 	ErrTargetNodeNotFound      = errors.New("target node not found in the compiled plan")
-	ErrDuplicateBusinessKey    = errors.New("business key already active for this tenant")
+	ErrDuplicateBusinessKey    = errors.New("business key already active for this subject")
 	ErrTenantNotActive         = errors.New("tenant is not currently active or trial")
 	ErrVersionNotPublished     = errors.New("workflow version is not published")
 	ErrVersionInvalid          = errors.New("workflow version is not valid")

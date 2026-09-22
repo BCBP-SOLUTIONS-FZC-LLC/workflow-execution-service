@@ -32,6 +32,7 @@ func (r *InstanceRepo) Create(ctx context.Context, inst *domain.Instance) error 
 			TenantID:           inst.TenantID,
 			WorkflowID:         inst.WorkflowID,
 			WorkflowVersionID:  inst.WorkflowVersionID,
+			SubjectID:          inst.SubjectID,
 			BusinessKey:        inst.BusinessKey,
 			TemporalWorkflowID: inst.TemporalWorkflowID,
 			TemporalRunID:      toNullableText(inst.TemporalRunID),
@@ -113,6 +114,7 @@ func (r *InstanceRepo) ListByTenant(
 	for i, s := range filter.Statuses {
 		params.Statuses[i] = string(s)
 	}
+	params.SubjectID = toPgtypeTextPtr(filter.SubjectID)
 	if filter.WorkflowVersionID != nil {
 		params.WorkflowVersionID = toPgtypeUUID(filter.WorkflowVersionID)
 	}

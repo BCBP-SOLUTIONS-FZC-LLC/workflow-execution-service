@@ -40,6 +40,7 @@ type instanceSummaryResp struct {
 	TenantID           uuid.UUID  `json:"tenant_id"`
 	WorkflowID         uuid.UUID  `json:"workflow_id"`
 	WorkflowVersionID  uuid.UUID  `json:"workflow_version_id"`
+	SubjectID          string     `json:"subject_id"`
 	BusinessKey        string     `json:"business_key"`
 	TemporalWorkflowID string     `json:"temporal_workflow_id"`
 	CurrentNodeKeys    []string   `json:"current_node_keys"`
@@ -59,6 +60,7 @@ func toInstanceSummaryResp(i *port.Instance) instanceSummaryResp {
 		TenantID:           i.TenantID,
 		WorkflowID:         i.WorkflowID,
 		WorkflowVersionID:  i.WorkflowVersionID,
+		SubjectID:          i.SubjectID,
 		BusinessKey:        i.BusinessKey,
 		TemporalWorkflowID: i.TemporalWorkflowID,
 		CurrentNodeKeys:    i.CurrentNodeKeys,
@@ -168,6 +170,7 @@ func parseTimeQuery(c *gin.Context, name string) (*time.Time, bool) {
 }
 
 type startInstanceReq struct {
+	SubjectID         string               `json:"subject_id" binding:"required,min=2,max=64"`
 	BusinessKey       string               `json:"business_key" binding:"required,min=2,max=64"`
 	WorkflowVersionID uuid.UUID            `json:"workflow_version_id" binding:"required"`
 	ContextJSON       json.RawMessage      `json:"context_json"`
@@ -200,6 +203,7 @@ func (h *Handler) StartInstance(c *gin.Context) {
 	instance, err := h.instances.Start(c.Request.Context(), port.StartInstanceInput{
 		TenantID:          tenantID,
 		WorkflowVersionID: req.WorkflowVersionID,
+		SubjectID:         req.SubjectID,
 		BusinessKey:       req.BusinessKey,
 		ContextJSON:       req.ContextJSON,
 		OverrideMap:       req.OverrideMap,
@@ -222,6 +226,9 @@ func (h *Handler) ListInstances(c *gin.Context) {
 	if v := c.Query("status"); v != "" {
 		s := port.InstanceStatus(v)
 		filter.Status = &s
+	}
+	if v := c.Query("subject_id"); v != "" {
+		filter.SubjectID = &v
 	}
 	if v := c.Query("workflow_version_id"); v != "" {
 		id, err := uuid.Parse(v)

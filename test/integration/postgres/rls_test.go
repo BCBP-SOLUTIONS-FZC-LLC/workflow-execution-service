@@ -85,10 +85,10 @@ func seedWorkflowInstance(t *testing.T, superPool *pgcommon.Pool, ctx context.Co
 	err := superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
 		_, err := conn.Exec(ctx, `
 			INSERT INTO workflow_instance (
-				id, tenant_id, workflow_id, workflow_version_id, business_key,
+				id, tenant_id, workflow_id, workflow_version_id, subject_id, business_key,
 				temporal_workflow_id, status, current_node_keys, task_queue, started_by_user_id
-			) VALUES ($1, $2, $3, $4, $5, $6, 'RUNNING', '{}', 'execution-default', $7)`,
-			id, tenantID, uuid.New(), uuid.New(), "rls-test-"+id.String(),
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'RUNNING', '{}', 'execution-default', $8)`,
+			id, tenantID, uuid.New(), uuid.New(), "rls-subj-"+id.String(), "rls-test-"+id.String(),
 			"wf-"+id.String(), uuid.New(),
 		)
 		return err

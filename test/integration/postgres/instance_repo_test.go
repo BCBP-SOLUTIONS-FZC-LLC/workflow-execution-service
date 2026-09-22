@@ -25,6 +25,7 @@ func newInstance(tenantID uuid.UUID, createdAt time.Time) *domain.Instance {
 		TenantID:           tenantID,
 		WorkflowID:         uuid.New(),
 		WorkflowVersionID:  uuid.New(),
+		SubjectID:          "subj-" + id.String(),
 		BusinessKey:        "bk-" + id.String(),
 		TemporalWorkflowID: "wf-" + id.String(),
 		Status:             domain.InstanceStatusRunning,
@@ -78,11 +79,26 @@ func TestInstanceRepo_CreateAndGetByID(t *testing.T) {
 		assert.ErrorIs(t, err, domain.ErrNotFound)
 	})
 
-	t.Run("duplicate business key for an active instance is rejected", func(t *testing.T) {
+	t.Run("the same subject and business key for an active instance is rejected", func(t *testing.T) {
 		dup := newInstance(tenantA, time.Now().UTC())
+		dup.SubjectID = inst.SubjectID
 		dup.BusinessKey = inst.BusinessKey
 		err := repo.Create(ctx, dup)
 		assert.ErrorIs(t, err, domain.ErrDuplicateBusinessKey)
+	})
+
+	t.Run("the same business key under a different subject is accepted", func(t *testing.T) {
+		other := newInstance(tenantA, time.Now().UTC())
+		other.BusinessKey = inst.BusinessKey
+		require.NoError(t, repo.Create(ctx, other),
+			"one subject's key must not reserve that key across every other subject")
+	})
+
+	t.Run("one subject holds several concurrent instances", func(t *testing.T) {
+		second := newInstance(tenantA, time.Now().UTC())
+		second.SubjectID = inst.SubjectID
+		require.NoError(t, repo.Create(ctx, second),
+			"a subject whose entity runs several workflows at once must be expressible")
 	})
 }
 
