@@ -75,8 +75,28 @@ func TestConnectorTaskService_Complete_AssignsTheActingPrincipal(t *testing.T) {
 	require.Len(t, temporal.signals, 1)
 	payload, err := json.Marshal(temporal.signals[0].Payload)
 	require.NoError(t, err)
-	assert.Contains(t, string(payload), testConnectorActorID.String(),
-		"the signal carries the actor, so the completion activity finds the row")
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(payload, &wire))
+	assert.Equal(t, testConnectorActorID.String(), wire["UserID"],
+		"the signal names the actor in the field the completion activity reads")
+}
+
+// Fail creates the same row Complete does: the failed task's event reads its
+// assignees off the task, so without it the actor is retained nowhere.
+func TestConnectorTaskService_Fail_AssignsTheActingPrincipal(t *testing.T) {
+	t.Parallel()
+
+	task := connectorTask("storage", domain.TaskStatusReady, `{}`)
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz"}
+	assignments := newFakeAssignmentRepo()
+	svc := newConnectorTaskServiceWith(task, inst, &fakeTemporalClient{}, newFakeCacheStore(), assignments)
+
+	require.NoError(t, svc.Fail(context.Background(), task.TenantID, task.ID, testConnectorActorID, "upstream_error"))
+
+	active, err := assignments.ListActiveByTask(context.Background(), task.TenantID, task.ID)
+	require.NoError(t, err)
+	require.Len(t, active, 1)
+	assert.Equal(t, testConnectorActorID, active[0].UserID)
 }
 
 // A retried callback must not leave a second assignment behind: the row's
@@ -118,6 +138,13 @@ func TestConnectorTaskService_Complete_AssignmentFailureReleasesReservation(t *t
 	require.Error(t, err)
 	assert.Empty(t, temporal.signals, "an unattributable completion must not be signalled")
 	assert.Empty(t, cache.values, "the dedup claim must not outlive the failed attempt")
+
+	failCache := newFakeCacheStore()
+	failTemporal := &fakeTemporalClient{}
+	failSvc := newConnectorTaskServiceWith(task, inst, failTemporal, failCache, assignments)
+	require.Error(t, failSvc.Fail(context.Background(), task.TenantID, task.ID, testConnectorActorID, "upstream_error"))
+	assert.Empty(t, failTemporal.signals, "an unattributable failure must not be signalled either")
+	assert.Empty(t, failCache.values)
 }
 
 func TestConnectorTaskService_Complete_HappyPath(t *testing.T) {

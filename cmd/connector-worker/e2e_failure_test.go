@@ -120,7 +120,7 @@ func TestE2E_ConnectorWorker_DispatchFailsInstanceFails(t *testing.T) {
 		DefinitionServiceInternalHTTPAddr: aliasSrv.URL, ConnectorAliasFetchTimeout: 5 * time.Second,
 		InternalAPIToken: e2eInternalToken, OpenBaoAddr: "http://unused.invalid", OpenBaoMount: "secret", OpenBaoTimeout: 5 * time.Second,
 		ExecutionServiceInternalAddr: execSrv.URL, ConnectorCompletionTimeout: 5 * time.Second,
-		ConnectorActorUserID:      e2eConnectorActorUserID,
+		ConnectorActorUserIDs:     e2eActorUserIDs(tenantID),
 		ConnectorPoolSizeRestCall: 2, ConnectorTimeoutRestCall: 10 * time.Second,
 	}
 	deps, cleanup, err := buildDeps(cfg)
@@ -224,7 +224,7 @@ func TestE2E_ConnectorWorker_RestCallRetriesIdempotentMethod(t *testing.T) {
 		DefinitionServiceInternalHTTPAddr: aliasSrv.URL, ConnectorAliasFetchTimeout: 5 * time.Second,
 		InternalAPIToken: e2eInternalToken, OpenBaoAddr: "http://unused.invalid", OpenBaoMount: "secret", OpenBaoTimeout: 5 * time.Second,
 		ExecutionServiceInternalAddr: execSrv.URL, ConnectorCompletionTimeout: 5 * time.Second,
-		ConnectorActorUserID:      e2eConnectorActorUserID,
+		ConnectorActorUserIDs:     e2eActorUserIDs(tenantID),
 		ConnectorPoolSizeRestCall: 2, ConnectorTimeoutRestCall: 10 * time.Second,
 	}
 	deps, cleanup, err := buildDeps(cfg)

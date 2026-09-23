@@ -72,7 +72,6 @@ func (d *Deps) CompleteAssignment(ctx context.Context, in port.CompleteAssignmen
 			return fmt.Errorf("get task: %w", err)
 		}
 		if in.UserID == "" {
-			out.AllDone = true
 			return nil
 		}
 		out, err = d.completeUserAssignment(ctx, tenantID, task, userID, in.ResultJSON)
@@ -91,6 +90,9 @@ func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, t
 	}
 	target := assignmentFor(active, userID)
 	if target == nil {
+		// Chiefly a retry whose earlier attempt completed the assignment and
+		// lost its ack: the completion and its event already happened, so the
+		// gate must still report done or the task never leaves IN_PROGRESS.
 		return port.CompleteAssignmentOutput{AllDone: len(active) == 0}, nil
 	}
 	completed, err := d.Assignments.Complete(ctx, tenantID, target.ID, []byte(resultJSON), task.RecordVersion)

@@ -49,8 +49,12 @@ import (
 const e2eInternalToken = "e2e-connector-worker-test-token"
 
 // The tenant's automation principal, the actor a connector completion is
-// recorded under.
+// recorded under. Built per test, since each seeds its own tenant.
 const e2eConnectorActorUserID = "99999999-9999-4999-8999-999999999999"
+
+func e2eActorUserIDs(tenantID uuid.UUID) string {
+	return tenantID.String() + "=" + e2eConnectorActorUserID
+}
 
 type e2eDefinitionClient struct {
 	versionID uuid.UUID
@@ -375,7 +379,7 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 		OpenBaoTimeout:                    5 * time.Second,
 		ExecutionServiceInternalAddr:      execSrv.URL,
 		ConnectorCompletionTimeout:        5 * time.Second,
-		ConnectorActorUserID:              e2eConnectorActorUserID,
+		ConnectorActorUserIDs:             e2eActorUserIDs(tenantID),
 		ConnectorPoolSizeRestCall:         2,
 		ConnectorTimeoutRestCall:          10 * time.Second,
 	}

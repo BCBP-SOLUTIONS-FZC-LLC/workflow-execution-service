@@ -94,8 +94,11 @@ type CompleteAssignmentInput struct {
 	RecordVersion int64
 }
 
-// CompleteAssignmentOutput.AllDone reports whether every assignment on the
-// task has now completed.
+// CompleteAssignmentOutput.AllDone reports that no assignment remains active
+// on the task, which is the gate for writing its COMPLETED status (LLD §4.3).
+// A call carrying no acting user completes nothing and reports false: it
+// enqueues no WorkflowTaskCompleted either, and a task must not reach a
+// terminal status that no consumer was told about.
 type CompleteAssignmentOutput struct {
 	AllDone bool
 }

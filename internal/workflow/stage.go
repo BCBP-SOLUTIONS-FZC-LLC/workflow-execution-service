@@ -169,7 +169,10 @@ func (in *interpreter) resolveTaskStage(
 	if err != nil {
 		return nodeKey, "", err
 	}
-	if completion.AllDone && getVersion(ctx, taskCompletedStatusChangeID) != wf.DefaultVersion {
+	// Version first, data second: GetVersion caches per run on the first call
+	// that reaches it, so gating it behind AllDone would split instances by
+	// their assignee counts rather than by whether they predate this change.
+	if getVersion(ctx, taskCompletedStatusChangeID) != wf.DefaultVersion && completion.AllDone {
 		if err := updateTaskStatus(ctx, port.UpdateTaskStatusInput{
 			TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusCompleted,
 		}); err != nil {

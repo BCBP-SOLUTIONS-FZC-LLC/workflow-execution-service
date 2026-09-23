@@ -363,6 +363,21 @@ func TestCompleteAssignment_NoMatchingAssignmentForUser_NoOp(t *testing.T) {
 	assert.Empty(t, outbox.enqueued)
 }
 
+// A signal carrying no acting user completes nothing and enqueues nothing, so
+// the gate must stay closed — a task reaching COMPLETED with no
+// WorkflowTaskCompleted beside it leaves every consumer believing it is open.
+func TestCompleteAssignment_NoActingUser_DoesNotSatisfyTheGate(t *testing.T) {
+	task := &domain.Task{ID: uuid.New(), RecordVersion: 1}
+	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo())
+
+	out, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
+		TaskID: task.ID.String(), TenantID: uuid.New().String(),
+	})
+	require.NoError(t, err)
+	assert.False(t, out.AllDone)
+	assert.Empty(t, outbox.enqueued)
+}
+
 func TestCompleteAssignment_TaskNotFound(t *testing.T) {
 	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: uuid.New(), UserID: uuid.New()}
 	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(), newFakeAssignmentRepo(assignment))

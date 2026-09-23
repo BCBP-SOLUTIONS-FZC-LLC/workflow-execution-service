@@ -172,12 +172,14 @@ type Config struct {
 	ExecutionServiceInternalAddr string
 	ConnectorCompletionTimeout   time.Duration
 
-	// ConnectorActorUserID is the tenant's automation principal, the actor a
-	// connector completion is recorded under. Configured for now: the identity
-	// subsystem holds the registry, and a read that answers "which subject is
-	// this tenant's automation principal" is asked for and not yet available.
-	// Connector-worker-only, not validated here.
-	ConnectorActorUserID string
+	// ConnectorActorUserIDs maps each tenant to its automation principal, the
+	// actor a connector completion is recorded under, as
+	// "<tenant-uuid>=<subject-uuid>,..." — one worker serves every tenant, so a
+	// single subject would attribute one tenant's work to another's principal.
+	// Configured for now: the identity subsystem holds the registry, and a read
+	// answering "which subject is this tenant's automation principal" is asked
+	// for and not yet available. Connector-worker-only, not validated here.
+	ConnectorActorUserIDs string
 }
 
 func Load() (*Config, error) {
@@ -300,7 +302,7 @@ func Load() (*Config, error) {
 
 		ExecutionServiceInternalAddr: getEnvOrDefault("EXECUTION_SERVICE_INTERNAL_ADDR", ""),
 		ConnectorCompletionTimeout:   envDuration("CONNECTOR_COMPLETION_TIMEOUT", 5*time.Second),
-		ConnectorActorUserID:         getEnvOrDefault("CONNECTOR_ACTOR_USER_ID", ""),
+		ConnectorActorUserIDs:        getEnvOrDefault("CONNECTOR_ACTOR_USER_IDS", ""),
 	}
 
 	if len(parseErrs) > 0 {

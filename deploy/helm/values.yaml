@@ -78,9 +78,10 @@ connectorWorker:
   streamGroup: connector-worker
   executionServiceInternalAddr: http://workflow-execution-service-api:8080
   definitionServiceInternalHTTPAddr: http://workflow-definition-service:8080
-  # The tenant's platform-automation principal, the actor a connector
-  # completion is recorded under. Required; no default is safe.
-  actorUserID: ""
+  # Each tenant's platform-automation principal, the actor a connector
+  # completion is recorded under, as "<tenant-uuid>=<subject-uuid>,...".
+  # Required; the template refuses to render without it.
+  actorUserIDs: ""
   openBaoAddr: ""
   openBaoMount: secret
   resources:

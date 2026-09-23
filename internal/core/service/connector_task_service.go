@@ -96,6 +96,14 @@ func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID, actor
 		return nil
 	}
 
+	// The same row a completion creates: the failed task's event reads its
+	// assignees off the task, so without it a connector failure names nobody
+	// and the actor the callback required is retained nowhere.
+	if err := s.assignActor(ctx, tenantID, taskID, actorUserID); err != nil {
+		s.releaseSignalReservation(ctx, taskID)
+		return err
+	}
+
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-fail", stageFailWire{
 		DeptID: deptID, NodeID: nodeID, ConnectorType: *task.ConnectorType, ErrorClass: errorClass, RecordVersion: task.RecordVersion,
