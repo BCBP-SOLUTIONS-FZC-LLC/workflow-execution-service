@@ -37,7 +37,10 @@ func (d *Deps) ClaimAssignment(ctx context.Context, in port.ClaimAssignmentInput
 		if _, err := d.Assignments.SetLead(ctx, tenantID, existing.TaskID, assignmentID, task.RecordVersion); err != nil {
 			return fmt.Errorf("set lead: %w", err)
 		}
-		core := domain.CommonCore{WorkflowInstanceID: task.WorkflowInstanceID}
+		core, err := d.instanceCore(ctx, tenantID, task.WorkflowInstanceID)
+		if err != nil {
+			return err
+		}
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{existing.UserID}}
 		payload := domain.NewWorkflowTaskClaimedPayload(core, taskCore, existing.UserID)
 		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskClaimed, payload)
@@ -100,7 +103,10 @@ func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, t
 	}
 	out := port.CompleteAssignmentOutput{AllDone: len(remaining) == 0}
 
-	core := domain.CommonCore{WorkflowInstanceID: task.WorkflowInstanceID}
+	core, err := d.instanceCore(ctx, tenantID, task.WorkflowInstanceID)
+	if err != nil {
+		return port.CompleteAssignmentOutput{}, err
+	}
 	taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{completed.UserID}}
 	payload := domain.NewWorkflowTaskCompletedPayload(core, taskCore, completed.UserID)
 	if err := d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskCompleted, payload); err != nil {
@@ -159,7 +165,10 @@ func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) (port.Defe
 			return nil
 		}
 
-		core := domain.CommonCore{WorkflowInstanceID: task.WorkflowInstanceID}
+		core, err := d.instanceCore(ctx, tenantID, task.WorkflowInstanceID)
+		if err != nil {
+			return err
+		}
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{deferrerUserID}}
 		reason := &in.Reason
 		payload := domain.NewWorkflowTaskDeferredPayload(core, taskCore, newTask.NodeKey, reason, nil)
@@ -259,16 +268,27 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 		if err := vacateAssignmentsFor(ctx, d.Assignments, tenantID, active, oldUserID); err != nil {
 			return err
 		}
-		assignment := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: taskID, UserID: newUserID, AssignedBy: &adminUserID}
+		assignment := &domain.TaskAssignment{
+			ID: uuid.New(), TenantID: tenantID, TaskID: taskID, UserID: newUserID,
+			AssignedBy: &adminUserID, IsLead: leadHeldBy(active, oldUserID),
+		}
 		if err := d.Assignments.Create(ctx, assignment); err != nil {
 			return fmt.Errorf("create new assignment: %w", err)
 		}
 
-		core := domain.CommonCore{WorkflowInstanceID: task.WorkflowInstanceID}
+		core, err := d.instanceCore(ctx, tenantID, task.WorkflowInstanceID)
+		if err != nil {
+			return err
+		}
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{newUserID}}
 		payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, oldUserID, newUserID, domain.ReassignInitiatorAdmin, nil)
 		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskReassigned, payload)
 	})
+}
+
+func leadHeldBy(active []*domain.TaskAssignment, userID uuid.UUID) bool {
+	a := assignmentFor(active, userID)
+	return a != nil && a.IsLead
 }
 
 func assignmentActiveFor(active []*domain.TaskAssignment, userID uuid.UUID) bool {
@@ -332,7 +352,10 @@ func (d *Deps) UpdateTaskStatus(ctx context.Context, in port.UpdateTaskStatusInp
 		for _, a := range active {
 			assigneeUserIDs = append(assigneeUserIDs, a.UserID)
 		}
-		core := domain.CommonCore{WorkflowInstanceID: task.WorkflowInstanceID}
+		core, err := d.instanceCore(ctx, tenantID, task.WorkflowInstanceID)
+		if err != nil {
+			return err
+		}
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
 		payload := domain.NewWorkflowTaskFailedPayload(core, taskCore, "stage_fail")
 		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskFailed, payload)

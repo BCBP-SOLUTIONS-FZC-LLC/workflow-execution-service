@@ -296,9 +296,9 @@ type delegationStartedPayload struct {
 	DelegatorID  string `json:"delegator_id"`
 	DelegateID   string `json:"delegate_id"`
 	// Scope is "all", "department" (scoped by ScopeID as a department UUID),
-	// or any other value treated as business-key-scoped (ScopeID compared
-	// against the instance's business_key) — see scopeMatches. "tender" is
-	// the one business-key-scoped value seen on the wire today.
+	// or any other value treated as subject-scoped (ScopeID compared against
+	// the instance's subject_id) — see scopeMatches. "tender" is the one
+	// subject-scoped value the upstream scope enum carries today.
 	Scope    string  `json:"scope"`
 	ScopeID  *string `json:"scope_id"`
 	StartsAt string  `json:"starts_at"`

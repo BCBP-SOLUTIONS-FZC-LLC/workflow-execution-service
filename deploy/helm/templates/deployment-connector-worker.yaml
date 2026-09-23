@@ -64,6 +64,8 @@ spec:
               value: {{ .Values.connectorWorker.definitionServiceInternalHTTPAddr | quote }}
             - name: EXECUTION_SERVICE_INTERNAL_ADDR
               value: {{ .Values.connectorWorker.executionServiceInternalAddr | quote }}
+            - name: CONNECTOR_ACTOR_USER_ID
+              value: {{ .Values.connectorWorker.actorUserID | quote }}
             - name: OPENBAO_ADDR
               value: {{ .Values.connectorWorker.openBaoAddr | quote }}
             - name: OPENBAO_MOUNT

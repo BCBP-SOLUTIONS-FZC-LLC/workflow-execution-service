@@ -113,6 +113,8 @@ func checkRequiredConfig(cfg *config.Config) error {
 		return fmt.Errorf("DEFINITION_SERVICE_INTERNAL_HTTP_ADDR is required")
 	case cfg.ExecutionServiceInternalAddr == "":
 		return fmt.Errorf("EXECUTION_SERVICE_INTERNAL_ADDR is required")
+	case cfg.ConnectorActorUserID == "":
+		return fmt.Errorf("CONNECTOR_ACTOR_USER_ID is required")
 	case cfg.AppEnv == "prod" && cfg.InternalAPIToken == "":
 		return fmt.Errorf("INTERNAL_API_TOKEN is required when APP_ENV=prod")
 	}

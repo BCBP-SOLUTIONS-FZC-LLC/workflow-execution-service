@@ -299,6 +299,14 @@ func (r *fakeAssignmentRepo) Create(_ context.Context, a *domain.TaskAssignment)
 	if r.createErr != nil {
 		return r.createErr
 	}
+	// Mirrors uq_workflow_task_assignment_active (task_id, user_id) WHERE
+	// is_active. Without this the fake accepts a second active row for a pair
+	// the database rejects, which is precisely the case a caller has to handle.
+	for _, existing := range r.byID {
+		if existing.IsActive && existing.TaskID == a.TaskID && existing.UserID == a.UserID {
+			return domain.ErrDuplicateActiveAssignment
+		}
+	}
 	a.IsActive = true
 	r.byID[a.ID] = a
 	return nil

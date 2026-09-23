@@ -230,7 +230,10 @@ func (d *Deps) failTask(ctx context.Context, tenantID, instanceID uuid.UUID, tas
 		assigneeUserIDs = append(assigneeUserIDs, a.UserID)
 	}
 
-	core := domain.CommonCore{WorkflowInstanceID: instanceID}
+	core, err := d.instanceCore(ctx, tenantID, instanceID)
+	if err != nil {
+		return err
+	}
 	taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
 	payload := domain.NewWorkflowTaskFailedPayload(core, taskCore, cascadeSource)
 	return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowTaskFailed, payload)

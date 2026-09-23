@@ -15,7 +15,11 @@ import (
 // Temporal SDK directly (LLD workflow_connectors.md §6.1 Decision #2) — it
 // calls this service's HTTP endpoint instead, which signals the workflow on
 // its behalf.
+// actorUserID is the tenant's automation principal. Automation authenticates
+// with the internal token and, without an actor, the platform can establish
+// that a call came from inside the cluster but not on whose behalf — enough for
+// a call, not enough for a record (LLD §5.7).
 type ConnectorTaskService interface {
-	Complete(ctx context.Context, tenantID, taskID uuid.UUID, output map[string]any) error
-	Fail(ctx context.Context, tenantID, taskID uuid.UUID, errorClass string) error
+	Complete(ctx context.Context, tenantID, taskID, actorUserID uuid.UUID, output map[string]any) error
+	Fail(ctx context.Context, tenantID, taskID, actorUserID uuid.UUID, errorClass string) error
 }

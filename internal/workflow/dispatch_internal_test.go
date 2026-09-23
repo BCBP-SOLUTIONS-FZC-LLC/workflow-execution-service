@@ -17,6 +17,16 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
+// registerNoopTaskStatus answers the UpdateTaskStatus activity for an env
+// built by hand. A stage whose last assignment completes writes COMPLETED
+// (LLD §4.3), so every env that drives a stage to completion has to answer it.
+func registerNoopTaskStatus(env *testsuite.TestWorkflowEnvironment) {
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.UpdateTaskStatusInput) error { return nil },
+		activity.RegisterOptions{Name: port.ActivityUpdateTaskStatus},
+	)
+}
+
 func newTestEnv() *testsuite.TestWorkflowEnvironment {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
@@ -178,6 +188,7 @@ func TestRunExclusiveRevertPopsHistory(t *testing.T) {
 		},
 		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
 	)
+	registerNoopTaskStatus(env)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
@@ -229,6 +240,7 @@ func TestRunExclusiveHonoursASecondRejection(t *testing.T) {
 		},
 		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
 	)
+	registerNoopTaskStatus(env)
 
 	for i, result := range []string{`{"decision":"rejected"}`, `{"decision":"approved"}`, `{"decision":"approved"}`} {
 		visit, res := int64(i+1), result
@@ -289,6 +301,7 @@ func TestRunExclusiveRevertCapFailsClosed(t *testing.T) {
 		},
 		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
 	)
+	registerNoopTaskStatus(env)
 
 	for i := 1; i <= maxRevertCycles+2; i++ {
 		visit := int64(i)
@@ -387,6 +400,7 @@ func TestRunExclusiveUsesTargetStageToAvoidReRunningEarlierStage(t *testing.T) {
 		},
 		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
 	)
+	registerNoopTaskStatus(env)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "billing", ToStage: "invoice", ResultJSON: "{}", VisitCount: 1})
@@ -456,6 +470,7 @@ func TestRunExclusiveUsesTargetNodeIDToAvoidReRunningEarlierStage(t *testing.T) 
 		},
 		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
 	)
+	registerNoopTaskStatus(env)
 
 	// Safety net only: if a regression reintroduces the index-0 restart,
 	// this lets the buggy run resolve Task_prep instead of hanging — the
@@ -525,6 +540,7 @@ func TestRunExclusiveRevertUsesRevertToNodeID(t *testing.T) {
 		},
 		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
 	)
+	registerNoopTaskStatus(env)
 
 	// Safety net only, same rationale as the forward test above.
 	env.RegisterDelayedCallback(func() {
@@ -600,6 +616,7 @@ func TestRunExclusiveRevertUsesRevertToStage(t *testing.T) {
 		},
 		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
 	)
+	registerNoopTaskStatus(env)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
@@ -909,8 +926,16 @@ func TestRunTaskStageInterruptingBoundaryTransfers(t *testing.T) {
 	if err := env.GetWorkflowError(); err != nil {
 		t.Fatalf("workflow returned error: %v", err)
 	}
-	if len(supersededCalls) != 1 || supersededCalls[0].TaskID != "sales/n1" || supersededCalls[0].Status != domain.TaskStatusSuperseded {
-		t.Errorf("UpdateTaskStatusActivity calls = %+v, want exactly one SUPERSEDED call for sales/n1", supersededCalls)
+	// The transfer target's own stage completes afterwards and writes its own
+	// COMPLETED, so filter to the abandoned host task this test is about.
+	var hostCalls []port.UpdateTaskStatusInput
+	for _, c := range supersededCalls {
+		if c.TaskID == "sales/n1" {
+			hostCalls = append(hostCalls, c)
+		}
+	}
+	if len(hostCalls) != 1 || hostCalls[0].Status != domain.TaskStatusSuperseded {
+		t.Errorf("UpdateTaskStatusActivity calls for sales/n1 = %+v (all calls %+v), want exactly one SUPERSEDED", hostCalls, supersededCalls)
 	}
 }
 

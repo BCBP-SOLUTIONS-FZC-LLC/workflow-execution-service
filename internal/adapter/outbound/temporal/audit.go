@@ -97,7 +97,10 @@ func (d *Deps) supersedeTask(ctx context.Context, tenantID, instanceID uuid.UUID
 		}
 		assigneeUserIDs = append(assigneeUserIDs, a.UserID)
 	}
-	core := domain.CommonCore{WorkflowInstanceID: instanceID}
+	core, err := d.instanceCore(ctx, tenantID, instanceID)
+	if err != nil {
+		return err
+	}
 	taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
 	payload := domain.NewWorkflowTaskSupersededPayload(core, taskCore, actorUserID)
 	return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowTaskSuperseded, payload)
@@ -171,7 +174,10 @@ func (d *Deps) recordSLAEvent(
 		for _, a := range active {
 			assigneeUserIDs = append(assigneeUserIDs, a.UserID)
 		}
-		core := domain.CommonCore{WorkflowInstanceID: instanceID}
+		core, err := d.instanceCore(ctx, tenantID, instanceID)
+		if err != nil {
+			return err
+		}
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
 		if err := d.enqueueInstanceEvent(ctx, tenantID, instanceID, eventType, buildPayload(core, taskCore, task)); err != nil {
 			if errors.Is(err, domain.ErrAlreadyExists) {

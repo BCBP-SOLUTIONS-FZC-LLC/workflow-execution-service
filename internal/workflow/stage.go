@@ -163,10 +163,18 @@ func (in *interpreter) resolveTaskStage(
 		return nodeKey, "", fmt.Errorf("workflow: stage %q failed: %s", nodeKey, sig.Reason)
 	}
 
-	if _, err := completeAssignment(ctx, port.CompleteAssignmentInput{
+	completion, err := completeAssignment(ctx, port.CompleteAssignmentInput{
 		TaskID: out.TaskID, UserID: sig.UserID, TenantID: in.tenantID, ResultJSON: sig.ResultJSON, RecordVersion: sig.RecordVersion,
-	}); err != nil {
+	})
+	if err != nil {
 		return nodeKey, "", err
+	}
+	if completion.AllDone && getVersion(ctx, taskCompletedStatusChangeID) != wf.DefaultVersion {
+		if err := updateTaskStatus(ctx, port.UpdateTaskStatusInput{
+			TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusCompleted,
+		}); err != nil {
+			return nodeKey, "", err
+		}
 	}
 	in.history.Push(nodeKey)
 	return nodeKey, sig.ResultJSON, nil

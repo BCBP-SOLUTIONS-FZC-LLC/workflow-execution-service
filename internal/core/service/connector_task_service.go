@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -19,11 +20,12 @@ var _ port.ConnectorTaskService = (*ConnectorTaskService)(nil)
 const connectorSignalDedupTTL = 5 * time.Minute
 
 type ConnectorTaskService struct {
-	Instances port.InstanceRepository
-	Tasks     port.TaskRepository
-	Temporal  port.TemporalClient
-	Cache     port.CacheStore
-	Log       port.Logger
+	Instances   port.InstanceRepository
+	Tasks       port.TaskRepository
+	Assignments port.TaskAssignmentRepository
+	Temporal    port.TemporalClient
+	Cache       port.CacheStore
+	Log         port.Logger
 }
 
 func (s *ConnectorTaskService) logger() port.Logger {
@@ -44,7 +46,7 @@ type stageFailWire struct {
 	VisitCount int64 `json:"visit_count"`
 }
 
-func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID uuid.UUID, output map[string]any) error {
+func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID, actorUserID uuid.UUID, output map[string]any) error {
 	task, done, err := s.loadConnectorTask(ctx, tenantID, taskID)
 	if err != nil || done {
 		return err
@@ -63,9 +65,15 @@ func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID uu
 		return nil
 	}
 
+	if err := s.assignActor(ctx, tenantID, taskID, actorUserID); err != nil {
+		s.releaseSignalReservation(ctx, taskID)
+		return err
+	}
+
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-transition", stageTransitionWire{
-		DeptID: deptID, NodeID: nodeID, ResultJSON: string(resultJSON), RecordVersion: task.RecordVersion,
+		DeptID: deptID, NodeID: nodeID, UserID: actorUserID.String(),
+		ResultJSON: string(resultJSON), RecordVersion: task.RecordVersion,
 		VisitCount: task.VisitCount,
 	}); err != nil {
 		s.releaseSignalReservation(ctx, taskID)
@@ -74,7 +82,7 @@ func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID uu
 	return nil
 }
 
-func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.UUID, errorClass string) error {
+func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID, actorUserID uuid.UUID, errorClass string) error {
 	task, done, err := s.loadConnectorTask(ctx, tenantID, taskID)
 	if err != nil || done {
 		return err
@@ -97,6 +105,27 @@ func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.U
 		return fmt.Errorf("signal stage-fail: %w", err)
 	}
 	return nil
+}
+
+const automationReasonTag = "automation"
+
+func (s *ConnectorTaskService) assignActor(ctx context.Context, tenantID, taskID, actorUserID uuid.UUID) error {
+	assignment := &domain.TaskAssignment{
+		ID:       domain.DeterministicAssignmentID(taskID, actorUserID),
+		TenantID: tenantID,
+		TaskID:   taskID,
+		UserID:   actorUserID,
+		Reason:   automationReasonTag,
+	}
+	err := s.Assignments.Create(ctx, assignment)
+	switch {
+	case err == nil,
+		errors.Is(err, domain.ErrAlreadyExists),
+		errors.Is(err, domain.ErrDuplicateActiveAssignment):
+		return nil
+	default:
+		return fmt.Errorf("assign automation principal: %w", err)
+	}
 }
 
 func (s *ConnectorTaskService) loadConnectorTask(ctx context.Context, tenantID, taskID uuid.UUID) (*domain.Task, bool, error) {

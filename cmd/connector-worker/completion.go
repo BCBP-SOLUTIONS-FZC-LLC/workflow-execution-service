@@ -19,25 +19,31 @@ import (
 type completionClient struct {
 	addr  string
 	token string
+	actor uuid.UUID
 	http  *http.Client
 }
 
-func newCompletionClient(addr, token string, timeout time.Duration) *completionClient {
-	return &completionClient{addr: strings.TrimRight(addr, "/"), token: token, http: &http.Client{Timeout: timeout}}
+func newCompletionClient(addr, token string, actor uuid.UUID, timeout time.Duration) *completionClient {
+	return &completionClient{
+		addr: strings.TrimRight(addr, "/"), token: token, actor: actor,
+		http: &http.Client{Timeout: timeout},
+	}
 }
 
 type completeRequest struct {
-	TenantID uuid.UUID      `json:"tenant_id"`
-	Output   map[string]any `json:"output"`
+	TenantID    uuid.UUID      `json:"tenant_id"`
+	ActorUserID uuid.UUID      `json:"actor_user_id"`
+	Output      map[string]any `json:"output"`
 }
 
 type failRequest struct {
-	TenantID   uuid.UUID `json:"tenant_id"`
-	ErrorClass string    `json:"error_class"`
+	TenantID    uuid.UUID `json:"tenant_id"`
+	ActorUserID uuid.UUID `json:"actor_user_id"`
+	ErrorClass  string    `json:"error_class"`
 }
 
 func (c *completionClient) Complete(ctx context.Context, tenantID, taskID uuid.UUID, output map[string]any) error {
-	body, err := json.Marshal(completeRequest{TenantID: tenantID, Output: output})
+	body, err := json.Marshal(completeRequest{TenantID: tenantID, ActorUserID: c.actor, Output: output})
 	if err != nil {
 		return fmt.Errorf("encode complete request: %w", err)
 	}
@@ -45,7 +51,7 @@ func (c *completionClient) Complete(ctx context.Context, tenantID, taskID uuid.U
 }
 
 func (c *completionClient) Fail(ctx context.Context, tenantID, taskID uuid.UUID, errorClass string) error {
-	body, err := json.Marshal(failRequest{TenantID: tenantID, ErrorClass: errorClass})
+	body, err := json.Marshal(failRequest{TenantID: tenantID, ActorUserID: c.actor, ErrorClass: errorClass})
 	if err != nil {
 		return fmt.Errorf("encode fail request: %w", err)
 	}

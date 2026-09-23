@@ -48,6 +48,10 @@ import (
 
 const e2eInternalToken = "e2e-connector-worker-test-token"
 
+// The tenant's automation principal, the actor a connector completion is
+// recorded under.
+const e2eConnectorActorUserID = "99999999-9999-4999-8999-999999999999"
+
 type e2eDefinitionClient struct {
 	versionID uuid.UUID
 	workflow  *port.CompiledWorkflow
@@ -183,7 +187,8 @@ func e2eBuildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, valkey
 		Temporal: temporal, Eligibility: eligibility, Definitions: definitions,
 	}
 	connectorTaskService := &service.ConnectorTaskService{
-		Instances: instances, Tasks: tasks, Temporal: temporal, Cache: valkey.NewCache(valkeyClient),
+		Instances: instances, Tasks: tasks, Assignments: assignments,
+		Temporal: temporal, Cache: valkey.NewCache(valkeyClient),
 	}
 
 	h := handler.New(handler.Services{
@@ -370,6 +375,7 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 		OpenBaoTimeout:                    5 * time.Second,
 		ExecutionServiceInternalAddr:      execSrv.URL,
 		ConnectorCompletionTimeout:        5 * time.Second,
+		ConnectorActorUserID:              e2eConnectorActorUserID,
 		ConnectorPoolSizeRestCall:         2,
 		ConnectorTimeoutRestCall:          10 * time.Second,
 	}

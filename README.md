@@ -66,7 +66,7 @@ go run ./cmd/worker
 go run ./cmd/connector-worker
 ```
 
-`cmd/connector-worker` additionally requires `OPENBAO_ADDR`, `DEFINITION_SERVICE_INTERNAL_HTTP_ADDR` (definition_service owns the endpointAlias/queryAlias registry and serves it over `GET /api/v1/internal/connector-aliases`), and `EXECUTION_SERVICE_INTERNAL_ADDR` — see `.env.example` for the full list.
+`cmd/connector-worker` additionally requires `OPENBAO_ADDR`, `DEFINITION_SERVICE_INTERNAL_HTTP_ADDR` (definition_service owns the endpointAlias/queryAlias registry and serves it over `GET /api/v1/internal/connector-aliases`), `EXECUTION_SERVICE_INTERNAL_ADDR`, and `CONNECTOR_ACTOR_USER_ID` (the tenant's automation principal, the actor a connector completion is recorded under) — see `.env.example` for the full list.
 
 Temporal's Web UI is available at <http://localhost:8233> once `make docker-up` is running.
 

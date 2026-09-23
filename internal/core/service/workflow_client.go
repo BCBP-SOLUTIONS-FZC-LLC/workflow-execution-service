@@ -89,7 +89,12 @@ func (s *WorkflowClient) ReassignDelegate(ctx context.Context, in port.ReassignD
 			s.logger().Warn("failed to vacate assignment during delegate reassignment", map[string]any{"assignment_id": a.ID, "error": err.Error()})
 			continue
 		}
-		newAssignment := &domain.TaskAssignment{ID: uuid.New(), TenantID: in.TenantID, TaskID: a.TaskID, UserID: in.NewDelegateID, Reason: a.Reason}
+		// IsLead carries across for the same reason the event-driven reroute carries
+		// it: an assignee_mode="all" task whose lead moves must keep having one.
+		newAssignment := &domain.TaskAssignment{
+			ID: uuid.New(), TenantID: in.TenantID, TaskID: a.TaskID,
+			UserID: in.NewDelegateID, Reason: a.Reason, IsLead: a.IsLead,
+		}
 		if err := s.Assignments.Create(ctx, newAssignment); err != nil {
 			s.logger().Warn("failed to create replacement assignment during delegate reassignment", map[string]any{"task_id": a.TaskID, "error": err.Error()})
 			continue

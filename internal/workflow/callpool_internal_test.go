@@ -39,6 +39,7 @@ func TestRunCallPoolIgnoredVisitsGetDistinctNodeKeys(t *testing.T) {
 		},
 		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
 	)
+	registerNoopTaskStatus(env)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "call_pool", NodeID: "vendor-pool#1", ResultJSON: "{}", VisitCount: 1})

@@ -13,6 +13,8 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
+const scopeTender = "tender"
+
 func scopeMatches(ctx context.Context, log port.Logger, plans *compiledPlanCache, tenantID uuid.UUID, c delegationCandidate, scope string, scopeID *string) bool {
 	switch scope {
 	case "all":
@@ -35,16 +37,19 @@ func scopeMatches(ctx context.Context, log port.Logger, plans *compiledPlanCache
 		}
 		return false
 	default:
-		// Org & Membership mints a subject-scoped delegation's scope_id as the bare
-		// subject identifier, which is what subject_id holds (LLD §4.2). A scope this
-		// service has no case for takes the same branch by design, counted so an
-		// addition to that enum is visible here (LLD §5).
-		if observability.DelegationScopeUnhandledTotal != nil {
-			observability.DelegationScopeUnhandledTotal.WithLabelValues(scope).Inc()
+		// A subject-scoped delegation's scope_id is the bare subject identifier,
+		// which is what subject_id holds (LLD §4.2). "tender" is the one such value
+		// the identity subsystem's own scope enum carries today; any other reaching
+		// here is a value added upstream that this service has never seen, matched
+		// the same way and counted so the addition is visible (LLD §5, §11).
+		if scope != scopeTender {
+			if observability.DelegationScopeUnhandledTotal != nil {
+				observability.DelegationScopeUnhandledTotal.WithLabelValues(scope).Inc()
+			}
+			log.Warn("scope match: delegation scope is unknown to this service, matching on subject", map[string]any{
+				"scope": scope, "task_id": c.task.ID,
+			})
 		}
-		log.Warn("scope match: delegation scope has no explicit case, matching on subject", map[string]any{
-			"scope": scope, "task_id": c.task.ID,
-		})
 		return scopeID != nil && c.instance.SubjectID == *scopeID
 	}
 }

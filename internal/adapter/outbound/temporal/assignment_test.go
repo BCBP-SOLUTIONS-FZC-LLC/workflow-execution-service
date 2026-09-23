@@ -14,11 +14,24 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
+// The instance repo is seeded for every task the fake task repo holds: an
+// event's common core is built from the instance row, so a task with no
+// instance behind it would emit a payload with empty identifiers.
 func newAssignmentTestDeps(tasks *fakeTaskRepo, assignments *fakeAssignmentRepo) (*outboundtemporal.Deps, *fakeOutbox) {
 	outbox := &fakeOutbox{}
+	instances := newFakeInstanceRepo()
+	for _, task := range tasks.byID {
+		instances.byID[task.WorkflowInstanceID] = &domain.Instance{
+			ID:                task.WorkflowInstanceID,
+			SubjectID:         "subject-1",
+			BusinessKey:       "key-1",
+			WorkflowVersionID: uuid.New(),
+		}
+	}
 	deps := &outboundtemporal.Deps{
 		Tasks:       tasks,
 		Assignments: assignments,
+		Instances:   instances,
 		Outbox:      outbox,
 		Transactor:  fakeTransactor{},
 		Validator:   realValidator(),

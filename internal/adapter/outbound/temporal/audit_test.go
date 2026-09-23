@@ -174,14 +174,26 @@ func TestSupersedeTask_VacateError(t *testing.T) {
 	assert.ErrorContains(t, err, "vacate assignment")
 }
 
+// seededInstances gives a task's instance a row, since an event's common core
+// is read from it.
+func seededInstances(task *domain.Task) *fakeInstanceRepo {
+	instances := newFakeInstanceRepo()
+	instances.byID[task.WorkflowInstanceID] = &domain.Instance{
+		ID: task.WorkflowInstanceID, SubjectID: "subject-1", BusinessKey: "key-1", WorkflowVersionID: uuid.New(),
+	}
+	return instances
+}
+
 func TestRecordSLAWarning_EnqueuesAuditEventOnly(t *testing.T) {
 	taskID, instanceID := uuid.New(), uuid.New()
 	followUp := time.Now().UTC()
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady, FollowUpAt: &followUp}
 	assignee := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
 	outbox := &fakeOutbox{}
+	instances := newFakeInstanceRepo()
+	instances.byID[instanceID] = &domain.Instance{ID: instanceID, SubjectID: "subject-1", BusinessKey: "key-1", WorkflowVersionID: uuid.New()}
 	deps := &outboundtemporal.Deps{
-		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(assignee),
+		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(assignee), Instances: instances,
 		Outbox: outbox, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
@@ -209,7 +221,7 @@ func TestRecordSLAWarning_RetriedCall_NoOp(t *testing.T) {
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady, FollowUpAt: &followUp}
 	outbox := &fakeOutbox{}
 	deps := &outboundtemporal.Deps{
-		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(),
+		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(), Instances: seededInstances(task),
 		Outbox: outbox, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
@@ -231,7 +243,7 @@ func TestRecordSLAEvent_ConcurrentEnqueue_TreatedAsNoOp(t *testing.T) {
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady}
 	outbox := &fakeOutbox{enqueueErr: domain.ErrAlreadyExists}
 	deps := &outboundtemporal.Deps{
-		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(),
+		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(), Instances: seededInstances(task),
 		Outbox: outbox, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
@@ -249,7 +261,7 @@ func TestRecordSLAEvent_ExistsForTaskError(t *testing.T) {
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady}
 	outbox := &fakeOutbox{existsErr: errBoom}
 	deps := &outboundtemporal.Deps{
-		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(),
+		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(), Instances: seededInstances(task),
 		Outbox: outbox, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
@@ -268,7 +280,7 @@ func TestRecordSLAEvent_ListActiveAssignmentsError(t *testing.T) {
 	assignments := newFakeAssignmentRepo()
 	assignments.listActiveErr = errBoom
 	deps := &outboundtemporal.Deps{
-		Tasks: newFakeTaskRepo(task), Assignments: assignments,
+		Tasks: newFakeTaskRepo(task), Assignments: assignments, Instances: seededInstances(task),
 		Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
@@ -285,7 +297,7 @@ func TestRecordSLABreach_EnqueuesAuditEventOnly(t *testing.T) {
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, DueAt: &due}
 	outbox := &fakeOutbox{}
 	deps := &outboundtemporal.Deps{
-		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(),
+		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(), Instances: seededInstances(task),
 		Outbox: outbox, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 

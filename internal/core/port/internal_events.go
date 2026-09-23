@@ -12,7 +12,7 @@ type DelegationRerouteInput struct {
 	DelegationID uuid.UUID
 	DelegatorID  uuid.UUID
 	DelegateID   uuid.UUID
-	Scope        string // "all" | "department" | "business_key"
+	Scope        string // "all" | "department" | a subject-scoped value such as "tender"
 	ScopeID      *string
 	StartsAt     time.Time
 	EndsAt       *time.Time // nil for an open-ended delegation

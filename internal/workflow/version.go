@@ -18,3 +18,9 @@ const taskStageCancelChangeID = "task-stage-cancel"
 // implicit slot per NodeKey, matching the pre-fix behavior byte-for-byte)
 // so replaying a history recorded before this change never diverges.
 const nodeVisitKeyChangeID = "node-visit-key-signal-buffer"
+
+// taskCompletedStatusChangeID gates the extra UpdateTaskStatus activity that
+// writes COMPLETED once a stage's last assignment is done (LLD §4.3). A
+// history recorded before the change has no such activity, so DefaultVersion
+// keeps the old sequence.
+const taskCompletedStatusChangeID = "task-completed-status"

@@ -127,6 +127,10 @@ func TestStageDeferOnPendingStageDoesNotWipeHistory(t *testing.T) {
 		},
 		activity.RegisterOptions{Name: port.ActivityDeferTask},
 	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ port.UpdateTaskStatusInput) error { return nil },
+		activity.RegisterOptions{Name: port.ActivityUpdateTaskStatus},
+	)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})

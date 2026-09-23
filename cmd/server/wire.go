@@ -179,7 +179,8 @@ func newApp(cfg *config.Config) (*app, error) {
 		Temporal: temporal, IAM: iam, Eligibility: eligibility, Definitions: definitions, Log: log,
 	}
 	connectorTaskService := &service.ConnectorTaskService{
-		Instances: instances, Tasks: tasks, Temporal: temporal, Cache: cache, Log: log,
+		Instances: instances, Tasks: tasks, Assignments: assignments,
+		Temporal: temporal, Cache: cache, Log: log,
 	}
 	workflowClient := &service.WorkflowClient{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Temporal: temporal,

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/openbao"
@@ -100,6 +101,12 @@ func buildDeps(cfg *config.Config) (*deps, func(), error) {
 		return nil, nil, fmt.Errorf("build connectors: %w", err)
 	}
 
+	actorUserID, err := uuid.Parse(cfg.ConnectorActorUserID)
+	if err != nil {
+		_ = valkeyClient.Close()
+		return nil, nil, fmt.Errorf("parse CONNECTOR_ACTOR_USER_ID: %w", err)
+	}
+
 	consumerName := cfg.ConnectorStreamConsumerName
 	if consumerName == "" {
 		if host, hostErr := os.Hostname(); hostErr == nil && host != "" {
@@ -116,7 +123,7 @@ func buildDeps(cfg *config.Config) (*deps, func(), error) {
 		openbao:      openbao.NewReader(cfg.OpenBaoAddr, cfg.OpenBaoToken, cfg.OpenBaoMount, cfg.OpenBaoTimeout),
 		aliases:      aliases,
 		pools:        buildPools(cfg, connectorSet),
-		completion:   newCompletionClient(cfg.ExecutionServiceInternalAddr, cfg.InternalAPIToken, cfg.ConnectorCompletionTimeout),
+		completion:   newCompletionClient(cfg.ExecutionServiceInternalAddr, cfg.InternalAPIToken, actorUserID, cfg.ConnectorCompletionTimeout),
 		streamKey:    cfg.ConnectorStreamKey,
 		streamGroup:  cfg.ConnectorStreamGroup,
 		consumerName: consumerName,

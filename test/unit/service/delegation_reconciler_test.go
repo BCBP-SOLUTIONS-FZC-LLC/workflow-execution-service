@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -194,6 +195,40 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		assert.Empty(t, outbox.enqueued)
 	})
 
+	// A scope value added to the identity subsystem's enum that this service has
+	// no case for is matched on the subject, the same way a tender-scoped one is,
+	// so the delegation still takes effect while the addition stays visible.
+	t.Run("a scope this service has no case for still matches on subject", func(t *testing.T) {
+		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
+		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "tender-42", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+
+		subjectID := "subject-of-tender-42"
+		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{
+			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID,
+			Scope: "contract", ScopeID: &subjectID,
+		})
+		require.NoError(t, err, "dropping it would strand the delegator's work")
+		assert.False(t, assignments.byID[a.ID].IsActive)
+		require.Len(t, outbox.enqueued, 1)
+	})
+
+	t.Run("adopting the delegate's existing row surfaces a read failure", func(t *testing.T) {
+		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
+		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		_, task, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "tender-42", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+		a.IsLead = true
+		existing := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegateID, IsActive: true}
+		assignments.byID[existing.ID] = existing
+		assignments.listActiveByTaskErr = errors.New("boom")
+
+		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{
+			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, Scope: "all",
+		})
+		require.Error(t, err, "the claim cannot be moved onto a row the reconciler could not read")
+		assert.Empty(t, outbox.enqueued)
+	})
+
 	t.Run("a delegated task keeps its lead", func(t *testing.T) {
 		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
@@ -214,6 +249,32 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		require.NotNil(t, delegateAssignment, "the delegate must hold the assignment")
 		assert.True(t, delegateAssignment.IsLead,
 			"an assignee_mode=all task with no lead row is actionable by nobody, the delegate included")
+		require.Len(t, outbox.enqueued, 1)
+	})
+
+	t.Run("a delegate already assigned to the task keeps one row and inherits the claim", func(t *testing.T) {
+		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
+		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		_, task, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "tender-42", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+		a.IsLead = true
+		// the delegate is already a co-assignee — the likeliest shape for the
+		// multi-assignee task a lead applies to at all
+		existing := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegateID, IsActive: true}
+		assignments.byID[existing.ID] = existing
+
+		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{
+			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, Scope: "all",
+		})
+		require.NoError(t, err, "a delegate who already holds the task must not fail the whole reroute")
+
+		activeForDelegate := 0
+		for _, got := range assignments.byID {
+			if got.TaskID == task.ID && got.UserID == delegateID && got.IsActive {
+				activeForDelegate++
+			}
+		}
+		assert.Equal(t, 1, activeForDelegate, "the row they already hold stands; no second is inserted")
+		assert.True(t, existing.IsLead, "the claim moves onto the row they already hold")
 		require.Len(t, outbox.enqueued, 1)
 	})
 

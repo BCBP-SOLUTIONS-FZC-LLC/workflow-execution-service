@@ -171,6 +171,13 @@ type Config struct {
 	// endpoints already check — connector-worker-only, not validated here.
 	ExecutionServiceInternalAddr string
 	ConnectorCompletionTimeout   time.Duration
+
+	// ConnectorActorUserID is the tenant's automation principal, the actor a
+	// connector completion is recorded under. Configured for now: the identity
+	// subsystem holds the registry, and a read that answers "which subject is
+	// this tenant's automation principal" is asked for and not yet available.
+	// Connector-worker-only, not validated here.
+	ConnectorActorUserID string
 }
 
 func Load() (*Config, error) {
@@ -293,6 +300,7 @@ func Load() (*Config, error) {
 
 		ExecutionServiceInternalAddr: getEnvOrDefault("EXECUTION_SERVICE_INTERNAL_ADDR", ""),
 		ConnectorCompletionTimeout:   envDuration("CONNECTOR_COMPLETION_TIMEOUT", 5*time.Second),
+		ConnectorActorUserID:         getEnvOrDefault("CONNECTOR_ACTOR_USER_ID", ""),
 	}
 
 	if len(parseErrs) > 0 {

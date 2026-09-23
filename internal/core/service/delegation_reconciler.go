@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/google/uuid"
@@ -111,6 +112,24 @@ func (s *DelegationReconciler) enqueueTaskReassigned(ctx context.Context, c dele
 	return s.Outbox.Enqueue(ctx, envelope)
 }
 
+func (s *DelegationReconciler) adoptExistingAssignment(ctx context.Context, tenantID uuid.UUID, c delegationCandidate, newUserID uuid.UUID) error {
+	if !c.assignment.IsLead {
+		return nil
+	}
+	active, err := s.Assignments.ListActiveByTask(ctx, tenantID, c.task.ID)
+	if err != nil {
+		return err
+	}
+	for _, a := range active {
+		if a.UserID != newUserID {
+			continue
+		}
+		_, err := s.Assignments.SetLead(ctx, tenantID, c.task.ID, a.ID, c.task.RecordVersion)
+		return err
+	}
+	return nil
+}
+
 func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID uuid.UUID, rows []delegationCandidate, newUserID uuid.UUID, reason string, delegationID *uuid.UUID) error {
 	txErr := s.Transactor.RunInTx(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
 		for _, c := range rows {
@@ -125,7 +144,12 @@ func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID
 				Reason: reason, IsLead: c.assignment.IsLead,
 			}
 			if err := s.Assignments.Create(ctx, newAssignment); err != nil {
-				return err
+				if !errors.Is(err, domain.ErrDuplicateActiveAssignment) {
+					return err
+				}
+				if err := s.adoptExistingAssignment(ctx, tenantID, c, newUserID); err != nil {
+					return err
+				}
 			}
 			if err := s.enqueueTaskReassigned(ctx, c, c.assignment.UserID, newUserID, delegationID); err != nil {
 				return err

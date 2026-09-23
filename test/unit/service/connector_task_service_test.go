@@ -29,6 +29,13 @@ func connectorTask(connectorType string, status domain.TaskStatus, extras string
 }
 
 func newConnectorTaskService(task *domain.Task, inst *domain.Instance, temporal *fakeTemporalClient, cache *fakeCacheStore) *service.ConnectorTaskService {
+	return newConnectorTaskServiceWith(task, inst, temporal, cache, newFakeAssignmentRepo())
+}
+
+func newConnectorTaskServiceWith(
+	task *domain.Task, inst *domain.Instance, temporal *fakeTemporalClient,
+	cache *fakeCacheStore, assignments *fakeAssignmentRepo,
+) *service.ConnectorTaskService {
 	tasks := newFakeTaskRepo()
 	if task != nil {
 		tasks.byID[task.ID] = task
@@ -38,11 +45,79 @@ func newConnectorTaskService(task *domain.Task, inst *domain.Instance, temporal 
 		instances.byID[inst.ID] = inst
 	}
 	return &service.ConnectorTaskService{
-		Instances: instances,
-		Tasks:     tasks,
-		Temporal:  temporal,
-		Cache:     cache,
+		Instances:   instances,
+		Tasks:       tasks,
+		Assignments: assignments,
+		Temporal:    temporal,
+		Cache:       cache,
 	}
+}
+
+var testConnectorActorID = uuid.MustParse("55555555-5555-5555-5555-555555555555")
+
+func TestConnectorTaskService_Complete_AssignsTheActingPrincipal(t *testing.T) {
+	t.Parallel()
+
+	extras := `{"resolved_inputs":{},"output_mapping":[]}`
+	task := connectorTask("storage", domain.TaskStatusReady, extras)
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz"}
+	temporal := &fakeTemporalClient{}
+	assignments := newFakeAssignmentRepo()
+	svc := newConnectorTaskServiceWith(task, inst, temporal, newFakeCacheStore(), assignments)
+
+	require.NoError(t, svc.Complete(context.Background(), task.TenantID, task.ID, testConnectorActorID, map[string]any{}))
+
+	active, err := assignments.ListActiveByTask(context.Background(), task.TenantID, task.ID)
+	require.NoError(t, err)
+	require.Len(t, active, 1, "the principal holds a real assignment, so completion is not a special case")
+	assert.Equal(t, testConnectorActorID, active[0].UserID)
+
+	require.Len(t, temporal.signals, 1)
+	payload, err := json.Marshal(temporal.signals[0].Payload)
+	require.NoError(t, err)
+	assert.Contains(t, string(payload), testConnectorActorID.String(),
+		"the signal carries the actor, so the completion activity finds the row")
+}
+
+// A retried callback must not leave a second assignment behind: the row's
+// identifier derives from the task and user. Each pass gets a fresh cache, so
+// the Valkey dedup guard cannot be what swallows the second attempt.
+func TestConnectorTaskService_Complete_RetriedCallbackReusesTheSameRow(t *testing.T) {
+	t.Parallel()
+
+	extras := `{"resolved_inputs":{},"output_mapping":[]}`
+	task := connectorTask("storage", domain.TaskStatusReady, extras)
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz"}
+	assignments := newFakeAssignmentRepo()
+
+	for range 2 {
+		svc := newConnectorTaskServiceWith(task, inst, &fakeTemporalClient{}, newFakeCacheStore(), assignments)
+		require.NoError(t, svc.Complete(context.Background(), task.TenantID, task.ID, testConnectorActorID, map[string]any{}))
+	}
+
+	active, err := assignments.ListActiveByTask(context.Background(), task.TenantID, task.ID)
+	require.NoError(t, err)
+	assert.Len(t, active, 1)
+}
+
+// No row means the completion activity has nothing to resolve the actor
+// against, so the callback fails and its dedup claim is released for the retry.
+func TestConnectorTaskService_Complete_AssignmentFailureReleasesReservation(t *testing.T) {
+	t.Parallel()
+
+	extras := `{"resolved_inputs":{},"output_mapping":[]}`
+	task := connectorTask("storage", domain.TaskStatusReady, extras)
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz"}
+	assignments := newFakeAssignmentRepo()
+	assignments.createErr = errors.New("transient database error")
+	temporal := &fakeTemporalClient{}
+	cache := newFakeCacheStore()
+	svc := newConnectorTaskServiceWith(task, inst, temporal, cache, assignments)
+
+	err := svc.Complete(context.Background(), task.TenantID, task.ID, testConnectorActorID, map[string]any{})
+	require.Error(t, err)
+	assert.Empty(t, temporal.signals, "an unattributable completion must not be signalled")
+	assert.Empty(t, cache.values, "the dedup claim must not outlive the failed attempt")
 }
 
 func TestConnectorTaskService_Complete_HappyPath(t *testing.T) {
@@ -54,7 +129,7 @@ func TestConnectorTaskService_Complete_HappyPath(t *testing.T) {
 	temporal := &fakeTemporalClient{}
 	svc := newConnectorTaskService(task, inst, temporal, newFakeCacheStore())
 
-	err := svc.Complete(context.Background(), task.TenantID, task.ID, map[string]any{"resultUrl": "s3://x", "ignored": "y"})
+	err := svc.Complete(context.Background(), task.TenantID, task.ID, testConnectorActorID, map[string]any{"resultUrl": "s3://x", "ignored": "y"})
 	require.NoError(t, err)
 
 	require.Len(t, temporal.signals, 1)
@@ -87,7 +162,7 @@ func TestConnectorTaskService_Complete_NoOutputMapping_PassesThrough(t *testing.
 	temporal := &fakeTemporalClient{}
 	svc := newConnectorTaskService(task, inst, temporal, newFakeCacheStore())
 
-	err := svc.Complete(context.Background(), task.TenantID, task.ID, map[string]any{"status": 200})
+	err := svc.Complete(context.Background(), task.TenantID, task.ID, testConnectorActorID, map[string]any{"status": 200})
 	require.NoError(t, err)
 
 	b, err := json.Marshal(temporal.signals[0].Payload)
@@ -103,7 +178,7 @@ func TestConnectorTaskService_Complete_TaskNotFound(t *testing.T) {
 	t.Parallel()
 
 	svc := newConnectorTaskService(nil, nil, &fakeTemporalClient{}, newFakeCacheStore())
-	err := svc.Complete(context.Background(), uuid.New(), uuid.New(), nil)
+	err := svc.Complete(context.Background(), uuid.New(), uuid.New(), testConnectorActorID, nil)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, port.ErrTaskNotFound))
 }
@@ -114,7 +189,7 @@ func TestConnectorTaskService_Complete_NotConnectorTyped(t *testing.T) {
 	task := &domain.Task{ID: uuid.New(), TenantID: uuid.New(), Status: domain.TaskStatusReady}
 	svc := newConnectorTaskService(task, nil, &fakeTemporalClient{}, newFakeCacheStore())
 
-	err := svc.Complete(context.Background(), task.TenantID, task.ID, nil)
+	err := svc.Complete(context.Background(), task.TenantID, task.ID, testConnectorActorID, nil)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, port.ErrTaskNotConnectorTyped))
 }
@@ -126,7 +201,7 @@ func TestConnectorTaskService_Complete_AlreadyTerminal_IsNoOp(t *testing.T) {
 	temporal := &fakeTemporalClient{}
 	svc := newConnectorTaskService(task, &domain.Instance{ID: task.WorkflowInstanceID}, temporal, newFakeCacheStore())
 
-	err := svc.Complete(context.Background(), task.TenantID, task.ID, map[string]any{"x": 1})
+	err := svc.Complete(context.Background(), task.TenantID, task.ID, testConnectorActorID, map[string]any{"x": 1})
 	require.NoError(t, err)
 	assert.Empty(t, temporal.signals)
 }
@@ -140,12 +215,12 @@ func TestConnectorTaskService_Complete_DedupPreventsSecondSignal(t *testing.T) {
 	cache := newFakeCacheStore()
 	svc := newConnectorTaskService(task, inst, temporal, cache)
 
-	require.NoError(t, svc.Complete(context.Background(), task.TenantID, task.ID, map[string]any{"x": 1}))
+	require.NoError(t, svc.Complete(context.Background(), task.TenantID, task.ID, testConnectorActorID, map[string]any{"x": 1}))
 	// Simulate a Stream-redelivery-driven retry arriving before the DB write
 	// that would flip task.Status to COMPLETED has committed — task is still
 	// READY in this fake, so only the SETNX dedup guard can prevent a second
 	// signal.
-	require.NoError(t, svc.Complete(context.Background(), task.TenantID, task.ID, map[string]any{"x": 1}))
+	require.NoError(t, svc.Complete(context.Background(), task.TenantID, task.ID, testConnectorActorID, map[string]any{"x": 1}))
 
 	assert.Len(t, temporal.signals, 1)
 }
@@ -161,14 +236,14 @@ func TestConnectorTaskService_Complete_SignalFails_ReleasesReservation(t *testin
 	cache := newFakeCacheStore()
 	svc := newConnectorTaskService(task, inst, temporal, cache)
 
-	err := svc.Complete(context.Background(), task.TenantID, task.ID, map[string]any{"x": 1})
+	err := svc.Complete(context.Background(), task.TenantID, task.ID, testConnectorActorID, map[string]any{"x": 1})
 	require.Error(t, err)
 	assert.Empty(t, cache.values, "the dedup key must be released after a failed signal, not left standing for the full TTL")
 
 	// A retry after the transient failure clears must actually re-signal, not
 	// see a stale claim and silently no-op.
 	temporal.signalFunc = nil
-	require.NoError(t, svc.Complete(context.Background(), task.TenantID, task.ID, map[string]any{"x": 1}))
+	require.NoError(t, svc.Complete(context.Background(), task.TenantID, task.ID, testConnectorActorID, map[string]any{"x": 1}))
 	assert.Len(t, temporal.signals, 2, "the retry must re-attempt the signal, not be swallowed by a stale dedup claim")
 }
 
@@ -183,12 +258,12 @@ func TestConnectorTaskService_Fail_SignalFails_ReleasesReservation(t *testing.T)
 	cache := newFakeCacheStore()
 	svc := newConnectorTaskService(task, inst, temporal, cache)
 
-	err := svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error")
+	err := svc.Fail(context.Background(), task.TenantID, task.ID, testConnectorActorID, "upstream_error")
 	require.Error(t, err)
 	assert.Empty(t, cache.values, "the dedup key must be released after a failed signal, not left standing for the full TTL")
 
 	temporal.signalFunc = nil
-	require.NoError(t, svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error"))
+	require.NoError(t, svc.Fail(context.Background(), task.TenantID, task.ID, testConnectorActorID, "upstream_error"))
 	assert.Len(t, temporal.signals, 2, "the retry must re-attempt the signal, not be swallowed by a stale dedup claim")
 }
 
@@ -200,7 +275,7 @@ func TestConnectorTaskService_Fail_HappyPath(t *testing.T) {
 	temporal := &fakeTemporalClient{}
 	svc := newConnectorTaskService(task, inst, temporal, newFakeCacheStore())
 
-	err := svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error")
+	err := svc.Fail(context.Background(), task.TenantID, task.ID, testConnectorActorID, "upstream_error")
 	require.NoError(t, err)
 
 	require.Len(t, temporal.signals, 1)
@@ -224,7 +299,7 @@ func TestConnectorTaskService_Fail_AlreadyTerminal_IsNoOp(t *testing.T) {
 	temporal := &fakeTemporalClient{}
 	svc := newConnectorTaskService(task, &domain.Instance{ID: task.WorkflowInstanceID}, temporal, newFakeCacheStore())
 
-	err := svc.Fail(context.Background(), task.TenantID, task.ID, "timeout")
+	err := svc.Fail(context.Background(), task.TenantID, task.ID, testConnectorActorID, "timeout")
 	require.NoError(t, err)
 	assert.Empty(t, temporal.signals)
 }
