@@ -213,11 +213,12 @@ func e2eBuildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, valkey
 // e2eTaskDetail is a narrow view of GET /instances/:id's response — just
 // enough to drive a connector task through the Valkey Stream by hand.
 type e2eTaskDetail struct {
-	ID                 uuid.UUID `json:"id"`
-	WorkflowInstanceID uuid.UUID `json:"workflow_instance_id"`
-	NodeKey            string    `json:"node_key"`
-	DepartmentID       uuid.UUID `json:"department_id"`
-	Status             string    `json:"status"`
+	ID                 uuid.UUID  `json:"id"`
+	WorkflowInstanceID uuid.UUID  `json:"workflow_instance_id"`
+	NodeKey            string     `json:"node_key"`
+	DepartmentID       uuid.UUID  `json:"department_id"`
+	Status             string     `json:"status"`
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`
 }
 
 type e2eInstanceDetail struct {
@@ -437,9 +438,22 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 	// event onto the endpoint that pushes onto the real Valkey Stream.
 	e2ePostWorkflowTaskCreated(t, httpClient, execSrv.URL, tenantID, task, map[string]any{"endpointAlias": "echo"})
 
-	e2ePollInstance(t, httpClient, execSrv.URL, tenantID, instanceID, func(d e2eInstanceDetail) bool {
+	final := e2ePollInstance(t, httpClient, execSrv.URL, tenantID, instanceID, func(d e2eInstanceDetail) bool {
 		return d.Status == "COMPLETED"
 	})
+
+	// The task's own status, not just the instance's: the allDone gate was
+	// computed and discarded for the whole life of this service, so no task
+	// ever left READY. Asserting the instance alone never noticed.
+	if len(final.Tasks) == 0 {
+		t.Fatal("completed instance returned no tasks")
+	}
+	if got := final.Tasks[0].Status; got != "COMPLETED" {
+		t.Errorf("connector task status = %q, want COMPLETED", got)
+	}
+	if final.Tasks[0].CompletedAt == nil {
+		t.Error("connector task completed_at is unset on a COMPLETED task")
+	}
 
 	if gotToken != e2eInternalToken {
 		t.Errorf("rest-call dispatch's x-internal-token = %q, want %q", gotToken, e2eInternalToken)
