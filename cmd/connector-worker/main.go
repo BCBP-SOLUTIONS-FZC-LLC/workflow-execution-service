@@ -130,9 +130,7 @@ func checkRequiredConfig(cfg *config.Config) error {
 		return fmt.Errorf("CONNECTOR_STREAM_DEAD_LETTER_KEY is required and must differ from CONNECTOR_STREAM_KEY")
 	case cfg.ConnectorStreamClaimMinIdle < 3*time.Second:
 		return fmt.Errorf("CONNECTOR_STREAM_CLAIM_MIN_IDLE must be at least 3s, the heartbeat runs three times within it")
-	// Reclaim runs every claim-min-idle, so an abandoned entry's redeliveries
-	// land up to twice that apart; the recorded outcome must outlive them all
-	// (workflow_connectors.md §6.5 step 0).
+	// Reclaim runs every claim-min-idle, so redeliveries land up to twice that apart.
 	case 2*time.Duration(cfg.ConnectorStreamMaxDeliveries)*cfg.ConnectorStreamClaimMinIdle >= outcomeTTL:
 		return fmt.Errorf("2 x CONNECTOR_STREAM_MAX_DELIVERIES x CONNECTOR_STREAM_CLAIM_MIN_IDLE must stay under the %s outcome record", outcomeTTL)
 	}

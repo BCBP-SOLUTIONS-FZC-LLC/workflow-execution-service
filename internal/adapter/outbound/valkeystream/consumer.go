@@ -12,10 +12,9 @@ import (
 
 // Consumer wraps the Valkey Stream consumer-group primitives
 // cmd/connector-worker's dispatch loop needs: EnsureGroup once at startup,
-// then ReadGroup/Ack/ReclaimStale in its main loop. connector-worker only
-// ever XACKs an entry once dispatch has genuinely completed (success or
-// fail-signal sent) — an un-acked entry becomes reclaimable by another
-// consumer via ReclaimStale.
+// then ReadGroup/Ack/ReclaimStale/Touch in its main loop. An entry is acked
+// once its outcome has been reported, or when it is dead-lettered; until then
+// it stays pending, and reclaimable once its consumer stops touching it.
 type Consumer struct {
 	client redis.Cmdable
 }
@@ -54,9 +53,7 @@ func (c *Consumer) ReadGroup(ctx context.Context, streamKey, group, consumerName
 	return entries, nil
 }
 
-// Ack acknowledges entryID on streamKey/group — only call this once dispatch
-// has genuinely completed (success, or a fail-signal was sent); an unacked
-// entry stays reclaimable.
+// Ack acknowledges entryID on streamKey/group.
 func (c *Consumer) Ack(ctx context.Context, streamKey, group, entryID string) error {
 	if err := c.client.XAck(ctx, streamKey, group, entryID).Err(); err != nil {
 		return fmt.Errorf("valkeystream ack: %w", err)

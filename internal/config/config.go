@@ -121,8 +121,8 @@ type Config struct {
 	ConnectorStreamConsumerName string
 	ConnectorStreamBlockTimeout time.Duration
 	// ConnectorStreamClaimMinIdle is XAUTOCLAIM's eligibility threshold —
-	// how long an entry must sit unacked before another consumer may
-	// reclaim it (LLD workflow_connectors.md §6.5 step 0 / Decision #10).
+	// how long an entry must go untouched by its consumer before another
+	// may reclaim it (LLD workflow_connectors.md §6.5 step 0).
 	ConnectorStreamClaimMinIdle time.Duration
 	ConnectorStreamBatchSize    int64
 	// An entry delivered more often than this is moved to

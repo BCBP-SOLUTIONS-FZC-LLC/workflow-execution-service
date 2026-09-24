@@ -3102,12 +3102,16 @@ paths:
           application/json:
             schema:
               type: object
-              required: [tenant_id]
+              required: [tenant_id, actor_user_id]
               properties:
                 tenant_id:
                   type: string
                   format: uuid
                   description: Tenant UUID the task belongs to.
+                actor_user_id:
+                  type: string
+                  format: uuid
+                  description: The tenant's platform-automation principal, retained as the actor on the task's assignment row and named on the emitted completion event.
                 output:
                   type: object
                   additionalProperties: true
@@ -3157,12 +3161,16 @@ paths:
           application/json:
             schema:
               type: object
-              required: [tenant_id, error_class]
+              required: [tenant_id, actor_user_id, error_class]
               properties:
                 tenant_id:
                   type: string
                   format: uuid
                   description: Tenant UUID the task belongs to.
+                actor_user_id:
+                  type: string
+                  format: uuid
+                  description: The tenant's platform-automation principal, retained as the actor on the task's assignment row and named on the emitted completion event.
                 error_class:
                   type: string
                   description: Connector-defined error classification, carried onto the stage-fail signal.

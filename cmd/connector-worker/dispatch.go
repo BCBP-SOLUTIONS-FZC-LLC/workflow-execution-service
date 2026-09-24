@@ -260,14 +260,14 @@ func ackEntry(ctx context.Context, d *deps, entryID string, wlog port.Logger) {
 	}
 }
 
-var errSecretRefNotOwned = errors.New("secret reference is not the task's own credential path")
+var errSecretRefInvalid = errors.New("secret reference is not the task's own credential path")
 
 // resolveSecrets substitutes every registry.Field.IsSecretRef() input's
 // value (an OpenBao path) with its real credential, immediately before
 // Execute() is called — Connector implementations never see a path, only
 // the resolved value (LLD §6.2 Decision #5). The worker's OpenBao token spans
-// every tenant, so a path other than the job's own is refused unread
-// (workflow_connectors.md §6.2).
+// every tenant, so every reference is checked against the job's own path
+// before any is read (workflow_connectors.md §6.2).
 func resolveSecrets(ctx context.Context, reader *openbao.Reader, job dispatchJob) (map[string]any, error) {
 	def, ok := registry.All()[job.connectorType]
 	if !ok {
@@ -277,22 +277,31 @@ func resolveSecrets(ctx context.Context, reader *openbao.Reader, job dispatchJob
 	for k, v := range job.resolvedInputs {
 		out[k] = v
 	}
+	var refs []string
 	for _, field := range def.Inputs {
 		if !field.IsSecretRef() {
 			continue
 		}
-		path, ok := out[field.Name].(string)
-		if !ok || path == "" {
-			continue
+		switch v := out[field.Name].(type) {
+		case nil:
+		case string:
+			if v == "" {
+				continue
+			}
+			if v != ownSecretPath(job, field.Name) {
+				return nil, fmt.Errorf("resolve secret %q: %w", field.Name, errSecretRefInvalid)
+			}
+			refs = append(refs, field.Name)
+		default:
+			return nil, fmt.Errorf("resolve secret %q: %w", field.Name, errSecretRefInvalid)
 		}
-		if path != ownSecretPath(job, field.Name) {
-			return nil, fmt.Errorf("resolve secret %q: %w", field.Name, errSecretRefNotOwned)
-		}
-		value, err := reader.Read(ctx, path, field.Name)
+	}
+	for _, name := range refs {
+		value, err := reader.Read(ctx, out[name].(string), name)
 		if err != nil {
-			return nil, fmt.Errorf("resolve secret %q: %w", field.Name, err)
+			return nil, fmt.Errorf("resolve secret %q: %w", name, err)
 		}
-		out[field.Name] = value
+		out[name] = value
 	}
 	return out, nil
 }
@@ -366,7 +375,7 @@ func classifyError(err error) string {
 		return "secret_not_found"
 	case errors.Is(err, openbao.ErrUnauthorized):
 		return "secret_unauthorized"
-	case errors.Is(err, errSecretRefNotOwned), errors.Is(err, openbao.ErrInvalidPath):
+	case errors.Is(err, errSecretRefInvalid), errors.Is(err, openbao.ErrInvalidPath):
 		return "secret_ref_invalid"
 	case errors.Is(err, connectors.ErrMissingInternalAuth):
 		return "missing_internal_auth"

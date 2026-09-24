@@ -62,5 +62,5 @@ func TestShutdownDrain_CoversTheSlowestRunAndItsCallback(t *testing.T) {
 	cfg := validConnectorWorkerConfig()
 	cfg.ConnectorCompletionTimeout = 5 * time.Second
 
-	assert.Equal(t, 60*time.Second+5*time.Second+executionLeaseMargin, shutdownDrain(cfg))
+	assert.Equal(t, 60*time.Second+5*time.Second+drainMargin, shutdownDrain(cfg))
 }

@@ -84,12 +84,12 @@ func heartbeatOnce(ctx context.Context, d *deps, wlog port.Logger) {
 	}
 }
 
-// shutdownDrain is how long shutdown waits for started runs: the slowest
-// connector type's timeout, its callback, and a margin.
+const drainMargin = 10 * time.Second
+
 func shutdownDrain(cfg *config.Config) time.Duration {
 	longest := max(
 		cfg.ConnectorTimeoutStorage, cfg.ConnectorTimeoutSendEmail, cfg.ConnectorTimeoutDocumentExtract,
 		cfg.ConnectorTimeoutRestCall, cfg.ConnectorTimeoutSQLQuery, cfg.ConnectorTimeoutChatNotify,
 	)
-	return longest + cfg.ConnectorCompletionTimeout + executionLeaseMargin
+	return longest + cfg.ConnectorCompletionTimeout + drainMargin
 }

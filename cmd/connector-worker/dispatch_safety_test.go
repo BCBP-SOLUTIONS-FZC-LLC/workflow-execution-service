@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -348,7 +349,19 @@ func TestDispatch_RedeliveredToAnotherConsumerWhileRunning_NeitherRunsNorAcks(t 
 	dispatchEntry(context.Background(), newConsumerDeps(first), &running, entry, noopLogger{})
 	<-conn.started
 
-	dispatchOnce(newConsumerDeps(second), entry)
+	secondDone := make(chan struct{})
+	go func() {
+		dispatchOnce(newConsumerDeps(second), entry)
+		close(secondDone)
+	}()
+	select {
+	case <-conn.started:
+		close(conn.release)
+		<-secondDone
+		running.Wait()
+		t.Fatal("the other consumer started a second run while the first was still going")
+	case <-secondDone:
+	}
 	assert.Zero(t, second.ackCount(), "the other consumer acked an entry whose run has not reported")
 
 	close(conn.release)
@@ -510,19 +523,24 @@ func TestDispatchBatch_EntriesQueuedForAPoolSlotAreTouched(t *testing.T) {
 		}},
 		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", map[uuid.UUID]uuid.UUID{tenantID: uuid.New()}, time.Second),
 	}
-	first, queued := connectorEntry(tenantID, uuid.New(), conn.typ), connectorEntry(tenantID, uuid.New(), conn.typ)
-	first.ID, queued.ID = "1-0", "2-0"
+	// Three entries: one running, one blocked on the pool slot, and one the
+	// batch has not reached yet.
+	batch := make([]valkeystream.Entry, 3)
+	for i := range batch {
+		batch[i] = connectorEntry(tenantID, uuid.New(), conn.typ)
+		batch[i].ID = fmt.Sprintf("%d-0", i+1)
+	}
 
 	var wg sync.WaitGroup
 	batchDone := make(chan struct{})
 	go func() {
-		dispatchBatch(context.Background(), d, &wg, []valkeystream.Entry{first, queued}, noopLogger{})
+		dispatchBatch(context.Background(), d, &wg, batch, noopLogger{})
 		close(batchDone)
 	}()
 	<-conn.started
 	heartbeatOnce(context.Background(), d, noopLogger{})
 
-	assert.ElementsMatch(t, []string{"1-0", "2-0"}, consumer.touchedIDs())
+	assert.ElementsMatch(t, []string{"1-0", "2-0", "3-0"}, consumer.touchedIDs())
 	close(conn.release)
 	<-batchDone
 	wg.Wait()
@@ -613,4 +631,34 @@ func TestHeartbeat_StopsTouchingARunPastItsLease(t *testing.T) {
 	assert.Empty(t, consumer.touchedIDs(), "a run past its lease was still touched")
 	close(conn.release)
 	wg.Wait()
+}
+
+// A task naming its own credential in one field and a foreign or malformed
+// value in another is refused before either is read.
+func TestDispatch_OneBadSecretRef_RefusesBeforeReadingAny(t *testing.T) {
+	cases := map[string]func(tenant uuid.UUID) string{
+		"foreign path":     func(uuid.UUID) string { return `"connectors/` + uuid.NewString() + `/storage/secretKey"` },
+		"non-string value": func(uuid.UUID) string { return `{"path":"x"}` },
+	}
+	for name, secretKey := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newSecretRefFixture(t)
+			own := "connectors/" + f.tenantID.String() + "/storage/accessKey"
+
+			dispatchOnce(f.d, valkeystream.Entry{ID: "1-0", Fields: map[string]string{
+				"tenant_id": f.tenantID.String(), "task_id": uuid.NewString(),
+				"department_id": uuid.NewString(), "connector_type": registry.TypeStorage,
+				"resolved_inputs": `{"accessKey":"` + own + `","secretKey":` + secretKey(f.tenantID) + `}`,
+			}})
+
+			assert.Equal(t, int32(0), f.reads.Load(), "a credential was read before the bad reference was refused")
+			assert.Equal(t, int32(0), f.conn.calls.Load(), "connector ran")
+			select {
+			case class := <-f.failClass:
+				assert.Equal(t, "secret_ref_invalid", class)
+			default:
+				t.Fatal("the task was not failed")
+			}
+		})
+	}
 }

@@ -28,7 +28,7 @@ func TestClassifyError(t *testing.T) {
 	for want, err := range cases {
 		assert.Equal(t, want, classifyError(fmt.Errorf("wrapped: %w", err)), want)
 	}
-	assert.Equal(t, "secret_ref_invalid", classifyError(errSecretRefNotOwned))
+	assert.Equal(t, "secret_ref_invalid", classifyError(errSecretRefInvalid))
 	assert.Equal(t, "secret_ref_invalid", classifyError(openbao.ErrInvalidPath))
 }
 
