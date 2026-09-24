@@ -20,4 +20,5 @@ message GetCompiledWorkflowResponse {
   string status = 4;
   bool   is_valid = 5;
   string compiled_plan_json = 6;
+  int32  dsl_schema_version = 7;
 }
