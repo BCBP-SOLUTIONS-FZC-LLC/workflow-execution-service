@@ -107,7 +107,7 @@ Run `make help` for the full target list.
 | `make migrate` | Apply schema migrations (outbox + domain) |
 | `make generate` | Regenerate proto (buf) + sqlc code |
 | `make build` | Compile `cmd/server`, `cmd/worker`, and `cmd/connector-worker` |
-| `make test` | Unit tests — `internal/...`, `test/unit/...`, `test/workflow/...` — race detector, coverage |
+| `make test` | Unit tests — `internal/...`, `cmd/...`, `test/unit/...`, `test/workflow/...` — race detector, coverage |
 | `make test-integration` | Integration tests (testcontainers, real Postgres) |
 | `make test-ci` | Unit + integration, merged coverage — what CI runs |
 | `make lint` / `make fix` | golangci-lint (read-only / with `--fix`) |
