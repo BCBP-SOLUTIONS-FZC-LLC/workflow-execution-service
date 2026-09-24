@@ -7,8 +7,10 @@
 // rather than growing that one.
 package valkeystream
 
-// Entry is one Stream entry: the ID needed for Ack, and its field map.
+// Entry is one Stream entry: the ID needed for Ack, its field map, and how
+// many times the group has delivered it, this delivery included.
 type Entry struct {
-	ID     string
-	Fields map[string]string
+	ID         string
+	Fields     map[string]string
+	Deliveries int64
 }

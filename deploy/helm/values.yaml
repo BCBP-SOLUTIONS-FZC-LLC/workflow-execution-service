@@ -74,6 +74,11 @@ connectorWorker:
   enabled: false
   replicas: 2
   healthPort: 8081
+  # Shutdown lets every started connector run finish and report, waiting up to
+  # the longest CONNECTOR_TIMEOUT_* plus CONNECTOR_COMPLETION_TIMEOUT plus 10s
+  # (75s with the defaults), then gives the health server 5s. Keep this above
+  # that total.
+  terminationGracePeriodSeconds: 90
   streamKey: connector-tasks
   streamGroup: connector-worker
   executionServiceInternalAddr: http://workflow-execution-service-api:8080

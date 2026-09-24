@@ -21,6 +21,14 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/registry"
 )
 
+type streamConsumer interface {
+	ReadGroup(ctx context.Context, streamKey, group, consumerName string, count int64, block time.Duration) ([]valkeystream.Entry, error)
+	Ack(ctx context.Context, streamKey, group, entryID string) error
+	ReclaimStale(ctx context.Context, streamKey, group, consumerName string, minIdle time.Duration, count int64) ([]valkeystream.Entry, error)
+	DeadLetter(ctx context.Context, streamKey, group, deadLetterKey string, entry valkeystream.Entry, reason string) error
+	Touch(ctx context.Context, streamKey, group, consumerName string, ids []string) error
+}
+
 // deps is cmd/connector-worker's own held composition-root state. There is
 // no shared port.XxxDeps struct to build against here (unlike cmd/worker's
 // outboundtemporal.Deps) — this binary's dependency shape (Stream consumer,
@@ -28,7 +36,7 @@ import (
 // no Temporal Activity counterpart.
 type deps struct {
 	valkeyClient *redis.Client
-	consumer     *valkeystream.Consumer
+	consumer     streamConsumer
 	dedup        port.CacheStore
 	openbao      *openbao.Reader
 	aliases      aliasconfig.Config
@@ -41,6 +49,11 @@ type deps struct {
 	blockTimeout time.Duration
 	claimMinIdle time.Duration
 	batchSize    int64
+
+	maxDeliveries int64
+	deadLetterKey string
+	inflight      inflightSet
+	now           func() time.Time
 }
 
 // buildDeps is cmd/connector-worker's composition root (mirrors cmd/worker's
@@ -129,6 +142,9 @@ func buildDeps(cfg *config.Config) (*deps, func(), error) {
 		blockTimeout: cfg.ConnectorStreamBlockTimeout,
 		claimMinIdle: cfg.ConnectorStreamClaimMinIdle,
 		batchSize:    cfg.ConnectorStreamBatchSize,
+
+		maxDeliveries: cfg.ConnectorStreamMaxDeliveries,
+		deadLetterKey: cfg.ConnectorStreamDeadLetterKey,
 	}
 
 	cleanup := func() { _ = valkeyClient.Close() }
@@ -146,6 +162,13 @@ type typePool struct {
 
 	mu        sync.RWMutex
 	connector connectors.Connector
+}
+
+func (d *deps) clock() time.Time {
+	if d.now == nil {
+		return time.Now()
+	}
+	return d.now()
 }
 
 func (p *typePool) currentConnector() connectors.Connector {

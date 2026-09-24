@@ -55,6 +55,12 @@ func TestConsumer_ReclaimStale_ConnectionError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestConsumer_DeadLetter_ConnectionError(t *testing.T) {
+	consumer := valkeystream.NewConsumer(newUnreachableClient())
+	err := consumer.DeadLetter(context.Background(), "stream", "group", "stream-dead", valkeystream.Entry{ID: "1-0"}, "max_deliveries_exceeded")
+	assert.Error(t, err)
+}
+
 func TestEventPublisher_PublishTaskCreated_ConnectionError(t *testing.T) {
 	pub := valkeystream.NewEventPublisher(valkeystream.NewProducer(newUnreachableClient()), "stream")
 	err := pub.PublishTaskCreated(context.Background(), port.ConnectorTaskCreatedEvent{EventID: uuid.New()})

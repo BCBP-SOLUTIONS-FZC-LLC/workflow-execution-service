@@ -125,6 +125,10 @@ type Config struct {
 	// reclaim it (LLD workflow_connectors.md §6.5 step 0 / Decision #10).
 	ConnectorStreamClaimMinIdle time.Duration
 	ConnectorStreamBatchSize    int64
+	// An entry delivered more often than this is moved to
+	// ConnectorStreamDeadLetterKey instead of being dispatched again.
+	ConnectorStreamMaxDeliveries int64
+	ConnectorStreamDeadLetterKey string
 
 	// OpenBao KV-v2 read side — cmd/connector-worker only. Deliberately NOT
 	// validated below (see validate()'s own doc comment on why
@@ -270,12 +274,14 @@ func Load() (*Config, error) {
 		GlueRegistryName:   getEnvOrDefault("GLUE_REGISTRY_NAME", ""),
 		GlueSchemaCacheTTL: envDuration("GLUE_SCHEMA_CACHE_TTL", 5*time.Minute),
 
-		ConnectorStreamKey:          getEnvOrDefault("CONNECTOR_STREAM_KEY", "connector-tasks"),
-		ConnectorStreamGroup:        getEnvOrDefault("CONNECTOR_STREAM_GROUP", "connector-worker"),
-		ConnectorStreamConsumerName: getEnvOrDefault("CONNECTOR_STREAM_CONSUMER_NAME", ""),
-		ConnectorStreamBlockTimeout: envDuration("CONNECTOR_STREAM_BLOCK_TIMEOUT", 5*time.Second),
-		ConnectorStreamClaimMinIdle: envDuration("CONNECTOR_STREAM_CLAIM_MIN_IDLE", 30*time.Second),
-		ConnectorStreamBatchSize:    int64(envInt("CONNECTOR_STREAM_BATCH_SIZE", 10)),
+		ConnectorStreamKey:           getEnvOrDefault("CONNECTOR_STREAM_KEY", "connector-tasks"),
+		ConnectorStreamGroup:         getEnvOrDefault("CONNECTOR_STREAM_GROUP", "connector-worker"),
+		ConnectorStreamConsumerName:  getEnvOrDefault("CONNECTOR_STREAM_CONSUMER_NAME", ""),
+		ConnectorStreamBlockTimeout:  envDuration("CONNECTOR_STREAM_BLOCK_TIMEOUT", 5*time.Second),
+		ConnectorStreamClaimMinIdle:  envDuration("CONNECTOR_STREAM_CLAIM_MIN_IDLE", 30*time.Second),
+		ConnectorStreamBatchSize:     int64(envInt("CONNECTOR_STREAM_BATCH_SIZE", 10)),
+		ConnectorStreamMaxDeliveries: int64(envInt("CONNECTOR_STREAM_MAX_DELIVERIES", 10)),
+		ConnectorStreamDeadLetterKey: getEnvOrDefault("CONNECTOR_STREAM_DEAD_LETTER_KEY", "connector-tasks-dead"),
 
 		OpenBaoAddr:    getEnvOrDefault("OPENBAO_ADDR", ""),
 		OpenBaoToken:   getEnvOrDefault("OPENBAO_TOKEN", ""),

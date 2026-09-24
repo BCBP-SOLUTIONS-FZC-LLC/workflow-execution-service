@@ -47,7 +47,11 @@ func (c *Consumer) ReadGroup(ctx context.Context, streamKey, group, consumerName
 		}
 		return nil, fmt.Errorf("valkeystream read group: %w", err)
 	}
-	return toEntries(streams), nil
+	entries := toEntries(streams)
+	for i := range entries {
+		entries[i].Deliveries = 1
+	}
+	return entries, nil
 }
 
 // Ack acknowledges entryID on streamKey/group — only call this once dispatch
@@ -71,7 +75,50 @@ func (c *Consumer) ReclaimStale(ctx context.Context, streamKey, group, consumerN
 	if err != nil {
 		return nil, fmt.Errorf("valkeystream reclaim stale: %w", err)
 	}
-	return toEntriesFromMessages(messages), nil
+	// The entries are claimed and counted already, so a count that can't be
+	// read leaves Deliveries at 0 rather than dropping them.
+	entries := toEntriesFromMessages(messages)
+	for i := range entries {
+		pending, err := c.client.XPendingExt(ctx, &redis.XPendingExtArgs{
+			Stream: streamKey, Group: group, Start: entries[i].ID, End: entries[i].ID, Count: 1,
+		}).Result()
+		if err == nil && len(pending) == 1 {
+			entries[i].Deliveries = pending[0].RetryCount
+		}
+	}
+	return entries, nil
+}
+
+// Touch resets the idle time of entries this consumer is still handling.
+// XCLAIM with JUSTID leaves the delivery count alone.
+func (c *Consumer) Touch(ctx context.Context, streamKey, group, consumerName string, ids []string) error {
+	err := c.client.XClaimJustID(ctx, &redis.XClaimArgs{
+		Stream: streamKey, Group: group, Consumer: consumerName, MinIdle: 0, Messages: ids,
+	}).Err()
+	if err != nil {
+		return fmt.Errorf("valkeystream touch: %w", err)
+	}
+	return nil
+}
+
+// DeadLetter copies entry onto deadLetterKey with the reason it was given
+// up on, then acks it on streamKey.
+func (c *Consumer) DeadLetter(ctx context.Context, streamKey, group, deadLetterKey string, entry Entry, reason string) error {
+	values := make(map[string]any, len(entry.Fields)+2)
+	for k, v := range entry.Fields {
+		values[k] = v
+	}
+	values["reason"] = reason
+	values["source_entry_id"] = entry.ID
+	_, err := c.client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.XAdd(ctx, &redis.XAddArgs{Stream: deadLetterKey, Values: values})
+		pipe.XAck(ctx, streamKey, group, entry.ID)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("valkeystream dead letter: %w", err)
+	}
+	return nil
 }
 
 func toEntries(streams []redis.XStream) []Entry {

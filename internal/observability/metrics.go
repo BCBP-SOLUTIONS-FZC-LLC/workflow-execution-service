@@ -52,6 +52,7 @@ var (
 	WorkerQueueLastPollTimestamp        *prometheus.GaugeVec
 	SLABreachesTotal                    *prometheus.CounterVec
 	DelegationScopeUnhandledTotal       *prometheus.CounterVec
+	ConnectorDispatchDeadLetteredTotal  *prometheus.CounterVec
 	OldestReadyTaskAgeSeconds           *prometheus.GaugeVec
 	UpstreamDependencyErrorsTotal       *prometheus.CounterVec
 
@@ -94,6 +95,11 @@ func register() {
 		Name: "delegation_scope_unhandled_total",
 		Help: "Delegations arriving with a scope this service has no case for, by scope. Still matched against subject_id.",
 	}, []string{"scope"})
+
+	ConnectorDispatchDeadLetteredTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "connector_dispatch_dead_lettered_total",
+		Help: "Connector stream entries moved to the dead-letter stream after exceeding their delivery cap, by connector_type.",
+	}, []string{"connector_type"})
 
 	DelegationRerouteDurationSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "delegation_reroute_duration_seconds",
@@ -198,6 +204,7 @@ func register() {
 		RecordVersionConflictTotal,
 		InternalEventsIngestTotal,
 		DelegationScopeUnhandledTotal,
+		ConnectorDispatchDeadLetteredTotal,
 		DelegationRerouteDurationSeconds,
 		TaskSignalDurationSeconds,
 		InstanceStartDurationSeconds,
