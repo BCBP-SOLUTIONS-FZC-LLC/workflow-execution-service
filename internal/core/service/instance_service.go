@@ -10,7 +10,6 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
 var _ port.InstanceService = (*InstanceService)(nil)
@@ -92,11 +91,11 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 		return nil, port.ErrVersionInvalid
 	}
 
-	var collab dsl.CompiledCollaboration
-	if err := json.Unmarshal([]byte(compiled.CompiledPlanJSON), &collab); err != nil {
-		return nil, fmt.Errorf("unmarshal compiled plan: %w", err)
+	collab, err := decodeCollaboration(compiled.CompiledPlanJSON)
+	if err != nil {
+		return nil, err
 	}
-	mainPlan := findPlan(&collab, collab.MainPlan)
+	mainPlan := findPlan(collab, collab.MainPlan)
 	if mainPlan == nil {
 		return nil, fmt.Errorf("main plan %q not found in compiled collaboration", collab.MainPlan)
 	}

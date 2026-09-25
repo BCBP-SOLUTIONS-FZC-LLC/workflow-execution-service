@@ -42,5 +42,16 @@ func (d *Deps) GetCompiledPlan(ctx context.Context, in port.GetCompiledPlanInput
 	if err := json.Unmarshal([]byte(cw.CompiledPlanJSON), &collab); err != nil {
 		return port.GetCompiledPlanOutput{}, nonRetryable("DefinitionServiceClientError", fmt.Errorf("unmarshal compiled plan: %w", err))
 	}
-	return port.GetCompiledPlanOutput{Collaboration: collab}, nil
+	// Expanded here, not in the workflow, so the recorded activity result is
+	// what replays: a later change to ExpandCalls never alters a running plan.
+	// Expansion follows the current schema; the workflow's schema check
+	// refuses or normalizes any other major as stored.
+	if collab.SchemaVersion != dsl.CurrentSchemaVersion {
+		return port.GetCompiledPlanOutput{Collaboration: collab}, nil
+	}
+	expanded, err := dsl.ExpandCalls(&collab, 0)
+	if err != nil {
+		return port.GetCompiledPlanOutput{}, nonRetryable("DefinitionServiceClientError", fmt.Errorf("expand compiled plan: %w", err))
+	}
+	return port.GetCompiledPlanOutput{Collaboration: *expanded}, nil
 }

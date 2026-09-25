@@ -24,3 +24,13 @@ const nodeVisitKeyChangeID = "node-visit-key-signal-buffer"
 // history recorded before the change has no such activity, so DefaultVersion
 // keeps the old sequence.
 const taskCompletedStatusChangeID = "task-completed-status"
+
+// isoTimerDurationChangeID gates reading a boundary timer's duration as an
+// ISO 8601 period (P5D) when it is not a Go duration. Before it, such a timer
+// was dropped with a warning, so an older history has no timer to replay.
+const isoTimerDurationChangeID = "iso-timer-duration"
+
+// boundaryEndsPathChangeID gates ending a path at an interrupting boundary
+// that has no target department, which is how a boundary leading straight to
+// an end event compiles. Before it, such a boundary failed the instance.
+const boundaryEndsPathChangeID = "boundary-no-target-ends-path"

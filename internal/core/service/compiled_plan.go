@@ -71,11 +71,11 @@ func (c *compiledPlanCache) mainPlan(ctx context.Context, tenantID, versionID uu
 	if err != nil {
 		return nil, err
 	}
-	var collab dsl.CompiledCollaboration
-	if err := json.Unmarshal([]byte(compiled.CompiledPlanJSON), &collab); err != nil {
-		return nil, fmt.Errorf("unmarshal compiled plan: %w", err)
+	collab, err := decodeCollaboration(compiled.CompiledPlanJSON)
+	if err != nil {
+		return nil, err
 	}
-	plan := findPlan(&collab, collab.MainPlan)
+	plan := findPlan(collab, collab.MainPlan)
 	if plan == nil {
 		return nil, fmt.Errorf("main plan %q not found in compiled collaboration", collab.MainPlan)
 	}
@@ -96,4 +96,23 @@ func requiredLevelForTask(plan *dsl.CompiledPlan, task *domain.Task) (string, bo
 		}
 	}
 	return "", false
+}
+
+// decodeCollaboration decodes a stored compiled plan with its calls expanded,
+// the shape every consumer reads: a module task exists only once expanded. A
+// plan of another schema major is returned as stored. One that cannot be
+// expanded is an invalid version, since nothing about it will change.
+func decodeCollaboration(planJSON string) (*dsl.CompiledCollaboration, error) {
+	var collab dsl.CompiledCollaboration
+	if err := json.Unmarshal([]byte(planJSON), &collab); err != nil {
+		return nil, fmt.Errorf("unmarshal compiled plan: %w", err)
+	}
+	if collab.SchemaVersion != dsl.CurrentSchemaVersion {
+		return &collab, nil
+	}
+	expanded, err := dsl.ExpandCalls(&collab, 0)
+	if err != nil {
+		return nil, fmt.Errorf("%w: expand compiled plan: %w", port.ErrVersionInvalid, err)
+	}
+	return expanded, nil
 }

@@ -216,6 +216,11 @@ func (in *interpreter) handleParallelForceBack(ctx wf.Context, plan *dsl.Compile
 	if preFork != "" {
 		_, _, err = in.runDepartment(ctx, plan, deptFromNodeKey(preFork))
 	}
+	// The fork has already happened: a boundary ending the re-run's path
+	// leaves the branches to resume and the join to proceed.
+	if errors.Is(err, errPathEnded) {
+		err = nil
+	}
 	for _, d := range deptIDs {
 		in.resumeDept(ctx, d)
 	}
@@ -281,6 +286,11 @@ func (in *interpreter) respawnBranch(ctx wf.Context, plan *dsl.CompiledPlan, fb 
 	}
 
 	node, _, err := in.runDepartmentFrom(ctx, plan, resumeDept, stageIndexAfter(dept, fb.LastCompletedNode))
+	// A guard: LastCompletedNode only ever names a completed department's
+	// last stage today, so this resume runs no stage that could end a path.
+	if errors.Is(err, errPathEnded) {
+		return node, nil
+	}
 	if err != nil {
 		return node, err
 	}

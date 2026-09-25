@@ -52,12 +52,17 @@ func (in *interpreter) runSubWorkflow(ctx wf.Context, plan *dsl.CompiledPlan, sw
 
 	if fired.Interrupting {
 		cancelChild()
+		if endsPath(ctx, fired) {
+			return "", errPathEnded
+		}
 		node, _, err := in.runDepartment(ctx, plan, fired.TargetDept)
 		return node, err
 	}
 
 	// Non-interrupting: both continue independently (LLD §2.2 step 5).
-	in.spawnNonInterruptingTarget(ctx, plan, fired.TargetDept)
+	if !endsPath(ctx, fired) {
+		in.spawnNonInterruptingTarget(ctx, plan, fired.TargetDept)
+	}
 	var v struct{}
 	doneCh.Receive(ctx, &v)
 	return lastNode, runErr

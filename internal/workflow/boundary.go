@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"errors"
 	"time"
 
 	wf "go.temporal.io/sdk/workflow"
@@ -8,6 +9,19 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
+
+// errPathEnded means an interrupting boundary with no target department
+// fired: its path leads to an end event, so the steps of the plan level it
+// belongs to stop there. runSteps turns it into a normal finish, so a call's
+// own flow ends and its caller carries on, and a top-level path ends the
+// instance.
+var errPathEnded = errors.New("workflow: path ended at a boundary")
+
+// endsPath reports whether f ends its path rather than moving to a
+// department.
+func endsPath(ctx wf.Context, f *boundaryFire) bool {
+	return getVersion(ctx, boundaryEndsPathChangeID) != wf.DefaultVersion && f.TargetDept == ""
+}
 
 type boundaryFire struct {
 	Kind         string // "timer", "message", or "error"
@@ -17,10 +31,14 @@ type boundaryFire struct {
 }
 
 func addTimerCase(ctx wf.Context, sel wf.Selector, duration string, interrupting bool, targetDept string, onFire func(boundaryFire)) (cancel func()) {
+	iso := getVersion(ctx, isoTimerDurationChangeID) != wf.DefaultVersion
 	if duration == "" {
 		return func() { /* no boundary was registered, nothing to cancel */ }
 	}
 	dur, err := time.ParseDuration(duration)
+	if err != nil && iso {
+		dur, err = parseISODuration(duration)
+	}
 	if err != nil {
 		wf.GetLogger(ctx).Warn("boundary timer has an unparseable duration, disabling it", "duration", duration, "error", err)
 		return func() { /* no boundary was registered, nothing to cancel */ }

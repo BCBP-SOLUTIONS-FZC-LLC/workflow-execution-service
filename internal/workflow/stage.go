@@ -139,10 +139,15 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 			_ = updateTaskStatus(ctx, port.UpdateTaskStatusInput{
 				TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusSuperseded,
 			})
+			if endsPath(ctx, fired) {
+				return "", "", errPathEnded
+			}
 			return in.runDepartment(ctx, plan, fired.TargetDept)
 		}
 		// Non-interrupting: the host keeps running (we keep waiting below).
-		in.spawnNonInterruptingTarget(ctx, plan, fired.TargetDept)
+		if !endsPath(ctx, fired) {
+			in.spawnNonInterruptingTarget(ctx, plan, fired.TargetDept)
+		}
 		resolveCh.Receive(ctx, &sig)
 	} else {
 		cancelBoundaries()

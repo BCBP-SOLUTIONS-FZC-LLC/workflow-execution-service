@@ -19,6 +19,8 @@ import (
 	outboundgrpc "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/grpc"
 	outboundtemporal "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl/dsltest"
 )
 
 type fakePlanServer struct {
@@ -136,4 +138,69 @@ func TestGetCompiledPlan_MalformedCompiledPlanJSON_IsNonRetryable(t *testing.T) 
 	var appErr *temporal.ApplicationError
 	require.True(t, errors.As(err, &appErr))
 	assert.Equal(t, "DefinitionServiceClientError", appErr.Type())
+}
+
+func planDeps(t *testing.T, planJSON string) *outboundtemporal.Deps {
+	t.Helper()
+	addr := startPlanServer(t, &fakePlanServer{resp: &definitionv1.GetCompiledWorkflowResponse{
+		WorkflowId: uuid.NewString(), VersionId: uuid.NewString(), CompiledPlanJson: planJSON,
+	}})
+	definitions, err := outboundgrpc.NewDefinitionClient(addr, 5*time.Second)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = definitions.Close() })
+	return &outboundtemporal.Deps{Definitions: definitions}
+}
+
+// The activity result is what the workflow records and replays, so the
+// expansion of library calls happens here: a later change to ExpandCalls
+// never alters a running instance's plan.
+func TestGetCompiledPlan_ExpandsLibraryCalls(t *testing.T) {
+	out, err := planDeps(t, string(dsltest.LibraryCalls())).GetCompiledPlan(context.Background(), port.GetCompiledPlanInput{
+		TenantID: uuid.NewString(), VersionID: uuid.NewString(),
+	})
+	require.NoError(t, err)
+	var callPlans int
+	var walk func(steps []dsl.ExecutionStep)
+	walk = func(steps []dsl.ExecutionStep) {
+		for _, st := range steps {
+			if st.CallPlan != nil {
+				callPlans++
+			}
+			if st.SubWorkflow != nil {
+				walk(st.SubWorkflow.Plan.Steps)
+			}
+		}
+	}
+	for _, p := range out.Collaboration.Plans {
+		walk(p.Execution.Steps)
+	}
+	assert.Zero(t, callPlans, "the workflow must never see a call_plan step")
+	var ids []string
+	for _, d := range out.Collaboration.Plans[0].Departments {
+		ids = append(ids, d.ID)
+	}
+	assert.Contains(t, ids, "CA_Ops::Review_Check::Process_Check@v1")
+}
+
+func TestGetCompiledPlan_UnexpandablePlan_IsNonRetryable(t *testing.T) {
+	missing := `{"main_plan":"main","schema_version":1,"plans":[{"name":"main","departments":[],"execution":{"steps":[{"call_plan":{"node_id":"CA_1","plan":"Nowhere"}}]}}]}`
+	_, err := planDeps(t, missing).GetCompiledPlan(context.Background(), port.GetCompiledPlanInput{
+		TenantID: uuid.NewString(), VersionID: uuid.NewString(),
+	})
+	require.Error(t, err)
+	var appErr *temporal.ApplicationError
+	require.True(t, errors.As(err, &appErr))
+	assert.Equal(t, "DefinitionServiceClientError", appErr.Type())
+}
+
+// Expansion follows the current schema; a plan of another major is handed to
+// the workflow as stored, whose schema check refuses or normalizes it.
+func TestGetCompiledPlan_OtherSchemaVersionIsNotExpanded(t *testing.T) {
+	other := `{"main_plan":"main","schema_version":99,"plans":[{"name":"main","departments":[],"execution":{"steps":[{"call_plan":{"node_id":"CA_1","plan":"Nowhere"}}]}}]}`
+	out, err := planDeps(t, other).GetCompiledPlan(context.Background(), port.GetCompiledPlanInput{
+		TenantID: uuid.NewString(), VersionID: uuid.NewString(),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 99, out.Collaboration.SchemaVersion)
+	assert.NotNil(t, out.Collaboration.Plans[0].Execution.Steps[0].CallPlan)
 }

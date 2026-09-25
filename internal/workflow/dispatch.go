@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,7 +13,17 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
+// runSteps runs one plan level's steps. A path that ends at a boundary ends
+// this level normally.
 func (in *interpreter) runSteps(ctx wf.Context, plan *dsl.CompiledPlan, steps []dsl.ExecutionStep, admin wf.Channel) (stepOutcome, error) {
+	out, err := in.runStepList(ctx, plan, steps, admin)
+	if errors.Is(err, errPathEnded) {
+		return out, nil
+	}
+	return out, err
+}
+
+func (in *interpreter) runStepList(ctx wf.Context, plan *dsl.CompiledPlan, steps []dsl.ExecutionStep, admin wf.Channel) (stepOutcome, error) {
 	var last domain.NodeKey
 	// lastResult is scoped to this one runSteps call (goroutine-local for a
 	// Parallel branch's own nested call) — never a shared instance-wide

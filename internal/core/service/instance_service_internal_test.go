@@ -1,13 +1,17 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl/dsltest"
 )
 
 func TestDeptUUID_PrefersIAMDepartmentID(t *testing.T) {
@@ -42,4 +46,24 @@ func TestNoopLogger(t *testing.T) {
 	l.Info("msg", nil)
 	l.Warn("msg", nil)
 	l.Error("msg", nil)
+}
+
+type goldenDefinitions struct{}
+
+func (goldenDefinitions) GetCompiledWorkflow(context.Context, uuid.UUID, uuid.UUID) (*port.CompiledWorkflow, error) {
+	return &port.CompiledWorkflow{Status: "PUBLISHED", IsValid: true, CompiledPlanJSON: string(dsltest.LibraryCalls())}, nil
+}
+
+// A module task's required level is found through its call-scoped node key,
+// which exists only once the plan's calls are expanded.
+func TestCompiledPlanCache_ExpandsLibraryCalls(t *testing.T) {
+	plan, err := newCompiledPlanCache(goldenDefinitions{}).mainPlan(context.Background(), uuid.New(), uuid.New())
+	require.NoError(t, err)
+	task := &domain.Task{
+		DepartmentID: uuid.MustParse("92fd92cf-4b2c-58dc-bf98-f3d0af729876"),
+		NodeKey:      "CA_Ops::Review_Check::Process_Check@v1/Check_Task",
+	}
+	level, ok := requiredLevelForTask(plan, task)
+	assert.True(t, ok, "no stage for the module task")
+	assert.Equal(t, "checker", level)
 }

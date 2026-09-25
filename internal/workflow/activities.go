@@ -26,12 +26,10 @@ var (
 		},
 	}
 
-	// externalCallActivityOptions backs GetCompiledPlanActivity. A DSL
-	// schema-version major mismatch could also belong in
-	// NonRetryableErrorTypes once the Activity's real implementation
-	// exists (cmd/worker, not yet built) — see "execution LLD" §2.5 and
-	// compat.go for the actual compatibility strategy (a Factory/Strategy
-	// layer in Execute), which this would only optimize, not replace.
+	// externalCallActivityOptions backs GetCompiledPlanActivity. Its
+	// permanent failures, including a plan that cannot be expanded, come back
+	// as DefinitionServiceClientError; a DSL schema-major mismatch is refused
+	// by Execute's own strategy check (execution LLD §2.5, compat.go).
 	externalCallActivityOptions = wf.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Second,
 		RetryPolicy: &temporal.RetryPolicy{
