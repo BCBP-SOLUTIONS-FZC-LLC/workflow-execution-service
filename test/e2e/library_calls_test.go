@@ -61,10 +61,10 @@ func TestE2E_LibraryCalls(t *testing.T) {
 
 	overrides := map[string]string{}
 	for _, key := range []string{
-		"CA_Eng::Process_Review@v2/Review_Task",
-		"CA_Eng::Review_Check::Process_Check@v1/Check_Task",
-		"CA_Ops::Process_Review@v2/Review_Task",
-		"CA_Ops::Review_Check::Process_Check@v1/Check_Task",
+		"CA_Eng::Process_Review/Review_Task",
+		"CA_Eng::Review_Check::Process_Check/Check_Task",
+		"CA_Ops::Process_Review/Review_Task",
+		"CA_Ops::Review_Check::Process_Check/Check_Task",
 	} {
 		overrides[key] = userID.String()
 	}

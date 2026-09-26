@@ -61,7 +61,7 @@ func TestCompiledPlanCache_ExpandsLibraryCalls(t *testing.T) {
 	require.NoError(t, err)
 	task := &domain.Task{
 		DepartmentID: uuid.MustParse("92fd92cf-4b2c-58dc-bf98-f3d0af729876"),
-		NodeKey:      "CA_Ops::Review_Check::Process_Check@v1/Check_Task",
+		NodeKey:      "CA_Ops::Review_Check::Process_Check/Check_Task",
 	}
 	level, ok := requiredLevelForTask(plan, task)
 	assert.True(t, ok, "no stage for the module task")

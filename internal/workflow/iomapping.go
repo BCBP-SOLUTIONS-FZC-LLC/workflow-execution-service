@@ -7,12 +7,9 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// applyIOMapping applies m.Inputs to contextJSON, on entry to an inlined
-// callActivity segment only (LLD §2.1). Outputs are never re-applied on
-// exit — the segment's own steps write context directly. The only real
-// usage today is department remapping (definition_service's
-// ValidateCallActivities requires a dept_id/target="Depts" input); don't
-// invent handling beyond simple source->target key copies.
+// applyIOMapping applies m.Inputs to contextJSON on entry to the step that
+// carries them (LLD §2.1). Outputs are never re-applied on exit — the step's
+// own work writes context directly.
 func applyIOMapping(contextJSON string, m *dsl.IOMapping) (string, error) {
 	if m == nil || len(m.Inputs) == 0 {
 		return contextJSON, nil

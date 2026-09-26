@@ -93,7 +93,7 @@ func TestExecute_InterruptingBoundaryWithNoTargetEndsThePath(t *testing.T) {
 				{SubWorkflow: &dsl.SubWorkflowStep{
 					NodeID: "sub1", Name: "sub",
 					Plan:       dsl.ExecutionPlan{Steps: []dsl.ExecutionStep{{Sequential: []string{"review"}}}},
-					TimerPaths: []dsl.TimerPath{{Duration: "1h", Interrupting: true}},
+					TimerPaths: []dsl.TimerPath{{Duration: "1h", Interrupting: true, Terminates: true}},
 				}},
 				{Sequential: []string{"after"}},
 			},
@@ -106,7 +106,7 @@ func TestExecute_InterruptingBoundaryWithNoTargetEndsThePath(t *testing.T) {
 
 	t.Run("on a task", func(t *testing.T) {
 		review := dept("review")
-		review.Stages[0].BoundaryTimer = &dsl.BoundaryTimer{Duration: "1h", Interrupting: true}
+		review.Stages[0].BoundaryTimer = &dsl.BoundaryTimer{Duration: "1h", Interrupting: true, Terminates: true}
 		out, created := runBoundaryPlan(t,
 			[]dsl.DepartmentDef{review, dept("after")},
 			[]dsl.ExecutionStep{{Sequential: []string{"review", "after"}}},
@@ -127,7 +127,7 @@ func TestExecute_InterruptingBoundaryWithNoTargetEndsThePath(t *testing.T) {
 						{SubWorkflow: &dsl.SubWorkflowStep{
 							NodeID: "inner", Name: "call",
 							Plan:       dsl.ExecutionPlan{Steps: []dsl.ExecutionStep{{Sequential: []string{"review"}}}},
-							TimerPaths: []dsl.TimerPath{{Duration: "1h", Interrupting: true}},
+							TimerPaths: []dsl.TimerPath{{Duration: "1h", Interrupting: true, Terminates: true}},
 						}},
 						{Sequential: []string{"inner_after"}},
 					}},
@@ -151,7 +151,7 @@ func TestExecute_BoundaryEndingABranchLetsTheJoinProceed(t *testing.T) {
 				{DeptID: "a", Steps: []dsl.ExecutionStep{{SubWorkflow: &dsl.SubWorkflowStep{
 					NodeID: "sub_a", Name: "sub",
 					Plan:       dsl.ExecutionPlan{Steps: []dsl.ExecutionStep{{Sequential: []string{"a"}}}},
-					TimerPaths: []dsl.TimerPath{{Duration: "1h", Interrupting: true}},
+					TimerPaths: []dsl.TimerPath{{Duration: "1h", Interrupting: true, Terminates: true}},
 				}}}},
 				{DeptID: "b", Steps: []dsl.ExecutionStep{{Sequential: []string{"b"}}}},
 			}},
@@ -171,7 +171,7 @@ func TestExecute_ForceBackBeforeAForkEndingAtABoundaryResumesTheBranches(t *test
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	pre := dept("pre")
-	pre.Stages[0].BoundaryTimer = &dsl.BoundaryTimer{Duration: "1h", Interrupting: true}
+	pre.Stages[0].BoundaryTimer = &dsl.BoundaryTimer{Duration: "1h", Interrupting: true, Terminates: true}
 	collab := &dsl.CompiledCollaboration{MainPlan: "main", Plans: []*dsl.CompiledPlan{{
 		Name:        "main",
 		Departments: []dsl.DepartmentDef{pre, dept("a"), dept("b"), dept("after")},

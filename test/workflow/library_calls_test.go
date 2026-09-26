@@ -42,10 +42,10 @@ func TestExecute_LibraryCalls_EachCallRunsItsOwnTasks(t *testing.T) {
 		opsIAM = "92fd92cf-4b2c-58dc-bf98-f3d0af729876"
 	)
 	want := []goldenTask{
-		{"CA_Eng::Process_Review@v2", "Review_Task", engIAM},
-		{"CA_Eng::Review_Check::Process_Check@v1", "Check_Task", engIAM},
-		{"CA_Ops::Process_Review@v2", "Review_Task", opsIAM},
-		{"CA_Ops::Review_Check::Process_Check@v1", "Check_Task", opsIAM},
+		{"CA_Eng::Process_Review", "Review_Task", engIAM},
+		{"CA_Eng::Review_Check::Process_Check", "Check_Task", engIAM},
+		{"CA_Ops::Process_Review", "Review_Task", opsIAM},
+		{"CA_Ops::Review_Check::Process_Check", "Check_Task", opsIAM},
 	}
 	var created []goldenTask
 	registerFakeActivities(env, goldenCollaboration(t), &activityHooks{
@@ -147,8 +147,8 @@ func TestExecute_LibraryCallBoundaries_TimerEndsThePath(t *testing.T) {
 // ends the instance without the call's tasks being done.
 func TestExecute_LibraryCallBoundaries_MessageEndsThePath(t *testing.T) {
 	status, _ := runGoldenBoundaries(t, []goldenTask{
-		{dept: "CA_Timer::Process_Review@v2", node: "Review_Task"},
-		{dept: "CA_Timer::Review_Check::Process_Check@v1", node: "Check_Task"},
+		{dept: "CA_Timer::Process_Review", node: "Review_Task"},
+		{dept: "CA_Timer::Review_Check::Process_Check", node: "Check_Task"},
 	})
 	if status != domain.InstanceStatusCompleted {
 		t.Errorf("Status = %v, want COMPLETED through CA_Message's withdraw boundary", status)

@@ -179,7 +179,7 @@ func TestGetCompiledPlan_ExpandsLibraryCalls(t *testing.T) {
 	for _, d := range out.Collaboration.Plans[0].Departments {
 		ids = append(ids, d.ID)
 	}
-	assert.Contains(t, ids, "CA_Ops::Review_Check::Process_Check@v1")
+	assert.Contains(t, ids, "CA_Ops::Review_Check::Process_Check")
 }
 
 func TestGetCompiledPlan_UnexpandablePlan_IsNonRetryable(t *testing.T) {
