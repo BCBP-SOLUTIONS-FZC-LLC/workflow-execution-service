@@ -14,9 +14,10 @@ docker-compose.yml @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
 # both cmd/server and cmd/worker (they share the workflow_execution schema).
 db/migrations/ @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
 
-# Proto contracts — gRPC contract changes affect Definition Service, our only
-# current cross-service consumer.
-api/proto/ @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
+# Internal HTTP contracts — this service's spec, which the Definition Service
+# calls, and the copy of the Definition Service's.
+api/internal-openapi.yaml @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
+api/contracts/ @BCBP-SOLUTIONS-FZC-LLC/platform-engineers
 
 # The Temporal workflow function + Activities — the core execution logic,
 # a peer layer to adapter/ with its own arch-lint isolation rules.

@@ -23,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
           token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
-          fetch-depth: 0 # buf breaking --against '.git#branch=main' needs main's history
+          fetch-depth: 0 # the contract breaking-change gate reads main's spec
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -33,10 +33,6 @@ jobs:
           cache-dependency-path: |
             go.sum
             go.mod
-
-      - uses: bufbuild/buf-setup-action@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: azure/setup-helm@v4
 
@@ -57,7 +53,7 @@ jobs:
       - name: Install dev tools
         run: make tools
 
-      - name: Generate (buf + sqlc)
+      - name: Generate (sqlc)
         run: make generate
 
       - name: Format check
@@ -96,11 +92,17 @@ jobs:
       - name: Vulnerability check
         run: make vuln
 
-      - name: Proto lint
-        run: buf lint
+      # The internal spec must not break its callers (LLD §5.3).
+      - name: Contract breaking-change gate
+        env:
+          CONTRACT_BASE_REF: origin/main
+        run: make contract-breaking
 
-      - name: Proto breaking-change check
-        run: buf breaking --against '.git#branch=main'
+      # The copy of the Definition Service's spec must match its source.
+      - name: Contract copy check
+        env:
+          GH_TOKEN: ${{ secrets.CI_REPO_READ_TOKEN }}
+        run: make contract-check
 
       - name: Dockerfile base image digest check
         run: |

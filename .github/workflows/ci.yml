@@ -77,14 +77,10 @@ jobs:
             go.sum
             go.mod
 
-      - uses: bufbuild/buf-setup-action@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Install dev tools
         run: make tools
 
-      - name: Generate (buf + sqlc)
+      - name: Generate (sqlc)
         run: make generate
 
       - name: Lint Dockerfile

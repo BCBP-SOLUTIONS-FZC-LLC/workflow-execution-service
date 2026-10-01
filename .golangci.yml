@@ -30,7 +30,6 @@ linters:
 
   exclusions:
     paths:
-      - gen/
       - platform-libs/
       - internal/adapter/outbound/postgres/db/
       - internal/core/port/mocks/
@@ -50,7 +49,6 @@ formatters:
     - goimports
   exclusions:
     paths:
-      - gen/
       - platform-libs/
       - internal/adapter/outbound/postgres/db/
       - internal/core/port/mocks/

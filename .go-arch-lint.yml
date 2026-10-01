@@ -53,9 +53,6 @@ components:
     in: "internal/eventschema/**"
   adapter:
     in: "internal/adapter/**"
-  # proto-generated code used by both adapter and cmd
-  gen:
-    in: "gen/**"
   db_migrations:
     in: "db/**"
   cmd:
@@ -89,7 +86,6 @@ deps:
       - service       # handlers reference service request/response types
       - db            # sqlc-generated types
       - eventschema   # eventbus.SchemaValidator embeds the event JSON Schemas
-      - gen           # proto-generated types (grpc server + definition client)
       - observability # internal_events.go records the centralized ingest/reroute/last-received metrics
   cmd:
     mayDependOn:
@@ -99,6 +95,5 @@ deps:
       - workflow  # cmd/worker registers the workflow function + Activities
       - adapter
       - config
-      - gen
       - db_migrations
       - observability # both binaries call Register()/InitTracing() at boot

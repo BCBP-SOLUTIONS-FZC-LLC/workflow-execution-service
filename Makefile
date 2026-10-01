@@ -8,7 +8,7 @@ ifneq ($(wildcard .env),)
 endif
 
 SQLC_VERSION         := v1.31.1
-BUF_VERSION          := v1.50.0
+OASDIFF_VERSION      := v1.32.1
 MOCKGEN_VERSION      := v0.6.0
 GOLANGCI_VERSION     := v2.12.2
 GOVULNCHECK_VERSION  := v1.1.4
@@ -31,7 +31,7 @@ COVERAGE_DIR       := .coverage
 MODULE             := github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service
 
 SQLC               := $(TOOLS_DIR)/sqlc
-BUF                := $(TOOLS_DIR)/buf
+OASDIFF            := $(TOOLS_DIR)/oasdiff
 MOCKGEN            := $(TOOLS_DIR)/mockgen
 GOLANGCI           := $(TOOLS_DIR)/golangci-lint
 GOVULNCHECK        := $(TOOLS_DIR)/govulncheck
@@ -65,7 +65,7 @@ COVER_THRESHOLD    := 95
 # the health server), which only `make test-e2e` exercises.
 COVER_PKG_FLOORS   := internal/workflow:88 cmd/connector-worker:55
 
-.PHONY: all tools tools-integration generate generate-proto generate-sqlc mock contract-check \
+.PHONY: all tools tools-integration generate generate-sqlc mock contract-check contract-breaking \
         build migrate dev test test-integration test-e2e test-ci merge-coverage \
         cover cover-func cover-gaps cover-html cover-check cover-check-pkg \
         arch-lint lint lint-fix vuln \
@@ -83,7 +83,7 @@ all: generate build
 tools:
 	@mkdir -p $(TOOLS_DIR)
 	GOBIN=$(PWD)/$(TOOLS_DIR) go install github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
-	GOBIN=$(PWD)/$(TOOLS_DIR) go install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
+	GOBIN=$(PWD)/$(TOOLS_DIR) go install github.com/oasdiff/oasdiff@$(OASDIFF_VERSION)
 	GOBIN=$(PWD)/$(TOOLS_DIR) go install go.uber.org/mock/mockgen@$(MOCKGEN_VERSION)
 	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
 		| sh -s -- -b $(PWD)/$(TOOLS_DIR) $(GOLANGCI_VERSION)
@@ -127,13 +127,8 @@ tools-integration:
 	@echo "✓ Docker images ready for integration tests"
 
 
-## generate: Run buf (proto → gen/) and sqlc (queries → postgres/db/)
-generate: generate-proto generate-sqlc
-
-generate-proto:
-	@echo "→ buf generate"
-	$(BUF) generate
-	@echo "proto stubs written to gen/proto/workflow/{definition,execution}/v1/"
+## generate: Run sqlc (queries → postgres/db/)
+generate: generate-sqlc
 
 generate-sqlc:
 	@echo "→ sqlc generate"
@@ -300,6 +295,8 @@ check:
 	go vet ./cmd/... ./internal/...
 	@echo "==> arch-lint"
 	$(MAKE) arch-lint
+	@echo "==> contract-breaking"
+	$(MAKE) contract-breaking
 	@echo "==> test-ci (unit + integration, merged coverage gate)"
 	$(MAKE) cover-check
 	@echo "✓ all checks passed"
@@ -311,6 +308,10 @@ arch-lint:
 ## contract-check: Fail if a copied contract in api/contracts differs from its source (CONTRACT_SRC_DIR=<checkout> reads it locally)
 contract-check:
 	@scripts/contract-check.sh
+
+## contract-breaking: Fail on a breaking change to api/internal-openapi.yaml against CONTRACT_BASE_REF (default origin/main)
+contract-breaking:
+	@OASDIFF=$(OASDIFF) scripts/contract-breaking.sh
 
 ## lint: Run golangci-lint (read-only; exits non-zero on violations)
 lint:
@@ -484,7 +485,6 @@ docker-down:
 clean:
 	rm -rf $(BIN_DIR)
 	rm -rf $(COVERAGE_DIR)
-	rm -rf gen/
 	rm -rf internal/adapter/outbound/postgres/db/
 	rm -rf internal/core/port/mocks/
 

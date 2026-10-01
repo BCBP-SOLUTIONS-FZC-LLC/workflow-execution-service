@@ -67,7 +67,7 @@ FROM gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a
 
 COPY --from=builder /build/bin/server /server
 
-EXPOSE 8080 9090
+EXPOSE 8080
 
 ENTRYPOINT ["/server"]
 

@@ -11,7 +11,7 @@ Provide a clear description of the changes.
 - [ ] Test
 - [ ] Breaking change
 - [ ] New migration
-- [ ] Proto contract change (`api/proto/`)
+- [ ] Internal API contract change (`api/internal-openapi.yaml` or `api/contracts/`)
 
 ---
 
@@ -35,9 +35,10 @@ Provide a clear description of the changes.
 - [ ] No secrets or DSNs hardcoded
 
 ### Code Generation
-- [ ] No changes to proto, sqlc queries, or port interfaces
+- [ ] No changes to the internal API spec, sqlc queries, or port interfaces
 - OR:
-- [ ] `make generate` re-run after changing `.proto` or `db/queries/*.sql` — `buf lint` clean, sqlc output committed nowhere (gitignored)
+- [ ] `make generate` re-run after changing `db/queries/*.sql` — sqlc output committed nowhere (gitignored)
+- [ ] `make contract-breaking` passes after changing `api/internal-openapi.yaml`, and the Definition Service's copy is refreshed
 - [ ] `make mock` re-run after changing `internal/core/port/*.go` interfaces
 
 ### Database / Migrations

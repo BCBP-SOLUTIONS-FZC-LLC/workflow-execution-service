@@ -31,8 +31,7 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# Generated code — produced by `make generate` (buf + sqlc), never committed.
-/gen/
+# Generated code — produced by `make generate` (sqlc) and `make mock`, never committed.
 /internal/adapter/outbound/postgres/db/
 /internal/core/port/mocks/
 

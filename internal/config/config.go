@@ -15,7 +15,6 @@ type Config struct {
 	BuildVersion string
 
 	HTTPPort         int
-	GRPCPort         int
 	MetricsPort      int
 	WorkerHealthPort int
 	// WorkerMetricsPort isolates cmd/worker's /metrics onto its own listener,
@@ -214,7 +213,6 @@ func Load() (*Config, error) {
 		BuildVersion: getEnvOrDefault("BUILD_VERSION", "dev"),
 
 		HTTPPort:          envInt("HTTP_PORT", 8080),
-		GRPCPort:          envInt("GRPC_PORT", 9090),
 		MetricsPort:       envInt("METRICS_PORT", 9091),
 		WorkerHealthPort:  envInt("WORKER_HEALTH_PORT", 8081),
 		WorkerMetricsPort: envInt("WORKER_METRICS_PORT", 8082),
@@ -321,9 +319,6 @@ func (c *Config) validate() error {
 	}
 	if c.HTTPPort < 1 || c.HTTPPort > 65535 {
 		return fmt.Errorf("HTTP_PORT must be in [1, 65535]")
-	}
-	if c.GRPCPort < 1 || c.GRPCPort > 65535 {
-		return fmt.Errorf("GRPC_PORT must be in [1, 65535]")
 	}
 	if c.MetricsPort < 1 || c.MetricsPort > 65535 {
 		return fmt.Errorf("METRICS_PORT must be in [1, 65535]")

@@ -16,7 +16,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/logger"
 
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/grpc"
 	httpadapter "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
@@ -205,8 +204,6 @@ func newApp(cfg *config.Config) (*app, error) {
 		Log: log,
 	})
 
-	grpcSrv := grpc.NewGRPCServer(cfg.OTELServiceName, cfg.BuildVersion, cfg.InternalAPIToken, log, guard, pauser)
-
 	router := httpadapter.NewRouter(httpadapter.RouterConfig{
 		GinConfig:        gincommon.Config{Logger: log, ServiceName: cfg.OTELServiceName, BuildVersion: cfg.BuildVersion},
 		AppEnv:           cfg.AppEnv,
@@ -242,7 +239,6 @@ func newApp(cfg *config.Config) (*app, error) {
 		cache:           cacheClient,
 		httpServer:      httpServer,
 		metricsServer:   metricsServer,
-		grpcServer:      grpcSrv,
 		outboxRelay:     relay,
 		sdkClient:       sdkClient,
 		tracingShutdown: tracingShutdown,

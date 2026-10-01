@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,7 +10,6 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/client"
-	"google.golang.org/grpc"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/pkg/outbox"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
@@ -31,7 +28,6 @@ type app struct {
 
 	httpServer    *http.Server
 	metricsServer *http.Server
-	grpcServer    *grpc.Server
 	outboxRelay   *outbox.Runner
 
 	sdkClient client.Client
@@ -72,19 +68,6 @@ func (a *app) startServers() {
 	}()
 
 	go func() {
-		addr := fmt.Sprintf(":%d", a.cfg.GRPCPort)
-		lis, err := net.Listen("tcp", addr)
-		if err != nil {
-			a.log.Error("gRPC listen error", map[string]any{"error": err.Error()})
-			os.Exit(1)
-		}
-		a.log.Info("gRPC server starting", map[string]any{"addr": addr})
-		if err := a.grpcServer.Serve(lis); err != nil {
-			a.log.Error("gRPC server exited", map[string]any{"error": err.Error()})
-		}
-	}()
-
-	go func() {
 		a.log.Info("outbox relay starting", map[string]any{
 			"poll_interval": a.cfg.OutboxPollInterval.String(),
 			"batch_size":    a.cfg.OutboxBatchSize,
@@ -106,7 +89,6 @@ func (a *app) stopServers(ctx context.Context) {
 	if err := a.metricsServer.Shutdown(ctx); err != nil {
 		a.log.Error("metrics server shutdown error", map[string]any{"error": err.Error()})
 	}
-	a.grpcServer.GracefulStop()
 
 	if err := a.outboxRelay.Stop(); err != nil {
 		a.log.Error("outbox relay stop error", map[string]any{"error": err.Error()})
