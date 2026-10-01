@@ -13,8 +13,8 @@ import (
 )
 
 // GetCompiledPlan is GetCompiledPlanActivity (LLD §3.1): the workflow
-// function's first activity, always — a single read-only gRPC call to
-// Definition Service, no DB write. Any error here is folded into
+// function's first activity, always — a single read-only call to the
+// Definition Service's internal API, no DB write. Any error here is folded into
 // "DefinitionServiceClientError", the one NonRetryableErrorTypes entry
 // externalCallActivityOptions already declares (internal/workflow/activities.go)
 // — a malformed ID is exactly as permanent as an upstream rejection, neither

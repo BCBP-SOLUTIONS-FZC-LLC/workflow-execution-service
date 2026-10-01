@@ -10,6 +10,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Added
 
+- `GET /api/v1/internal/workflows/{workflow_id}/active-instances` and `POST /api/v1/internal/users/{user_id}/pause-tasks`, the Definition Service's archive guard and membership-revocation pause, replacing the gRPC `CheckActiveInstances`/`PauseUserTasks`.
+- `api/internal-openapi.yaml`, the authority for every `/api/v1/internal` route (moved out of the public spec). `test/contract` validates the real router's responses against it, and the definition client's requests against the copy of the Definition Service's spec in `api/contracts/`.
+- `make contract-breaking` (oasdiff against `origin/main`, in `make check` and CI, replacing `buf breaking`) and `make contract-check` (the copy against its source branch, in CI).
+
 - **`cmd/connector-worker`** — the third binary that actually executes connector-typed tasks (`design/LLD/workflow_connectors.md`): consumes a Valkey Stream `cmd/server`'s `internal_events.go` handler pushes connector-typed `workflow.task.created` events onto, resolves each `secret_ref` input's OpenBao path to its real credential (`internal/adapter/outbound/openbao`, mirroring `definition_service`'s write-side path convention and path-traversal guard), dispatches to a real `workflow-connectors.Connector` under a per-connector-type bounded pool with the ratified per-type retry/backoff policy, and reports the outcome via a new pair of internal endpoints. Never imports the Temporal SDK — see the new `.claude/CLAUDE.md` bullet.
 - **New completion path**: `POST /internal/connector-tasks/:id/{complete,fail}` (`internal/adapter/inbound/http/handler/connector_task_completion.go`), backed by a new `ConnectorTaskService` (deliberately separate from the human `TaskService`, whose `checkHumanActionable` gate rejects connector tasks). Idempotent under `cmd/connector-worker`'s own Stream-redelivery-driven retries via a terminal-status check plus a short-TTL `CacheStore.SetNX` dedup key.
 - `internal/adapter/outbound/valkeystream` — Stream producer/consumer-group wrapper (`XADD`/`XREADGROUP`/`XACK`/`XAUTOCLAIM`) and the `port.ConnectorEventPublisher` implementation `internal_events.go`'s new `workflow.task.created` handler calls.
@@ -26,6 +30,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- **The Definition Service link is internal HTTP; gRPC is removed.** `internal/adapter/outbound/http.DefinitionClient` reads compiled plans for `cmd/server`, `cmd/worker` and the connector-worker's alias fetch, with `DEFINITION_SERVICE_URL`/`DEFINITION_SERVICE_TOKEN` replacing `DEFINITION_SERVICE_ADDR` and `DEFINITION_SERVICE_INTERNAL_HTTP_ADDR`. `port.ErrDefinitionRejected`/`ErrDefinitionUnavailable` replace the gRPC adapter's sentinels. `GRPC_PORT`, the protos, buf and port 9090 are gone.
+- Helm: the Worker gets the Definition Service URL, token and egress; the API and Worker get `INTERNAL_API_TOKEN`; the Secret refuses to render without both tokens outside dev; the gateway routes only the public routes; `make helm-lint` renders to a file first, since a failed render had passed through the pipe.
 - Node keys and the human-task rule come from workflow-models' `dsl.NodeKey` and `StageDef.CreatesHumanTask`, which Definition's node read uses too. The key format is unchanged, so no Temporal version gate is needed.
 
 ### Fixed

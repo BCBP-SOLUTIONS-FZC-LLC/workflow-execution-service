@@ -95,8 +95,8 @@ type Config struct {
 	// against (LLD §3.2 item 2, proposed 60s).
 	QueueTopologyPollInterval time.Duration
 
-	// InternalAPIToken authenticates internal-only routes/RPCs
-	// (middleware.RequireInternalToken, grpc.NewGRPCServer). Empty disables
+	// InternalAPIToken authenticates the internal route group
+	// (middleware.RequireInternalToken). Empty disables
 	// the check — dev mode only; required in prod (see validate()).
 	InternalAPIToken string
 

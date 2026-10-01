@@ -140,7 +140,7 @@ podDisruptionBudget:
 
 serviceAccount:
   # Two separate ServiceAccounts (api, worker), not one shared — the API
-  # process needs SNS-publish/gRPC-egress permissions the Worker never does;
+  # process needs SNS-publish permissions the Worker never does;
   # least-privilege IRSA scoping is worth the extra manifest over one
   # over-permissioned identity.
   create: true

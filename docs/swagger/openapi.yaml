@@ -317,7 +317,7 @@ components:
           format: uuid
           description: >
             UUID of the parent workflow record in the Definition Service.
-            Snapshotted from the GetCompiledWorkflow response at instance creation; immutable.
+            Snapshotted from the Definition Service's compiled-plan read at instance creation; immutable.
         subject_id:
           type: string
           description: >

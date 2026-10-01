@@ -10,9 +10,9 @@ import (
 
 var _ port.ArchiveGuard = (*ArchiveGuard)(nil)
 
-// ArchiveGuard implements port.ArchiveGuard — the inbound gRPC
-// CheckActiveInstances RPC Definition Service calls before archiving a
-// workflow (LLD §5.3).
+// ArchiveGuard implements port.ArchiveGuard — the active-instances read the
+// Definition Service calls on the internal API before archiving a workflow
+// (LLD §5.3).
 type ArchiveGuard struct {
 	Instances port.InstanceRepository
 }
