@@ -1,6 +1,6 @@
 {{ include "workflow-execution-service.fullname" . }} deployed.
 
-API:    {{ include "workflow-execution-service.apiFullname" . }} — {{ .Values.api.replicas }} replica(s), :{{ .Values.api.httpPort }} HTTP + :{{ .Values.api.grpcPort }} gRPC
+API:    {{ include "workflow-execution-service.apiFullname" . }} — {{ .Values.api.replicas }} replica(s), :{{ .Values.api.httpPort }} HTTP (public routes, and /api/v1/internal for in-cluster callers only)
 Worker: {{ include "workflow-execution-service.workerFullname" . }} — {{ .Values.worker.replicas }} replica(s), :{{ .Values.worker.healthPort }} health + :{{ .Values.worker.metricsPort }} metrics
 
 IMPORTANT: cmd/server and cmd/worker are both still stub mains as of this

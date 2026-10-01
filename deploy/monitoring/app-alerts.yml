@@ -13,9 +13,9 @@
 # a composition root — verified against the LLD and against
 # definition_service's own equivalent metric names, not assumed from prose.
 #
-# Labels on HTTP/gRPC metrics (from platform-gincommon):
+# Labels on HTTP metrics (from platform-gincommon):
 #   job          — "workflow-execution-service-api" | "workflow-execution-service-worker"
-#   method       — HTTP: route template; gRPC: full RPC path
+#   method       — the route template
 #   status_class — "2xx" | "4xx" | "5xx" (there is no raw "status" label)
 
 groups:
@@ -113,25 +113,24 @@ groups:
           summary: execution-service API p99 latency above 2s
           description: "p99 request duration is {{ $value | humanizeDuration }}."
 
-  - name: workflow_execution_service_grpc
+  - name: workflow_execution_service_definition_calls
     rules:
-      # Combined rather than split per-RPC: both CheckActiveInstances and
-      # PauseUserTasks (LLD §5.3/T1.4) are lightweight, similarly-critical
-      # admin-triggered RPCs called by Definition Service, not two
-      # independently-scaled hot paths worth separate alerts.
-      - alert: ExecutionServiceInboundRPCHighErrorRate
+      # Combined rather than split per endpoint: the active-instances and
+      # pause-tasks calls (LLD §5.3) are lightweight, similarly-critical calls
+      # from the Definition Service, not two independently-scaled hot paths.
+      - alert: ExecutionServiceDefinitionCallsHighErrorRate
         expr: |
-          sum(rate(grpc_server_handled_total{job="workflow-execution-service-api", method=~".*CheckActiveInstances.*|.*PauseUserTasks.*", status_class="5xx"}[5m]))
+          sum(rate(http_requests_total{job="workflow-execution-service-api", method=~"/api/v1/internal/workflows/:workflow_id/active-instances|/api/v1/internal/users/:user_id/pause-tasks", status_class="5xx"}[5m]))
             /
-          sum(rate(grpc_server_handled_total{job="workflow-execution-service-api", method=~".*CheckActiveInstances.*|.*PauseUserTasks.*"}[5m]))
+          sum(rate(http_requests_total{job="workflow-execution-service-api", method=~"/api/v1/internal/workflows/:workflow_id/active-instances|/api/v1/internal/users/:user_id/pause-tasks"}[5m]))
           > 0.05
         for: 5m
         labels:
           severity: warning
           team: platform
         annotations:
-          summary: "execution-service inbound RPC error rate above 5%: {{ $labels.method }}"
-          description: "Definition Service depends on these RPCs (LLD §5.3, §9.2) — check Postgres/Temporal-frontend health and recent deployments."
+          summary: "execution-service Definition Service call error rate above 5%: {{ $labels.method }}"
+          description: "The Definition Service depends on these calls (LLD §5.3, §9.2) — check Postgres/Temporal-frontend health and recent deployments."
 
   - name: workflow_execution_service_panics
     rules:
@@ -145,15 +144,6 @@ groups:
           summary: An execution-service API HTTP handler panicked
           description: "http_panic_total increased — recovered by platform-gincommon's middleware. Check logs for the stack trace immediately."
 
-      - alert: ExecutionServiceGRPCPanic
-        expr: increase(grpc_panic_total{job="workflow-execution-service-api"}[5m]) > 0
-        for: 0m
-        labels:
-          severity: critical
-          team: platform
-        annotations:
-          summary: An execution-service gRPC handler panicked
-          description: "grpc_panic_total increased — recovered by platform-gincommon's grpccommon interceptor. Check logs for the stack trace immediately."
 
   - name: workflow_execution_service_database
     rules:

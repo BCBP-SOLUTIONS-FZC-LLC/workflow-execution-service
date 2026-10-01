@@ -380,14 +380,18 @@ lint-workflows:
 	$(ACTIONLINT)
 
 ## helm-lint: Lint the Helm chart and validate its rendered manifests against the Kubernetes API schema
-helm-lint:
-	$(HELM) lint deploy/helm \
-	  --set-string secret.secretValues.DATABASE_URL=placeholder \
-	  --set-string secret.secretValues.TEMPORAL_HOST_PORT=placeholder
-	$(HELM) template deploy/helm \
-	  --set-string secret.secretValues.DATABASE_URL=placeholder \
+HELM_LINT_VALUES := --set-string secret.secretValues.DATABASE_URL=placeholder \
 	  --set-string secret.secretValues.TEMPORAL_HOST_PORT=placeholder \
-	  | $(KUBECONFORM) -strict -skip PrometheusRule,ServiceMonitor
+	  --set-string secret.secretValues.INTERNAL_API_TOKEN=placeholder \
+	  --set-string secret.secretValues.DEFINITION_SERVICE_TOKEN=placeholder
+
+# The render goes to a file first: piped straight into kubeconform, a failed
+# render reached it as empty input and passed.
+helm-lint:
+	$(HELM) lint deploy/helm $(HELM_LINT_VALUES)
+	@mkdir -p $(TOOLS_DIR)
+	$(HELM) template deploy/helm $(HELM_LINT_VALUES) > $(TOOLS_DIR)/helm-rendered.yaml
+	$(KUBECONFORM) -strict -skip PrometheusRule,ServiceMonitor $(TOOLS_DIR)/helm-rendered.yaml
 	@echo "✓ helm chart valid"
 
 ## pin-base-images: Resolve current digests for Dockerfile base images and pin them (writes .docker-digests)

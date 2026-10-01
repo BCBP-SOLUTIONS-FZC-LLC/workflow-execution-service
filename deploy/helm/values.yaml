@@ -16,7 +16,6 @@ fullnameOverride: ""
 api:
   replicas: 2
   httpPort: 8080
-  grpcPort: 9090
   metricsPort: 9091  # /metrics only — served on its own http.Server (cmd/server/wire.go)
   resources:
     requests:
@@ -82,7 +81,6 @@ connectorWorker:
   streamKey: connector-tasks
   streamGroup: connector-worker
   executionServiceInternalAddr: http://workflow-execution-service-api:8080
-  definitionServiceInternalHTTPAddr: http://workflow-definition-service:8080
   # Each tenant's platform-automation principal, the actor a connector
   # completion is recorded under, as "<tenant-uuid>=<subject-uuid>,...".
   # Required; the template refuses to render without it.
@@ -103,9 +101,16 @@ ingress:
 
   hosts:
     - host: workflow-execution-service.example.com
+      # Only the public route groups. /api/v1/internal is service-to-service
+      # (LLD §5.3) and must never be routed by the gateway, so a broad /api/v1
+      # prefix is not used.
       paths:
-        - path: /api/v1
+        - path: /api/v1/instances
           pathType: PathPrefix
+        - path: /api/v1/tasks
+          pathType: PathPrefix
+        - path: /api/v1/workflows/active-by-user
+          pathType: Exact
 
   gateway:
     name: ""              # required when ingress.enabled and type is HTTPRoute
@@ -155,10 +160,14 @@ containerSecurityContext:
   capabilities:
     drop: [ALL]
 
+# The Definition Service's internal HTTP Service, read by the API (compiled
+# plans), the Worker (GetCompiledPlan) and the connector-worker (the alias
+# registry) — LLD §5.3. Its token is secret.secretValues.DEFINITION_SERVICE_TOKEN.
+definitionServiceURL: http://workflow-definition-service:8080
+
 # Plain env vars — non-secret config only, matching internal/config's real
-# fields (checked against the current config.go; INTERNAL_API_TOKEN and the
-# Temporal TLS cert/key paths are LLD-documented but not yet read by any
-# config field, so they're deliberately not templated here yet).
+# fields. Secrets (INTERNAL_API_TOKEN, DEFINITION_SERVICE_TOKEN, ...) come from
+# the Secret below.
 env:
   appEnv: production
   otelServiceName: execution-service
@@ -180,9 +189,11 @@ secret:
     VALKEY_PASSWORD: ""
     TEMPORAL_HOST_PORT: ""
     SNS_TOPIC_ARN: ""
-    DEFINITION_SERVICE_ADDR: ""
     OPENBAO_TOKEN: ""
+    # This service's own token, which its internal-API callers present.
     INTERNAL_API_TOKEN: ""
+    # The Definition Service's INTERNAL_API_TOKEN, sent on its internal API.
+    DEFINITION_SERVICE_TOKEN: ""
 
 # LLD §7.5's mTLS/namespace-bootstrap note: registering the Temporal
 # namespace and provisioning mTLS material are cluster-operator actions this
@@ -215,8 +226,8 @@ networkPolicy:
         matchLabels:
           app.kubernetes.io/name: workflow-definition-service
   # Named same-namespace egress targets, replacing a blanket podSelector: {}
-  # allow. Definition Service is this API's only same-namespace outbound
-  # dependency (the GetCompiledWorkflow call).
+  # allow. The Definition Service is the only same-namespace outbound
+  # dependency of the API and the Worker (the compiled-plan read).
   allowedEgressTargets:
     - podSelector:
         matchLabels:

@@ -1,6 +1,7 @@
 # The Worker has no /internal/* route and no public HTTP surface at all —
 # its only inbound traffic is Prometheus scraping the health/metrics port;
 # work arrives via Temporal task-queue polling (outbound), not inbound calls.
+# Its outbound calls are Postgres, OTel, Temporal and the Definition Service.
 {{- if .Values.networkPolicy.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -48,4 +49,11 @@ spec:
     - ports:
         - port: 7233
           protocol: TCP
+    # The Definition Service, for GetCompiledPlan's compiled-plan read (LLD §5.3).
+    {{- range .Values.networkPolicy.allowedEgressTargets }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .podSelector.matchLabels | nindent 14 }}
+    {{- end }}
 {{- end }}
