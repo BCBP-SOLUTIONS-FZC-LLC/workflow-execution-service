@@ -34,8 +34,7 @@ type app struct {
 	grpcServer    *grpc.Server
 	outboxRelay   *outbox.Runner
 
-	definitions io.Closer
-	sdkClient   client.Client
+	sdkClient client.Client
 
 	tracingShutdown func()
 }
@@ -121,9 +120,6 @@ func (a *app) stopServers(ctx context.Context) {
 	}
 	if err := a.cache.Close(); err != nil {
 		a.log.Error("valkey close error", map[string]any{"error": err.Error()})
-	}
-	if err := a.definitions.Close(); err != nil {
-		a.log.Error("definition client close error", map[string]any{"error": err.Error()})
 	}
 	a.sdkClient.Close()
 

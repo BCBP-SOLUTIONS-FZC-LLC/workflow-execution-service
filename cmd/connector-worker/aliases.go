@@ -28,7 +28,7 @@ func runAliasRefreshLoop(ctx context.Context, d *deps, cfg *config.Config, log p
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			fresh, err := fetchAliases(ctx, cfg.DefinitionServiceInternalHTTPAddr, cfg.InternalAPIToken, cfg.ConnectorAliasFetchTimeout)
+			fresh, err := fetchAliases(ctx, cfg.DefinitionServiceURL, cfg.DefinitionServiceToken, cfg.ConnectorAliasFetchTimeout)
 			if err != nil {
 				log.Warn("connector alias refresh failed; keeping the previous registry", map[string]any{"error": err.Error()})
 				continue

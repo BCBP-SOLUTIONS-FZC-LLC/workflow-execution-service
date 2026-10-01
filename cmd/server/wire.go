@@ -20,7 +20,6 @@ import (
 	httpadapter "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
-	outboundgrpc "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/grpc"
 	outboundhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporalclient"
@@ -140,21 +139,12 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, fmt.Errorf("new schema validator: %w", err)
 	}
 
-	if cfg.DefinitionServiceAddr == "" {
-		unwind()
-		return nil, fmt.Errorf("DEFINITION_SERVICE_ADDR is required for cmd/server")
-	}
 	if cfg.EligibilityBaseURL == "" {
 		unwind()
 		return nil, fmt.Errorf("ELIGIBILITY_BASE_URL is required for cmd/server")
 	}
 
-	definitions, err := outboundgrpc.NewDefinitionClient(cfg.DefinitionServiceAddr, cfg.DefinitionClientTimeout)
-	if err != nil {
-		unwind()
-		return nil, fmt.Errorf("new definition client: %w", err)
-	}
-	cleanups = append(cleanups, func() { _ = definitions.Close() })
+	definitions := outboundhttp.NewDefinitionClient(cfg.DefinitionServiceURL, cfg.DefinitionServiceToken, cfg.DefinitionClientTimeout)
 
 	eligibility := outboundhttp.NewEligibilityClient(cfg.EligibilityBaseURL, cfg.EligibilityClientTimeout)
 	iam := outboundhttp.NewIAMClient(cfg.IAMBaseURL, cfg.IAMClientTimeout)
@@ -254,7 +244,6 @@ func newApp(cfg *config.Config) (*app, error) {
 		metricsServer:   metricsServer,
 		grpcServer:      grpcSrv,
 		outboxRelay:     relay,
-		definitions:     definitions,
 		sdkClient:       sdkClient,
 		tracingShutdown: tracingShutdown,
 	}, nil

@@ -62,7 +62,7 @@ type deps struct {
 // into execution_service's own /api/v1/internal/connector-tasks endpoints (LLD
 // workflow_connectors.md §6.1 Decision #2).
 func buildDeps(cfg *config.Config) (*deps, func(), error) {
-	aliases, err := fetchAliases(context.Background(), cfg.DefinitionServiceInternalHTTPAddr, cfg.InternalAPIToken, cfg.ConnectorAliasFetchTimeout)
+	aliases, err := fetchAliases(context.Background(), cfg.DefinitionServiceURL, cfg.DefinitionServiceToken, cfg.ConnectorAliasFetchTimeout)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetch alias registry: %w", err)
 	}

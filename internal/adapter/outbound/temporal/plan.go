@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 
-	outboundgrpc "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/grpc"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
@@ -32,7 +31,7 @@ func (d *Deps) GetCompiledPlan(ctx context.Context, in port.GetCompiledPlanInput
 
 	cw, err := d.Definitions.GetCompiledWorkflow(ctx, tenantID, versionID)
 	if err != nil {
-		if errors.Is(err, outboundgrpc.ErrUpstreamRejected) {
+		if errors.Is(err, port.ErrDefinitionRejected) {
 			return port.GetCompiledPlanOutput{}, nonRetryable("DefinitionServiceClientError", err)
 		}
 		return port.GetCompiledPlanOutput{}, fmt.Errorf("get compiled workflow: %w", err)

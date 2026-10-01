@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	outboundgrpc "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/grpc"
 	adapterhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
@@ -164,8 +163,8 @@ func TestStartInstance_ErrorCodes(t *testing.T) {
 		{"OverrideMapInvalid", port.ErrOverrideMapInvalid, http.StatusUnprocessableEntity, "OVERRIDE_MAP_INVALID"},
 		{"AssigneeIneligible", port.ErrAssigneeIneligible, http.StatusUnprocessableEntity, "ASSIGNEE_INELIGIBLE"},
 		{"UpstreamUnavailable", adapterhttp.ErrUpstreamUnavailable, http.StatusServiceUnavailable, "UPSTREAM_UNAVAILABLE"},
-		{"DefinitionServiceUnavailable", outboundgrpc.ErrUpstreamUnavailable, http.StatusServiceUnavailable, "UPSTREAM_UNAVAILABLE"},
-		{"DefinitionServiceRejected", outboundgrpc.ErrUpstreamRejected, http.StatusServiceUnavailable, "UPSTREAM_UNAVAILABLE"},
+		{"DefinitionServiceUnavailable", port.ErrDefinitionUnavailable, http.StatusServiceUnavailable, "UPSTREAM_UNAVAILABLE"},
+		{"DefinitionServiceRejected", port.ErrDefinitionRejected, http.StatusServiceUnavailable, "UPSTREAM_UNAVAILABLE"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

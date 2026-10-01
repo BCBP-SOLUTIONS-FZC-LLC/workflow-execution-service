@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	outboundgrpc "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/grpc"
 	adapterhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
@@ -244,15 +243,9 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusConflict, CodeTaskNotConnectorTyped, err.Error()
 	case errors.Is(err, adapterhttp.ErrUpstreamUnavailable):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, err.Error()
-	// The Definition Service gRPC client's own two sentinels (retries-
-	// exhausted vs. a non-retryable rejection on the first attempt) are
-	// distinct in outboundgrpc's own doc comment, but this catalogue has no
-	// narrower code for "upstream actively rejected the call" than
-	// UPSTREAM_UNAVAILABLE (LLD §5.10) — mapping both here is strictly
-	// better than the 500 either previously fell through to.
-	case errors.Is(err, outboundgrpc.ErrUpstreamUnavailable):
-		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, err.Error()
-	case errors.Is(err, outboundgrpc.ErrUpstreamRejected):
+	// This catalogue has no narrower code than UPSTREAM_UNAVAILABLE for a
+	// Definition Service rejection (LLD §5.10), so both of its outcomes map here.
+	case errors.Is(err, port.ErrDefinitionUnavailable), errors.Is(err, port.ErrDefinitionRejected):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, err.Error()
 	case errors.Is(err, context.DeadlineExceeded):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "request timed out"

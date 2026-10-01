@@ -65,7 +65,7 @@ COVER_THRESHOLD    := 95
 # the health server), which only `make test-e2e` exercises.
 COVER_PKG_FLOORS   := internal/workflow:88 cmd/connector-worker:55
 
-.PHONY: all tools tools-integration generate generate-proto generate-sqlc mock \
+.PHONY: all tools tools-integration generate generate-proto generate-sqlc mock contract-check \
         build migrate dev test test-integration test-e2e test-ci merge-coverage \
         cover cover-func cover-gaps cover-html cover-check cover-check-pkg \
         arch-lint lint lint-fix vuln \
@@ -307,6 +307,10 @@ check:
 ## arch-lint: Enforce Clean Architecture import direction via go-arch-lint
 arch-lint:
 	$(GOARCHLINT) check --project-path .
+
+## contract-check: Fail if a copied contract in api/contracts differs from its source (CONTRACT_SRC_DIR=<checkout> reads it locally)
+contract-check:
+	@scripts/contract-check.sh
 
 ## lint: Run golangci-lint (read-only; exits non-zero on violations)
 lint:

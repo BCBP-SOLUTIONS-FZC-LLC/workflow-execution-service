@@ -20,6 +20,6 @@ func TestEligibilityBackoff(t *testing.T) {
 		{10, 500 * time.Millisecond}, // stays capped for any further growth
 	}
 	for _, tt := range tests {
-		assert.Equal(t, tt.want, eligibilityBackoff(tt.attempt))
+		assert.Equal(t, tt.want, retryBackoff(tt.attempt))
 	}
 }

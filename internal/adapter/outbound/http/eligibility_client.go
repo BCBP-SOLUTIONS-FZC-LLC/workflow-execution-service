@@ -107,7 +107,7 @@ func (c *EligibilityClient) CheckEligibility(
 		select {
 		case <-ctx.Done():
 			return false, fmt.Errorf("%w: eligibility check: %w", ErrUpstreamUnavailable, ctx.Err())
-		case <-time.After(eligibilityBackoff(attempt)):
+		case <-time.After(retryBackoff(attempt)):
 		}
 	}
 	return false, lastErr
@@ -153,7 +153,7 @@ func (c *EligibilityClient) tryCheckEligibility(
 	return *out.Eligible, false, nil
 }
 
-func eligibilityBackoff(attempt int) time.Duration {
+func retryBackoff(attempt int) time.Duration {
 	d := 50 * time.Millisecond << (attempt - 1)
 	if d > 500*time.Millisecond {
 		d = 500 * time.Millisecond

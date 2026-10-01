@@ -72,18 +72,16 @@ type Config struct {
 	// only. Use OutboxRelayDSN(), not this field directly.
 	OutboxRelayDatabaseURL string
 
-	// DefinitionServiceAddr is optional: empty disables the outbound
-	// DefinitionClient. Whoever builds the composition root must guard
-	// construction on non-empty, mirroring definition_service's own
-	// `if cfg.ExecutionServiceAddr != ""` pattern — this is deliberately not
-	// enforced in validate() below.
-	DefinitionServiceAddr   string
+	// DefinitionServiceURL is the Definition Service's internal HTTP base URL
+	// (LLD §5.3), which cmd/server, cmd/worker and cmd/connector-worker all
+	// call. DefinitionServiceToken is that service's INTERNAL_API_TOKEN.
+	DefinitionServiceURL    string
+	DefinitionServiceToken  string
 	DefinitionClientTimeout time.Duration
 
 	// EligibilityBaseURL is required for cmd/server (InstanceService/
 	// DelegationReconciler's Eligibility field is not nil-safe) but not
-	// enforced here — deliberately not in validate(), same convention as
-	// DefinitionServiceAddr above; cmd/server fails fast inline instead.
+	// enforced here: cmd/server fails fast inline instead.
 	EligibilityBaseURL       string
 	EligibilityClientTimeout time.Duration
 
@@ -133,22 +131,17 @@ type Config struct {
 	// OpenBao KV-v2 read side — cmd/connector-worker only. Deliberately NOT
 	// validated below (see validate()'s own doc comment on why
 	// connector-worker-only fields skip that): cmd/connector-worker checks
-	// these itself at startup, mirroring DefinitionServiceAddr's precedent.
+	// these itself at startup.
 	OpenBaoAddr    string
 	OpenBaoToken   string
 	OpenBaoMount   string
 	OpenBaoTimeout time.Duration
 
-	// DefinitionServiceInternalHTTPAddr/ConnectorAliasFetchTimeout:
-	// cmd/connector-worker fetches the endpointAlias/queryAlias registry from
-	// definition_service's GET /api/v1/internal/connector-aliases once at startup
-	// (definition_service owns it now, not a static file — LLD Decision #21),
-	// authenticated the same x-internal-token way as ExecutionServiceInternalAddr
-	// below. connector-worker-only, not validated here. Distinct from
-	// DefinitionServiceAddr above, which is the gRPC port (9090), not HTTP.
-	DefinitionServiceInternalHTTPAddr string
-	ConnectorAliasFetchTimeout        time.Duration
-	ConnectorAliasRefreshInterval     time.Duration
+	// cmd/connector-worker fetches the alias registry from the Definition
+	// Service's GET /api/v1/internal/connector-aliases at DefinitionServiceURL
+	// (LLD Decision #21).
+	ConnectorAliasFetchTimeout    time.Duration
+	ConnectorAliasRefreshInterval time.Duration
 
 	// Per-connector-type dispatch pool sizing + internal execution timeout
 	// (LLD §6.5 step 2 — one bounded pool + one timeout per connector type).
@@ -258,7 +251,8 @@ func Load() (*Config, error) {
 		OutboxBatchSize:        envInt("OUTBOX_BATCH_SIZE", 50),
 		OutboxRelayDatabaseURL: getEnvOrDefault("OUTBOX_RELAY_DATABASE_URL", ""),
 
-		DefinitionServiceAddr:   getEnvOrDefault("DEFINITION_SERVICE_ADDR", ""),
+		DefinitionServiceURL:    getEnvOrDefault("DEFINITION_SERVICE_URL", ""),
+		DefinitionServiceToken:  getEnvOrDefault("DEFINITION_SERVICE_TOKEN", ""),
 		DefinitionClientTimeout: envDuration("DEFINITION_CLIENT_TIMEOUT", 5*time.Second),
 
 		EligibilityBaseURL:       getEnvOrDefault("ELIGIBILITY_BASE_URL", ""),
@@ -288,9 +282,8 @@ func Load() (*Config, error) {
 		OpenBaoMount:   getEnvOrDefault("OPENBAO_MOUNT", "secret"),
 		OpenBaoTimeout: envDuration("OPENBAO_TIMEOUT", 5*time.Second),
 
-		DefinitionServiceInternalHTTPAddr: getEnvOrDefault("DEFINITION_SERVICE_INTERNAL_HTTP_ADDR", ""),
-		ConnectorAliasFetchTimeout:        envDuration("CONNECTOR_ALIAS_FETCH_TIMEOUT", 10*time.Second),
-		ConnectorAliasRefreshInterval:     envDuration("CONNECTOR_ALIAS_REFRESH_INTERVAL", 5*time.Minute),
+		ConnectorAliasFetchTimeout:    envDuration("CONNECTOR_ALIAS_FETCH_TIMEOUT", 10*time.Second),
+		ConnectorAliasRefreshInterval: envDuration("CONNECTOR_ALIAS_REFRESH_INTERVAL", 5*time.Minute),
 
 		ConnectorPoolSizeStorage:         envInt("CONNECTOR_POOL_SIZE_STORAGE", 10),
 		ConnectorPoolSizeSendEmail:       envInt("CONNECTOR_POOL_SIZE_SEND_EMAIL", 5),
@@ -382,15 +375,20 @@ func (c *Config) validate() error {
 	if c.AppEnv != "dev" && c.InternalAPIToken == "" {
 		return fmt.Errorf("INTERNAL_API_TOKEN is required when APP_ENV != dev")
 	}
+	if c.DefinitionServiceURL == "" {
+		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
+	}
+	if c.AppEnv != "dev" && c.DefinitionServiceToken == "" {
+		return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required when APP_ENV != dev")
+	}
 	if c.AppEnv != "dev" && c.OutboxRelayDatabaseURL == "" {
 		return fmt.Errorf("OUTBOX_RELAY_DATABASE_URL is required when APP_ENV != dev — a missing relay DSN would silently fall back to the RLS-enforced app role and see zero rows forever")
 	}
-	// Connector-worker-only fields (OpenBao*, DefinitionServiceInternalHTTPAddr,
-	// ConnectorPoolSize*/ConnectorTimeout*, ExecutionServiceInternalAddr)
-	// are deliberately NOT validated here, mirroring DefinitionServiceAddr's
-	// own precedent above: this Config is shared by cmd/server and
-	// cmd/worker too, and a hard requirement here would break their boot
-	// for fields only cmd/connector-worker actually needs.
+	// Connector-worker-only fields (OpenBao*, ConnectorPoolSize*/
+	// ConnectorTimeout*, ExecutionServiceInternalAddr) are deliberately NOT
+	// validated here: this Config is shared by cmd/server and cmd/worker too,
+	// and a hard requirement here would break their boot for fields only
+	// cmd/connector-worker actually needs.
 	// cmd/connector-worker's own main.go checks its required fields itself.
 	return nil
 }

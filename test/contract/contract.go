@@ -6,6 +6,7 @@ package contract
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"testing"
@@ -18,6 +19,7 @@ import (
 
 // Spec is a loaded, valid OpenAPI document.
 type Spec struct {
+	doc    *openapi3.T
 	router routers.Router
 }
 
@@ -38,7 +40,7 @@ func Load(t testing.TB, path string) *Spec {
 	if err != nil {
 		t.Fatalf("route %s: %v", path, err)
 	}
-	return &Spec{router: router}
+	return &Spec{doc: doc, router: router}
 }
 
 // options skips the security check: whether a token is right is the
@@ -94,4 +96,42 @@ func restore(req *http.Request, body []byte) {
 		return
 	}
 	req.Body = io.NopCloser(bytes.NewReader(body))
+}
+
+// Example returns the JSON example the spec gives for a response: the media
+// type's own, or else its schema's.
+func (s *Spec) Example(t testing.TB, method, path string, status int) []byte {
+	t.Helper()
+	item := s.doc.Paths.Find(path)
+	if item == nil {
+		t.Fatalf("%s is not in the spec", path)
+		return nil
+	}
+	op := item.GetOperation(method)
+	if op == nil {
+		t.Fatalf("%s %s is not in the spec", method, path)
+		return nil
+	}
+	resp := op.Responses.Status(status)
+	if resp == nil || resp.Value == nil {
+		t.Fatalf("%s %s declares no %d response", method, path, status)
+		return nil
+	}
+	media := resp.Value.Content.Get("application/json")
+	if media == nil {
+		t.Fatalf("%s %s %d has no application/json body", method, path, status)
+		return nil
+	}
+	example := media.Example
+	if example == nil && media.Schema != nil && media.Schema.Value != nil {
+		example = media.Schema.Value.Example
+	}
+	if example == nil {
+		t.Fatalf("%s %s %d has no example", method, path, status)
+	}
+	b, err := json.Marshal(example)
+	if err != nil {
+		t.Fatalf("marshal example: %v", err)
+	}
+	return b
 }

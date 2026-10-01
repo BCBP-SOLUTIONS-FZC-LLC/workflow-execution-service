@@ -2,15 +2,22 @@ package port
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 )
 
-// CompiledWorkflow mirrors outboundgrpc.DefinitionClient's own CompiledWorkflow
-// struct field-for-field. That package predates this port and keeps its own
-// copy for its existing (Worker-side) callers; this one is what
-// internal/core/service's InstanceService/TemplateCachePrewarmer code
-// against, since service may not import adapter.
+// ErrDefinitionRejected is a Definition Service answer no retry can change: a
+// 4xx, or a response that breaks the contract. ErrDefinitionUnavailable is
+// a transport failure or a 5xx after the client's own retries (LLD §5.3).
+var (
+	ErrDefinitionRejected    = errors.New("definition service rejected the request")
+	ErrDefinitionUnavailable = errors.New("definition service unavailable")
+)
+
+// CompiledWorkflow is a workflow version and its stored compiled plan, in any
+// status. CompiledPlanJSON is the plan's JSON, or empty for a version with
+// none; VersionNumber is zero for a DRAFT.
 type CompiledWorkflow struct {
 	WorkflowID       uuid.UUID
 	VersionID        uuid.UUID
@@ -20,13 +27,8 @@ type CompiledWorkflow struct {
 	CompiledPlanJSON string
 }
 
-// DefinitionServiceClient is the outbound gRPC contract for fetching a
-// published workflow version's compiled plan (LLD §5.1, §5.3). Its real
-// implementation, outboundgrpc.DefinitionClient, predates this port and
-// returns its own package-local outboundgrpc.ErrUpstreamUnavailable/
-// ErrUpstreamRejected sentinels on failure — a caller needing to distinguish
-// the two still imports outboundgrpc for those two sentinels, the same way
-// internal/adapter/outbound/temporal/plan.go already does.
+// DefinitionServiceClient reads a workflow version's compiled plan from the
+// Definition Service's internal API (LLD §5.3).
 type DefinitionServiceClient interface {
 	GetCompiledWorkflow(ctx context.Context, tenantID, workflowVersionID uuid.UUID) (*CompiledWorkflow, error)
 }

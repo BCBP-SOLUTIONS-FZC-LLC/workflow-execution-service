@@ -8,6 +8,7 @@ import (
 func setValidEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("APP_ENV", "dev")
+	t.Setenv("DEFINITION_SERVICE_URL", "http://definition:8080")
 	t.Setenv("DATABASE_URL", "postgres://wfexec:wfexec@localhost:5432/workflow_execution?sslmode=disable")
 	t.Setenv("HTTP_PORT", "8080")
 	t.Setenv("GRPC_PORT", "9090")
@@ -91,12 +92,20 @@ func TestValidate(t *testing.T) {
 		{"internal api token set in prod", func(c *Config) {
 			c.AppEnv = "prod"
 			c.InternalAPIToken = "tok"
+			c.DefinitionServiceToken = "def-tok"
 			c.OutboxRelayDatabaseURL = "postgres://relay"
 		}, false},
+		{"definition service url required", func(c *Config) { c.DefinitionServiceURL = "" }, true},
+		{"definition service token required outside dev", func(c *Config) {
+			c.AppEnv = "staging"
+			c.InternalAPIToken = "tok"
+			c.OutboxRelayDatabaseURL = "postgres://relay"
+		}, true},
 		{"outbox relay database url required outside dev", func(c *Config) { c.AppEnv = "staging"; c.InternalAPIToken = "tok" }, true},
 		{"outbox relay database url set outside dev", func(c *Config) {
 			c.AppEnv = "staging"
 			c.InternalAPIToken = "tok"
+			c.DefinitionServiceToken = "def-tok"
 			c.OutboxRelayDatabaseURL = "postgres://relay"
 		}, false},
 	}
@@ -118,6 +127,7 @@ func TestValidate(t *testing.T) {
 				OutboxPollInterval:        time.Second,
 				AWSUseStub:                true,
 				GlueRegistryName:          "wf-workflow-events",
+				DefinitionServiceURL:      "http://definition:8080",
 				DefinitionClientTimeout:   5 * time.Second,
 				EligibilityClientTimeout:  5 * time.Second,
 				IAMClientTimeout:          5 * time.Second,

@@ -17,7 +17,7 @@ import (
 	"go.temporal.io/sdk/worker"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
-	outboundgrpc "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/grpc"
+	outboundhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pglogger"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pgtracer"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
@@ -40,10 +40,6 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
-		os.Exit(1)
-	}
-	if cfg.DefinitionServiceAddr == "" {
-		fmt.Fprintln(os.Stderr, "DEFINITION_SERVICE_ADDR is required for cmd/worker")
 		os.Exit(1)
 	}
 
@@ -142,11 +138,7 @@ func buildDeps(cfg *config.Config) (*outboundtemporal.Deps, port.ActiveTaskQueue
 		return nil, nil, nil, nil, nil, fmt.Errorf("new schema validator: %w", err)
 	}
 
-	definitions, err := outboundgrpc.NewDefinitionClient(cfg.DefinitionServiceAddr, cfg.DefinitionClientTimeout)
-	if err != nil {
-		pool.Close()
-		return nil, nil, nil, nil, nil, fmt.Errorf("new definition client: %w", err)
-	}
+	definitions := outboundhttp.NewDefinitionClient(cfg.DefinitionServiceURL, cfg.DefinitionServiceToken, cfg.DefinitionClientTimeout)
 
 	deps := &outboundtemporal.Deps{
 		Instances:   postgres.NewInstanceRepo(pool),
@@ -161,7 +153,6 @@ func buildDeps(cfg *config.Config) (*outboundtemporal.Deps, port.ActiveTaskQueue
 	queueRepo := postgres.NewActiveTaskQueueRepo(pool)
 
 	cleanup := func() {
-		_ = definitions.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = pool.DrainAndClose(ctx)

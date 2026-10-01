@@ -11,16 +11,16 @@ import (
 
 func validConnectorWorkerConfig() *config.Config {
 	return &config.Config{
-		ConnectorStreamKey:                "connector-tasks",
-		OpenBaoAddr:                       "http://openbao:8200",
-		DefinitionServiceInternalHTTPAddr: "http://definition:8080",
-		ExecutionServiceInternalAddr:      "http://execution:8080",
-		ConnectorActorUserIDs:             "00000000-0000-0000-0000-000000000001=00000000-0000-0000-0000-000000000002",
-		ConnectorStreamClaimMinIdle:       30 * time.Second,
-		ConnectorStreamMaxDeliveries:      10,
-		ConnectorStreamDeadLetterKey:      "connector-tasks-dead",
-		ConnectorTimeoutStorage:           60 * time.Second,
-		ConnectorTimeoutRestCall:          30 * time.Second,
+		ConnectorStreamKey:           "connector-tasks",
+		OpenBaoAddr:                  "http://openbao:8200",
+		DefinitionServiceURL:         "http://definition:8080",
+		ExecutionServiceInternalAddr: "http://execution:8080",
+		ConnectorActorUserIDs:        "00000000-0000-0000-0000-000000000001=00000000-0000-0000-0000-000000000002",
+		ConnectorStreamClaimMinIdle:  30 * time.Second,
+		ConnectorStreamMaxDeliveries: 10,
+		ConnectorStreamDeadLetterKey: "connector-tasks-dead",
+		ConnectorTimeoutStorage:      60 * time.Second,
+		ConnectorTimeoutRestCall:     30 * time.Second,
 	}
 }
 
@@ -39,15 +39,14 @@ func TestCheckRequiredConfig_OutcomeMustOutliveEveryRedelivery(t *testing.T) {
 
 func TestCheckRequiredConfig_RefusesMissingFields(t *testing.T) {
 	cases := map[string]func(*config.Config){
-		"CONNECTOR_STREAM_KEY":                  func(c *config.Config) { c.ConnectorStreamKey = "" },
-		"OPENBAO_ADDR":                          func(c *config.Config) { c.OpenBaoAddr = "" },
-		"DEFINITION_SERVICE_INTERNAL_HTTP_ADDR": func(c *config.Config) { c.DefinitionServiceInternalHTTPAddr = "" },
-		"EXECUTION_SERVICE_INTERNAL_ADDR":       func(c *config.Config) { c.ExecutionServiceInternalAddr = "" },
-		"CONNECTOR_ACTOR_USER_IDS":              func(c *config.Config) { c.ConnectorActorUserIDs = "" },
-		"INTERNAL_API_TOKEN":                    func(c *config.Config) { c.AppEnv = "prod" },
-		"CONNECTOR_STREAM_MAX_DELIVERIES":       func(c *config.Config) { c.ConnectorStreamMaxDeliveries = 0 },
-		"CONNECTOR_STREAM_DEAD_LETTER_KEY":      func(c *config.Config) { c.ConnectorStreamDeadLetterKey = c.ConnectorStreamKey },
-		"CONNECTOR_STREAM_CLAIM_MIN_IDLE":       func(c *config.Config) { c.ConnectorStreamClaimMinIdle = time.Second },
+		"CONNECTOR_STREAM_KEY":             func(c *config.Config) { c.ConnectorStreamKey = "" },
+		"OPENBAO_ADDR":                     func(c *config.Config) { c.OpenBaoAddr = "" },
+		"EXECUTION_SERVICE_INTERNAL_ADDR":  func(c *config.Config) { c.ExecutionServiceInternalAddr = "" },
+		"CONNECTOR_ACTOR_USER_IDS":         func(c *config.Config) { c.ConnectorActorUserIDs = "" },
+		"INTERNAL_API_TOKEN":               func(c *config.Config) { c.AppEnv = "prod" },
+		"CONNECTOR_STREAM_MAX_DELIVERIES":  func(c *config.Config) { c.ConnectorStreamMaxDeliveries = 0 },
+		"CONNECTOR_STREAM_DEAD_LETTER_KEY": func(c *config.Config) { c.ConnectorStreamDeadLetterKey = c.ConnectorStreamKey },
+		"CONNECTOR_STREAM_CLAIM_MIN_IDLE":  func(c *config.Config) { c.ConnectorStreamClaimMinIdle = time.Second },
 	}
 	for want, mutate := range cases {
 		cfg := validConnectorWorkerConfig()
