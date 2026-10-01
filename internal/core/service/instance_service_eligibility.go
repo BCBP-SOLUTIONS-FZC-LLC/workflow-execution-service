@@ -8,31 +8,11 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/enums"
 )
-
-func createsHumanTask(stage *dsl.StageDef) bool {
-	if stage.ConnectorType != "" {
-		return false
-	}
-	switch stage.Type {
-	case string(enums.StageTypeSendTask), string(enums.StageTypeReceiveTask):
-		return false
-	default:
-		return true
-	}
-}
 
 func deptUUID(dept *dsl.DepartmentDef) uuid.UUID {
 	id, _ := uuid.Parse(dept.IAMDepartmentID)
 	return id
-}
-
-func stageNodeKey(deptID string, stage *dsl.StageDef) string {
-	if stage.NodeID != "" {
-		return deptID + "/" + stage.NodeID
-	}
-	return deptID + "/" + stage.Type
 }
 
 func findPlan(collab *dsl.CompiledCollaboration, name string) *dsl.CompiledPlan {
@@ -51,7 +31,7 @@ func validateOverrideMap(plan *dsl.CompiledPlan, overrideMap map[string]uuid.UUI
 	valid := make(map[string]struct{})
 	for _, dept := range plan.Departments {
 		for i := range dept.Stages {
-			valid[stageNodeKey(dept.ID, &dept.Stages[i])] = struct{}{}
+			valid[dsl.NodeKey(dept.ID, &dept.Stages[i])] = struct{}{}
 		}
 	}
 	for nodeKey := range overrideMap {
@@ -104,10 +84,10 @@ func collectAssigneeChecks(
 		}
 		for i := range dept.Stages {
 			stage := &dept.Stages[i]
-			if !createsHumanTask(stage) {
+			if !stage.CreatesHumanTask() {
 				continue
 			}
-			nodeKey := stageNodeKey(dept.ID, stage)
+			nodeKey := dsl.NodeKey(dept.ID, stage)
 			userIDs := resolveStageAssignees(stage, nodeKey, overrideMap)
 			if len(userIDs) == 0 {
 				unresolvedNodes = append(unresolvedNodes, nodeKey)

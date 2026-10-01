@@ -44,7 +44,7 @@ type reassignSignalWire struct {
 }
 
 // deptAndSuffix splits a NodeKey ("dept/rest") back into its two halves —
-// the inverse of stageNodeKey, matching internal/adapter/outbound/temporal's
+// the inverse of dsl.NodeKey, matching internal/adapter/outbound/temporal's
 // own deptIDFromNodeKey convention (each duplicated locally, arch-lint's
 // service/adapter dependency direction forbids importing either).
 func deptAndSuffix(nodeKey string) (deptID, suffix string) {

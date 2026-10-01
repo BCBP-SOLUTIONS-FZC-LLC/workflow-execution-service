@@ -142,7 +142,7 @@ func findDepartment(plan *dsl.CompiledPlan, id string) *dsl.DepartmentDef {
 }
 
 // runDepartmentAtKey resolves key to its index within deptID's compiled
-// Stages via stageNodeKey and runs from there (execution LLD §2.6):
+// Stages via dsl.NodeKey and runs from there (execution LLD §2.6):
 // TargetNodeID/TargetStage and their Revert* counterparts give
 // machine-addressable routing for the case a bare department reference
 // can't express — a branch target that shares a department with a stage
@@ -154,7 +154,7 @@ func (in *interpreter) runDepartmentAtKey(ctx wf.Context, plan *dsl.CompiledPlan
 		return "", "", fmt.Errorf("workflow: department %q not found in plan %q", deptID, plan.Name)
 	}
 	for i := range dept.Stages {
-		if stageNodeKey(deptID, &dept.Stages[i]) == key {
+		if domain.NodeKey(dsl.NodeKey(deptID, &dept.Stages[i])) == key {
 			return in.runDepartmentFrom(ctx, plan, deptID, i)
 		}
 	}
@@ -213,7 +213,7 @@ func containsDept(deptIDs []string, deptID string) bool {
 
 func stageIndexAfter(dept *dsl.DepartmentDef, lastCompletedNode domain.NodeKey) int {
 	for i := range dept.Stages {
-		if stageNodeKey(dept.ID, &dept.Stages[i]) == lastCompletedNode {
+		if domain.NodeKey(dsl.NodeKey(dept.ID, &dept.Stages[i])) == lastCompletedNode {
 			return i + 1
 		}
 	}

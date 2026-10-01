@@ -391,7 +391,7 @@ func (f *adminOverrideFixture) assigneeCanComplete(client *apiClient, taskID uui
 
 // TestE2E_NodeOverride drives POST /instances/:id/nodes/:node/override — a
 // real e2e run here caught a genuine routing bug: a compiled NodeKey is
-// always "<deptID>/<stageID>" (dsl's stageNodeKey), but gin's default
+// always "<deptID>/<stageID>" (dsl.NodeKey), but gin's default
 // routing 404s on a literal "/" inside a single :node path segment (it
 // either splits into an extra segment if unescaped, or gets decoded back to
 // "/" before ever reaching the router tree if sent as a plain %2F without

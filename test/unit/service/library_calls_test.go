@@ -2,8 +2,12 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
+	"maps"
+	"slices"
 	"testing"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl/dsltest"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -30,6 +34,25 @@ func goldenStart(overrides map[string]uuid.UUID) port.StartInstanceInput {
 		TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "GOLDEN",
 		StartedByUserID: uuid.New(), OverrideMap: overrides,
 	}
+}
+
+// goldenHumanNodeKeys is dsl.NodeKey over every human task of the golden's
+// expanded main plan.
+func goldenHumanNodeKeys(t *testing.T) []string {
+	t.Helper()
+	var collab dsl.CompiledCollaboration
+	require.NoError(t, json.Unmarshal(dsltest.LibraryCalls(), &collab))
+	expanded, err := dsl.ExpandCalls(&collab, 0)
+	require.NoError(t, err)
+	var keys []string
+	for _, d := range expanded.Plans[0].Departments {
+		for i := range d.Stages {
+			if d.Stages[i].CreatesHumanTask() {
+				keys = append(keys, dsl.NodeKey(d.ID, &d.Stages[i]))
+			}
+		}
+	}
+	return keys
 }
 
 func TestInstanceService_Start_LibraryCalls(t *testing.T) {
@@ -80,6 +103,33 @@ func TestInstanceService_Start_LibraryCalls(t *testing.T) {
 			{NewUserID: uuid.MustParse(goldenOpsReview), DepartmentID: uuid.MustParse(goldenOpsIAM), RequiredLevel: "reviewer"},
 			{NewUserID: opsChecker, DepartmentID: uuid.MustParse(goldenOpsIAM), RequiredLevel: "checker"},
 		}, got)
+	})
+
+	// Definition's node read keys each human task with dsl.NodeKey over this
+	// same expanded plan (definition LLD §3.3.12.2), so every key it returns
+	// must be one override_map accepts and the eligibility check covers.
+	t.Run("override_map accepts every key dsl.NodeKey gives the expanded plan's human tasks", func(t *testing.T) {
+		overrides := map[string]uuid.UUID{}
+		for _, key := range goldenHumanNodeKeys(t) {
+			overrides[key] = uuid.New()
+		}
+		require.Len(t, overrides, 4)
+
+		svc, _, _, _, _, _, definitions, eligibility := newInstanceServiceHarness()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), string(dsltest.LibraryCalls()))
+		var checked []uuid.UUID
+		eligibility.batchCheck = func(_ context.Context, reqs []port.EligibilityCheckRequest, _ uuid.UUID) ([]port.EligibilityResult, error) {
+			results := make([]port.EligibilityResult, len(reqs))
+			for i := range reqs {
+				checked = append(checked, reqs[i].NewUserID)
+				results[i] = port.EligibilityResult{Eligible: true}
+			}
+			return results, nil
+		}
+
+		_, err := svc.Start(context.Background(), goldenStart(overrides))
+		require.NoError(t, err)
+		assert.ElementsMatch(t, slices.Collect(maps.Values(overrides)), checked, "every override is the user checked for its node")
 	})
 
 	t.Run("a plan that cannot be expanded is refused as an invalid version", func(t *testing.T) {

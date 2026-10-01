@@ -90,7 +90,7 @@ func requiredLevelForTask(plan *dsl.CompiledPlan, task *domain.Task) (string, bo
 		}
 		for i := range dept.Stages {
 			stage := &dept.Stages[i]
-			if stageNodeKey(dept.ID, stage) == task.NodeKey {
+			if dsl.NodeKey(dept.ID, stage) == task.NodeKey {
 				return stage.Role, true
 			}
 		}

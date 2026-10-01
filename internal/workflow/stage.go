@@ -17,17 +17,10 @@ import (
 // branch), not a completion or a failure.
 var errStageAbandoned = errors.New("workflow: stage abandoned")
 
-func stageNodeKey(deptID string, stage *dsl.StageDef) domain.NodeKey {
-	if stage.NodeID != "" {
-		return domain.NodeKey(deptID + "/" + stage.NodeID)
-	}
-	return domain.NodeKey(deptID + "/" + stage.Type)
-}
-
 // stage.Type is a plain string, not enums.StageType: an unrecognized value
 // is a valid forward-compat passthrough, never a failure.
 func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, stage *dsl.StageDef) (domain.NodeKey, string, error) {
-	nodeKey := stageNodeKey(deptID, stage)
+	nodeKey := domain.NodeKey(dsl.NodeKey(deptID, stage))
 
 	switch stage.Type {
 	case string(enums.StageTypeSendTask):

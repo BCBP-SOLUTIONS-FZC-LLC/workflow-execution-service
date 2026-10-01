@@ -55,14 +55,13 @@ func NewRouter(cfg RouterConfig) *Router {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
-	// A compiled NodeKey is always "<deptID>/<stageID>" (dsl's own
-	// stageNodeKey convention) — every real call to POST
-	// /instances/:id/nodes/:node/override needs that literal "/" preserved
-	// inside :node's single path segment, which gin's default routing can't
-	// do (it 404s: an unescaped "/" splits into an extra segment, and a raw
-	// path match without UseRawPath decodes %2F back to "/" before ever
-	// reaching the router tree). UseRawPath makes gin match on the
-	// still-encoded path and only unescape the matched param value
+	// A compiled NodeKey is always "<deptID>/<stageID>" (dsl.NodeKey) — every
+	// real call to POST /instances/:id/nodes/:node/override needs that literal
+	// "/" preserved inside :node's single path segment, which gin's default
+	// routing can't do (it 404s: an unescaped "/" splits into an extra
+	// segment, and a raw path match without UseRawPath decodes %2F back to
+	// "/" before ever reaching the router tree). UseRawPath makes gin match on
+	// the still-encoded path and only unescape the matched param value
 	// afterward — callers must percent-encode the node key's "/" as %2F.
 	r.UseRawPath = true
 	h := cfg.Handler
