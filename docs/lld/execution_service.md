@@ -906,16 +906,29 @@ If the bulk node-eligibility re-validation (§5.5) finds a stale default assigne
 }
 ```
 
-### 5.3 gRPC Surface (port 9090)
+### 5.3 Calls between this service and the Definition Service
 
-| Direction | Method | Caller/Callee | Notes |
+The two services call each other over HTTP on their internal route groups (`/api/v1/internal`), which the public gateway does not route.
+
+**Contracts.**
+- This service's internal endpoints are specified in `api/internal-openapi.yaml`, with a design-repo copy, `execution_internal_openapi.yaml`.
+- `api/contracts/definition-internal-openapi.yaml` is a byte-identical copy of the Definition Service's internal document, and `api/contracts/SOURCES` names the commit it was taken from. `make contract-check` fails when the copy differs from that file.
+- `test/contract` sends requests through the real router and validates each response against this service's document. It also validates every request the definition client sends against the copy, and parses the copy's response examples (definition LLD §3.4).
+
+**Authentication.** A caller sends the callee's token in `x-internal-token`. This service compares it with its own `INTERNAL_API_TOKEN` in constant time (`RequireInternalToken`), and answers a missing or wrong token with `401` and a problem body. Calling the Definition Service, this service sends `DEFINITION_SERVICE_TOKEN`; the Definition Service sends this service's token as `EXECUTION_SERVICE_TOKEN`.
+
+| Direction | Endpoint | Caller | Notes |
 | --- | --- | --- | --- |
-| Inbound | `CheckActiveInstances(tenant_id, workflow_id) → {has_active, count}` | Definition Service | The archive-guard RPC, backed by the partial index in §4.9 |
-| Inbound | `PauseUserTasks(tenant_id, user_id) → {}` | Internal IAM event consumer | The `DepartmentMembershipRevoked`/`UserDeleted` safety-net pause vehicle |
-| Inbound | `grpc_health_v1.Health/Check` | k8s probes | Co-registered alongside the domain RPCs |
-| Outbound | `GetCompiledWorkflow(tenant_id, workflow_version_id)` | Definition Service | Called from two sites: the API process's early synchronous pre-check (§5.1) and the Worker's `GetCompiledPlanActivity`, authoritative |
+| Served | `GET /api/v1/internal/workflows/{workflow_id}/active-instances?tenant_id=` → `{has_active, count}` | Definition Service | The archive guard, backed by the partial index in §4.9 |
+| Served | `POST /api/v1/internal/users/{user_id}/pause-tasks`, body `{tenant_id}` → `204` | Definition Service | The membership-revoked safety-net pause: each RUNNING instance holding an active assignment for the user gets a pause signal with initiator `safety_net`; a failure to signal one instance is logged and skipped |
+| Called | `GET /api/v1/internal/workflow-versions/{version_id}/compiled-plan?tenant_id=` | Definition Service | From instance start (§5.1), the compiled-plan cache and the Worker's `GetCompiledPlanActivity`, which is authoritative |
 
-Both directions reuse the shared platform gRPC interceptor chain for observability (`grpccommon.ObservabilityUnaryInterceptors`/`ObservabilityStreamInterceptors` — panic recovery, request ID, tracing, metrics, logging), the same chain Definition Service's own shipped gRPC setup already uses, not a step past it. Inbound authentication is a dedicated `x-internal-token` gRPC-metadata interceptor, not `grpccommon.RequirePermission`: `RequirePermission`'s per-user action/resource model depends on gateway-injected `x-user-id`/`x-tenant-id`/`x-tenant-roles` metadata from an authenticated end user, which a machine-to-machine call from Definition Service never carries (confirmed against Definition Service's own real, shipped outbound client, which sends no such metadata) — using it here would reject every real call before the handler ever ran. Instead, both inbound RPCs are guarded by the identical `RequireInternalToken`/`x-internal-token`/`INTERNAL_API_TOKEN` convention §5.7/§9.2 already establish for `POST /api/v1/internal/events`, adapted to gRPC metadata instead of an HTTP header; `grpc_health_v1.Health/Check` and gRPC reflection are exempt, since k8s probes and introspection tooling carry no token. A missing or invalid token returns the gRPC-native `codes.Unauthenticated` — the gRPC-status equivalent of the HTTP `401 UNAUTHORIZED` code this same convention already returns over HTTP, not a distinct shape this design needs to define separately.
+**The definition client** (`internal/adapter/outbound/http/definition_client.go`, configured by `DEFINITION_SERVICE_URL` and `DEFINITION_SERVICE_TOKEN`):
+- It makes 3 attempts, each bounded by `DEFINITION_CLIENT_TIMEOUT`, and stops when its context is done.
+- It retries a transport error or a `5xx` after 50ms, then 100ms, capped at 500ms. After the last attempt it returns `port.ErrDefinitionUnavailable`, which `GetCompiledPlanActivity` retries.
+- A `4xx`, or a response that breaks the contract (a body that does not decode, or identifiers that are not UUIDs), is `port.ErrDefinitionRejected`, which the activity fails as non-retryable `DefinitionServiceClientError`.
+- The plan arrives as a JSON object, and the client keeps its bytes as `CompiledWorkflow.CompiledPlanJSON`. The plan's own `schema_version` is the DSL schema major version that §2.5's compatibility layer acts on.
+- `cmd/server`, `cmd/worker` and `cmd/connector-worker` all use `DEFINITION_SERVICE_URL`; the connector-worker reads the alias registry from it (`workflow_connectors.md` §6.2).
 
 ### 5.4 Node-Override Endpoint
 

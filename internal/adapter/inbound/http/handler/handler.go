@@ -56,6 +56,8 @@ type Handler struct {
 	eventDecoder    port.EventDecoder
 	connectorTasks  port.ConnectorTaskService
 	connectorEvents port.ConnectorEventPublisher
+	archiveGuard    port.ArchiveGuard
+	userTaskPauser  port.UserTaskPauser
 	log             port.Logger
 }
 
@@ -89,6 +91,10 @@ type Services struct {
 	// matches this package's established nil-safe-dependency convention
 	// (Cache, Log, etc.).
 	ConnectorEvents port.ConnectorEventPublisher
+	// ArchiveGuard and UserTaskPauser back the two endpoints the Definition
+	// Service calls (execution LLD §5.3).
+	ArchiveGuard   port.ArchiveGuard
+	UserTaskPauser port.UserTaskPauser
 	// Log is nil-safe throughout this package — every call site guards it.
 	Log port.Logger
 }
@@ -115,6 +121,8 @@ func New(s Services) *Handler {
 		eventDecoder:    s.EventDecoder,
 		connectorTasks:  s.ConnectorTasks,
 		connectorEvents: s.ConnectorEvents,
+		archiveGuard:    s.ArchiveGuard,
+		userTaskPauser:  s.UserTaskPauser,
 		log:             s.Log,
 	}
 }

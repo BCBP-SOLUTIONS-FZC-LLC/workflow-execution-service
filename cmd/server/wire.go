@@ -210,7 +210,9 @@ func newApp(cfg *config.Config) (*app, error) {
 		Delegation: delegationReconciler, TenantLifecycle: tenantLifecycleReconciler,
 		UserSafetyNet: userSafetyNetReconciler, OOOAvailability: oooAvailabilityReconciler,
 		ConnectorTasks:  connectorTaskService,
-		ConnectorEvents: connectorEvents, Log: log,
+		ConnectorEvents: connectorEvents,
+		ArchiveGuard:    guard, UserTaskPauser: pauser,
+		Log: log,
 	})
 
 	grpcSrv := grpc.NewGRPCServer(cfg.OTELServiceName, cfg.BuildVersion, cfg.InternalAPIToken, log, guard, pauser)

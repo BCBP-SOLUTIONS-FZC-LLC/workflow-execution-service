@@ -87,6 +87,8 @@ func NewRouter(cfg RouterConfig) *Router {
 	internalWorkflows.POST("/reassign-delegate", h.Idempotent(h.ReassignDelegate))
 	internalWorkflows.POST("/cancel-by-delegate", h.Idempotent(h.CancelByDelegate))
 	internalWorkflows.GET("/delegate-impact", h.DelegateImpact)
+	internalWorkflows.GET("/:workflow_id/active-instances", h.ActiveInstances)
+	internal.POST("/users/:user_id/pause-tasks", h.PauseUserTasks)
 
 	internal.POST("/events/delegation", h.HandleDelegationEvents)
 	internal.POST("/events/user-profile", h.HandleUserProfileEvents)

@@ -169,13 +169,13 @@ migrate:
 dev:
 	go run ./cmd/server
 
-## test: Run unit tests with race detector and coverage (internal + cmd + test/unit + test/workflow)
+## test: Run unit tests with race detector and coverage (internal + cmd + test/unit + test/workflow + test/contract)
 test:
 	@mkdir -p $(COVERAGE_DIR)
 	go test -race -count=1 \
 	    -coverpkg=$$(go list ./internal/... ./cmd/... | grep -v '$(COVER_EXCLUDE_PKG)' | tr '\n' ',' | sed 's/,$$//') \
 	    -coverprofile=$(COVERAGE_DIR)/unit.out -covermode=atomic \
-	    ./internal/... ./cmd/... ./test/unit/... ./test/workflow/...
+	    ./internal/... ./cmd/... ./test/unit/... ./test/workflow/... ./test/contract/...
 	@grep -v '$(COVER_EXCLUDE_FILE)' $(COVERAGE_DIR)/unit.out > $(COVERAGE_DIR)/unit.out.filtered && mv $(COVERAGE_DIR)/unit.out.filtered $(COVERAGE_DIR)/unit.out
 	@go tool cover -func=$(COVERAGE_DIR)/unit.out | awk '/^total:/{print "total:", $$NF}'
 
