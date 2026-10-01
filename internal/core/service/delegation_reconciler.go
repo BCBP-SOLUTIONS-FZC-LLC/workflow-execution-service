@@ -58,7 +58,7 @@ func (s *DelegationReconciler) resolveCandidates(ctx context.Context, tenantID u
 }
 
 func (s *DelegationReconciler) eligibleCandidates(ctx context.Context, tenantID, candidateUserID uuid.UUID, rows []delegationCandidate, logPrefix string) ([]delegationCandidate, error) {
-	plans := newCompiledPlanCache(s.Definitions)
+	plans := newCompiledPlanCache(s.Definitions, s.logger())
 	requests := make([]port.EligibilityCheckRequest, 0, len(rows))
 	resolved := make([]delegationCandidate, 0, len(rows))
 	for _, c := range rows {
@@ -178,7 +178,7 @@ func (s *DelegationReconciler) Reroute(ctx context.Context, in port.DelegationRe
 	}
 	candidates := s.resolveCandidates(ctx, in.TenantID, active)
 
-	plans := newCompiledPlanCache(s.Definitions)
+	plans := newCompiledPlanCache(s.Definitions, s.logger())
 	scoped := make([]delegationCandidate, 0, len(candidates))
 	for _, c := range candidates {
 		if scopeMatches(ctx, s.logger(), plans, in.TenantID, c, in.Scope, in.ScopeID) {

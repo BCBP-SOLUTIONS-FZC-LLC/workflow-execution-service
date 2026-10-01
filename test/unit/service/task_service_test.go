@@ -701,6 +701,8 @@ func TestTaskService_Reassign(t *testing.T) {
 		definitions := &fakeDefinitionClient{err: assert.AnError}
 		svc.Definitions = definitions
 		svc.Eligibility = &fakeEligibilityChecker{}
+		log := &fakeLogger{}
+		svc.Log = log
 
 		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
@@ -712,6 +714,8 @@ func TestTaskService_Reassign(t *testing.T) {
 		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
 		assert.Error(t, err)
 		assert.Empty(t, temporal.signals)
+		require.Len(t, log.warnFields, 1, "the handler's 503 detail is fixed, so the cause must be logged")
+		assert.Equal(t, assert.AnError.Error(), log.warnFields[0]["error"])
 	})
 
 	t.Run("node not found in compiled plan skips the eligibility check", func(t *testing.T) {

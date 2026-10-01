@@ -68,7 +68,7 @@ func (s *WorkflowClient) ReassignDelegate(ctx context.Context, in port.ReassignD
 	}
 	matched := matchingAssignments(active, in.DelegationID)
 
-	plans := newCompiledPlanCache(s.Definitions)
+	plans := newCompiledPlanCache(s.Definitions, s.logger())
 	count := 0
 	for _, a := range matched {
 		task, err := s.Tasks.GetByID(ctx, in.TenantID, a.TaskID)

@@ -43,9 +43,10 @@ func Load(t testing.TB, path string) *Spec {
 	return &Spec{doc: doc, router: router}
 }
 
-// options skips the security check: whether a token is right is the
-// middleware's concern, tested on its own, not the document's.
-var options = &openapi3filter.Options{AuthenticationFunc: openapi3filter.NoopAuthenticationFunc}
+// options skips the security check, since whether a token is right is the
+// middleware's concern, tested on its own; and it refuses a status the
+// document does not declare.
+var options = &openapi3filter.Options{AuthenticationFunc: openapi3filter.NoopAuthenticationFunc, IncludeResponseStatus: true}
 
 func (s *Spec) input(t testing.TB, req *http.Request) *openapi3filter.RequestValidationInput {
 	t.Helper()

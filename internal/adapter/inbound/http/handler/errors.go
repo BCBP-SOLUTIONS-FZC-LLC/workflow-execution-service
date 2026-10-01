@@ -245,8 +245,10 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, err.Error()
 	// This catalogue has no narrower code than UPSTREAM_UNAVAILABLE for a
 	// Definition Service rejection (LLD §5.10), so both of its outcomes map here.
+	// The cause carries the Definition Service's internal URL and the tenant,
+	// so the detail is fixed; the service that read the plan logs the cause.
 	case errors.Is(err, port.ErrDefinitionUnavailable), errors.Is(err, port.ErrDefinitionRejected):
-		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, err.Error()
+		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "the Definition Service could not serve the workflow version"
 	case errors.Is(err, context.DeadlineExceeded):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "request timed out"
 	default:

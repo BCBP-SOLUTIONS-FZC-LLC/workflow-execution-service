@@ -388,7 +388,7 @@ func (s *TaskService) checkReassignEligibility(ctx context.Context, inst *domain
 	if s.Eligibility == nil || s.Definitions == nil {
 		return nil
 	}
-	plan, err := newCompiledPlanCache(s.Definitions).mainPlan(ctx, inst.TenantID, inst.WorkflowVersionID)
+	plan, err := newCompiledPlanCache(s.Definitions, s.logger()).mainPlan(ctx, inst.TenantID, inst.WorkflowVersionID)
 	if err != nil {
 		return fmt.Errorf("get compiled plan for eligibility check: %w", err)
 	}

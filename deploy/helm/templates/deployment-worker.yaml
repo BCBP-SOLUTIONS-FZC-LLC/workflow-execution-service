@@ -75,11 +75,15 @@ spec:
                 secretKeyRef:
                   name: {{ include "workflow-execution-service.secretName" . }}
                   key: DEFINITION_SERVICE_TOKEN
+                  {{- /* secret.yaml requires it outside dev */}}
+                  optional: {{ eq .Values.env.appEnv "dev" }}
             - name: INTERNAL_API_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "workflow-execution-service.secretName" . }}
                   key: INTERNAL_API_TOKEN
+                  {{- /* secret.yaml requires it outside dev */}}
+                  optional: {{ eq .Values.env.appEnv "dev" }}
             {{- if .Values.temporalMTLS.enabled }}
             - name: TEMPORAL_TLS_CERT_PATH
               value: /etc/temporal-tls/tls.crt

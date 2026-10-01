@@ -56,11 +56,12 @@ func scopeMatches(ctx context.Context, log port.Logger, plans *compiledPlanCache
 
 type compiledPlanCache struct {
 	definitions port.DefinitionServiceClient
+	log         port.Logger
 	byVersion   map[uuid.UUID]*dsl.CompiledPlan
 }
 
-func newCompiledPlanCache(definitions port.DefinitionServiceClient) *compiledPlanCache {
-	return &compiledPlanCache{definitions: definitions, byVersion: make(map[uuid.UUID]*dsl.CompiledPlan)}
+func newCompiledPlanCache(definitions port.DefinitionServiceClient, log port.Logger) *compiledPlanCache {
+	return &compiledPlanCache{definitions: definitions, log: log, byVersion: make(map[uuid.UUID]*dsl.CompiledPlan)}
 }
 
 func (c *compiledPlanCache) mainPlan(ctx context.Context, tenantID, versionID uuid.UUID) (*dsl.CompiledPlan, error) {
@@ -69,6 +70,7 @@ func (c *compiledPlanCache) mainPlan(ctx context.Context, tenantID, versionID uu
 	}
 	compiled, err := c.definitions.GetCompiledWorkflow(ctx, tenantID, versionID)
 	if err != nil {
+		c.log.Warn("compiled-plan read from Definitions failed", map[string]any{"error": err.Error()})
 		return nil, err
 	}
 	collab, err := decodeCollaboration(compiled.CompiledPlanJSON)

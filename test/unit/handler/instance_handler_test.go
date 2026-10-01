@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -183,6 +184,21 @@ func TestStartInstance_ErrorCodes(t *testing.T) {
 			assert.Equal(t, tc.code, body.Code)
 		})
 	}
+}
+
+// A Definition Service failure wraps its internal URL and the tenant; neither
+// belongs in a browser-facing problem body.
+func TestStartInstance_DefinitionFailureDetailHidesItsCause(t *testing.T) {
+	cause := fmt.Errorf("%w: compiled plan: Get \"http://workflow-definition-service:8080/api/v1/internal/workflow-versions/x/compiled-plan?tenant_id=7ca648b2\": dial tcp: connection refused", port.ErrDefinitionUnavailable)
+	fake := &fakeInstanceService{
+		start: func(context.Context, port.StartInstanceInput) (*port.Instance, error) { return nil, cause },
+	}
+	w := do(newRouter(newInstanceHandler(fake)), req(http.MethodPost, instancesPath(), map[string]any{
+		"subject_id": "SUBJ-1", "business_key": "TND-001", "workflow_version_id": uuid.New(),
+	}))
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.NotContains(t, w.Body.String(), "workflow-definition-service")
+	assert.NotContains(t, w.Body.String(), "tenant_id")
 }
 
 func TestStartInstance_AssigneeIneligible_PopulatesInvalidParams(t *testing.T) {

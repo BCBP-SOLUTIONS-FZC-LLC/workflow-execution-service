@@ -32,6 +32,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 - **The Definition Service link is internal HTTP; gRPC is removed.** `internal/adapter/outbound/http.DefinitionClient` reads compiled plans for `cmd/server`, `cmd/worker` and the connector-worker's alias fetch, with `DEFINITION_SERVICE_URL`/`DEFINITION_SERVICE_TOKEN` replacing `DEFINITION_SERVICE_ADDR` and `DEFINITION_SERVICE_INTERNAL_HTTP_ADDR`. `port.ErrDefinitionRejected`/`ErrDefinitionUnavailable` replace the gRPC adapter's sentinels. `GRPC_PORT`, the protos, buf and port 9090 are gone.
 - Helm: the Worker gets the Definition Service URL, token and egress; the API and Worker get `INTERNAL_API_TOKEN`; the Secret refuses to render without both tokens outside dev; the gateway routes only the public routes; `make helm-lint` renders to a file first, since a failed render had passed through the pipe.
+- A failed compiled-plan read answers `503 UPSTREAM_UNAVAILABLE` with a fixed detail; the cause, which names the Definition Service's URL and the tenant, is logged instead.
+- Helm: in a dev install the API's and Worker's `DEFINITION_SERVICE_TOKEN` and `INTERNAL_API_TOKEN` references are optional, so pods start without them. The internal-call alert selects on `route` (`method` is the HTTP verb) and reports per route.
+- `make contract-check` and `make contract-breaking` fail on a repo, ref or `CONTRACT_SRC_DIR` they cannot read, instead of reporting it as pending; a source file missing from a real branch is still pending.
 - Node keys and the human-task rule come from workflow-models' `dsl.NodeKey` and `StageDef.CreatesHumanTask`, which Definition's node read uses too. The key format is unchanged, so no Temporal version gate is needed.
 
 ### Fixed

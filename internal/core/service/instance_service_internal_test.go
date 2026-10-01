@@ -57,7 +57,7 @@ func (goldenDefinitions) GetCompiledWorkflow(context.Context, uuid.UUID, uuid.UU
 // A module task's required level is found through its call-scoped node key,
 // which exists only once the plan's calls are expanded.
 func TestCompiledPlanCache_ExpandsLibraryCalls(t *testing.T) {
-	plan, err := newCompiledPlanCache(goldenDefinitions{}).mainPlan(context.Background(), uuid.New(), uuid.New())
+	plan, err := newCompiledPlanCache(goldenDefinitions{}, noopLogger{}).mainPlan(context.Background(), uuid.New(), uuid.New())
 	require.NoError(t, err)
 	task := &domain.Task{
 		DepartmentID: uuid.MustParse("92fd92cf-4b2c-58dc-bf98-f3d0af729876"),

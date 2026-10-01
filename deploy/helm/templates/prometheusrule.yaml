@@ -127,21 +127,20 @@ spec:
 
     - name: workflow_execution_service_definition_calls
       rules:
-        # Combined rather than split per endpoint: the active-instances and
-        # pause-tasks calls (LLD §5.3) are lightweight, similarly-critical calls
-        # from the Definition Service, not two independently-scaled hot paths.
+        # One rule for the active-instances and pause-tasks calls (LLD §5.3),
+        # evaluated per route so the summary names the failing one.
         - alert: ExecutionServiceDefinitionCallsHighErrorRate
           expr: |
-            sum(rate(http_requests_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}, method=~"/api/v1/internal/workflows/:workflow_id/active-instances|/api/v1/internal/users/:user_id/pause-tasks", status_class="5xx"}[5m]))
+            sum by (route) (rate(http_requests_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}, route=~"/api/v1/internal/workflows/:workflow_id/active-instances|/api/v1/internal/users/:user_id/pause-tasks", status_class="5xx"}[5m]))
               /
-            sum(rate(http_requests_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}, method=~"/api/v1/internal/workflows/:workflow_id/active-instances|/api/v1/internal/users/:user_id/pause-tasks"}[5m]))
+            sum by (route) (rate(http_requests_total{job={{ include "workflow-execution-service.apiFullname" . | quote }}, route=~"/api/v1/internal/workflows/:workflow_id/active-instances|/api/v1/internal/users/:user_id/pause-tasks"}[5m]))
             > 0.05
           for: 5m
           labels:
             severity: warning
             team: platform
           annotations:
-            summary: "execution-service Definition Service call error rate above 5%: {{ "{{" }} $labels.method {{ "}}" }}"
+            summary: "execution-service Definition Service call error rate above 5%: {{ "{{" }} $labels.route {{ "}}" }}"
             description: "The Definition Service depends on these calls (LLD §5.3, §9.2) — check Postgres/Temporal-frontend health and recent deployments."
 
     - name: workflow_execution_service_panics

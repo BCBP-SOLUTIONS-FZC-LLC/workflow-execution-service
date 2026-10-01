@@ -2,7 +2,8 @@
 # Fails when api/internal-openapi.yaml makes a breaking change against its
 # version on CONTRACT_BASE_REF (default origin/main), the gate
 # platform-schemagov's diff runs for event schemas. A spec not on the base
-# ref yet passes as new. OASDIFF overrides the oasdiff binary.
+# ref yet passes as new; a base ref that does not exist fails. OASDIFF
+# overrides the oasdiff binary.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,6 +11,10 @@ spec="api/internal-openapi.yaml"
 base_ref="${CONTRACT_BASE_REF:-origin/main}"
 oasdiff="${OASDIFF:-$root/.tools/oasdiff}"
 
+if ! git -C "$root" rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null; then
+  echo "✗ $base_ref is not a ref here; fetch it first" >&2
+  exit 1
+fi
 base="$(mktemp)"
 trap 'rm -f "$base"' EXIT
 if ! git -C "$root" show "$base_ref:$spec" >"$base" 2>/dev/null; then

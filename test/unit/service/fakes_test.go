@@ -660,13 +660,15 @@ func (c *fakeCacheStore) Ping(_ context.Context) error { return nil }
 // path every other test in this package already exercises) never reaches.
 type fakeLogger struct {
 	warnCalls  []string
+	warnFields []map[string]any
 	errorCalls []string
 }
 
 func (l *fakeLogger) Debug(string, map[string]any) {}
 func (l *fakeLogger) Info(string, map[string]any)  {}
-func (l *fakeLogger) Warn(msg string, _ map[string]any) {
+func (l *fakeLogger) Warn(msg string, fields map[string]any) {
 	l.warnCalls = append(l.warnCalls, msg)
+	l.warnFields = append(l.warnFields, fields)
 }
 func (l *fakeLogger) Error(msg string, _ map[string]any) {
 	l.errorCalls = append(l.errorCalls, msg)

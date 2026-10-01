@@ -341,7 +341,8 @@ paths:
           required: true
           schema: { type: string }
       responses:
-        "204": { description: "Alias deleted, or no alias by that name existed. No response body." }
+        "204": { description: "Alias deleted. No response body." }
+        "404": { $ref: '#/components/responses/NotFound' }
         "401":
           description: Missing or invalid internal service credential.
           content:

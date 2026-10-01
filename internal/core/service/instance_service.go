@@ -63,6 +63,7 @@ func (s *InstanceService) fetchCompiledWorkflow(ctx context.Context, tenantID, v
 
 	compiled, err := s.Definitions.GetCompiledWorkflow(ctx, tenantID, versionID)
 	if err != nil {
+		s.logger().Warn("compiled-plan read from Definitions failed", map[string]any{"error": err.Error()})
 		return nil, err
 	}
 	// Write-through on a miss: with no other populator left in this codebase

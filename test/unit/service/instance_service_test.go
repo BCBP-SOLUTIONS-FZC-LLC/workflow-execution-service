@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -922,5 +923,21 @@ func TestInstanceService_Start_CompiledPlanCache(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.NotEmpty(t, log.warnCalls)
+	})
+
+	// The 503 the handler answers with carries a fixed detail, so the cause
+	// must reach the log here or nowhere.
+	t.Run("a Definitions failure is logged with its cause", func(t *testing.T) {
+		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
+		log := &fakeLogger{}
+		svc.Log = log
+		definitions.err = fmt.Errorf("%w: GET http://definition:8080/x: connection refused", port.ErrDefinitionUnavailable)
+
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), BusinessKey: "TND-CACHE-7", StartedByUserID: uuid.New(),
+		})
+		require.ErrorIs(t, err, port.ErrDefinitionUnavailable)
+		require.Len(t, log.warnFields, 1)
+		assert.Equal(t, definitions.err.Error(), log.warnFields[0]["error"])
 	})
 }
