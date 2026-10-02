@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -672,6 +673,17 @@ func (l *fakeLogger) Warn(msg string, fields map[string]any) {
 }
 func (l *fakeLogger) Error(msg string, _ map[string]any) {
 	l.errorCalls = append(l.errorCalls, msg)
+}
+
+// warnsWithCause counts the Warns whose "error" field contains cause.
+func warnsWithCause(l *fakeLogger, cause string) int {
+	n := 0
+	for _, f := range l.warnFields {
+		if e, ok := f["error"].(string); ok && strings.Contains(e, cause) {
+			n++
+		}
+	}
+	return n
 }
 
 // --- IAMClient ---

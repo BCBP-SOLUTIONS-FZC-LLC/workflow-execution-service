@@ -64,7 +64,7 @@ func (s *DelegationReconciler) eligibleCandidates(ctx context.Context, tenantID,
 	for _, c := range rows {
 		plan, err := plans.mainPlan(ctx, tenantID, c.instance.WorkflowVersionID)
 		if err != nil {
-			s.logger().Warn(logPrefix+": skipping row with unreadable compiled plan", map[string]any{"task_id": c.task.ID, "error": err.Error()})
+			s.logger().Warn(logPrefix+": skipping row with unreadable compiled plan", map[string]any{"task_id": c.task.ID})
 			continue
 		}
 		level, ok := requiredLevelForTask(plan, c.task)

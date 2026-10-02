@@ -120,8 +120,6 @@ func checkRequiredConfig(cfg *config.Config) error {
 		return fmt.Errorf("EXECUTION_SERVICE_INTERNAL_ADDR is required")
 	case cfg.ConnectorActorUserIDs == "":
 		return fmt.Errorf("CONNECTOR_ACTOR_USER_IDS is required")
-	case cfg.AppEnv == "prod" && cfg.InternalAPIToken == "":
-		return fmt.Errorf("INTERNAL_API_TOKEN is required when APP_ENV=prod")
 	case cfg.ConnectorStreamMaxDeliveries < 1:
 		return fmt.Errorf("CONNECTOR_STREAM_MAX_DELIVERIES must be >= 1")
 	case cfg.ConnectorStreamDeadLetterKey == "" || cfg.ConnectorStreamDeadLetterKey == cfg.ConnectorStreamKey:

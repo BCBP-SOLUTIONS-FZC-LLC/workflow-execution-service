@@ -43,7 +43,6 @@ func TestCheckRequiredConfig_RefusesMissingFields(t *testing.T) {
 		"OPENBAO_ADDR":                     func(c *config.Config) { c.OpenBaoAddr = "" },
 		"EXECUTION_SERVICE_INTERNAL_ADDR":  func(c *config.Config) { c.ExecutionServiceInternalAddr = "" },
 		"CONNECTOR_ACTOR_USER_IDS":         func(c *config.Config) { c.ConnectorActorUserIDs = "" },
-		"INTERNAL_API_TOKEN":               func(c *config.Config) { c.AppEnv = "prod" },
 		"CONNECTOR_STREAM_MAX_DELIVERIES":  func(c *config.Config) { c.ConnectorStreamMaxDeliveries = 0 },
 		"CONNECTOR_STREAM_DEAD_LETTER_KEY": func(c *config.Config) { c.ConnectorStreamDeadLetterKey = c.ConnectorStreamKey },
 		"CONNECTOR_STREAM_CLAIM_MIN_IDLE":  func(c *config.Config) { c.ConnectorStreamClaimMinIdle = time.Second },

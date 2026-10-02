@@ -101,7 +101,7 @@ jobs:
       # The copy of the Definition Service's spec must match its source.
       - name: Contract copy check
         env:
-          GH_TOKEN: ${{ secrets.CI_REPO_READ_TOKEN }}
+          GH_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
         run: make contract-check
 
       - name: Dockerfile base image digest check

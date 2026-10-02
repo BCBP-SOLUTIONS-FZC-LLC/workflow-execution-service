@@ -35,6 +35,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - A failed compiled-plan read answers `503 UPSTREAM_UNAVAILABLE` with a fixed detail; the cause, which names the Definition Service's URL and the tenant, is logged instead.
 - Helm: in a dev install the API's and Worker's `DEFINITION_SERVICE_TOKEN` and `INTERNAL_API_TOKEN` references are optional, so pods start without them. The internal-call alert selects on `route` (`method` is the HTTP verb) and reports per route.
 - `make contract-check` and `make contract-breaking` fail on a repo, ref or `CONTRACT_SRC_DIR` they cannot read, instead of reporting it as pending; a source file missing from a real branch is still pending.
+- CI's contract copy check reads the sibling repo with `GO_PRIVATE_TOKEN`. The release deploys with `secret.existingSecretName=workflow-execution-service-secrets`, a Secret created in the cluster, instead of `PROD_*` secrets.
+- A plan that cannot be read is logged once, with its cause and version, by the shared plan cache; callers log only what they skip. `cmd/connector-worker` drops its `INTERNAL_API_TOKEN` check, which `config.Load` already makes outside dev.
 - Node keys and the human-task rule come from workflow-models' `dsl.NodeKey` and `StageDef.CreatesHumanTask`, which Definition's node read uses too. The key format is unchanged, so no Temporal version gate is needed.
 
 ### Fixed

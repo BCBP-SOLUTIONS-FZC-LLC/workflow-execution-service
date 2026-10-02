@@ -25,7 +25,7 @@ func scopeMatches(ctx context.Context, log port.Logger, plans *compiledPlanCache
 		}
 		plan, err := plans.mainPlan(ctx, tenantID, c.instance.WorkflowVersionID)
 		if err != nil {
-			log.Warn("scope match: skipping candidate with unreadable compiled plan", map[string]any{"task_id": c.task.ID, "error": err.Error()})
+			log.Warn("scope match: skipping candidate with unreadable compiled plan", map[string]any{"task_id": c.task.ID})
 			return false
 		}
 		taskDeptID, _ := deptAndSuffix(c.task.NodeKey)
@@ -64,13 +64,22 @@ func newCompiledPlanCache(definitions port.DefinitionServiceClient, log port.Log
 	return &compiledPlanCache{definitions: definitions, log: log, byVersion: make(map[uuid.UUID]*dsl.CompiledPlan)}
 }
 
+// mainPlan logs why a plan could not be read, so its callers log only what
+// they skipped.
 func (c *compiledPlanCache) mainPlan(ctx context.Context, tenantID, versionID uuid.UUID) (*dsl.CompiledPlan, error) {
+	plan, err := c.readMainPlan(ctx, tenantID, versionID)
+	if err != nil {
+		c.log.Warn("compiled plan unreadable", map[string]any{"version_id": versionID, "error": err.Error()})
+	}
+	return plan, err
+}
+
+func (c *compiledPlanCache) readMainPlan(ctx context.Context, tenantID, versionID uuid.UUID) (*dsl.CompiledPlan, error) {
 	if plan, ok := c.byVersion[versionID]; ok {
 		return plan, nil
 	}
 	compiled, err := c.definitions.GetCompiledWorkflow(ctx, tenantID, versionID)
 	if err != nil {
-		c.log.Warn("compiled-plan read from Definitions failed", map[string]any{"error": err.Error()})
 		return nil, err
 	}
 	collab, err := decodeCollaboration(compiled.CompiledPlanJSON)

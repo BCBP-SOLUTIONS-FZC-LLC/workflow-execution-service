@@ -140,7 +140,7 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, assignments.byID[a.ID].IsActive, "a row whose compiled plan can't be read must survive untouched")
 		assert.Empty(t, outbox.enqueued)
-		assert.NotEmpty(t, log.warnCalls)
+		assert.Equal(t, 1, warnsWithCause(log, assert.AnError.Error()), "the cause is logged once")
 	})
 
 	t.Run("department scope matches a task by its real IAMDepartmentID", func(t *testing.T) {
@@ -407,10 +407,13 @@ func TestDelegationReconciler_EligibleCandidates(t *testing.T) {
 		tenantID, delegatorID, delegateID := uuid.New(), uuid.New(), uuid.New()
 		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
 		definitions.resp.CompiledPlanJSON = "not json"
+		log := &fakeLogger{}
+		svc.Log = log
 
 		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{TenantID: tenantID, DelegationID: uuid.New(), DelegatorID: delegatorID, DelegateID: delegateID, Scope: "all"})
 		require.NoError(t, err)
 		assert.True(t, assignments.byID[a.ID].IsActive)
+		assert.Equal(t, 1, warnsWithCause(log, "invalid character"), "the decode cause is logged once")
 	})
 
 	t.Run("a main plan missing from the collaboration holds the row, doesn't fail the batch", func(t *testing.T) {
