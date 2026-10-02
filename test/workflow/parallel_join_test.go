@@ -13,7 +13,7 @@ import (
 
 // TestExecute_ParallelBranchesSharingADepartmentID_Join pins that branches
 // are told apart by their place in the step, not by DeptID: two branches that
-// start with a call or a pool both carry an empty one.
+// start with a call both carry an empty one.
 func TestExecute_ParallelBranchesSharingADepartmentID_Join(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

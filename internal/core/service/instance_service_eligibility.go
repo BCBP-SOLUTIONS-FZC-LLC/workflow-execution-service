@@ -79,9 +79,6 @@ func collectAssigneeChecks(
 	overrideMap map[string]uuid.UUID,
 ) (checks []eligibilityCheck, unresolvedNodes []string) {
 	for _, dept := range plan.Departments {
-		if dept.Ignore {
-			continue
-		}
 		for i := range dept.Stages {
 			stage := &dept.Stages[i]
 			if !stage.CreatesHumanTask() {

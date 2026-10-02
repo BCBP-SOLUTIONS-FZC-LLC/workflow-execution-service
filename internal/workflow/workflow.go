@@ -170,11 +170,8 @@ func (in *interpreter) recordForceRouteAudit(ctx wf.Context, oldNodeKeys []domai
 // redirects don't compound — recursing into Parallel branches, Exclusive
 // branches, and inline SubWorkflow steps to find it wherever it's nested,
 // and always preserving whatever steps were still owed after the containing
-// step once found (never truncating the rest of the plan). A CallPool step
-// references a separately compiled plan (runCallPool resolves it via
-// in.collab, not the plan/steps in scope here) with no deptID surface this
-// function can reach — the one case still falling back to running deptID in
-// isolation with nothing else queued after it.
+// step once found (never truncating the rest of the plan). A deptID found
+// nowhere in original runs in isolation, with nothing queued after it.
 func redirectSteps(original []dsl.ExecutionStep, deptID string) []dsl.ExecutionStep {
 	if cont, ok := findRedirectTarget(original, deptID); ok {
 		return cont

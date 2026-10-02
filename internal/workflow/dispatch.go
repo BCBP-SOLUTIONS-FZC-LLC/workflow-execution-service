@@ -84,13 +84,6 @@ func (in *interpreter) runStepList(ctx wf.Context, plan *dsl.CompiledPlan, steps
 				return stepOutcome{LastNode: last, LastResult: lastResult}, err
 			}
 
-		case step.CallPool != nil:
-			node, err := in.runCallPool(ctx, plan, step.CallPool, admin)
-			last = node
-			if err != nil {
-				return stepOutcome{LastNode: last, LastResult: lastResult}, err
-			}
-
 		default:
 			return stepOutcome{LastNode: last, LastResult: lastResult}, fmt.Errorf("workflow: execution step has no populated variant")
 		}

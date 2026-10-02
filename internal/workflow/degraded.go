@@ -332,8 +332,8 @@ func (in *interpreter) respawnBranch(ctx wf.Context, plan *dsl.CompiledPlan, fb 
 	resumeDept := deptFromNodeKey(fb.LastCompletedNode)
 	dept := findDepartment(plan, resumeDept)
 	if dept == nil {
-		// resumeDept isn't a plain department (e.g. inside a CallPool's or
-		// SubWorkflow's own inline recursion) — this interpreter has no
+		// resumeDept isn't a plain department (e.g. inside a SubWorkflow's
+		// own inline recursion) — this interpreter has no
 		// finer-grained resume pointer for that shape. Re-running the whole
 		// branch is the safe fallback, matching redirectSteps' own
 		// documented isolation fallback for the same structural limit

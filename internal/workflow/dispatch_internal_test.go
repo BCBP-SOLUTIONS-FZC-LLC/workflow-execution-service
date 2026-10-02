@@ -1074,15 +1074,11 @@ func TestRedirectStepsSubWorkflowNested(t *testing.T) {
 	}
 }
 
-// TestRedirectStepsNotFoundFallsBackToIsolation covers the one remaining
-// structurally-unreachable case (a deptID that only exists inside a
-// CallPool's separately compiled target plan, or a genuinely nonexistent
-// deptID): redirectSteps can't recurse into it, so it isolates deptID —
-// still not a data-loss bug on its own, since there's no trailing plan to
-// preserve when the target isn't found anywhere in this plan's own tree.
+// TestRedirectStepsNotFoundFallsBackToIsolation covers a deptID found nowhere
+// in the plan: redirectSteps isolates it, with no trailing plan to preserve.
 func TestRedirectStepsNotFoundFallsBackToIsolation(t *testing.T) {
 	original := []dsl.ExecutionStep{
-		{CallPool: &dsl.CallPoolStep{Pool: "vendor-pool"}},
+		{Sequential: []string{"A"}},
 	}
 	got := redirectSteps(original, "does-not-exist")
 	want := []dsl.ExecutionStep{{Sequential: []string{"does-not-exist"}}}

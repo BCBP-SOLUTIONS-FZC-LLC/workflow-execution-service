@@ -15,6 +15,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - The parallel join counts branches by their place in the step; two branches with one `DeptID` hung it (change id `parallel-join-by-branch`).
 - A force-route resumes inside an exclusive or parallel branch's `Steps` at the department it names.
 
+### Removed
+
+- The call-pool step and its admin stub task (`runCallPool`): a document runs one pool, and outside parties' pools produce nothing (workflow-models `v1.4.0-rc.2` removes `CallPoolStep`, `CompiledPlan.Ignored`, `CompiledCollaboration.Messages` and `DepartmentDef.Ignore`).
+
 ### Added
 
 - `GET /api/v1/internal/workflows/{workflow_id}/active-instances` and `POST /api/v1/internal/users/{user_id}/pause-tasks`, the Definition Service's archive guard and membership-revocation pause, replacing the gRPC `CheckActiveInstances`/`PauseUserTasks`.

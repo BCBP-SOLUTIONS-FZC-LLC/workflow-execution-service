@@ -58,7 +58,7 @@ components:
         version_number: 3
         status: PUBLISHED
         is_valid: true
-        compiled_plan: { main_plan: "Bid-No-Bid Review", plans: [], messages: [], schema_version: 1 }
+        compiled_plan: { main_plan: "Bid-No-Bid Review", plans: [], schema_version: 1 }
 
     ConnectorRestAlias:
       type: object

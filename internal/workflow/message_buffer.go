@@ -12,8 +12,7 @@ import (
 // No mutex is needed: Temporal workflow code runs on a single-threaded
 // cooperative scheduler, so this is replay-safe by construction.
 //
-// CompiledCollaboration.Messages plays no role here — it is diagram-only.
-// Real correlation runs entirely through StageDef.Extras["message"].
+// Correlation runs entirely through StageDef.Extras["message"].
 type messageBuffer struct {
 	buf map[string][]domain.NodeKey
 	// blocked holds, per message name, a FIFO queue of channels currently
