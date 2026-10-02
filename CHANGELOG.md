@@ -8,6 +8,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## [Unreleased]
 
+### Changed
+
+- An exclusive branch with `Steps` runs them (workflow-models `v1.4.0-rc.1`); a call or subprocess on a branch had never run.
+- A branch that leads to an end event ends its path: the instance completes and its status is written. It ended as `TERMINATED` with no status write (change id `exclusive-end-completes-path`).
+- The parallel join counts branches by their place in the step; two branches with one `DeptID` hung it (change id `parallel-join-by-branch`).
+- A force-route resumes inside an exclusive or parallel branch's `Steps` at the department it names.
+
 ### Added
 
 - `GET /api/v1/internal/workflows/{workflow_id}/active-instances` and `POST /api/v1/internal/users/{user_id}/pause-tasks`, the Definition Service's archive guard and membership-revocation pause, replacing the gRPC `CheckActiveInstances`/`PauseUserTasks`.
