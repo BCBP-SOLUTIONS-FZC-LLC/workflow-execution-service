@@ -68,7 +68,7 @@ func (in *interpreter) runStepList(ctx wf.Context, plan *dsl.CompiledPlan, steps
 			}
 
 		case len(step.Exclusive) > 0:
-			out, err := in.runExclusive(ctx, plan, step.Exclusive, lastResult)
+			out, err := in.runExclusive(ctx, plan, step.Exclusive, lastResult, admin)
 			last = out.LastNode
 			if out.LastResult != "" {
 				lastResult = out.LastResult
@@ -202,15 +202,6 @@ func (in *interpreter) currentPendingNodes() []domain.NodeKey {
 	return keys
 }
 
-func containsDept(deptIDs []string, deptID string) bool {
-	for _, d := range deptIDs {
-		if d == deptID {
-			return true
-		}
-	}
-	return false
-}
-
 func stageIndexAfter(dept *dsl.DepartmentDef, lastCompletedNode domain.NodeKey) int {
 	for i := range dept.Stages {
 		if domain.NodeKey(dsl.NodeKey(dept.ID, &dept.Stages[i])) == lastCompletedNode {
@@ -252,9 +243,6 @@ func (in *interpreter) settleReverts(
 			}
 			return nil, stepOutcome{LastNode: lastNode, LastResult: resultJSON}, true, nil
 		}
-		if winner.Terminates {
-			return nil, stepOutcome{Terminated: true}, true, nil
-		}
 		if winner.RevertToDept == "" {
 			return winner, stepOutcome{LastNode: lastNode, LastResult: resultJSON}, false, nil
 		}
@@ -276,10 +264,26 @@ func (in *interpreter) settleReverts(
 	}
 }
 
-func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, branches []dsl.ExclusiveBranch, resultJSON string) (stepOutcome, error) {
+func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, branches []dsl.ExclusiveBranch, resultJSON string, admin wf.Channel) (stepOutcome, error) {
 	winner, outcome, done, err := in.settleReverts(ctx, plan, branches, resultJSON)
 	if done || err != nil {
 		return outcome, err
+	}
+
+	// A branch with Steps carries its own work up to the join; Target only
+	// names where that work starts (execution LLD §2.6).
+	if len(winner.Steps) > 0 {
+		out, err := in.runStepList(ctx, plan, winner.Steps, admin)
+		if err != nil || out.Terminated || !winner.Terminates {
+			return out, err
+		}
+		return out, errPathEnded
+	}
+	if winner.Terminates {
+		if getVersion(ctx, exclusiveEndCompletesPathChangeID) == wf.DefaultVersion {
+			return stepOutcome{Terminated: true}, nil
+		}
+		return outcome, errPathEnded
 	}
 
 	// A branch with no Target routes nowhere of its own: the path it selects

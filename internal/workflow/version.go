@@ -34,3 +34,13 @@ const isoTimerDurationChangeID = "iso-timer-duration"
 // that has no target department, which is how a boundary leading straight to
 // an end event compiles. Before it, such a boundary failed the instance.
 const boundaryEndsPathChangeID = "boundary-no-target-ends-path"
+
+// exclusiveEndCompletesPathChangeID gates ending only the path, as an end
+// event does, when an exclusive branch leads to one. Before it, such a branch
+// ended the instance as TERMINATED without writing the instance's status.
+const exclusiveEndCompletesPathChangeID = "exclusive-end-completes-path"
+
+// parallelJoinByBranchChangeID gates telling a Parallel step's branches apart
+// by their place in the step. Before it, they were told apart by DeptID, and
+// two branches with one DeptID never joined.
+const parallelJoinByBranchChangeID = "parallel-join-by-branch"

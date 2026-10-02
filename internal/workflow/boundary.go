@@ -10,12 +10,12 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// errPathEnded means an interrupting boundary with no target department
-// fired: its path leads to an end event, so the steps of the plan level it
-// belongs to stop there. runSteps turns it into a normal finish, so a call's
-// own flow ends and its caller carries on, and a top-level path ends the
-// instance.
-var errPathEnded = errors.New("workflow: path ended at a boundary")
+// errPathEnded means a path reached its end event: an interrupting boundary
+// with no target department fired, or an exclusive branch that terminates
+// was taken. The steps of the plan level it belongs to stop there. runSteps
+// turns it into a normal finish, so a call's own flow ends and its caller
+// carries on, and a top-level path ends the instance.
+var errPathEnded = errors.New("workflow: path ended at an end event")
 
 // endsPath reports whether f ends its path rather than moving to a
 // department.

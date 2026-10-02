@@ -204,18 +204,21 @@ func redirectWithinStep(step *dsl.ExecutionStep, deptID string) ([]dsl.Execution
 		}
 	}
 	for _, b := range step.Parallel {
+		if cont, ok := findRedirectTarget(b.Steps, deptID); ok {
+			return cont, true
+		}
 		if b.DeptID == deptID {
 			// b.Steps is the branch's own full dispatch for deptID — never
 			// prepend a bare {Sequential: [deptID]} ahead of it, or deptID
 			// would run twice.
 			return b.Steps, true
 		}
+	}
+	for _, b := range step.Exclusive {
 		if cont, ok := findRedirectTarget(b.Steps, deptID); ok {
 			return cont, true
 		}
-	}
-	for _, b := range step.Exclusive {
-		if b.Target == deptID || b.RevertToDept == deptID {
+		if len(b.Steps) == 0 && (b.Target == deptID || b.RevertToDept == deptID) {
 			return []dsl.ExecutionStep{{Sequential: []string{deptID}}}, true
 		}
 	}

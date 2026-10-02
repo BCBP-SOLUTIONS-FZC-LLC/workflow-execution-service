@@ -142,26 +142,44 @@ func TestRunStageLogsEngineNoteForUnrecognizedType(t *testing.T) {
 	}
 }
 
-// TestRunExclusiveTerminates exercises runExclusive's Terminates:true path.
-func TestRunExclusiveTerminates(t *testing.T) {
+// TestRunExclusiveTerminates_EndsThePath pins that a branch leading to an end
+// event ends its path, as the end event does, rather than the instance.
+func TestRunExclusiveTerminates_EndsThePath(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 
-	var terminated bool
+	var out stepOutcome
+	var err error
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		in := newInterpreter("tenant", "instance", "", nil, nil)
-		plan := &dsl.CompiledPlan{Name: "main"}
-		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
+		out, err = in.runExclusive(ctx, &dsl.CompiledPlan{Name: "main"}, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "reject"`, Terminates: true},
-		}, `{"decision":"reject"}`)
-		terminated = out.Terminated
-		return err
+		}, `{"decision":"reject"}`, nil)
+		return nil
 	})
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("workflow returned error: %v", err)
+	if !errors.Is(err, errPathEnded) || out.Terminated {
+		t.Errorf("runExclusive = %+v, %v; want the path ended, not the instance terminated", out, err)
 	}
-	if !terminated {
-		t.Error("runExclusive should report Terminated:true")
+}
+
+// TestRunExclusiveTerminates_BeforeTheChangeTerminates pins the behaviour a
+// history recorded before exclusiveEndCompletesPathChangeID replays.
+func TestRunExclusiveTerminates_BeforeTheChangeTerminates(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.OnGetVersion(exclusiveEndCompletesPathChangeID, wf.DefaultVersion, 1).Return(wf.DefaultVersion)
+
+	var out stepOutcome
+	var err error
+	env.ExecuteWorkflow(func(ctx wf.Context) error {
+		in := newInterpreter("tenant", "instance", "", nil, nil)
+		out, err = in.runExclusive(ctx, &dsl.CompiledPlan{Name: "main"}, []dsl.ExclusiveBranch{
+			{ConditionExpression: `decision == "reject"`, Terminates: true},
+		}, `{"decision":"reject"}`, nil)
+		return nil
+	})
+	if err != nil || !out.Terminated {
+		t.Errorf("runExclusive = %+v, %v; want Terminated", out, err)
 	}
 }
 
@@ -207,7 +225,7 @@ func TestRunExclusiveRevertPopsHistory(t *testing.T) {
 		}
 		_, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "rejected"`, RevertToDept: "rework", RevertToStage: "prep"},
-		}, `{"decision":"rejected"}`)
+		}, `{"decision":"rejected"}`, nil)
 		if len(in.history.stack) != 1 {
 			return errBadHistoryLen(len(in.history.stack))
 		}
@@ -267,7 +285,7 @@ func TestRunExclusiveHonoursASecondRejection(t *testing.T) {
 		settled, err = in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "rejected"`, RevertToDept: "prepare", RevertToStage: "draft"},
 			{ConditionExpression: `decision == "approved"`, Target: "prepare", TargetStage: "draft"},
-		}, `{"decision":"rejected"}`)
+		}, `{"decision":"rejected"}`, nil)
 		return err
 	})
 	if err := env.GetWorkflowError(); err != nil {
@@ -326,7 +344,7 @@ func TestRunExclusiveRevertCapFailsClosed(t *testing.T) {
 		_, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "rejected"`, RevertToDept: "prepare", RevertToStage: "draft"},
 			{ConditionExpression: `decision == "approved"`, Target: "prepare", TargetStage: "draft"},
-		}, `{"decision":"rejected"}`)
+		}, `{"decision":"rejected"}`, nil)
 		return err
 	})
 	err := env.GetWorkflowError()
@@ -363,7 +381,7 @@ func TestRunExclusiveForwardFallsBackToTargetFromTop(t *testing.T) {
 		}
 		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "approved"`, Target: "shipping"},
-		}, `{"decision":"approved"}`)
+		}, `{"decision":"approved"}`, nil)
 		lastNode = out.LastNode
 		return err
 	})
@@ -425,7 +443,7 @@ func TestRunExclusiveUsesTargetStageToAvoidReRunningEarlierStage(t *testing.T) {
 		}
 		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "approved"`, Target: "billing", TargetStage: "invoice"},
-		}, `{"decision":"approved"}`)
+		}, `{"decision":"approved"}`, nil)
 		lastNode = out.LastNode
 		return err
 	})
@@ -498,7 +516,7 @@ func TestRunExclusiveUsesTargetNodeIDToAvoidReRunningEarlierStage(t *testing.T) 
 		}
 		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `notify == "true"`, Target: "design", TargetStage: "send_task", TargetNodeID: "Task_send"},
-		}, `{"notify":"true"}`)
+		}, `{"notify":"true"}`, nil)
 		lastNode = out.LastNode
 		return err
 	})
@@ -570,7 +588,7 @@ func TestRunExclusiveRevertUsesRevertToNodeID(t *testing.T) {
 		}
 		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "rejected"`, RevertToDept: "rework", RevertToStage: "approve", RevertToNodeID: "Task_approve"},
-		}, `{"decision":"rejected"}`)
+		}, `{"decision":"rejected"}`, nil)
 		if err != nil {
 			return err
 		}
@@ -645,7 +663,7 @@ func TestRunExclusiveRevertUsesRevertToStage(t *testing.T) {
 		}
 		out, err := in.runExclusive(ctx, plan, []dsl.ExclusiveBranch{
 			{ConditionExpression: `decision == "rejected"`, RevertToDept: "rework", RevertToStage: "approve"},
-		}, `{"decision":"rejected"}`)
+		}, `{"decision":"rejected"}`, nil)
 		if err != nil {
 			return err
 		}
@@ -1070,5 +1088,45 @@ func TestRedirectStepsNotFoundFallsBackToIsolation(t *testing.T) {
 	want := []dsl.ExecutionStep{{Sequential: []string{"does-not-exist"}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("redirectSteps() = %+v, want %+v", got, want)
+	}
+}
+
+// TestRedirectSteps_IntoAnExclusiveBranchsSteps pins that a redirect to a
+// department inside a branch's own steps resumes there, runs the rest of the
+// branch, and then the steps after the gateway.
+func TestRedirectSteps_IntoAnExclusiveBranchsSteps(t *testing.T) {
+	original := []dsl.ExecutionStep{
+		{Sequential: []string{"A"}},
+		{Exclusive: []dsl.ExclusiveBranch{
+			{ConditionExpression: `x == "y"`, Target: "B", Steps: []dsl.ExecutionStep{{Sequential: []string{"B"}}, {Sequential: []string{"C"}}}},
+			{Steps: []dsl.ExecutionStep{{Sequential: []string{"F"}}}, Target: "F"},
+		}},
+		{Sequential: []string{"D"}},
+	}
+	for target, want := range map[string][]dsl.ExecutionStep{
+		"B": {{Sequential: []string{"B"}}, {Sequential: []string{"C"}}, {Sequential: []string{"D"}}},
+		"C": {{Sequential: []string{"C"}}, {Sequential: []string{"D"}}},
+	} {
+		if got := redirectSteps(original, target); !reflect.DeepEqual(got, want) {
+			t.Errorf("redirectSteps to %s = %+v, want %+v", target, got, want)
+		}
+	}
+}
+
+// TestRedirectSteps_IntoAGatewayLedParallelBranch pins that a redirect to the
+// department a gateway-led branch names resumes inside that branch's gateway,
+// not at the gateway, which could choose another of its branches.
+func TestRedirectSteps_IntoAGatewayLedParallelBranch(t *testing.T) {
+	inner := dsl.ExecutionStep{Exclusive: []dsl.ExclusiveBranch{
+		{ConditionExpression: `x == "y"`, Steps: []dsl.ExecutionStep{{Sequential: []string{"Ops"}}}},
+		{Steps: []dsl.ExecutionStep{{Sequential: []string{"Ops~2"}}}},
+	}}
+	original := []dsl.ExecutionStep{
+		{Parallel: []dsl.ParallelBranch{{DeptID: "Ops", Steps: []dsl.ExecutionStep{inner}}, {DeptID: "Eng", Steps: []dsl.ExecutionStep{{Sequential: []string{"Eng"}}}}}},
+		{Sequential: []string{"Close"}},
+	}
+	want := []dsl.ExecutionStep{{Sequential: []string{"Ops"}}, {Sequential: []string{"Close"}}}
+	if got := redirectSteps(original, "Ops"); !reflect.DeepEqual(got, want) {
+		t.Errorf("redirectSteps to Ops = %+v, want %+v", got, want)
 	}
 }

@@ -72,6 +72,7 @@ func mustMarshalAny(t *testing.T, v any) []byte {
 
 type taskSummary struct {
 	ID                 uuid.UUID  `json:"id"`
+	NodeKey            string     `json:"node_key"`
 	Status             string     `json:"status"`
 	RecordVersion      int64      `json:"record_version"`
 	DeferredFromTaskID *uuid.UUID `json:"deferred_from_task_id,omitempty"`

@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"errors"
+	"slices"
+	"strconv"
 
 	wf "go.temporal.io/sdk/workflow"
 
@@ -35,24 +37,25 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 
 	settle := wf.NewChannel(ctx)
 	deptIDs := make([]string, 0, len(branches))
+	keys := branchKeys(ctx, branches)
 	cancels := make(map[string]wf.CancelFunc, len(branches))
 	branchSteps := make(map[string][]dsl.ExecutionStep, len(branches))
 	// resolved guards two races a force-forward introduces: a stale settle
 	// landing after its branch has already been force-forwarded past, and a
-	// duplicate/late force-forward for a dept already resolved.
+	// duplicate/late force-forward for a branch already resolved.
 	resolved := make(map[string]bool, len(branches))
-	for _, b := range branches {
+	for i, b := range branches {
 		deptIDs = append(deptIDs, b.DeptID)
-		branchSteps[b.DeptID] = b.Steps
+		key, deptID, steps := keys[i], b.DeptID, b.Steps
+		branchSteps[key] = steps
 		bctx, cancel := wf.WithCancel(ctx)
-		cancels[b.DeptID] = cancel
-		deptID, steps := b.DeptID, b.Steps
+		cancels[key] = cancel
 		wf.Go(bctx, func(gctx wf.Context) {
 			out, err := in.runSteps(gctx, plan, steps, admin)
 			if errors.Is(err, errStageAbandoned) {
-				return // force-forwarded away; settle has no listener left for this dept
+				return // force-forwarded away; settle has no listener left for this branch
 			}
-			settle.Send(gctx, branchOutcome{DeptID: deptID, LastNode: out.LastNode, Err: err})
+			settle.Send(gctx, branchOutcome{Key: key, DeptID: deptID, LastNode: out.LastNode, Err: err})
 		})
 	}
 
@@ -70,13 +73,13 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 		sel.AddReceive(settle, func(c wf.ReceiveChannel, more bool) {
 			var out branchOutcome
 			c.Receive(ctx, &out)
-			if resolved[out.DeptID] {
+			if resolved[out.Key] {
 				return // stale settle from a branch already force-forwarded past
 			}
-			resolved[out.DeptID] = true
+			resolved[out.Key] = true
 			remaining--
 			if out.Err != nil {
-				failed = append(failed, failedBranch{DeptID: out.DeptID, Steps: branchSteps[out.DeptID], LastCompletedNode: out.LastNode, Err: out.Err})
+				failed = append(failed, failedBranch{DeptID: out.DeptID, Steps: branchSteps[out.Key], LastCompletedNode: out.LastNode, Err: out.Err})
 			} else {
 				completed = append(completed, completedBranch{DeptID: out.DeptID, LastNode: out.LastNode})
 			}
@@ -91,7 +94,7 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 			return stepOutcome{Terminated: true}, in.cancelInstanceOnSignal(ctx, envelope.Signal)
 
 		case SignalInstanceForceFwd:
-			if cb, ok := in.handleParallelForceForward(ctx, deptIDs, cancels, resolved, envelope.Signal); ok {
+			if cb, ok := in.handleParallelForceForward(ctx, keys, branchSteps, cancels, resolved, envelope.Signal); ok {
 				remaining--
 				completed = append(completed, cb)
 			}
@@ -187,9 +190,10 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 	return stepOutcome{LastNode: preFork}, nil
 }
 
-func (in *interpreter) handleParallelForceForward(ctx wf.Context, deptIDs []string, cancels map[string]wf.CancelFunc, resolved map[string]bool, sig adminSignal) (completedBranch, bool) {
+func (in *interpreter) handleParallelForceForward(ctx wf.Context, keys []string, branchSteps map[string][]dsl.ExecutionStep, cancels map[string]wf.CancelFunc, resolved map[string]bool, sig adminSignal) (completedBranch, bool) {
 	deptID := sig.TargetDeptID
-	if resolved[deptID] || !containsDept(deptIDs, deptID) {
+	key := branchRunning(keys, branchSteps, resolved, deptID)
+	if key == "" {
 		wf.GetLogger(ctx).Warn("instance-force-forward: target_dept_id doesn't name a still-active branch of this gateway; dropping",
 			"target_dept_id", deptID)
 		return completedBranch{}, false
@@ -199,11 +203,65 @@ func (in *interpreter) handleParallelForceForward(ctx wf.Context, deptIDs []stri
 		oldKeys = []domain.NodeKey{node}
 	}
 	in.recordAndRedirect(ctx, oldKeys, sig.TargetNodeKey, domain.ForceRouteDirectionForward, sig)
-	if cancel, ok := cancels[deptID]; ok {
+	if cancel, ok := cancels[key]; ok {
 		cancel()
 	}
-	resolved[deptID] = true
+	resolved[key] = true
 	return completedBranch{DeptID: deptID, LastNode: sig.TargetNodeKey}, true
+}
+
+// branchKeys names each branch of a Parallel step for the join: by its place
+// in the step, or, in a history recorded before parallelJoinByBranchChangeID,
+// by its DeptID.
+func branchKeys(ctx wf.Context, branches []dsl.ParallelBranch) []string {
+	byPlace := getVersion(ctx, parallelJoinByBranchChangeID) != wf.DefaultVersion
+	keys := make([]string, len(branches))
+	for i, b := range branches {
+		keys[i] = b.DeptID
+		if byPlace {
+			keys[i] = strconv.Itoa(i)
+		}
+	}
+	return keys
+}
+
+// branchRunning returns the key of the unresolved branch that runs
+// department deptID: the branch keyed by it, or one whose steps name it.
+func branchRunning(keys []string, branchSteps map[string][]dsl.ExecutionStep, resolved map[string]bool, deptID string) string {
+	for _, key := range keys {
+		if !resolved[key] && key == deptID {
+			return key
+		}
+	}
+	for _, key := range keys {
+		if !resolved[key] && key != deptID && stepsRun(branchSteps[key], deptID) {
+			return key
+		}
+	}
+	return ""
+}
+
+// stepsRun reports whether steps run department deptID anywhere inside them.
+func stepsRun(steps []dsl.ExecutionStep, deptID string) bool {
+	for _, st := range steps {
+		if slices.Contains(st.Sequential, deptID) {
+			return true
+		}
+		for _, b := range st.Parallel {
+			if stepsRun(b.Steps, deptID) {
+				return true
+			}
+		}
+		for _, b := range st.Exclusive {
+			if stepsRun(b.Steps, deptID) {
+				return true
+			}
+		}
+		if st.SubWorkflow != nil && stepsRun(st.SubWorkflow.Plan.Steps, deptID) {
+			return true
+		}
+	}
+	return false
 }
 
 func (in *interpreter) handleParallelForceBack(ctx wf.Context, plan *dsl.CompiledPlan, deptIDs []string, preFork domain.NodeKey) error {

@@ -38,6 +38,7 @@ type stepOutcome struct {
 // branchOutcome is what a Parallel branch's goroutine reports back to the
 // aggregator (dispatch.go), consumed by the DEGRADED aggregator (degraded.go).
 type branchOutcome struct {
+	Key      string
 	DeptID   string
 	LastNode domain.NodeKey
 	Err      error
