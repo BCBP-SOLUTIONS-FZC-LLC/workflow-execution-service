@@ -287,7 +287,7 @@ spec:
             severity: warning
           annotations:
             summary: "Sustained errors calling {{ "{{" }} $labels.dependency {{ "}}" }}"
-            description: "Separates a GetCompiledWorkflow/IAM-eligibility outage from Execution's own generic 5xx rate (LLD §7.6)."
+            description: "Separates a compiled-plan read or IAM-eligibility outage from Execution's own generic 5xx rate (LLD §7.6)."
 
         - alert: CompiledPlanCacheMissRatioHigh
           expr: wf_cache_misses_total / (wf_cache_hits_total + wf_cache_misses_total) > 0.10
