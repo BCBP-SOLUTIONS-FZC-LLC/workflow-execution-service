@@ -142,12 +142,12 @@ type fakeInstanceService struct {
 	forceBack    func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int64) error
 	listEvents   func(context.Context, uuid.UUID, uuid.UUID, port.ReadScope, port.Page) (port.PageResult[*port.WorkflowEvent], error)
 
-	answerOutsideWait func(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, key string, variables map[string]any) error
+	answerOutsideWait func(ctx context.Context, tenantID, instanceID uuid.UUID, scope port.ReadScope, key string, variables map[string]any) error
 }
 
-func (f *fakeInstanceService) AnswerOutsideWait(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, key string, variables map[string]any) error {
+func (f *fakeInstanceService) AnswerOutsideWait(ctx context.Context, tenantID, instanceID uuid.UUID, scope port.ReadScope, key string, variables map[string]any) error {
 	if f.answerOutsideWait != nil {
-		return f.answerOutsideWait(ctx, tenantID, instanceID, actorUserID, key, variables)
+		return f.answerOutsideWait(ctx, tenantID, instanceID, scope, key, variables)
 	}
 	return nil
 }

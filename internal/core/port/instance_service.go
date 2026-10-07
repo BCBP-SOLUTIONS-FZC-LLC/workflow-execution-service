@@ -146,8 +146,10 @@ type InstanceService interface {
 
 	// AnswerOutsideWait delivers an outside party's answer to the receive task
 	// or message boundary whose wait key (dsl.ExternalWait.Key) is key, merging
-	// variables into the instance's variables (LLD §5.11).
-	AnswerOutsideWait(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, key string, variables map[string]any) error
+	// variables into the instance's variables (LLD §5.11). An admin may answer,
+	// and so may a user with an active assignment on a task of the instance;
+	// scope's department membership is not consulted.
+	AnswerOutsideWait(ctx context.Context, tenantID, instanceID uuid.UUID, scope ReadScope, key string, variables map[string]any) error
 
 	// ListEvents applies the same intra-tenant visibility check as Get (LLD
 	// §9.2) — the events endpoint is a sub-resource of the same instance.

@@ -10,7 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Added
 
-- `POST /instances/:id/nodes/:node/complete` and `.../boundaries/:boundary/fire`: an outside party's answer completes a receive task, or fires a message boundary, that no send task of the plan feeds (`dsl.ExternalWaits`). Admin only; `WAIT_NOT_FOUND` (404) and `NOT_WAITING` (409) are new. The `instance-external-answer` signal and the `waiting-external` query carry it (change id `external-wait-by-key`).
+- `POST /instances/:id/nodes/:node/complete` and `.../boundaries/:boundary/fire`: an outside party's answer completes a receive task, or fires a message boundary, that no send task of the plan feeds (`dsl.ExternalWaits`). Open to an admin and to a user assigned to a task of the instance; `WAIT_NOT_FOUND` (404) and `NOT_WAITING` (409) are new. The `instance-external-answer` signal and the `waiting-external` query carry it (change id `external-wait-by-key`).
 - Completed tasks' results and outside answers merge into the instance's variables, which each task is created with (change id `task-result-variables`).
 
 ### Changed

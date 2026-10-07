@@ -19,10 +19,20 @@ type externalAnswerWire struct {
 // the one it can (execution LLD §5.11). The query is a courtesy that lets the
 // caller hear "not waiting"; the interpreter drops an answer that finds
 // nothing waiting, which covers the moment between the query and the signal.
-func (s *InstanceService) AnswerOutsideWait(ctx context.Context, tenantID, instanceID, _ uuid.UUID, key string, variables map[string]any) error {
+func (s *InstanceService) AnswerOutsideWait(ctx context.Context, tenantID, instanceID uuid.UUID, scope port.ReadScope, key string, variables map[string]any) error {
 	inst, err := s.Instances.GetByID(ctx, tenantID, instanceID)
 	if err != nil {
 		return wrapInstanceErr(err)
+	}
+	if !scope.IsAdmin {
+		tasks, _, err := s.Tasks.ListByInstance(ctx, tenantID, instanceID, port.PageRequest{Limit: 100})
+		if err != nil {
+			return wrapTaskErr(err)
+		}
+		scope.Departments = nil
+		if !s.callerInScope(ctx, tenantID, scope, tasks) {
+			return port.ErrNotAuthorizedForRead
+		}
 	}
 	compiled, err := s.fetchCompiledWorkflow(ctx, tenantID, inst.WorkflowVersionID)
 	if err != nil {

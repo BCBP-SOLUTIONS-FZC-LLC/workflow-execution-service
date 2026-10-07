@@ -23,11 +23,8 @@ func (h *Handler) FireOutsideBoundary(c *gin.Context) {
 }
 
 func (h *Handler) answerOutsideWait(c *gin.Context, key string) {
-	tenantID, actorUserID, ok := callerIdentity(c)
+	tenantID, userID, ok := callerIdentity(c)
 	if !ok {
-		return
-	}
-	if !requireAdmin(c) {
 		return
 	}
 	instanceID, ok := parseIDParam(c)
@@ -38,7 +35,7 @@ func (h *Handler) answerOutsideWait(c *gin.Context, key string) {
 	if c.Request.ContentLength != 0 && !bindJSON(c, &req) {
 		return
 	}
-	if err := h.instances.AnswerOutsideWait(c.Request.Context(), tenantID, instanceID, actorUserID, key, req.Variables); err != nil {
+	if err := h.instances.AnswerOutsideWait(c.Request.Context(), tenantID, instanceID, readScope(c, userID), key, req.Variables); err != nil {
 		errResponse(c, err)
 		return
 	}

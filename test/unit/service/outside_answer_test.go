@@ -17,6 +17,8 @@ import (
 
 const outsideKey = "finance/Receive_Bid"
 
+func adminScope() port.ReadScope { return port.ReadScope{CallerUserID: uuid.New(), IsAdmin: true} }
+
 // outsideAnswerHarness has a running instance whose plan has one outside wait,
 // the receive task finance/Receive_Bid, and a Temporal query that reports the
 // keys the instance is waiting in.
@@ -48,7 +50,7 @@ func outsideAnswerHarness(t *testing.T, status domain.InstanceStatus, waiting ..
 func TestAnswerOutsideWait_SignalsTheWaitingInstance(t *testing.T) {
 	svc, inst, temporal := outsideAnswerHarness(t, domain.InstanceStatusRunning, outsideKey)
 
-	err := svc.AnswerOutsideWait(context.Background(), inst.TenantID, inst.ID, uuid.New(), outsideKey, map[string]any{"bid": "42"})
+	err := svc.AnswerOutsideWait(context.Background(), inst.TenantID, inst.ID, adminScope(), outsideKey, map[string]any{"bid": "42"})
 	require.NoError(t, err)
 
 	require.Len(t, temporal.signals, 1)
@@ -63,7 +65,7 @@ func TestAnswerOutsideWait_AMessageBoundaryIsAddressedByHostAndBoundary(t *testi
 	key := dsl.BoundaryWaitKey("finance/Prepare", "Boundary_Withdraw")
 	svc, inst, temporal := outsideAnswerHarness(t, domain.InstanceStatusRunning, key)
 
-	require.NoError(t, svc.AnswerOutsideWait(context.Background(), inst.TenantID, inst.ID, uuid.New(), key, nil))
+	require.NoError(t, svc.AnswerOutsideWait(context.Background(), inst.TenantID, inst.ID, adminScope(), key, nil))
 	require.Len(t, temporal.signals, 1)
 }
 
@@ -83,7 +85,7 @@ func TestAnswerOutsideWait_Refusals(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, inst, temporal := outsideAnswerHarness(t, tc.status, tc.waiting...)
 
-			err := svc.AnswerOutsideWait(context.Background(), inst.TenantID, inst.ID, uuid.New(), tc.key, nil)
+			err := svc.AnswerOutsideWait(context.Background(), inst.TenantID, inst.ID, adminScope(), tc.key, nil)
 
 			assert.ErrorIs(t, err, tc.want)
 			assert.Empty(t, temporal.signals, "a refused answer must not be signalled")
@@ -93,6 +95,34 @@ func TestAnswerOutsideWait_Refusals(t *testing.T) {
 
 func TestAnswerOutsideWait_UnknownInstance(t *testing.T) {
 	svc, _, _ := outsideAnswerHarness(t, domain.InstanceStatusRunning, outsideKey)
-	err := svc.AnswerOutsideWait(context.Background(), uuid.New(), uuid.New(), uuid.New(), outsideKey, nil)
+	err := svc.AnswerOutsideWait(context.Background(), uuid.New(), uuid.New(), adminScope(), outsideKey, nil)
 	assert.ErrorIs(t, err, port.ErrInstanceNotFound)
+}
+
+// TestAnswerOutsideWait_AnAssigneeOfTheInstancesTasksMayAnswer pins who may
+// answer besides an admin: a user with an active assignment on a task of the
+// instance. Another user, even in the task's department, may not.
+func TestAnswerOutsideWait_AnAssigneeOfTheInstancesTasksMayAnswer(t *testing.T) {
+	svc, instances, tasks, assignments, _, temporal, definitions, _ := newInstanceServiceHarness()
+	versionID := uuid.New()
+	definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t,
+		dsl.StageDef{Type: "receive_task", NodeID: "Receive_Bid", Extras: map[string]string{"message": "bid-received"}}))
+	inst := &domain.Instance{ID: uuid.New(), TenantID: uuid.New(), WorkflowVersionID: versionID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "t:s:k"}
+	instances.byID[inst.ID] = inst
+	deptID, assignee := uuid.New(), uuid.New()
+	task := &domain.Task{ID: uuid.New(), TenantID: inst.TenantID, WorkflowInstanceID: inst.ID, DepartmentID: deptID, Status: domain.TaskStatusReady}
+	tasks.byID[task.ID] = task
+	assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: inst.TenantID, TaskID: task.ID, UserID: assignee, IsActive: true}
+	temporal.queryFunc = func(_ context.Context, _, _ string, out any) error {
+		return json.Unmarshal([]byte(`["`+outsideKey+`"]`), out)
+	}
+
+	err := svc.AnswerOutsideWait(context.Background(), inst.TenantID, inst.ID, port.ReadScope{CallerUserID: assignee}, outsideKey, nil)
+	require.NoError(t, err)
+	require.Len(t, temporal.signals, 1)
+
+	other := port.ReadScope{CallerUserID: uuid.New(), Departments: []port.DepartmentRole{{DepartmentID: deptID}}}
+	err = svc.AnswerOutsideWait(context.Background(), inst.TenantID, inst.ID, other, outsideKey, nil)
+	assert.ErrorIs(t, err, port.ErrNotAuthorizedForRead)
+	assert.Len(t, temporal.signals, 1, "an unauthorised answer must not be signalled")
 }

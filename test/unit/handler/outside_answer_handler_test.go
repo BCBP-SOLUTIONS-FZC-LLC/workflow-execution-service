@@ -22,12 +22,14 @@ func firePath(node, boundary string) string {
 
 type answered struct {
 	key       string
+	scope     port.ReadScope
 	variables map[string]any
 	calls     int
 }
 
 func recordingInstances(t *testing.T, a *answered, err error) *fakeInstanceService {
-	return &fakeInstanceService{answerOutsideWait: func(_ context.Context, tenantID, instanceID, _ uuid.UUID, key string, variables map[string]any) error {
+	return &fakeInstanceService{answerOutsideWait: func(_ context.Context, tenantID, instanceID uuid.UUID, scope port.ReadScope, key string, variables map[string]any) error {
+		a.scope = scope
 		a.calls++
 		a.key, a.variables = key, variables
 		assert.Equal(t, testTenantID, tenantID)
@@ -71,14 +73,28 @@ func TestFireOutsideBoundary(t *testing.T) {
 	assert.Equal(t, "finance/Prepare#Boundary_Withdraw", got.key)
 }
 
-func TestOutsideAnswer_NotAdmin_Forbidden(t *testing.T) {
+// A non-admin caller is passed on with their identity and no department
+// membership: only an admin or an assignee of the instance's tasks may answer,
+// which the service decides.
+func TestOutsideAnswer_NonAdminIsPassedOnAsAnIndividual(t *testing.T) {
 	var got answered
 	router := newRouter(newInstanceHandler(recordingInstances(t, &got, nil)))
 
 	w := do(router, req(http.MethodPost, completePath("finance%2FReceive_Bid"), nil))
 
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	assert.False(t, got.scope.IsAdmin)
+	assert.Equal(t, testUserID, got.scope.CallerUserID)
+	assert.Empty(t, got.scope.Departments)
+}
+
+func TestOutsideAnswer_NotAuthorized_Forbidden(t *testing.T) {
+	var got answered
+	router := newRouter(newInstanceHandler(recordingInstances(t, &got, port.ErrNotAuthorizedForRead)))
+
+	w := do(router, req(http.MethodPost, completePath("finance%2FReceive_Bid"), nil))
+
 	assert.Equal(t, http.StatusForbidden, w.Code)
-	assert.Zero(t, got.calls)
 }
 
 func TestOutsideAnswer_Errors(t *testing.T) {
@@ -105,4 +121,14 @@ func TestOutsideAnswer_Errors(t *testing.T) {
 			assert.Equal(t, tc.body, body.Code)
 		})
 	}
+}
+
+func TestOutsideAnswer_BadRequests(t *testing.T) {
+	router := newRouter(newInstanceHandler(&fakeInstanceService{}))
+
+	w := do(router, asAdmin(req(http.MethodPost, "/api/v1/instances/not-a-uuid/nodes/finance%2FReceive_Bid/complete", nil)))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	w = do(router, asAdmin(req(http.MethodPost, completePath("finance%2FReceive_Bid"), map[string]any{"variables": "not an object"})))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }

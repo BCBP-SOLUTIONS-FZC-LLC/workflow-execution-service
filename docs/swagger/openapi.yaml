@@ -1548,8 +1548,9 @@ paths:
     post:
       operationId: completeOutsideWait
       tags: [Instances]
-      summary: An outside party's answer completes a receive task (admin)
+      summary: An outside party's answer completes a receive task
       description: >
+        Callable by an admin or by a user with an active assignment on a task of the instance.
         Completes the receive task whose node key is node, which no send task of the plan
         feeds: only an outside party's answer can. The published version lists such steps as
         its waits. The variables merge into the instance's variables. The node key's "/" must
@@ -1557,7 +1558,6 @@ paths:
       security:
         - GatewayTenantContext: []
           UserContext: []
-          AdminRole: []
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
         - $ref: "#/components/parameters/UserIdHeader"
@@ -1619,8 +1619,9 @@ paths:
     post:
       operationId: fireOutsideBoundary
       tags: [Instances]
-      summary: An outside party's message fires a message boundary (admin)
+      summary: An outside party's message fires a message boundary
       description: >
+        Callable by an admin or by a user with an active assignment on a task of the instance.
         Fires the message boundary boundary of the host node, a boundary no send task of the
         plan feeds. node is the host stage's node key, or the id of the subprocess or call the
         boundary is attached to. The variables merge into the instance's variables. The node
@@ -1628,7 +1629,6 @@ paths:
       security:
         - GatewayTenantContext: []
           UserContext: []
-          AdminRole: []
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
         - $ref: "#/components/parameters/UserIdHeader"
