@@ -109,13 +109,13 @@ func addErrorCase(ctx wf.Context, sel wf.Selector, ch wf.Channel, errorPaths []d
 	})
 }
 
-func registerTaskBoundaries(ctx wf.Context, sel wf.Selector, msgBuf *messageBuffer, timer *dsl.BoundaryTimer, msg *dsl.MessagePath, onFire func(boundaryFire)) (cancel func()) {
+func registerTaskBoundaries(ctx wf.Context, sel wf.Selector, in *interpreter, host string, timer *dsl.BoundaryTimer, msg *dsl.MessagePath, onFire func(boundaryFire)) (cancel func()) {
 	var cancels []func()
 	if timer != nil {
 		cancels = append(cancels, addTimerCase(ctx, sel, timer.Duration, timer.Interrupting, timer.TargetDept, onFire))
 	}
 	if msg != nil {
-		cancels = append(cancels, addMessageCase(ctx, sel, msgBuf, msg.MessageName, msg.Interrupting, msg.TargetDept, onFire))
+		cancels = append(cancels, in.addMessageBoundary(ctx, sel, host, *msg, onFire))
 	}
 	return func() {
 		for _, c := range cancels {
@@ -124,13 +124,13 @@ func registerTaskBoundaries(ctx wf.Context, sel wf.Selector, msgBuf *messageBuff
 	}
 }
 
-func registerSubWorkflowBoundaries(ctx wf.Context, sel wf.Selector, msgBuf *messageBuffer, errCh wf.Channel, sw *dsl.SubWorkflowStep, onFire func(boundaryFire)) (cancelAll func()) {
+func registerSubWorkflowBoundaries(ctx wf.Context, sel wf.Selector, in *interpreter, errCh wf.Channel, sw *dsl.SubWorkflowStep, onFire func(boundaryFire)) (cancelAll func()) {
 	var cancels []func()
 	for _, t := range sw.TimerPaths {
 		cancels = append(cancels, addTimerCase(ctx, sel, t.Duration, t.Interrupting, t.TargetDept, onFire))
 	}
 	for _, m := range sw.MessagePaths {
-		cancels = append(cancels, addMessageCase(ctx, sel, msgBuf, m.MessageName, m.Interrupting, m.TargetDept, onFire))
+		cancels = append(cancels, in.addMessageBoundary(ctx, sel, sw.NodeID, m, onFire))
 	}
 	addErrorCase(ctx, sel, errCh, sw.ErrorPaths, onFire)
 	return func() {

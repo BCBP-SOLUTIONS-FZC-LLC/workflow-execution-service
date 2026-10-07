@@ -12,6 +12,7 @@ func TestApplyIOMapping(t *testing.T) {
 		name        string
 		contextJSON string
 		mapping     *dsl.IOMapping
+		byRule      bool
 		want        map[string]any
 	}{
 		{
@@ -38,10 +39,31 @@ func TestApplyIOMapping(t *testing.T) {
 			mapping:     &dsl.IOMapping{Inputs: []dsl.IOVar{{Source: "missing", Target: "target"}}},
 			want:        map[string]any{"target": nil},
 		},
+		{
+			name:        "by the input rule, =name reads the variable name",
+			contextJSON: `{"clarificationId":"C-9"}`,
+			mapping:     &dsl.IOMapping{Inputs: []dsl.IOVar{{Source: "=clarificationId", Target: "id"}}},
+			byRule:      true,
+			want:        map[string]any{"clarificationId": "C-9", "id": "C-9"},
+		},
+		{
+			name:        "by the input rule, an identity mapping keeps the variable",
+			contextJSON: `{"clarificationId":"C-9"}`,
+			mapping:     &dsl.IOMapping{Inputs: []dsl.IOVar{{Source: "=clarificationId", Target: "clarificationId"}}},
+			byRule:      true,
+			want:        map[string]any{"clarificationId": "C-9"},
+		},
+		{
+			name:        "by the input rule, any other source is a literal",
+			contextJSON: `{"dept_id":"legal"}`,
+			mapping:     &dsl.IOMapping{Inputs: []dsl.IOVar{{Source: "dept_id", Target: "target"}}},
+			byRule:      true,
+			want:        map[string]any{"dept_id": "legal", "target": "dept_id"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := applyIOMapping(tt.contextJSON, tt.mapping)
+			got, err := applyIOMapping(tt.contextJSON, tt.mapping, tt.byRule)
 			if err != nil {
 				t.Fatalf("applyIOMapping() unexpected error: %v", err)
 			}
@@ -62,7 +84,7 @@ func TestApplyIOMapping(t *testing.T) {
 }
 
 func TestApplyIOMappingInvalidContext(t *testing.T) {
-	_, err := applyIOMapping("not json", &dsl.IOMapping{Inputs: []dsl.IOVar{{Source: "a", Target: "b"}}})
+	_, err := applyIOMapping("not json", &dsl.IOMapping{Inputs: []dsl.IOVar{{Source: "a", Target: "b"}}}, true)
 	if err == nil {
 		t.Fatal("applyIOMapping() with invalid context_json: want error, got nil")
 	}

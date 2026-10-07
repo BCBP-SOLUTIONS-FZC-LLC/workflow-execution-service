@@ -181,6 +181,29 @@ func TestConnectorTaskService_Complete_HappyPath(t *testing.T) {
 	assert.False(t, hasSource)
 }
 
+// An author writes a connector output as `source="=contentRef"`; both spellings
+// name the key of the connector's result (workflow-models IOVar.OutputKey).
+func TestConnectorTaskService_Complete_OutputSourceMayCarryTheEqualsSign(t *testing.T) {
+	t.Parallel()
+
+	extras := `{"resolved_inputs":{},"output_mapping":[{"source":"=contentRef","target":"packet_ref"}]}`
+	task := connectorTask("storage", domain.TaskStatusReady, extras)
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz"}
+	temporal := &fakeTemporalClient{}
+	svc := newConnectorTaskService(task, inst, temporal, newFakeCacheStore())
+
+	require.NoError(t, svc.Complete(context.Background(), task.TenantID, task.ID, testConnectorActorID, map[string]any{"contentRef": "doc-1"}))
+
+	require.Len(t, temporal.signals, 1)
+	b, err := json.Marshal(temporal.signals[0].Payload)
+	require.NoError(t, err)
+	var wire struct{ ResultJSON string }
+	require.NoError(t, json.Unmarshal(b, &wire))
+	var result map[string]any
+	require.NoError(t, json.Unmarshal([]byte(wire.ResultJSON), &result))
+	assert.Equal(t, map[string]any{"packet_ref": "doc-1"}, result)
+}
+
 func TestConnectorTaskService_Complete_NoOutputMapping_PassesThrough(t *testing.T) {
 	t.Parallel()
 

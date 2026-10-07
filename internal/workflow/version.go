@@ -44,3 +44,19 @@ const exclusiveEndCompletesPathChangeID = "exclusive-end-completes-path"
 // by their place in the step. Before it, they were told apart by DeptID, and
 // two branches with one DeptID never joined.
 const parallelJoinByBranchChangeID = "parallel-join-by-branch"
+
+// ioInputRuleChangeID gates reading an IOMapping input by workflow-models'
+// rule: "=name" is the variable name and any other text is a literal. Before
+// it, a source was always a variable name, so an authored "=name" read a
+// variable called "=name".
+const ioInputRuleChangeID = "io-input-rule"
+
+// taskResultVariablesChangeID gates merging a completed task's result_json
+// into the instance's variables. Before it, only the start context and call
+// inputs wrote them.
+const taskResultVariablesChangeID = "task-result-variables"
+
+// externalWaitChangeID gates waiting for an outside wait (dsl.ExternalWaits)
+// under its key, where an outside party's answer can complete it. Before it,
+// such a wait sat in the message buffer, which nothing outside the plan feeds.
+const externalWaitChangeID = "external-wait-by-key"

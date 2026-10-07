@@ -105,58 +105,48 @@ func TestDispatch_RedeliveryAfterFailedCallback_DoesNotRerunConnector(t *testing
 	assert.Equal(t, int32(1), conn.calls.Load(), "connector ran again on redelivery")
 }
 
-// A task's secret_ref inputs may only name its own tenant's credentials. A
-// path under another tenant's prefix must be refused before any OpenBao read
-// and before the connector runs.
-func TestDispatch_SecretRefToAnotherTenant_IsRefusedBeforeRead(t *testing.T) {
-	var reads atomic.Int32
-	openbaoSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		reads.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"data":{"accessKey":"tenant-b-secret"}}}`))
-	}))
-	t.Cleanup(openbaoSrv.Close)
-	// Failing the callback keeps the entry unacked, so no stream consumer is needed.
-	callbackSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	t.Cleanup(callbackSrv.Close)
-
-	tenantA, tenantB := uuid.New(), uuid.New()
-	conn := &countingConnector{typ: registry.TypeStorage}
-	d := &deps{
-		dedup:      newFakeCacheStore(),
-		openbao:    openbao.NewReader(openbaoSrv.URL, "token", "secret", time.Second),
-		pools:      poolFor(conn),
-		completion: newCompletionClient(callbackSrv.URL, "token", map[uuid.UUID]uuid.UUID{tenantA: uuid.New()}, time.Second),
-	}
-	entry := valkeystream.Entry{ID: "1-0", Fields: map[string]string{
-		"tenant_id": tenantA.String(), "task_id": uuid.NewString(),
-		"department_id": uuid.NewString(), "connector_type": conn.typ,
-		"resolved_inputs": `{"accessKey":"connectors/` + tenantB.String() + `/storage/accessKey"}`,
-	}}
-
-	dispatchOnce(d, entry)
-
-	assert.Equal(t, int32(0), reads.Load(), "OpenBao was read under another tenant's prefix")
-	assert.Equal(t, int32(0), conn.calls.Load(), "connector ran with another tenant's credential")
+// capturingConnector records the params it was run with.
+type capturingConnector struct {
+	typ    string
+	params chan map[string]any
 }
 
-type secretRefFixture struct {
+func (c *capturingConnector) Type() string { return c.typ }
+func (c *capturingConnector) Execute(_ context.Context, params map[string]any) (map[string]any, error) {
+	c.params <- params
+	return map[string]any{"ok": true}, nil
+}
+
+// credentialFixture is a worker whose OpenBao holds the given fields of one
+// tenant's storage credential, recording every path it is asked to read.
+type credentialFixture struct {
 	tenantID  uuid.UUID
-	reads     atomic.Int32
-	conn      *countingConnector
+	conn      *capturingConnector
 	failClass chan string
+	paths     chan string
 	d         *deps
 }
 
-func newSecretRefFixture(t *testing.T) *secretRefFixture {
+func newCredentialFixture(t *testing.T, stored map[string]string, storeStatus int) *credentialFixture {
 	t.Helper()
-	f := &secretRefFixture{tenantID: uuid.New(), conn: &countingConnector{typ: registry.TypeStorage}, failClass: make(chan string, 1)}
-	openbaoSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		f.reads.Add(1)
+	f := &credentialFixture{
+		tenantID: uuid.New(), failClass: make(chan string, 1), paths: make(chan string, 64),
+		conn: &capturingConnector{typ: registry.TypeStorage, params: make(chan map[string]any, 1)},
+	}
+	openbaoSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.paths <- strings.TrimPrefix(r.URL.Path, "/v1/secret/data/")
+		if storeStatus != 0 {
+			w.WriteHeader(storeStatus)
+			return
+		}
+		field := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		value, ok := stored[field]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"data":{"accessKey":"own-secret"}}}`))
+		_, _ = w.Write([]byte(`{"data":{"data":{"` + field + `":"` + value + `"}}}`))
 	}))
 	t.Cleanup(openbaoSrv.Close)
 	callbackSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -168,60 +158,109 @@ func newSecretRefFixture(t *testing.T) *secretRefFixture {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(callbackSrv.Close)
+	pool := &typePool{connectorType: f.conn.typ, sem: make(chan struct{}, 1), timeout: time.Second, retry: registry.RetryPolicyUnsafe, connector: f.conn}
 	f.d = &deps{
 		dedup:      newFakeCacheStore(),
 		openbao:    openbao.NewReader(openbaoSrv.URL, "token", "secret", time.Second),
-		pools:      poolFor(f.conn),
+		pools:      map[string]*typePool{f.conn.typ: pool},
 		completion: newCompletionClient(callbackSrv.URL, "token", map[uuid.UUID]uuid.UUID{f.tenantID: uuid.New()}, time.Second),
 	}
 	return f
 }
 
-func (f *secretRefFixture) dispatch(accessKeyPath string) {
+func (f *credentialFixture) dispatch(resolvedInputs string) {
 	dispatchOnce(f.d, valkeystream.Entry{ID: "1-0", Fields: map[string]string{
 		"tenant_id": f.tenantID.String(), "task_id": uuid.NewString(),
 		"department_id": uuid.NewString(), "connector_type": registry.TypeStorage,
-		"resolved_inputs": `{"accessKey":"` + accessKeyPath + `"}`,
+		"resolved_inputs": resolvedInputs,
 	}})
 }
 
-// The only path that can hold a job's credential is the one WriteCredential
-// builds from the job's own tenant, connector type and field name, so any
-// other value is refused outright rather than read.
-func TestDispatch_SecretRefNotTheJobsOwnPath_FailsTaskBeforeRead(t *testing.T) {
-	cases := map[string]func(tenant uuid.UUID) string{
-		"another connector type": func(tenant uuid.UUID) string { return "connectors/" + tenant.String() + "/send-email/accessKey" },
-		"another field":          func(tenant uuid.UUID) string { return "connectors/" + tenant.String() + "/storage/secretKey" },
-		"not a connector path":   func(uuid.UUID) string { return "secret/data/platform/db" },
-		"own path, tenant upper-cased": func(tenant uuid.UUID) string {
-			return "connectors/" + strings.ToUpper(tenant.String()) + "/storage/accessKey"
-		},
-	}
-	for name, path := range cases {
-		t.Run(name, func(t *testing.T) {
-			f := newSecretRefFixture(t)
-
-			f.dispatch(path(f.tenantID))
-
-			assert.Equal(t, int32(0), f.reads.Load(), "OpenBao was read for a path that is not the job's own")
-			assert.Equal(t, int32(0), f.conn.calls.Load(), "connector ran")
-			select {
-			case class := <-f.failClass:
-				assert.Equal(t, "secret_ref_invalid", class)
-			default:
-				t.Fatal("the task was not failed")
-			}
-		})
+// ran waits for the connector's run and returns its params, failing the test
+// when it does not run.
+func (f *credentialFixture) ran(t *testing.T) map[string]any {
+	t.Helper()
+	select {
+	case params := <-f.conn.params:
+		return params
+	case <-time.After(5 * time.Second):
+		t.Fatal("the connector did not run")
+		return nil
 	}
 }
 
-func TestDispatch_OwnSecretRef_IsResolved(t *testing.T) {
-	f := newSecretRefFixture(t)
+func (f *credentialFixture) readPaths() []string {
+	close(f.paths)
+	var got []string
+	for p := range f.paths {
+		got = append(got, p)
+	}
+	return got
+}
 
-	f.dispatch("connectors/" + f.tenantID.String() + "/storage/accessKey")
+// A connector always uses the tenant's stored credential: the worker reads
+// each of the connector type's secret fields from the path WriteCredential
+// builds from the job's own tenant, type and field name, and nothing the
+// diagram says decides which path.
+func TestDispatch_ReadsTheTenantsStoredCredentialFromItsOwnPaths(t *testing.T) {
+	f := newCredentialFixture(t, map[string]string{"accessKey": "own-access", "secretKey": "own-secret"}, 0)
 
-	assert.Equal(t, int32(1), f.reads.Load())
-	assert.Equal(t, int32(1), f.conn.calls.Load())
+	f.dispatch(`{"provider":"aws-s3","bucket":"b","key":"k"}`)
+
+	got := f.ran(t)
+	assert.Equal(t, "own-access", got["accessKey"])
+	assert.Equal(t, "own-secret", got["secretKey"])
+	assert.NotContains(t, got, "azureAccountName", "a field the tenant stored no credential for is left out")
+	assert.Equal(t, "b", got["bucket"])
+	for _, p := range f.readPaths() {
+		assert.True(t, strings.HasPrefix(p, "connectors/"+f.tenantID.String()+"/storage/"), "read outside the tenant's own storage credentials: %s", p)
+	}
+}
+
+// A value an old plan still carries for a secret field is never read or used:
+// it is replaced by the stored credential, and a path it names is not fetched.
+func TestDispatch_AnAuthoredSecretValueIsNeverUsed(t *testing.T) {
+	f := newCredentialFixture(t, map[string]string{"accessKey": "own-access", "secretKey": "own-secret"}, 0)
+	foreign := "connectors/" + uuid.NewString() + "/storage/accessKey"
+
+	f.dispatch(`{"provider":"aws-s3","accessKey":"` + foreign + `","secretKey":{"path":"x"}}`)
+
+	got := f.ran(t)
+	assert.Equal(t, "own-access", got["accessKey"])
+	assert.Equal(t, "own-secret", got["secretKey"])
+	for _, p := range f.readPaths() {
+		assert.NotEqual(t, foreign, p)
+	}
+}
+
+// With no credential stored, the connector runs and refuses it by its own
+// validation, which names the provider that needs it; the worker does not
+// guess which of the type's secret fields a provider requires.
+func TestDispatch_NoStoredCredential_LeavesTheConnectorToRefuseIt(t *testing.T) {
+	f := newCredentialFixture(t, nil, 0)
+
+	f.dispatch(`{"provider":"aws-s3"}`)
+
+	got := f.ran(t)
+	assert.NotContains(t, got, "accessKey")
+}
+
+func TestDispatch_CredentialStoreFailure_FailsTheTaskBeforeTheConnectorRuns(t *testing.T) {
+	f := newCredentialFixture(t, nil, http.StatusForbidden)
+
+	f.dispatch(`{"provider":"aws-s3"}`)
+
+	select {
+	case class := <-f.failClass:
+		assert.Equal(t, "secret_unauthorized", class)
+	default:
+		t.Fatal("the task was not failed")
+	}
+	select {
+	case <-f.conn.params:
+		t.Fatal("the connector ran without its credential")
+	default:
+	}
 }
 
 type fakeConsumer struct {
@@ -631,34 +670,4 @@ func TestHeartbeat_StopsTouchingARunPastItsLease(t *testing.T) {
 	assert.Empty(t, consumer.touchedIDs(), "a run past its lease was still touched")
 	close(conn.release)
 	wg.Wait()
-}
-
-// A task naming its own credential in one field and a foreign or malformed
-// value in another is refused before either is read.
-func TestDispatch_OneBadSecretRef_RefusesBeforeReadingAny(t *testing.T) {
-	cases := map[string]func(tenant uuid.UUID) string{
-		"foreign path":     func(uuid.UUID) string { return `"connectors/` + uuid.NewString() + `/storage/secretKey"` },
-		"non-string value": func(uuid.UUID) string { return `{"path":"x"}` },
-	}
-	for name, secretKey := range cases {
-		t.Run(name, func(t *testing.T) {
-			f := newSecretRefFixture(t)
-			own := "connectors/" + f.tenantID.String() + "/storage/accessKey"
-
-			dispatchOnce(f.d, valkeystream.Entry{ID: "1-0", Fields: map[string]string{
-				"tenant_id": f.tenantID.String(), "task_id": uuid.NewString(),
-				"department_id": uuid.NewString(), "connector_type": registry.TypeStorage,
-				"resolved_inputs": `{"accessKey":"` + own + `","secretKey":` + secretKey(f.tenantID) + `}`,
-			}})
-
-			assert.Equal(t, int32(0), f.reads.Load(), "a credential was read before the bad reference was refused")
-			assert.Equal(t, int32(0), f.conn.calls.Load(), "connector ran")
-			select {
-			case class := <-f.failClass:
-				assert.Equal(t, "secret_ref_invalid", class)
-			default:
-				t.Fatal("the task was not failed")
-			}
-		})
-	}
 }

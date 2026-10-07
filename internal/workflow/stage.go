@@ -30,8 +30,7 @@ func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID s
 		return nodeKey, "", nil
 
 	case string(enums.StageTypeReceiveTask):
-		msgName := stage.Extras["message"]
-		in.msgBuf.Receive(ctx, msgName)
+		in.receive(ctx, nodeKey, stage.Extras["message"])
 		in.history.Push(nodeKey)
 		return nodeKey, "", nil
 
@@ -101,7 +100,7 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	}
 
 	var fired *boundaryFire
-	cancelBoundaries := registerTaskBoundaries(ctx, sel, in.msgBuf, stage.BoundaryTimer, stage.BoundaryMessage, func(f boundaryFire) {
+	cancelBoundaries := registerTaskBoundaries(ctx, sel, in, string(nodeKey), stage.BoundaryTimer, stage.BoundaryMessage, func(f boundaryFire) {
 		fired = &f
 	})
 	cancelSLA := addSLATimers(ctx, sel, slaTimerParams{
@@ -174,6 +173,11 @@ func (in *interpreter) resolveTaskStage(
 		if err := updateTaskStatus(ctx, port.UpdateTaskStatusInput{
 			TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusCompleted,
 		}); err != nil {
+			return nodeKey, "", err
+		}
+	}
+	if getVersion(ctx, taskResultVariablesChangeID) != wf.DefaultVersion {
+		if err := in.mergeResult(sig.ResultJSON); err != nil {
 			return nodeKey, "", err
 		}
 	}

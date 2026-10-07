@@ -11,6 +11,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
 var _ port.ConnectorTaskService = (*ConnectorTaskService)(nil)
@@ -181,10 +182,7 @@ func connectorSignalKey(taskID uuid.UUID) string {
 }
 
 type connectorTaskExtras struct {
-	OutputMapping []struct {
-		Source string `json:"source"`
-		Target string `json:"target"`
-	} `json:"output_mapping"`
+	OutputMapping []dsl.IOVar `json:"output_mapping"`
 }
 
 // renames output's top-level keys into the workflow context variable names
@@ -199,7 +197,7 @@ func applyOutputMapping(extrasJSON json.RawMessage, output map[string]any) (json
 
 	mapped := make(map[string]any, len(extras.OutputMapping))
 	for _, ref := range extras.OutputMapping {
-		if v, ok := output[ref.Source]; ok {
+		if v, ok := output[ref.OutputKey()]; ok {
 			mapped[ref.Target] = v
 		}
 	}

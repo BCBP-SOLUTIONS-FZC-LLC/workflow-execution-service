@@ -7,7 +7,7 @@ require (
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon v1.3.0
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon v1.2.1
 	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors v0.1.0-beta.1
-	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models v1.4.0-rc.2
+	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models v1.4.0-rc.3
 	github.com/aws/aws-sdk-go-v2 v1.43.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.38
 	github.com/aws/aws-sdk-go-v2/service/glue v1.151.1

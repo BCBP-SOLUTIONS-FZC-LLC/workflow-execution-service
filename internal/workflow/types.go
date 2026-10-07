@@ -63,6 +63,12 @@ type interpreter struct {
 	history *nodeHistory
 	msgBuf  *messageBuffer
 
+	// external is the key set of the main plan's outside waits
+	// (dsl.ExternalWaits); externalWaiting holds the channel each one now
+	// waiting in is blocked on, by key (execution LLD §2.4).
+	external        map[string]bool
+	externalWaiting map[string]wf.Channel
+
 	// Instance-wide, not per-branch scoped (LLD §2.4).
 	contextJSON string
 
@@ -118,18 +124,20 @@ type interpreter struct {
 
 func newInterpreter(tenantID, instanceID, initialContextJSON string, collab *dsl.CompiledCollaboration, overrideMap map[string]string) *interpreter {
 	return &interpreter{
-		tenantID:       tenantID,
-		instanceID:     instanceID,
-		collab:         collab,
-		history:        newNodeHistory(),
-		msgBuf:         newMessageBuffer(),
-		contextJSON:    initialContextJSON,
-		overrideMap:    overrideMap,
-		pending:        make(map[nodeVisitKey]wf.Channel),
-		pendingSignals: make(map[nodeVisitKey]stageTransitionSignal),
-		taskVisits:     make(map[domain.NodeKey]int64),
-		pauseGates:     make(map[string]wf.Channel),
-		status:         domain.InstanceStatusRunning,
+		tenantID:        tenantID,
+		instanceID:      instanceID,
+		collab:          collab,
+		history:         newNodeHistory(),
+		msgBuf:          newMessageBuffer(),
+		external:        externalWaitKeys(collab),
+		externalWaiting: make(map[string]wf.Channel),
+		contextJSON:     initialContextJSON,
+		overrideMap:     overrideMap,
+		pending:         make(map[nodeVisitKey]wf.Channel),
+		pendingSignals:  make(map[nodeVisitKey]stageTransitionSignal),
+		taskVisits:      make(map[domain.NodeKey]int64),
+		pauseGates:      make(map[string]wf.Channel),
+		status:          domain.InstanceStatusRunning,
 	}
 }
 

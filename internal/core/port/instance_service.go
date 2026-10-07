@@ -144,6 +144,11 @@ type InstanceService interface {
 	ForceForward(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, targetNodeKey string, recordVersion int64) error
 	ForceBack(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, recordVersion int64) error
 
+	// AnswerOutsideWait delivers an outside party's answer to the receive task
+	// or message boundary whose wait key (dsl.ExternalWait.Key) is key, merging
+	// variables into the instance's variables (LLD §5.11).
+	AnswerOutsideWait(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, key string, variables map[string]any) error
+
 	// ListEvents applies the same intra-tenant visibility check as Get (LLD
 	// §9.2) — the events endpoint is a sub-resource of the same instance.
 	ListEvents(ctx context.Context, tenantID, instanceID uuid.UUID, scope ReadScope, page Page) (PageResult[*WorkflowEvent], error)

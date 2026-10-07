@@ -630,6 +630,16 @@ components:
           format: date-time
           nullable: true
 
+    OutsideAnswer:
+      type: object
+      description: An outside party's answer or message, delivered by the service that deals with it.
+      properties:
+        variables:
+          type: object
+          description: Merged into the instance's variables; a key already set is replaced.
+          additionalProperties: true
+          example: { bid: "42" }
+
     ProblemDetails:
       type: object
       required: [type, title, status, detail, instance, code]
@@ -664,7 +674,7 @@ components:
             Machine-readable error code (stable across releases). One of:
             BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_ASSIGNEE, NOT_AUTHORIZED_FOR_RESOURCE,
             TENANT_MISMATCH, INSTANCE_NOT_FOUND, TASK_NOT_FOUND,
-            TARGET_NODE_NOT_FOUND, OVERRIDE_NO_OP, DUPLICATE_BUSINESS_KEY, TENANT_NOT_ACTIVE,
+            TARGET_NODE_NOT_FOUND, WAIT_NOT_FOUND, NOT_WAITING, OVERRIDE_NO_OP, DUPLICATE_BUSINESS_KEY, TENANT_NOT_ACTIVE,
             VERSION_NOT_PUBLISHED, VERSION_INVALID,
             RECORD_VERSION_CONFLICT, INSTANCE_ALREADY_TERMINAL, INVALID_INSTANCE_STATE,
             TASK_ALREADY_CLAIMED, CLAIM_NOT_APPLICABLE, INVALID_TASK_STATE,
@@ -1529,6 +1539,155 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/instances/{id}/nodes/{node}/complete:
+    post:
+      operationId: completeOutsideWait
+      tags: [Instances]
+      summary: An outside party's answer completes a receive task (admin)
+      description: >
+        Completes the receive task whose node key is node, which no send task of the plan
+        feeds: only an outside party's answer can. The published version lists such steps as
+        its waits. The variables merge into the instance's variables. The node key's "/" must
+        be percent-encoded as %2F.
+      security:
+        - GatewayTenantContext: []
+          UserContext: []
+          AdminRole: []
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - $ref: "#/components/parameters/InstanceIdPath"
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+          description: >
+            The wait's host: the receive task's node key, or for a boundary the host stage's
+            node key or the id of the subprocess or call it is attached to. The "/" in a node
+            key must be percent-encoded as %2F.
+          example: "Ops%2FReceive_Bid"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OutsideAnswer"
+      responses:
+        "202":
+          description: Answer accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: >
+            INSTANCE_NOT_FOUND, or WAIT_NOT_FOUND: the key is not an outside wait of the
+            instance's plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+        "409":
+          description: >
+            INVALID_INSTANCE_STATE: the instance is not RUNNING or DEGRADED;
+            NOT_WAITING: the instance is not waiting in that step now;
+            IDEMPOTENCY_KEY_REPLAY: same key reused with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/instances/{id}/nodes/{node}/boundaries/{boundary}/fire:
+    post:
+      operationId: fireOutsideBoundary
+      tags: [Instances]
+      summary: An outside party's message fires a message boundary (admin)
+      description: >
+        Fires the message boundary boundary of the host node, a boundary no send task of the
+        plan feeds. node is the host stage's node key, or the id of the subprocess or call the
+        boundary is attached to. The variables merge into the instance's variables. The node
+        key's "/" must be percent-encoded as %2F.
+      security:
+        - GatewayTenantContext: []
+          UserContext: []
+          AdminRole: []
+      parameters:
+        - $ref: "#/components/parameters/TenantIdHeader"
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/TenantRolesHeader"
+        - $ref: "#/components/parameters/InstanceIdPath"
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+          description: >
+            The wait's host: the receive task's node key, or for a boundary the host stage's
+            node key or the id of the subprocess or call it is attached to. The "/" in a node
+            key must be percent-encoded as %2F.
+          example: "Ops%2FReceive_Bid"
+        - name: boundary
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The BPMN id of the message boundary event.
+          example: "Boundary_Withdraw"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OutsideAnswer"
+      responses:
+        "202":
+          description: Message accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: >
+            INSTANCE_NOT_FOUND, or WAIT_NOT_FOUND: the host and boundary are not an outside
+            wait of the instance's plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+        "409":
+          description: >
+            INVALID_INSTANCE_STATE: the instance is not RUNNING or DEGRADED;
+            NOT_WAITING: the instance is not waiting in that boundary now;
+            IDEMPOTENCY_KEY_REPLAY: same key reused with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
         "500":
           $ref: "#/components/responses/InternalError"
         "503":

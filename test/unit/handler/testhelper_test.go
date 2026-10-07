@@ -141,6 +141,15 @@ type fakeInstanceService struct {
 	forceForward func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, int64) error
 	forceBack    func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int64) error
 	listEvents   func(context.Context, uuid.UUID, uuid.UUID, port.ReadScope, port.Page) (port.PageResult[*port.WorkflowEvent], error)
+
+	answerOutsideWait func(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, key string, variables map[string]any) error
+}
+
+func (f *fakeInstanceService) AnswerOutsideWait(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, key string, variables map[string]any) error {
+	if f.answerOutsideWait != nil {
+		return f.answerOutsideWait(ctx, tenantID, instanceID, actorUserID, key, variables)
+	}
+	return nil
 }
 
 func (f *fakeInstanceService) Start(ctx context.Context, in port.StartInstanceInput) (*port.Instance, error) {
@@ -680,6 +689,7 @@ func newDelegateHandlerWithCacheAndLog(wc *fakeWorkflowClient, cache port.CacheS
 func newRouter(h *handler.Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
+	r.UseRawPath = true
 	for _, mw := range gincommon.ProtectedMiddlewares(gincommon.Config{}) {
 		r.Use(mw)
 	}
@@ -695,6 +705,8 @@ func newRouter(h *handler.Handler) *gin.Engine {
 
 	rg.GET("/workflows/active-by-user", h.ListActiveByUser)
 	rg.POST("/instances/:id/nodes/:node/override", h.Idempotent(h.OverrideNodeAssignee))
+	rg.POST("/instances/:id/nodes/:node/complete", h.Idempotent(h.CompleteOutsideWait))
+	rg.POST("/instances/:id/nodes/:node/boundaries/:boundary/fire", h.Idempotent(h.FireOutsideBoundary))
 
 	instances := rg.Group("/instances")
 	instances.POST("", h.Idempotent(h.StartInstance))

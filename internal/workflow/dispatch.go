@@ -34,7 +34,7 @@ func (in *interpreter) runStepList(ctx wf.Context, plan *dsl.CompiledPlan, steps
 		step := &steps[i]
 
 		if step.IOMapping != nil {
-			ctxJSON, err := applyIOMapping(in.contextJSON, step.IOMapping)
+			ctxJSON, err := applyIOMapping(in.contextJSON, step.IOMapping, getVersion(ctx, ioInputRuleChangeID) != wf.DefaultVersion)
 			if err != nil {
 				return stepOutcome{LastNode: last, LastResult: lastResult}, err
 			}

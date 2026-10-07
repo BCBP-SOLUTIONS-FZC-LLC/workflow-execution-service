@@ -46,6 +46,13 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 		return ExecuteOutput{Status: domain.InstanceStatusFailed}, err
 	}
 
+	if err := in.registerWaitingExternalQuery(ctx); err != nil {
+		_ = updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
+			InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusFailed,
+		})
+		return ExecuteOutput{Status: domain.InstanceStatusFailed}, err
+	}
+
 	if err := in.registerStatusQuery(ctx); err != nil {
 		_ = updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
 			InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusFailed,

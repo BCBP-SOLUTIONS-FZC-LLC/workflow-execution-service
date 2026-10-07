@@ -122,7 +122,7 @@ func resolveConnectorInputs(contextJSON string, m *dsl.IOMapping) (map[string]an
 	resolved := map[string]any{}
 	if m != nil {
 		for _, iv := range m.Inputs {
-			resolved[iv.Target] = vars[iv.Source]
+			resolved[iv.Target] = iv.InputValue(vars)
 		}
 	}
 	return resolved, nil

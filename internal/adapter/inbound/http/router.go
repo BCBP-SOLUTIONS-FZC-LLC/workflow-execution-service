@@ -114,6 +114,8 @@ func NewRouter(cfg RouterConfig) *Router {
 
 	api.GET("/workflows/active-by-user", h.ListActiveByUser)
 	api.POST("/instances/:id/nodes/:node/override", h.Idempotent(h.OverrideNodeAssignee))
+	api.POST("/instances/:id/nodes/:node/complete", h.Idempotent(h.CompleteOutsideWait))
+	api.POST("/instances/:id/nodes/:node/boundaries/:boundary/fire", h.Idempotent(h.FireOutsideBoundary))
 
 	instances := api.Group("/instances")
 	instances.POST("", h.Idempotent(h.StartInstance))

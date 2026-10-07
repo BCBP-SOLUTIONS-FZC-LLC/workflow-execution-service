@@ -8,7 +8,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## [Unreleased]
 
+### Added
+
+- `POST /instances/:id/nodes/:node/complete` and `.../boundaries/:boundary/fire`: an outside party's answer completes a receive task, or fires a message boundary, that no send task of the plan feeds (`dsl.ExternalWaits`). Admin only; `WAIT_NOT_FOUND` (404) and `NOT_WAITING` (409) are new. The `instance-external-answer` signal and the `waiting-external` query carry it (change id `external-wait-by-key`).
+- Completed tasks' results and outside answers merge into the instance's variables, which each task is created with (change id `task-result-variables`).
+
 ### Changed
+
+- An `IOMapping` input is `=name` for an instance variable or any other text for a literal, and an output's `source` names a key of the connector's result with or without `=` (change id `io-input-rule` on call steps). An authored `=name` used to read a variable called `=name`, and a call input `=x` to `x` set `x` to nothing.
+- The connector worker reads each secret field of its connector type from the tenant's stored credential, `connectors/<tenant>/<type>/<field>`, and discards any value a plan carries for one. A field with no stored credential is left out for the connector to refuse; `secret_ref_invalid` is no longer raised for an authored path.
 
 - An exclusive branch with `Steps` runs them (workflow-models `v1.4.0-rc.1`); a call or subprocess on a branch had never run.
 - A branch that leads to an end event ends its path: the instance completes and its status is written. It ended as `TERMINATED` with no status write (change id `exclusive-end-completes-path`).

@@ -39,7 +39,7 @@ func (in *interpreter) runSubWorkflow(ctx wf.Context, plan *dsl.CompiledPlan, sw
 	})
 
 	var fired *boundaryFire
-	cancelBoundaries := registerSubWorkflowBoundaries(ctx, sel, in.msgBuf, errCh, sw, func(f boundaryFire) {
+	cancelBoundaries := registerSubWorkflowBoundaries(ctx, sel, in, errCh, sw, func(f boundaryFire) {
 		fired = &f
 	})
 

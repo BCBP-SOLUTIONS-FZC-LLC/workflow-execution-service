@@ -49,7 +49,7 @@ func validateInstanceStateFor(signalName string, status domain.InstanceStatus) e
 		allowed = []domain.InstanceStatus{domain.InstanceStatusPaused}
 	case port.SignalInstanceCancel:
 		allowed = []domain.InstanceStatus{domain.InstanceStatusRunning, domain.InstanceStatusPaused, domain.InstanceStatusDegraded}
-	case port.SignalInstanceForceFwd, port.SignalInstanceForceBack:
+	case port.SignalInstanceForceFwd, port.SignalInstanceForceBack, port.SignalInstanceExternalAnswer:
 		allowed = []domain.InstanceStatus{domain.InstanceStatusRunning, domain.InstanceStatusDegraded}
 	}
 	for _, a := range allowed {

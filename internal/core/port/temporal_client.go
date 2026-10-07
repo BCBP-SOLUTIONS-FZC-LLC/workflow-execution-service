@@ -20,7 +20,14 @@ const (
 	SignalInstanceForceFwd  = "instance-force-forward"
 	SignalInstanceForceBack = "instance-force-back"
 	SignalInstanceReassign  = "instance-reassign"
+
+	SignalInstanceExternalAnswer = "instance-external-answer"
 )
+
+// QueryWaitingExternal is internal/workflow's query naming the outside waits
+// an instance is waiting in, mirrored here for the same reason as the signal
+// names above.
+const QueryWaitingExternal = "waiting-external"
 
 // WorkflowTypeExecute is the Temporal workflow type name internal/workflow.Execute
 // registers under (cmd/worker's RegisterWorkflowWithOptions call) — duplicated

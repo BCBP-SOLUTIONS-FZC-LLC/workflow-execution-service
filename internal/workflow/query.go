@@ -14,6 +14,11 @@ import (
 // (workflow.SetQueryHandler), so this must live in this package.
 const QueryGetWorkflowStatus = "get-workflow-status"
 
+// QueryWaitingExternal returns the keys of the outside waits (dsl.ExternalWaits)
+// the instance is waiting in now, which the HTTP layer reads before it accepts
+// an outside party's answer.
+const QueryWaitingExternal = "waiting-external"
+
 // WorkflowStatusQuery mirrors LLD §3.1's {status, current_node_keys,
 // active_tasks[], saved_sibling_branches[]} shape. ActiveTasks reports the
 // same NodeKeys as CurrentNodeKeys — this interpreter doesn't separately

@@ -46,6 +46,8 @@ var signalPreconditions = map[string][]domain.InstanceStatus{
 	SignalInstanceForceFwd:  {domain.InstanceStatusRunning, domain.InstanceStatusDegraded},
 	SignalInstanceForceBack: {domain.InstanceStatusRunning, domain.InstanceStatusDegraded},
 	SignalInstanceReassign:  {domain.InstanceStatusRunning, domain.InstanceStatusDegraded},
+
+	SignalInstanceExternalAnswer: {domain.InstanceStatusRunning, domain.InstanceStatusDegraded},
 }
 
 // validateSignal is the pure precondition gate: does signal make sense given
@@ -173,6 +175,13 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 		var sig stageFailSignal
 		c.Receive(ctx, &sig)
 		in.handleStageFail(ctx, sig)
+	})
+
+	externalCh := wf.GetSignalChannel(ctx, SignalInstanceExternalAnswer+":"+in.instanceID)
+	sel.AddReceive(externalCh, func(c wf.ReceiveChannel, more bool) {
+		var sig externalAnswerSignal
+		c.Receive(ctx, &sig)
+		in.handleExternalAnswer(ctx, sig)
 	})
 
 	reassignCh := wf.GetSignalChannel(ctx, SignalInstanceReassign+":"+in.instanceID)

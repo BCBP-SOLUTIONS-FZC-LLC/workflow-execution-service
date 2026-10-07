@@ -58,7 +58,7 @@ func TestCreateTask_ConnectorStage_ResolvesInputsNoAssignments(t *testing.T) {
 
 	stage := dsl.StageDef{
 		Type: "connector", ConnectorType: "send-email",
-		IOMapping: &dsl.IOMapping{Inputs: []dsl.IOVar{{Source: "applicantEmail", Target: "to"}}},
+		IOMapping: &dsl.IOMapping{Inputs: []dsl.IOVar{{Source: "=applicantEmail", Target: "to"}}},
 	}
 	compiled, err := json.Marshal(stage)
 	require.NoError(t, err)
@@ -85,6 +85,37 @@ func TestCreateTask_ConnectorStage_ResolvesInputsNoAssignments(t *testing.T) {
 
 	require.Len(t, outbox.enqueued, 1)
 	assert.Equal(t, domain.EventWorkflowTaskCreated, outbox.enqueued[0].Type)
+}
+
+// TestCreateTask_ConnectorStage_InputsFollowTheInputRule pins workflow-models'
+// rule for an authored input: "=name" reads the instance variable, and any
+// other text is a literal. A variable an earlier task's result or an outside
+// answer set is read the same way as one the start request gave.
+func TestCreateTask_ConnectorStage_InputsFollowTheInputRule(t *testing.T) {
+	deps, tasks, _, _ := newTestDeps()
+	stage := dsl.StageDef{
+		Type: "connector", ConnectorType: "storage",
+		IOMapping: &dsl.IOMapping{Inputs: []dsl.IOVar{
+			{Source: "=tenderId", Target: "key"},
+			{Source: "aws-s3", Target: "provider"},
+			{Source: "=notSet", Target: "region"},
+		}},
+	}
+	compiled, err := json.Marshal(stage)
+	require.NoError(t, err)
+
+	out, err := deps.CreateTask(context.Background(), port.CreateTaskInput{
+		InstanceID: uuid.New().String(), TenantID: uuid.New().String(), NodeKey: "sales/connector",
+		CompiledNode: compiled, ContextJSON: `{"tenderId":"T-7","aws-s3":"not a variable"}`,
+	})
+	require.NoError(t, err)
+
+	task := tasks.byID[uuid.MustParse(out.TaskID)]
+	var extras struct {
+		ResolvedInputs map[string]any `json:"resolved_inputs"`
+	}
+	require.NoError(t, json.Unmarshal(task.ExtrasJSON, &extras))
+	assert.Equal(t, map[string]any{"key": "T-7", "provider": "aws-s3", "region": nil}, extras.ResolvedInputs)
 }
 
 func TestCreateTask_NonConnectorStage_CreatesAssignmentsFromDefaultAssignees(t *testing.T) {
@@ -209,7 +240,7 @@ func TestCreateTask_ConnectorStage_PublishesSchemaValidEvent(t *testing.T) {
 
 	stage := dsl.StageDef{
 		Type: "connector", ConnectorType: "send-email",
-		IOMapping: &dsl.IOMapping{Inputs: []dsl.IOVar{{Source: "applicantEmail", Target: "to"}}},
+		IOMapping: &dsl.IOMapping{Inputs: []dsl.IOVar{{Source: "=applicantEmail", Target: "to"}}},
 	}
 	compiled, err := json.Marshal(stage)
 	require.NoError(t, err)

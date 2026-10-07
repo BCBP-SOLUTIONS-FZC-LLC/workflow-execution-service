@@ -38,6 +38,8 @@ const (
 
 	CodeInstanceNotFound        ErrCode = "INSTANCE_NOT_FOUND"
 	CodeTargetNodeNotFound      ErrCode = "TARGET_NODE_NOT_FOUND"
+	CodeWaitNotFound            ErrCode = "WAIT_NOT_FOUND"
+	CodeNotWaiting              ErrCode = "NOT_WAITING"
 	CodeDuplicateBusinessKey    ErrCode = "DUPLICATE_BUSINESS_KEY"
 	CodeTenantNotActive         ErrCode = "TENANT_NOT_ACTIVE"
 	CodeVersionNotPublished     ErrCode = "VERSION_NOT_PUBLISHED"
@@ -75,6 +77,8 @@ var codeTitles = map[ErrCode]string{
 
 	CodeInstanceNotFound:        "Instance Not Found",
 	CodeTargetNodeNotFound:      "Target Node Not Found",
+	CodeWaitNotFound:            "Wait Not Found",
+	CodeNotWaiting:              "Not Waiting",
 	CodeDuplicateBusinessKey:    "Duplicate Business Key",
 	CodeTenantNotActive:         "Tenant Not Active",
 	CodeVersionNotPublished:     "Version Not Published",
@@ -114,6 +118,8 @@ var problemTypes = map[ErrCode]string{
 
 	CodeInstanceNotFound:        errBase + "instance-not-found",
 	CodeTargetNodeNotFound:      errBase + "target-node-not-found",
+	CodeWaitNotFound:            errBase + "wait-not-found",
+	CodeNotWaiting:              errBase + "not-waiting",
 	CodeDuplicateBusinessKey:    errBase + "duplicate-business-key",
 	CodeTenantNotActive:         errBase + "tenant-not-active",
 	CodeVersionNotPublished:     errBase + "version-not-published",
@@ -217,6 +223,10 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusNotFound, CodeInstanceNotFound, err.Error()
 	case errors.Is(err, port.ErrTargetNodeNotFound):
 		return http.StatusConflict, CodeTargetNodeNotFound, err.Error()
+	case errors.Is(err, port.ErrWaitNotFound):
+		return http.StatusNotFound, CodeWaitNotFound, err.Error()
+	case errors.Is(err, port.ErrNotWaiting):
+		return http.StatusConflict, CodeNotWaiting, err.Error()
 	case errors.Is(err, port.ErrDuplicateBusinessKey):
 		return http.StatusConflict, CodeDuplicateBusinessKey, err.Error()
 	case errors.Is(err, port.ErrTenantNotActive):

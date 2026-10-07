@@ -34,6 +34,8 @@ var (
 	ErrInstanceAlreadyTerminal = errors.New("instance is already in a terminal state")
 	ErrInvalidInstanceState    = errors.New("action not valid for instance's current status")
 	ErrForceBackNoSavedBranch  = errors.New("no saved branch to restore")
+	ErrWaitNotFound            = errors.New("not an outside wait of the instance's plan")
+	ErrNotWaiting              = errors.New("instance is not waiting there")
 	ErrOverrideMapInvalid      = errors.New("override_map references an unknown node key or invalid value")
 
 	// ErrAssigneeIneligible is Start's own §5.5 bulk eligibility re-check

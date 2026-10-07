@@ -260,14 +260,15 @@ func ackEntry(ctx context.Context, d *deps, entryID string, wlog port.Logger) {
 	}
 }
 
-var errSecretRefInvalid = errors.New("secret reference is not the task's own credential path")
-
-// resolveSecrets substitutes every registry.Field.IsSecretRef() input's
-// value (an OpenBao path) with its real credential, immediately before
-// Execute() is called — Connector implementations never see a path, only
-// the resolved value (LLD §6.2 Decision #5). The worker's OpenBao token spans
-// every tenant, so every reference is checked against the job's own path
-// before any is read (workflow_connectors.md §6.2).
+// resolveSecrets sets every registry.Field.IsSecretRef() input to the
+// tenant's stored credential, immediately before Execute() is called —
+// Connector implementations never see a path, only the resolved value (LLD
+// §6.2 Decision #5). The path is always the job's own, and nothing a diagram
+// says chooses it: the worker's OpenBao token spans every tenant, so a value
+// an old plan still carries for a secret field is discarded unread. A field
+// the tenant stored nothing for is left out: the registry does not say which
+// of a type's fields a provider needs, so the connector refuses an absent
+// credential itself (workflow_connectors.md §6.2).
 func resolveSecrets(ctx context.Context, reader *openbao.Reader, job dispatchJob) (map[string]any, error) {
 	def, ok := registry.All()[job.connectorType]
 	if !ok {
@@ -277,31 +278,19 @@ func resolveSecrets(ctx context.Context, reader *openbao.Reader, job dispatchJob
 	for k, v := range job.resolvedInputs {
 		out[k] = v
 	}
-	var refs []string
 	for _, field := range def.Inputs {
 		if !field.IsSecretRef() {
 			continue
 		}
-		switch v := out[field.Name].(type) {
-		case nil:
-		case string:
-			if v == "" {
-				continue
-			}
-			if v != ownSecretPath(job, field.Name) {
-				return nil, fmt.Errorf("resolve secret %q: %w", field.Name, errSecretRefInvalid)
-			}
-			refs = append(refs, field.Name)
-		default:
-			return nil, fmt.Errorf("resolve secret %q: %w", field.Name, errSecretRefInvalid)
+		delete(out, field.Name)
+		value, err := reader.Read(ctx, ownSecretPath(job, field.Name), field.Name)
+		if errors.Is(err, openbao.ErrSecretNotFound) {
+			continue
 		}
-	}
-	for _, name := range refs {
-		value, err := reader.Read(ctx, out[name].(string), name)
 		if err != nil {
-			return nil, fmt.Errorf("resolve secret %q: %w", name, err)
+			return nil, fmt.Errorf("resolve secret %q: %w", field.Name, err)
 		}
-		out[name] = value
+		out[field.Name] = value
 	}
 	return out, nil
 }
@@ -375,7 +364,7 @@ func classifyError(err error) string {
 		return "secret_not_found"
 	case errors.Is(err, openbao.ErrUnauthorized):
 		return "secret_unauthorized"
-	case errors.Is(err, errSecretRefInvalid), errors.Is(err, openbao.ErrInvalidPath):
+	case errors.Is(err, openbao.ErrInvalidPath):
 		return "secret_ref_invalid"
 	case errors.Is(err, connectors.ErrMissingInternalAuth):
 		return "missing_internal_auth"
