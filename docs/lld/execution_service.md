@@ -599,7 +599,7 @@ Two carried-forward entities from the legacy LLD — `workflow_comment` and `wor
 | --- | --- | --- | --- |
 | `workflow_instance` | `workflow_task` | one-to-many | `workflow_task.workflow_instance_id` |
 | `workflow_task` | `workflow_task_assignment` | one-to-many | `workflow_task_assignment.task_id` |
-| `workflow_task` | `workflow_task` | self-reference (column no longer written) | `workflow_task.deferred_from_task_id` |
+| `workflow_task` | `workflow_task` | self-reference (legacy, not written) | `workflow_task.deferred_from_task_id` |
 | `workflow_instance` | `assignee_overrides` | one-to-many | `assignee_overrides.workflow_instance_id` |
 | `workflow_instance` | `outbox_events` | one-to-many, **logical only** — a JSONB key lookup (`payload -> 'data' ->> 'workflow_instance_id'`), not a DB-enforced FK | — |
 | `workflow_task` | `outbox_events` | one-to-many, nullable, **logical only** — same JSONB-key relationship, absent for instance-level events | — |

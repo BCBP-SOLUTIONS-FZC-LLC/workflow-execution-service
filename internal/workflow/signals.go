@@ -299,14 +299,9 @@ func (in *interpreter) routeAdminSignal(ctx wf.Context, kind string, sig adminSi
 	}
 }
 
-// handleStageDefer sends the instance one completed step back for a
-// stage-defer signal: it closes the deferring task, naming the node the
-// instance goes back to, then routes as instance-force-back does, so that
-// node's department runs again. The deferred stage itself is never pushed to
-// the history (that happens once a stage completes, stage.go), so the node
-// gone back to is the most recently completed one, or inside a parallel step
-// the one completed before it. With none, the defer goes nowhere and changes
-// nothing.
+// handleStageDefer sends the instance one completed step back, routing as
+// instance-force-back does. The deferred stage is never in the history, so the
+// target is the last completed node, or the pre-fork node inside a parallel step.
 func (in *interpreter) handleStageDefer(ctx wf.Context, sig stageDeferSignal) {
 	if err := validateSignal(in.status, SignalStageDefer); err != nil {
 		wf.GetLogger(ctx).Warn("dropping stage-defer signal", "error", err)
