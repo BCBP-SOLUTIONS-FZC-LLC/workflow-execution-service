@@ -26,7 +26,9 @@ type ConnectorTaskService struct {
 	Assignments port.TaskAssignmentRepository
 	Temporal    port.TemporalClient
 	Cache       port.CacheStore
-	Log         port.Logger
+	// Principals names the actor: the tenant's automation principal, never a value a caller supplies.
+	Principals port.AutomationPrincipalResolver
+	Log        port.Logger
 }
 
 func (s *ConnectorTaskService) logger() port.Logger {
@@ -47,9 +49,13 @@ type stageFailWire struct {
 	VisitCount int64 `json:"visit_count"`
 }
 
-func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID, actorUserID uuid.UUID, output map[string]any) error {
+func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID uuid.UUID, output map[string]any) error {
 	task, done, err := s.loadConnectorTask(ctx, tenantID, taskID)
 	if err != nil || done {
+		return err
+	}
+	actorUserID, err := s.automationPrincipal(ctx, tenantID)
+	if err != nil {
 		return err
 	}
 
@@ -83,9 +89,13 @@ func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID, a
 	return nil
 }
 
-func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID, actorUserID uuid.UUID, errorClass string) error {
+func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.UUID, errorClass string) error {
 	task, done, err := s.loadConnectorTask(ctx, tenantID, taskID)
 	if err != nil || done {
+		return err
+	}
+	actorUserID, err := s.automationPrincipal(ctx, tenantID)
+	if err != nil {
 		return err
 	}
 
@@ -114,6 +124,15 @@ func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID, actor
 		return fmt.Errorf("signal stage-fail: %w", err)
 	}
 	return nil
+}
+
+// automationPrincipal fails closed when no resolver is wired, rather than
+// recording a callback under no actor.
+func (s *ConnectorTaskService) automationPrincipal(ctx context.Context, tenantID uuid.UUID) (uuid.UUID, error) {
+	if s.Principals == nil {
+		return uuid.Nil, port.ErrNoAutomationPrincipal
+	}
+	return s.Principals.AutomationPrincipal(ctx, tenantID)
 }
 
 const automationReasonTag = "automation"

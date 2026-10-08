@@ -71,6 +71,7 @@ func TestValidate(t *testing.T) {
 		{"definition client timeout zero", func(c *Config) { c.DefinitionClientTimeout = 0 }, true},
 		{"eligibility client timeout zero", func(c *Config) { c.EligibilityClientTimeout = 0 }, true},
 		{"iam client timeout zero", func(c *Config) { c.IAMClientTimeout = 0 }, true},
+		{"token service client timeout zero", func(c *Config) { c.TokenServiceClientTimeout = 0 }, true},
 		{"queue topology poll interval zero", func(c *Config) { c.QueueTopologyPollInterval = 0 }, true},
 	}
 
@@ -92,6 +93,7 @@ func TestValidate(t *testing.T) {
 				EligibilityClientTimeout:  5 * time.Second,
 				IAMClientTimeout:          5 * time.Second,
 				QueueTopologyPollInterval: 60 * time.Second,
+				TokenServiceClientTimeout: 5 * time.Second,
 			}
 			tt.mutate(cfg)
 
@@ -218,6 +220,7 @@ func TestRequire(t *testing.T) {
 		c.InternalAPIToken = "tok"
 		c.DefinitionServiceToken = "def-tok"
 		c.OutboxRelayDatabaseURL = "postgres://relay"
+		c.TokenServiceBaseURL = "http://token-service"
 		c.SNSTopicARN = "arn:aws:sns:x"
 		c.GlueRegistryName = "wf-workflow-events"
 	}
@@ -245,6 +248,7 @@ func TestRequire(t *testing.T) {
 		{"server needs glue when not stubbed", (*Config).RequireServer, func(c *Config) { c.AWSUseStub = false; c.SNSTopicARN = "arn" }, "GLUE_REGISTRY_NAME"},
 		{"server needs its token outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.InternalAPIToken = "" }, "INTERNAL_API_TOKEN"},
 		{"server needs the definition token outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.DefinitionServiceToken = "" }, "DEFINITION_SERVICE_TOKEN"},
+		{"server needs the token service outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.TokenServiceBaseURL = "" }, "TOKEN_SERVICE_BASE_URL"},
 		{"server needs the relay dsn outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.OutboxRelayDatabaseURL = "" }, "OUTBOX_RELAY_DATABASE_URL"},
 
 		{"worker valid in dev", (*Config).RequireWorker, func(c *Config) {}, ""},

@@ -91,7 +91,7 @@ func TestDispatch_RedeliveryAfterFailedCallback_DoesNotRerunConnector(t *testing
 	d := &deps{
 		dedup:      dedup,
 		pools:      poolFor(conn),
-		completion: newCompletionClient(callbackSrv.URL, "token", map[uuid.UUID]uuid.UUID{tenantID: uuid.New()}, time.Second),
+		completion: newCompletionClient(callbackSrv.URL, "token", time.Second),
 	}
 	entry := valkeystream.Entry{ID: "1-0", Fields: map[string]string{
 		"tenant_id": tenantID.String(), "task_id": taskID.String(),
@@ -163,7 +163,7 @@ func newCredentialFixture(t *testing.T, stored map[string]string, storeStatus in
 		dedup:      newFakeCacheStore(),
 		openbao:    openbao.NewReader(openbaoSrv.URL, "token", "secret", time.Second),
 		pools:      map[string]*typePool{f.conn.typ: pool},
-		completion: newCompletionClient(callbackSrv.URL, "token", map[uuid.UUID]uuid.UUID{f.tenantID: uuid.New()}, time.Second),
+		completion: newCompletionClient(callbackSrv.URL, "token", time.Second),
 	}
 	return f
 }
@@ -333,24 +333,6 @@ func connectorEntry(tenantID, taskID uuid.UUID, connectorType string) valkeystre
 	}}
 }
 
-// The actor is what the callback needs, so a tenant without one must not get
-// as far as the side effect: the entry stays pending until the delivery cap.
-func TestDispatch_TenantWithoutActor_DoesNotRunConnector(t *testing.T) {
-	conn := &countingConnector{typ: "counting"}
-	consumer := newFakeConsumer()
-	d := &deps{
-		consumer:   consumer,
-		dedup:      newFakeCacheStore(),
-		pools:      poolFor(conn),
-		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", map[uuid.UUID]uuid.UUID{uuid.New(): uuid.New()}, time.Second),
-	}
-
-	dispatchOnce(d, connectorEntry(uuid.New(), uuid.New(), conn.typ))
-
-	assert.Equal(t, int32(0), conn.calls.Load(), "connector ran for a tenant with no automation principal")
-	assert.Zero(t, consumer.ackCount(), "an entry nobody could report on was acked")
-}
-
 type blockingConnector struct {
 	countingConnector
 	started, release chan struct{}
@@ -378,7 +360,7 @@ func TestDispatch_RedeliveredToAnotherConsumerWhileRunning_NeitherRunsNorAcks(t 
 				connectorType: conn.typ, sem: make(chan struct{}, 1), timeout: 5 * time.Second,
 				retry: registry.RetryPolicyUnsafe, connector: conn,
 			}},
-			completion: newCompletionClient(callbackURL, "token", map[uuid.UUID]uuid.UUID{tenantID: uuid.New()}, time.Second),
+			completion: newCompletionClient(callbackURL, "token", time.Second),
 		}
 	}
 	first, second := newFakeConsumer(), newFakeConsumer()
@@ -421,7 +403,7 @@ func TestDispatch_LeaseCacheError_DoesNotRun(t *testing.T) {
 		consumer:   consumer,
 		dedup:      cache,
 		pools:      poolFor(conn),
-		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", map[uuid.UUID]uuid.UUID{tenantID: uuid.New()}, time.Second),
+		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", time.Second),
 	}
 
 	dispatchOnce(d, connectorEntry(tenantID, uuid.New(), conn.typ))
@@ -438,7 +420,7 @@ func TestDispatch_OverDeliveryCap_DeadLettersWithoutRunning(t *testing.T) {
 		consumer:      consumer,
 		dedup:         newFakeCacheStore(),
 		pools:         poolFor(conn),
-		completion:    newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", map[uuid.UUID]uuid.UUID{tenantID: uuid.New()}, time.Second),
+		completion:    newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", time.Second),
 		maxDeliveries: 3,
 		deadLetterKey: "connector-tasks-dead",
 	}
@@ -492,7 +474,7 @@ func TestDispatch_ShutdownMidRun_StillReportsTheOutcome(t *testing.T) {
 			connectorType: conn.typ, sem: make(chan struct{}, 1), timeout: 5 * time.Second,
 			retry: registry.RetryPolicyUnsafe, connector: conn,
 		}},
-		completion: newCompletionClient(callbackSrv.URL, "token", map[uuid.UUID]uuid.UUID{tenantID: uuid.New()}, time.Second),
+		completion: newCompletionClient(callbackSrv.URL, "token", time.Second),
 	}
 	taskID := uuid.New()
 	ctx, shutdown := context.WithCancel(context.Background())
@@ -515,7 +497,7 @@ func TestDispatch_ShutdownMidRun_StillReportsTheOutcome(t *testing.T) {
 
 // The reclaim wait is meant to detect a dead consumer. An entry this consumer
 // is still queueing or running is touched on every heartbeat, so it never
-// looks idle; once it is finished, or deliberately left pending, it is not.
+// looks idle; once it is finished it is not.
 func TestHeartbeat_TouchesOnlyEntriesStillBeingHandled(t *testing.T) {
 	tenantID := uuid.New()
 	conn := &blockingConnector{countingConnector: countingConnector{typ: "blocking"}, started: make(chan struct{}, 1), release: make(chan struct{})}
@@ -527,16 +509,13 @@ func TestHeartbeat_TouchesOnlyEntriesStillBeingHandled(t *testing.T) {
 			connectorType: conn.typ, sem: make(chan struct{}, 1), timeout: 5 * time.Second,
 			retry: registry.RetryPolicyUnsafe, connector: conn,
 		}},
-		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", map[uuid.UUID]uuid.UUID{tenantID: uuid.New()}, time.Second),
+		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", time.Second),
 	}
 	running := connectorEntry(tenantID, uuid.New(), conn.typ)
 	running.ID = "1-0"
-	noActor := connectorEntry(uuid.New(), uuid.New(), conn.typ)
-	noActor.ID = "2-0"
 
 	var wg sync.WaitGroup
 	dispatchEntry(context.Background(), d, &wg, running, noopLogger{})
-	dispatchEntry(context.Background(), d, &wg, noActor, noopLogger{})
 	<-conn.started
 	heartbeatOnce(context.Background(), d, noopLogger{})
 	assert.Equal(t, []string{"1-0"}, consumer.touchedIDs())
@@ -560,7 +539,7 @@ func TestDispatchBatch_EntriesQueuedForAPoolSlotAreTouched(t *testing.T) {
 			connectorType: conn.typ, sem: make(chan struct{}, 1), timeout: 5 * time.Second,
 			retry: registry.RetryPolicyUnsafe, connector: conn,
 		}},
-		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", map[uuid.UUID]uuid.UUID{tenantID: uuid.New()}, time.Second),
+		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", time.Second),
 	}
 	// Three entries: one running, one blocked on the pool slot, and one the
 	// batch has not reached yet.
@@ -594,7 +573,7 @@ func TestDispatch_DeadLetterFailure_LeavesEntryPending(t *testing.T) {
 		consumer:      consumer,
 		dedup:         newFakeCacheStore(),
 		pools:         poolFor(conn),
-		completion:    newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", map[uuid.UUID]uuid.UUID{tenantID: uuid.New()}, time.Second),
+		completion:    newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", time.Second),
 		maxDeliveries: 1,
 	}
 	entry := connectorEntry(tenantID, uuid.New(), conn.typ)
@@ -619,7 +598,7 @@ func TestDispatch_DuplicateOfARunningEntry_StaysTouched(t *testing.T) {
 			connectorType: conn.typ, sem: make(chan struct{}, 2), timeout: 5 * time.Second,
 			retry: registry.RetryPolicyUnsafe, connector: conn,
 		}},
-		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", map[uuid.UUID]uuid.UUID{tenantID: uuid.New()}, time.Second),
+		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", time.Second),
 	}
 	entry := connectorEntry(tenantID, uuid.New(), conn.typ)
 
@@ -651,7 +630,7 @@ func TestHeartbeat_StopsTouchingARunPastItsLease(t *testing.T) {
 			connectorType: conn.typ, sem: make(chan struct{}, 1), timeout: 5 * time.Second,
 			retry: registry.RetryPolicyUnsafe, connector: conn,
 		}},
-		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", map[uuid.UUID]uuid.UUID{tenantID: uuid.New()}, time.Second),
+		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", time.Second),
 		now: func() time.Time {
 			mu.Lock()
 			defer mu.Unlock()

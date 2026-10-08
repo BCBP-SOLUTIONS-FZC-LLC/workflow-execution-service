@@ -33,6 +33,10 @@ import (
 // literals. Every construction step appends its own cleanup to cleanups so a
 // failure partway through unwinds everything already built, most-recent
 // first.
+// automationPrincipalCacheTTL bounds how long an offboarded tenant keeps a
+// cached principal; the principal's identifier itself does not change.
+const automationPrincipalCacheTTL = 5 * time.Minute
+
 func newApp(cfg *config.Config) (*app, error) {
 	var cleanups []func()
 	unwind := func() {
@@ -142,6 +146,7 @@ func newApp(cfg *config.Config) (*app, error) {
 
 	eligibility := outboundhttp.NewEligibilityClient(cfg.EligibilityBaseURL, cfg.EligibilityClientTimeout)
 	iam := outboundhttp.NewIAMClient(cfg.IAMBaseURL, cfg.IAMClientTimeout)
+	principals := outboundhttp.NewAutomationPrincipalClient(cfg.TokenServiceBaseURL, cfg.TokenServiceClientTimeout, automationPrincipalCacheTTL)
 
 	instances := postgres.NewInstanceRepo(appPool)
 	tasks := postgres.NewTaskRepo(appPool)
@@ -164,7 +169,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 	connectorTaskService := &service.ConnectorTaskService{
 		Instances: instances, Tasks: tasks, Assignments: assignments,
-		Temporal: temporal, Cache: cache, Log: log,
+		Temporal: temporal, Cache: cache, Principals: principals, Log: log,
 	}
 	workflowClient := &service.WorkflowClient{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Temporal: temporal,
@@ -193,9 +198,10 @@ func newApp(cfg *config.Config) (*app, error) {
 		Cache: cache, IdempotencyTTL: cfg.IdempotencyTTL, ProcessedEvents: processedEvents, Recency: recency,
 		Delegation: delegationReconciler, TenantLifecycle: tenantLifecycleReconciler,
 		UserSafetyNet: userSafetyNetReconciler, OOOAvailability: oooAvailabilityReconciler,
-		ConnectorTasks:  connectorTaskService,
-		ConnectorEvents: connectorEvents,
-		ArchiveGuard:    guard, UserTaskPauser: pauser,
+		ConnectorTasks:       connectorTaskService,
+		ConnectorEvents:      connectorEvents,
+		AutomationPrincipals: principals,
+		ArchiveGuard:         guard, UserTaskPauser: pauser,
 		Log: log,
 	})
 

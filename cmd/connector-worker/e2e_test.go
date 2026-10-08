@@ -52,8 +52,11 @@ const e2eInternalToken = "e2e-connector-worker-test-token"
 // recorded under. Built per test, since each seeds its own tenant.
 const e2eConnectorActorUserID = "99999999-9999-4999-8999-999999999999"
 
-func e2eActorUserIDs(tenantID uuid.UUID) string {
-	return tenantID.String() + "=" + e2eConnectorActorUserID
+// e2ePrincipals resolves every tenant to the one automation principal.
+type e2ePrincipals struct{}
+
+func (e2ePrincipals) AutomationPrincipal(context.Context, uuid.UUID) (uuid.UUID, error) {
+	return uuid.MustParse(e2eConnectorActorUserID), nil
 }
 
 type e2eDefinitionClient struct {
@@ -192,7 +195,7 @@ func e2eBuildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, valkey
 	}
 	connectorTaskService := &service.ConnectorTaskService{
 		Instances: instances, Tasks: tasks, Assignments: assignments,
-		Temporal: temporal, Cache: valkey.NewCache(valkeyClient),
+		Temporal: temporal, Cache: valkey.NewCache(valkeyClient), Principals: e2ePrincipals{},
 	}
 
 	h := handler.New(handler.Services{
@@ -380,7 +383,6 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 		OpenBaoTimeout:               5 * time.Second,
 		ExecutionServiceInternalAddr: execSrv.URL,
 		ConnectorCompletionTimeout:   5 * time.Second,
-		ConnectorActorUserIDs:        e2eActorUserIDs(tenantID),
 		ConnectorPoolSizeRestCall:    2,
 		ConnectorTimeoutRestCall:     10 * time.Second,
 	}

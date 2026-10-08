@@ -61,6 +61,11 @@ var (
 	// called against a task with no connector_type — the inverse gate of
 	// ErrTaskNotHumanActionable, closing the same seam from the other side.
 	ErrTaskNotConnectorTyped = errors.New("task is not connector-typed")
+
+	// ErrNoAutomationPrincipal means IAM holds no automation principal for the
+	// tenant (not yet minted, or offboarded), so a connector step has no actor
+	// to be recorded under.
+	ErrNoAutomationPrincipal = errors.New("tenant has no automation principal")
 )
 
 // AssigneeIneligibleError is ErrAssigneeIneligible's node-carrying form (LLD

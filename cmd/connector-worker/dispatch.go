@@ -154,11 +154,6 @@ func handleEntry(ctx context.Context, d *deps, wg *sync.WaitGroup, entry valkeys
 		return
 	}
 
-	if _, err := d.completion.actorFor(job.tenantID); err != nil {
-		wlog.Warn("connector-worker: no automation principal to report under, leaving entry pending", map[string]any{"task_id": job.taskID, "error": err.Error()})
-		return
-	}
-
 	if resendRecordedOutcome(ctx, d, job, entry.ID, wlog) {
 		return
 	}

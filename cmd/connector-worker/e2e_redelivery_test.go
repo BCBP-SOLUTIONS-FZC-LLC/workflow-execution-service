@@ -62,7 +62,7 @@ type redeliveryWorker struct {
 func startRedeliveryWorker(t *testing.T, client *redis.Client, name string, conn interface {
 	Type() string
 	Execute(context.Context, map[string]any) (map[string]any, error)
-}, timeout time.Duration, maxDeliveries int64, callbackURL string, actors map[uuid.UUID]uuid.UUID) *redeliveryWorker {
+}, timeout time.Duration, maxDeliveries int64, callbackURL string) *redeliveryWorker {
 	t.Helper()
 	stream := &reclaimCounter{streamConsumer: valkeystream.NewConsumer(client)}
 	d := &deps{
@@ -73,7 +73,7 @@ func startRedeliveryWorker(t *testing.T, client *redis.Client, name string, conn
 			connectorType: conn.Type(), sem: make(chan struct{}, 2), timeout: timeout,
 			retry: registry.RetryPolicyUnsafe, connector: conn,
 		}},
-		completion:    newCompletionClient(callbackURL, "token", actors, 2*time.Second),
+		completion:    newCompletionClient(callbackURL, "token", 2*time.Second),
 		streamKey:     redeliveryStream,
 		streamGroup:   redeliveryGroup,
 		consumerName:  name,
@@ -137,7 +137,7 @@ func TestE2E_Redelivery_FailedCallbacksDoNotRerunTheConnector(t *testing.T) {
 	t.Cleanup(callbackSrv.Close)
 	tenantID := uuid.New()
 	conn := &countingConnector{typ: "counting"}
-	startRedeliveryWorker(t, client, "worker-a", conn, time.Second, 10, callbackSrv.URL, map[uuid.UUID]uuid.UUID{tenantID: uuid.New()})
+	startRedeliveryWorker(t, client, "worker-a", conn, time.Second, 10, callbackSrv.URL)
 
 	publishConnectorEntry(t, client, tenantID, conn.typ)
 
@@ -159,10 +159,9 @@ func TestE2E_Redelivery_SlowRunIsNotReclaimedFromALiveWorker(t *testing.T) {
 		return srv.URL
 	}()
 	tenantID := uuid.New()
-	actors := map[uuid.UUID]uuid.UUID{tenantID: uuid.New()}
 	conn := &sleepyConnector{countingConnector: countingConnector{typ: "sleepy"}, sleep: 2*redeliveryIdle + time.Second}
-	a := startRedeliveryWorker(t, client, "worker-a", conn, 20*time.Second, 10, callbackURL, actors)
-	b := startRedeliveryWorker(t, client, "worker-b", conn, 20*time.Second, 10, callbackURL, actors)
+	a := startRedeliveryWorker(t, client, "worker-a", conn, 20*time.Second, 10, callbackURL)
+	b := startRedeliveryWorker(t, client, "worker-b", conn, 20*time.Second, 10, callbackURL)
 
 	publishConnectorEntry(t, client, tenantID, conn.typ)
 
@@ -171,14 +170,14 @@ func TestE2E_Redelivery_SlowRunIsNotReclaimedFromALiveWorker(t *testing.T) {
 	assert.Zero(t, a.stream.reclaimed.Load()+b.stream.reclaimed.Load(), "an entry was reclaimed from a live worker")
 }
 
-// A tenant with no automation principal can never be reported on: the entry
-// is dead-lettered once past its delivery cap, and the connector never runs.
+// An outcome the callback keeps refusing can never be reported: the entry is
+// dead-lettered once past its delivery cap, and the connector ran only once.
 func TestE2E_Redelivery_UnreportableEntryIsDeadLettered(t *testing.T) {
 	client := newRedeliveryStream(t)
-	callbackSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	callbackSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusConflict) }))
 	t.Cleanup(callbackSrv.Close)
 	conn := &countingConnector{typ: "counting"}
-	startRedeliveryWorker(t, client, "worker-a", conn, time.Second, 2, callbackSrv.URL, map[uuid.UUID]uuid.UUID{uuid.New(): uuid.New()})
+	startRedeliveryWorker(t, client, "worker-a", conn, time.Second, 2, callbackSrv.URL)
 
 	publishConnectorEntry(t, client, uuid.New(), conn.typ)
 
@@ -187,7 +186,7 @@ func TestE2E_Redelivery_UnreportableEntryIsDeadLettered(t *testing.T) {
 		return err == nil && n == 1
 	}, 40*time.Second, 200*time.Millisecond, "the entry was never dead-lettered")
 	assert.Zero(t, pendingCount(t, client))
-	assert.Equal(t, int32(0), conn.calls.Load())
+	assert.Equal(t, int32(1), conn.calls.Load(), "a refused callback re-ran the connector")
 	dead, err := client.XRange(context.Background(), redeliveryDead, "-", "+").Result()
 	require.NoError(t, err)
 	assert.Equal(t, "max_deliveries_exceeded", dead[0].Values["reason"])

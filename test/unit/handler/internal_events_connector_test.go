@@ -28,16 +28,30 @@ func (f *fakeConnectorEventPublisher) PublishTaskCreated(ctx context.Context, ev
 	return nil
 }
 
+type fakePrincipalResolver struct {
+	principal uuid.UUID
+	err       error
+}
+
+func (f fakePrincipalResolver) AutomationPrincipal(context.Context, uuid.UUID) (uuid.UUID, error) {
+	return f.principal, f.err
+}
+
 func newConnectorEventsHandler(fakes *eventsFakes, publisher port.ConnectorEventPublisher) *handler.Handler {
+	return newConnectorEventsHandlerWith(fakes, publisher, fakePrincipalResolver{principal: uuid.New()})
+}
+
+func newConnectorEventsHandlerWith(fakes *eventsFakes, publisher port.ConnectorEventPublisher, principals port.AutomationPrincipalResolver) *handler.Handler {
 	return handler.New(handler.Services{
-		ProcessedEvents: fakes.processedEvents,
-		Recency:         fakes.recency,
-		Delegation:      fakes.delegation,
-		TenantLifecycle: fakes.tenantLifecycle,
-		UserSafetyNet:   fakes.userSafetyNet,
-		OOOAvailability: fakes.oooAvailability,
-		ConnectorEvents: publisher,
-		Log:             fakes.log,
+		AutomationPrincipals: principals,
+		ProcessedEvents:      fakes.processedEvents,
+		Recency:              fakes.recency,
+		Delegation:           fakes.delegation,
+		TenantLifecycle:      fakes.tenantLifecycle,
+		UserSafetyNet:        fakes.userSafetyNet,
+		OOOAvailability:      fakes.oooAvailability,
+		ConnectorEvents:      publisher,
+		Log:                  fakes.log,
 	})
 }
 
@@ -201,5 +215,20 @@ func TestHandleWorkflowTaskCreated_InvalidDepartmentID_Returns400(t *testing.T) 
 	w := postEvent(router, envelope("WorkflowTaskCreated", uuid.New(), testTenantID, time.Now(), body))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Empty(t, publisher.published)
+}
+
+// A tenant IAM holds no automation principal for has no actor to record the
+// step under, so the job is not put on the stream; the answer is a retryable
+// failure, not a processed event, so a principal minted later is picked up.
+func TestHandleWorkflowTaskCreated_NoAutomationPrincipal_DoesNotPublish(t *testing.T) {
+	fakes := newEventsFakes()
+	publisher := &fakeConnectorEventPublisher{}
+	router := newInternalRouter(newConnectorEventsHandlerWith(fakes, publisher, fakePrincipalResolver{err: port.ErrNoAutomationPrincipal}))
+
+	connectorType := "storage"
+	w := postEvent(router, envelope("WorkflowTaskCreated", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType)))
+
+	assert.GreaterOrEqual(t, w.Code, http.StatusInternalServerError)
 	assert.Empty(t, publisher.published)
 }

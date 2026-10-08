@@ -121,8 +121,6 @@ func checkRequiredConfig(cfg *config.Config) error {
 		return fmt.Errorf("OPENBAO_ADDR is required")
 	case cfg.ExecutionServiceInternalAddr == "":
 		return fmt.Errorf("EXECUTION_SERVICE_INTERNAL_ADDR is required")
-	case cfg.ConnectorActorUserIDs == "":
-		return fmt.Errorf("CONNECTOR_ACTOR_USER_IDS is required")
 	case cfg.ConnectorStreamMaxDeliveries < 1:
 		return fmt.Errorf("CONNECTOR_STREAM_MAX_DELIVERIES must be >= 1")
 	case cfg.ConnectorStreamDeadLetterKey == "" || cfg.ConnectorStreamDeadLetterKey == cfg.ConnectorStreamKey:

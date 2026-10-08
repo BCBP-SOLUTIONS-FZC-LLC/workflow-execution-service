@@ -84,6 +84,12 @@ func (h *Handler) handleWorkflowTaskCreated(c *gin.Context, env events.Envelope[
 	}
 
 	ctx := guCtx(c, env.TenantID)
+	if h.principals != nil {
+		if _, err := h.principals.AutomationPrincipal(ctx, tenantID); err != nil {
+			h.reconcilerError(c, eventType, err)
+			return
+		}
+	}
 	if err := h.connectorEvents.PublishTaskCreated(ctx, port.ConnectorTaskCreatedEvent{
 		EventID: eventID, TenantID: tenantID, InstanceID: instanceID, TaskID: taskID,
 		NodeKey: p.NodeKey, DepartmentID: departmentID, ConnectorType: *p.ConnectorType,

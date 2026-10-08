@@ -65,6 +65,12 @@ spec:
               value: {{ .Values.env.awsUseStub | quote }}
             - name: GLUE_REGISTRY_NAME
               value: {{ .Values.env.glueRegistryName | quote }}
+            - name: TOKEN_SERVICE_BASE_URL
+              {{- if ne .Values.env.appEnv "dev" }}
+              value: {{ required "env.tokenServiceBaseURL is required outside dev: the API reads each tenant's automation principal from it" .Values.env.tokenServiceBaseURL | quote }}
+              {{- else }}
+              value: {{ .Values.env.tokenServiceBaseURL | quote }}
+              {{- end }}
             - name: ELIGIBILITY_BASE_URL
               value: {{ required "env.eligibilityBaseURL is required: the API refuses to start without it" .Values.env.eligibilityBaseURL | quote }}
             - name: OUTBOX_POLL_INTERVAL

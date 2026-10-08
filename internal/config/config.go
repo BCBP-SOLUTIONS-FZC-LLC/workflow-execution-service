@@ -90,6 +90,11 @@ type Config struct {
 	IAMBaseURL       string
 	IAMClientTimeout time.Duration
 
+	// TokenServiceBaseURL is the identity subsystem's Token Service, read for
+	// each tenant's automation principal. Required by cmd/server outside dev.
+	TokenServiceBaseURL       string
+	TokenServiceClientTimeout time.Duration
+
 	// QueueTopologyPollInterval is how often cmd/worker polls
 	// active_task_queues for isolated tenant queues to start a Worker
 	// against (LLD §3.2 item 2, proposed 60s).
@@ -167,15 +172,6 @@ type Config struct {
 	// endpoints already check — connector-worker-only, not validated here.
 	ExecutionServiceInternalAddr string
 	ConnectorCompletionTimeout   time.Duration
-
-	// ConnectorActorUserIDs maps each tenant to its automation principal, the
-	// actor a connector completion is recorded under, as
-	// "<tenant-uuid>=<subject-uuid>,..." — one worker serves every tenant, so a
-	// single subject would attribute one tenant's work to another's principal.
-	// Configured for now: the identity subsystem holds the registry, and a read
-	// answering "which subject is this tenant's automation principal" is asked
-	// for and not yet available. Connector-worker-only, not validated here.
-	ConnectorActorUserIDs string
 }
 
 func Load() (*Config, error) {
@@ -259,6 +255,9 @@ func Load() (*Config, error) {
 		IAMBaseURL:       getEnvOrDefault("IAM_BASE_URL", ""),
 		IAMClientTimeout: envDuration("IAM_CLIENT_TIMEOUT", 5*time.Second),
 
+		TokenServiceBaseURL:       getEnvOrDefault("TOKEN_SERVICE_BASE_URL", ""),
+		TokenServiceClientTimeout: envDuration("TOKEN_SERVICE_CLIENT_TIMEOUT", 5*time.Second),
+
 		QueueTopologyPollInterval: envDuration("QUEUE_TOPOLOGY_POLL_INTERVAL", 60*time.Second),
 
 		InternalAPIToken: getEnvOrDefault("INTERNAL_API_TOKEN", ""),
@@ -299,7 +298,6 @@ func Load() (*Config, error) {
 
 		ExecutionServiceInternalAddr: getEnvOrDefault("EXECUTION_SERVICE_INTERNAL_ADDR", ""),
 		ConnectorCompletionTimeout:   envDuration("CONNECTOR_COMPLETION_TIMEOUT", 5*time.Second),
-		ConnectorActorUserIDs:        getEnvOrDefault("CONNECTOR_ACTOR_USER_IDS", ""),
 	}
 
 	if len(parseErrs) > 0 {
@@ -353,6 +351,9 @@ func (c *Config) validate() error {
 	if c.EligibilityClientTimeout <= 0 {
 		return fmt.Errorf("ELIGIBILITY_CLIENT_TIMEOUT must be > 0")
 	}
+	if c.TokenServiceClientTimeout <= 0 {
+		return fmt.Errorf("TOKEN_SERVICE_CLIENT_TIMEOUT must be > 0")
+	}
 	if c.IAMClientTimeout <= 0 {
 		return fmt.Errorf("IAM_CLIENT_TIMEOUT must be > 0")
 	}
@@ -395,6 +396,9 @@ func (c *Config) RequireServer() error {
 		}
 		if c.DefinitionServiceToken == "" {
 			return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required when APP_ENV != dev")
+		}
+		if c.TokenServiceBaseURL == "" {
+			return fmt.Errorf("TOKEN_SERVICE_BASE_URL is required when APP_ENV != dev")
 		}
 		if c.OutboxRelayDatabaseURL == "" {
 			return fmt.Errorf("OUTBOX_RELAY_DATABASE_URL is required when APP_ENV != dev — a missing relay DSN would silently fall back to the RLS-enforced app role and see zero rows forever")

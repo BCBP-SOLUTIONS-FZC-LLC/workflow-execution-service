@@ -81,10 +81,6 @@ connectorWorker:
   streamKey: connector-tasks
   streamGroup: connector-worker
   executionServiceInternalAddr: http://workflow-execution-service-api:8080
-  # Each tenant's platform-automation principal, the actor a connector
-  # completion is recorded under, as "<tenant-uuid>=<subject-uuid>,...".
-  # Required; the template refuses to render without it.
-  actorUserIDs: ""
   openBaoAddr: ""
   openBaoMount: secret
   resources:
@@ -179,6 +175,8 @@ env:
   glueRegistryName: wf-workflow-events
   # The Org & Membership eligibility endpoint the API calls. Required: the API refuses to start without it.
   eligibilityBaseURL: ""
+  # The identity subsystem's Token Service, read for each tenant's automation principal. Required outside dev.
+  tokenServiceBaseURL: ""
   outboxPollInterval: 500ms
   outboxBatchSize: "50"
 

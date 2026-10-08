@@ -17,15 +17,13 @@ import (
 // resolver (the worker that dispatched it), never a concurrent human racing
 // it, so the service reads the task's own current RecordVersion itself.
 type completeConnectorTaskReq struct {
-	TenantID    uuid.UUID      `json:"tenant_id" binding:"required"`
-	ActorUserID uuid.UUID      `json:"actor_user_id" binding:"required"`
-	Output      map[string]any `json:"output"`
+	TenantID uuid.UUID      `json:"tenant_id" binding:"required"`
+	Output   map[string]any `json:"output"`
 }
 
 type failConnectorTaskReq struct {
-	TenantID    uuid.UUID `json:"tenant_id" binding:"required"`
-	ActorUserID uuid.UUID `json:"actor_user_id" binding:"required"`
-	ErrorClass  string    `json:"error_class" binding:"required"`
+	TenantID   uuid.UUID `json:"tenant_id" binding:"required"`
+	ErrorClass string    `json:"error_class" binding:"required"`
 }
 
 // CompleteConnectorTask is POST /api/v1/internal/connector-tasks/:id/complete.
@@ -39,7 +37,7 @@ func (h *Handler) CompleteConnectorTask(c *gin.Context) {
 		return
 	}
 
-	if err := h.connectorTasks.Complete(c.Request.Context(), req.TenantID, taskID, req.ActorUserID, req.Output); err != nil {
+	if err := h.connectorTasks.Complete(c.Request.Context(), req.TenantID, taskID, req.Output); err != nil {
 		errResponse(c, err)
 		return
 	}
@@ -57,7 +55,7 @@ func (h *Handler) FailConnectorTask(c *gin.Context) {
 		return
 	}
 
-	if err := h.connectorTasks.Fail(c.Request.Context(), req.TenantID, taskID, req.ActorUserID, req.ErrorClass); err != nil {
+	if err := h.connectorTasks.Fail(c.Request.Context(), req.TenantID, taskID, req.ErrorClass); err != nil {
 		errResponse(c, err)
 		return
 	}

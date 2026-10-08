@@ -69,8 +69,6 @@ spec:
                   key: DEFINITION_SERVICE_TOKEN
             - name: EXECUTION_SERVICE_INTERNAL_ADDR
               value: {{ .Values.connectorWorker.executionServiceInternalAddr | quote }}
-            - name: CONNECTOR_ACTOR_USER_IDS
-              value: {{ required "connectorWorker.actorUserIDs is required: each tenant's automation principal, as <tenant-uuid>=<subject-uuid>,..." .Values.connectorWorker.actorUserIDs | quote }}
             - name: OPENBAO_ADDR
               value: {{ .Values.connectorWorker.openBaoAddr | quote }}
             - name: OPENBAO_MOUNT

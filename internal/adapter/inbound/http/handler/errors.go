@@ -51,6 +51,7 @@ const (
 	CodeTaskNotHumanActionable  ErrCode = "TASK_NOT_HUMAN_ACTIONABLE"
 	CodeAssigneeUnavailable     ErrCode = "ASSIGNEE_UNAVAILABLE"
 	CodeTaskNotConnectorTyped   ErrCode = "TASK_NOT_CONNECTOR_TYPED"
+	CodeNoAutomationPrincipal   ErrCode = "NO_AUTOMATION_PRINCIPAL"
 )
 
 var codeTitles = map[ErrCode]string{
@@ -90,6 +91,7 @@ var codeTitles = map[ErrCode]string{
 	CodeTaskNotHumanActionable:  "Task Not Human Actionable",
 	CodeAssigneeUnavailable:     "Assignee Unavailable",
 	CodeTaskNotConnectorTyped:   "Task Not Connector Typed",
+	CodeNoAutomationPrincipal:   "No Automation Principal",
 }
 
 const errBase = "https://errors.bcbp.io/execution/"
@@ -131,6 +133,7 @@ var problemTypes = map[ErrCode]string{
 	CodeTaskNotHumanActionable:  errBase + "task-not-human-actionable",
 	CodeAssigneeUnavailable:     errBase + "assignee-unavailable",
 	CodeTaskNotConnectorTyped:   errBase + "task-not-connector-typed",
+	CodeNoAutomationPrincipal:   errBase + "no-automation-principal",
 }
 
 type invalidParam struct {
@@ -251,6 +254,8 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusConflict, CodeAssigneeUnavailable, err.Error()
 	case errors.Is(err, port.ErrTaskNotConnectorTyped):
 		return http.StatusConflict, CodeTaskNotConnectorTyped, err.Error()
+	case errors.Is(err, port.ErrNoAutomationPrincipal):
+		return http.StatusConflict, CodeNoAutomationPrincipal, err.Error()
 	case errors.Is(err, adapterhttp.ErrUpstreamUnavailable):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, err.Error()
 	// This catalogue has no narrower code than UPSTREAM_UNAVAILABLE for a

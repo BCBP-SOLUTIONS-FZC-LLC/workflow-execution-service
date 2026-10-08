@@ -35,8 +35,6 @@ var (
 	testUserID   = uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	testTaskID   = uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	testInstID   = uuid.MustParse("44444444-4444-4444-4444-444444444444")
-	// the tenant's automation principal, the actor on a connector completion
-	testActorID = uuid.MustParse("55555555-5555-5555-5555-555555555555")
 )
 
 // fakeTaskService is a hand-rolled fake (repo convention: no mockgen at the

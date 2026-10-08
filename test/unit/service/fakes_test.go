@@ -724,3 +724,13 @@ var errValidationFailed = errors.New("validation failed")
 func (failingValidator) Validate(context.Context, string, json.RawMessage) error {
 	return errValidationFailed
 }
+
+// fakePrincipals resolves every tenant to one automation principal, or fails.
+type fakePrincipals struct {
+	principal uuid.UUID
+	err       error
+}
+
+func (f fakePrincipals) AutomationPrincipal(context.Context, uuid.UUID) (uuid.UUID, error) {
+	return f.principal, f.err
+}
