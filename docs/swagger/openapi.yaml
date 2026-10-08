@@ -459,7 +459,7 @@ components:
           type: string
           format: uuid
           nullable: true
-          description: If this task is a regression created by a Defer signal, the ID of the parent task.
+          description: Legacy. A defer no longer creates a task, so nothing sets this.
         created_at:
           type: string
           format: date-time

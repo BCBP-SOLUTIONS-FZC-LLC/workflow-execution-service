@@ -92,9 +92,7 @@ func (r *fakeInstanceRepo) UpdateCurrentNodeKeys(_ context.Context, _, id uuid.U
 // makes Create fail without touching byID — used to exercise callers'
 // DB-failure branches. getByIDErr, when set, makes GetByID fail for
 // getByIDErrID specifically (or for every ID, if getByIDErrID is left
-// uuid.Nil) — needed to force the post-ErrAlreadyExists GetByID error branch
-// in createRegressionTask without also breaking the same call's earlier,
-// unrelated GetByID(taskID) lookup. pages, when non-nil, makes ListByInstance
+// uuid.Nil). pages, when non-nil, makes ListByInstance
 // ignore byID and instead walk through pages one PageRequest at a time —
 // used to exercise a caller's multi-page cursor loop (byID's own
 // ListByInstance has no real pagination, it returns everything in one page).
