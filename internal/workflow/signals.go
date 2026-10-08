@@ -145,14 +145,18 @@ type adminSignal struct {
 	Reason        string
 	Initiator     string // set only for instance-pause/instance-resume
 	TargetDeptID  string
-	TargetNodeKey domain.NodeKey // set only for instance-force-forward
+	TargetNodeKey domain.NodeKey // instance-force-forward; for instance-force-back, optionally a node of the failed branch
 	RecordVersion int64
+	// FromDefer marks a force-back an assignee's defer sent; no admin routed
+	// it, so no force-route is recorded for it.
+	FromDefer bool
 }
 
 // runSignalRouter is the always-on background goroutine (started once, in
 // Execute) draining every raw signal channel for this instance, validating
 // each before anything else can react to it (execution LLD §7.2 test #5).
 func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Channel) {
+	in.admin, in.baseAdmin = admin, baseAdmin
 	logger := wf.GetLogger(ctx)
 	sel := wf.NewSelector(ctx)
 
@@ -212,12 +216,10 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 				in.handleInstanceResume(ctx, sig)
 			default:
 				// instance-cancel, instance-force-forward, instance-force-back.
-				envelope := adminSignalEnvelope{Kind: name, Signal: sig}
-				if in.parallelDepth > 0 {
-					admin.Send(ctx, envelope)
-				} else {
-					baseAdmin.Send(ctx, envelope)
+				if sig.TargetDeptID == "" && sig.TargetNodeKey != "" && getVersion(ctx, forceRouteByNodeKeyChangeID) != wf.DefaultVersion {
+					sig.TargetDeptID = deptFromNodeKey(sig.TargetNodeKey)
 				}
+				in.routeAdminSignal(ctx, name, sig)
 			}
 		})
 	}
@@ -285,22 +287,58 @@ func (in *interpreter) handleStageFail(ctx wf.Context, sig stageFailSignal) {
 	}
 }
 
-// handleStageDefer closes the deferring assignment(s) for a stage-defer
-// signal.
+// routeAdminSignal hands an instance-level signal that changes the route to
+// whichever steps are listening: the parallel step running, if there is one,
+// else the top level.
+func (in *interpreter) routeAdminSignal(ctx wf.Context, kind string, sig adminSignal) {
+	envelope := adminSignalEnvelope{Kind: kind, Signal: sig}
+	if in.parallelDepth > 0 {
+		in.admin.Send(ctx, envelope)
+	} else {
+		in.baseAdmin.Send(ctx, envelope)
+	}
+}
+
+// handleStageDefer sends the instance one completed step back for a
+// stage-defer signal: it closes the deferring task, naming the node the
+// instance goes back to, then routes as instance-force-back does, so that
+// node's department runs again. The deferred stage itself is never pushed to
+// the history (that happens once a stage completes, stage.go), so the node
+// gone back to is the most recently completed one, or inside a parallel step
+// the one completed before it. With none, the defer goes nowhere and changes
+// nothing.
 func (in *interpreter) handleStageDefer(ctx wf.Context, sig stageDeferSignal) {
 	if err := validateSignal(in.status, SignalStageDefer); err != nil {
 		wf.GetLogger(ctx).Warn("dropping stage-defer signal", "error", err)
 		return
 	}
-	// The deferred stage itself is never history.Push'd (that only happens
-	// once a stage completes, stage.go), so there's nothing of its own to
-	// PopTo here: an earlier version of this handler called
-	// history.PopTo(fromNode) anyway, and PopTo's own not-found fallback
-	// then wiped the ENTIRE history stack, including unrelated
-	// already-completed nodes.
-	_, _ = deferTask(ctx, port.DeferTaskInput{
+	input := port.DeferTaskInput{
 		TaskID: sig.TaskID, TenantID: in.tenantID, UserID: sig.UserID,
 		AssignmentID: sig.AssignmentID, Reason: sig.Reason, RecordVersion: sig.RecordVersion,
+	}
+	if getVersion(ctx, deferRoutesBackChangeID) == wf.DefaultVersion {
+		_ = deferTask(ctx, input)
+		return
+	}
+	if in.status != domain.InstanceStatusRunning {
+		wf.GetLogger(ctx).Warn("dropping stage-defer signal: only a running instance goes back a step", "status", in.status)
+		return
+	}
+	target := in.history.Peek()
+	if in.parallelDepth > 0 {
+		target = in.forkEntries[len(in.forkEntries)-1]
+	}
+	if target == "" {
+		wf.GetLogger(ctx).Warn("dropping stage-defer signal: no completed step to go back to")
+		return
+	}
+	input.DeferredToNodeKey = string(target)
+	if err := deferTask(ctx, input); err != nil {
+		wf.GetLogger(ctx).Warn("deferTask failed", "error", err)
+		return
+	}
+	in.routeAdminSignal(ctx, SignalInstanceForceBack, adminSignal{
+		AdminUserID: sig.UserID, Reason: sig.Reason, RecordVersion: sig.RecordVersion, FromDefer: true,
 	})
 }
 

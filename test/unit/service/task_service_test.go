@@ -449,7 +449,10 @@ func TestTaskService_Defer(t *testing.T) {
 	t.Run("success signals stage-defer", func(t *testing.T) {
 		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
 		tenantID, instanceID := uuid.New(), uuid.New()
-		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:biz"}
+		done := newReadyTask(tenantID, instanceID)
+		done.Status = domain.TaskStatusCompleted
+		tasks.byID[done.ID] = done
 		task := newReadyTask(tenantID, instanceID)
 		tasks.byID[task.ID] = task
 		userID := uuid.New()
@@ -459,6 +462,66 @@ func TestTaskService_Defer(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, temporal.signals, 1)
 		assert.Equal(t, "stage-defer", temporal.signals[0].SignalName)
+	})
+
+	t.Run("no completed step to go back to is refused", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+		_, err := svc.Defer(context.Background(), tenantID, task.ID, userID, "reason", task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrInvalidTaskState)
+		assert.Empty(t, temporal.signals)
+	})
+
+	t.Run("failures reading the instance, its tasks, or signalling are returned", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			setup func(*fakeInstanceRepo, *fakeTaskRepo, *fakeTemporalClient, uuid.UUID, uuid.UUID)
+		}{
+			{"instance missing", func(i *fakeInstanceRepo, _ *fakeTaskRepo, _ *fakeTemporalClient, _, id uuid.UUID) { delete(i.byID, id) }},
+			{"task listing fails", func(_ *fakeInstanceRepo, t *fakeTaskRepo, _ *fakeTemporalClient, _, _ uuid.UUID) {
+				t.listErr = assert.AnError
+			}},
+			{"signal fails", func(_ *fakeInstanceRepo, t *fakeTaskRepo, tc *fakeTemporalClient, tenant, id uuid.UUID) {
+				done := newReadyTask(tenant, id)
+				done.Status = domain.TaskStatusCompleted
+				t.byID[done.ID] = done
+				tc.signalFunc = func(context.Context, string, uuid.UUID, string, any) error { return assert.AnError }
+			}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+				tenantID, instanceID := uuid.New(), uuid.New()
+				instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:biz"}
+				task := newReadyTask(tenantID, instanceID)
+				tasks.byID[task.ID] = task
+				userID := uuid.New()
+				assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+				tc.setup(instances, tasks, temporal, tenantID, instanceID)
+
+				_, err := svc.Defer(context.Background(), tenantID, task.ID, userID, "reason", task.RecordVersion)
+				assert.Error(t, err)
+			})
+		}
+	})
+
+	t.Run("an instance that is not running is refused", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusPaused, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+		_, err := svc.Defer(context.Background(), tenantID, task.ID, userID, "reason", task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrInvalidInstanceState)
+		assert.Empty(t, temporal.signals)
 	})
 
 	t.Run("connector-typed task is rejected", func(t *testing.T) {

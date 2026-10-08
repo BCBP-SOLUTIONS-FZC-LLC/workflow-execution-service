@@ -489,60 +489,6 @@ func TestExecute_InstanceReassignRejectedWhilePaused(t *testing.T) {
 	}
 }
 
-// TestExecute_StageDeferOnPendingStageDoesNotDisruptFlow drives the
-// stage-defer signal (LLD §3.1) against the currently-pending stage it's
-// meant for — a user-initiated defer of their own in-flight task, backed by
-// DeferTaskActivity — and confirms it doesn't perturb the interpreter's own
-// control flow (history/message-buffer/dispatch) at all: that bookkeeping is
-// DeferTaskActivity's own concern, not the signal handler's, since the
-// pending stage was never pushed to history in the first place (stage.go
-// only pushes once a stage completes).
-func TestExecute_StageDeferOnPendingStageDoesNotDisruptFlow(t *testing.T) {
-	var suite testsuite.WorkflowTestSuite
-	env := suite.NewTestWorkflowEnvironment()
-
-	collab := twoDeptCollaboration()
-	registerFakeActivities(env, collab, nil)
-
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
-		})
-	}, time.Millisecond)
-
-	// deptB/prep is now pending — defer it directly, the real usage shape.
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-defer:instance-1", struct {
-			DeptID        string
-			FromStage     string
-			Reason        string
-			UserID        string
-			RecordVersion int64
-		}{DeptID: "deptB", FromStage: "prep", Reason: "need more info", UserID: "user-1", RecordVersion: 1})
-	}, 5*time.Millisecond)
-
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
-		})
-	}, 10*time.Millisecond)
-
-	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
-		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
-	})
-
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("workflow returned error: %v", err)
-	}
-	var out wfengine.ExecuteOutput
-	if err := env.GetWorkflowResult(&out); err != nil {
-		t.Fatalf("GetWorkflowResult error: %v", err)
-	}
-	if out.Status != domain.InstanceStatusCompleted {
-		t.Errorf("Status = %v, want COMPLETED", out.Status)
-	}
-}
-
 // TestExecute_ActiveParallelForceBackPausesAndResumes drives LLD §2.7's
 // active-parallel-gateway extension: force-back arriving while Parallel
 // branches are still active (none failed yet) regresses to the pre-fork

@@ -589,16 +589,18 @@ func TestInstanceService_LifecycleSignals(t *testing.T) {
 			return s.Cancel(context.Background(), t, i, a, "reason", rv)
 		}, port.SignalInstanceCancel},
 		{"force-back from running", domain.InstanceStatusRunning, func(s *service.InstanceService, t, i, a uuid.UUID, rv int64) error {
-			return s.ForceBack(context.Background(), t, i, a, rv)
+			return s.ForceBack(context.Background(), t, i, a, "", rv)
 		}, port.SignalInstanceForceBack},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc, instances, _, _, _, temporal, _, _ := newInstanceServiceHarness()
+			svc, instances, tasks, _, _, temporal, _, _ := newInstanceServiceHarness()
 			tenantID, actorID := uuid.New(), uuid.New()
 			inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: tc.status, RecordVersion: 3, TemporalWorkflowID: "tenant:biz"}
 			instances.byID[inst.ID] = inst
+			done := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, Status: domain.TaskStatusCompleted}
+			tasks.byID[done.ID] = done
 
 			err := tc.call(svc, tenantID, inst.ID, actorID, 3)
 			require.NoError(t, err)
@@ -608,6 +610,44 @@ func TestInstanceService_LifecycleSignals(t *testing.T) {
 			assert.Equal(t, inst.ID, temporal.signals[0].InstanceID)
 		})
 	}
+
+	t.Run("force-back with no completed step is refused", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, _, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 3, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[inst.ID] = inst
+
+		err := svc.ForceBack(context.Background(), tenantID, inst.ID, uuid.New(), "", 3)
+		assert.ErrorIs(t, err, port.ErrInvalidInstanceState)
+		assert.Empty(t, temporal.signals)
+	})
+
+	t.Run("force-back of a degraded instance needs no completed step and passes the node key", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, _, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusDegraded, RecordVersion: 3, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[inst.ID] = inst
+
+		require.NoError(t, svc.ForceBack(context.Background(), tenantID, inst.ID, uuid.New(), "billing/prep", 3))
+		require.Len(t, temporal.signals, 1)
+		assert.Contains(t, fmt.Sprint(temporal.signals[0].Payload), "billing/prep")
+	})
+
+	t.Run("force-back surfaces a task listing failure", func(t *testing.T) {
+		svc, instances, tasks, _, _, temporal, _, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 3, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[inst.ID] = inst
+		tasks.listErr = assert.AnError
+
+		assert.ErrorIs(t, svc.ForceBack(context.Background(), tenantID, inst.ID, uuid.New(), "", 3), assert.AnError)
+		assert.Empty(t, temporal.signals)
+	})
+
+	t.Run("force-back of an unknown instance", func(t *testing.T) {
+		svc, _, _, _, _, _, _, _ := newInstanceServiceHarness()
+		assert.Error(t, svc.ForceBack(context.Background(), uuid.New(), uuid.New(), uuid.New(), "", 1))
+	})
 
 	t.Run("record version conflict", func(t *testing.T) {
 		svc, instances, _, _, _, _, _, _ := newInstanceServiceHarness()

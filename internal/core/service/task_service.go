@@ -312,6 +312,14 @@ func (s *TaskService) Defer(ctx context.Context, tenantID, taskID, userID uuid.U
 	if err != nil {
 		return nil, wrapInstanceErr(err)
 	}
+	if inst.Status != domain.InstanceStatusRunning {
+		return nil, port.ErrInvalidInstanceState
+	}
+	if done, err := hasCompletedStep(ctx, s.Tasks, tenantID, inst.ID); err != nil {
+		return nil, err
+	} else if !done {
+		return nil, port.ErrInvalidTaskState
+	}
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-defer", stageDeferWire{
 		DeptID: deptID, FromStage: nodeID, Reason: reason, UserID: userID.String(), RecordVersion: recordVersion,

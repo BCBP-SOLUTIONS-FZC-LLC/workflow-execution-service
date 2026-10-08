@@ -117,27 +117,32 @@ func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, t
 	return out, nil
 }
 
-func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) (port.DeferTaskOutput, error) {
+// DeferTask closes the task an assignee deferred: it marks it DEFERRED,
+// completes the deferring assignment and enqueues workflow.task.deferred
+// naming the earlier node the instance goes back to. It creates no
+// replacement: the earlier node's task is created when its department runs
+// again. A retry after a lost ack finds the assignment completed and does
+// nothing.
+func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) error {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
-		return port.DeferTaskOutput{}, nonRetryable("ValidationError", fmt.Errorf("parse tenant_id: %w", err))
+		return nonRetryable("ValidationError", fmt.Errorf("parse tenant_id: %w", err))
 	}
 	taskID, err := uuid.Parse(in.TaskID)
 	if err != nil {
-		return port.DeferTaskOutput{}, nonRetryable("ValidationError", fmt.Errorf("parse task_id: %w", err))
+		return nonRetryable("ValidationError", fmt.Errorf("parse task_id: %w", err))
 	}
 	assignmentID, err := uuid.Parse(in.AssignmentID)
 	if err != nil {
-		return port.DeferTaskOutput{}, nonRetryable("ValidationError", fmt.Errorf("parse assignment_id: %w", err))
+		return nonRetryable("ValidationError", fmt.Errorf("parse assignment_id: %w", err))
 	}
 	deferrerUserID, err := uuid.Parse(in.UserID)
 	if err != nil {
-		return port.DeferTaskOutput{}, nonRetryable("ValidationError", fmt.Errorf("parse user_id: %w", err))
+		return nonRetryable("ValidationError", fmt.Errorf("parse user_id: %w", err))
 	}
 
-	var newTask domain.Task
 	ctx = withTenantGUC(ctx, tenantID)
-	err = d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
+	return d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
 		task, err := d.Tasks.GetByID(ctx, tenantID, taskID)
 		if err != nil {
 			return fmt.Errorf("get task: %w", err)
@@ -146,25 +151,15 @@ func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) (port.Defe
 		if err != nil {
 			return fmt.Errorf("get assignment: %w", err)
 		}
-		// A retry after a lost ack skips re-deferring and re-completing, but
-		// still resolves the regression task below for the output.
-		alreadyDeferred := existing.CompletedAt != nil
-		if !alreadyDeferred {
-			updatedTask, err := d.Tasks.UpdateStatus(ctx, tenantID, taskID, domain.TaskStatusDeferred, task.RecordVersion)
-			if err != nil {
-				return fmt.Errorf("mark task deferred: %w", err)
-			}
-			if _, err := d.Assignments.Complete(ctx, tenantID, assignmentID, nil, updatedTask.RecordVersion); err != nil {
-				return fmt.Errorf("complete deferring assignment: %w", err)
-			}
-		}
-		created, err := d.createRegressionTask(ctx, tenantID, task, deferrerUserID)
-		if err != nil {
-			return err
-		}
-		newTask = *created
-		if alreadyDeferred {
+		if existing.CompletedAt != nil {
 			return nil
+		}
+		updatedTask, err := d.Tasks.UpdateStatus(ctx, tenantID, taskID, domain.TaskStatusDeferred, task.RecordVersion)
+		if err != nil {
+			return fmt.Errorf("mark task deferred: %w", err)
+		}
+		if _, err := d.Assignments.Complete(ctx, tenantID, assignmentID, nil, updatedTask.RecordVersion); err != nil {
+			return fmt.Errorf("complete deferring assignment: %w", err)
 		}
 
 		core, err := d.instanceCore(ctx, tenantID, task.WorkflowInstanceID)
@@ -173,51 +168,9 @@ func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) (port.Defe
 		}
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{deferrerUserID}}
 		reason := &in.Reason
-		payload := domain.NewWorkflowTaskDeferredPayload(core, taskCore, newTask.NodeKey, reason, nil)
+		payload := domain.NewWorkflowTaskDeferredPayload(core, taskCore, in.DeferredToNodeKey, reason, nil)
 		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskDeferred, payload)
 	})
-	if err != nil {
-		return port.DeferTaskOutput{}, err
-	}
-	return port.DeferTaskOutput{NewTaskID: newTask.ID.String()}, nil
-}
-
-func (d *Deps) createRegressionTask(ctx context.Context, tenantID uuid.UUID, deferred *domain.Task, assigneeID uuid.UUID) (*domain.Task, error) {
-	newTaskID := deterministicRegressionTaskID(deferred.ID)
-	newTask := &domain.Task{
-		ID:                 newTaskID,
-		TenantID:           tenantID,
-		WorkflowInstanceID: deferred.WorkflowInstanceID,
-		NodeKey:            deferred.NodeKey,
-		DepartmentID:       deferred.DepartmentID,
-		Status:             domain.TaskStatusReady,
-		AssigneeMode:       deferred.AssigneeMode,
-		DeferredFromTaskID: &deferred.ID,
-		// Continues the same in-flight runTaskStage visit the deferred task
-		// belonged to (the interpreter never re-registers on a defer — see
-		// signals.go's handleStageDefer) — the eventual completion signal's
-		// VisitCount must match the still-pending registration's, or it
-		// resolves nothing and the workflow hangs.
-		VisitCount: deferred.VisitCount,
-	}
-	if err := d.Tasks.Create(ctx, newTask); err != nil {
-		if errors.Is(err, domain.ErrAlreadyExists) {
-			existing, getErr := d.Tasks.GetByID(ctx, tenantID, newTaskID)
-			if getErr != nil {
-				return nil, fmt.Errorf("get existing regression task: %w", getErr)
-			}
-			return existing, nil
-		}
-		return nil, fmt.Errorf("create regression task: %w", err)
-	}
-	assignment := &domain.TaskAssignment{ID: deterministicAssignmentID(newTask.ID, assigneeID), TenantID: tenantID, TaskID: newTask.ID, UserID: assigneeID}
-	if err := d.Assignments.Create(ctx, assignment); err != nil {
-		if errors.Is(err, domain.ErrAlreadyExists) {
-			return newTask, nil
-		}
-		return nil, fmt.Errorf("create regression assignment: %w", err)
-	}
-	return newTask, nil
 }
 
 func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmentInput) error {

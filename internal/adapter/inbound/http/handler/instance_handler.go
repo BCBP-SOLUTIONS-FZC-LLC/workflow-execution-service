@@ -464,7 +464,8 @@ func (h *Handler) ForceForwardInstance(c *gin.Context) {
 }
 
 type forceBackInstanceReq struct {
-	RecordVersion int64 `json:"record_version" binding:"required"`
+	TargetNodeKey string `json:"target_node_key" binding:"max=255"`
+	RecordVersion int64  `json:"record_version" binding:"required"`
 }
 
 func (h *Handler) ForceBackInstance(c *gin.Context) {
@@ -484,7 +485,7 @@ func (h *Handler) ForceBackInstance(c *gin.Context) {
 		return
 	}
 
-	if err := h.instances.ForceBack(c.Request.Context(), tenantID, instanceID, actorUserID, req.RecordVersion); err != nil {
+	if err := h.instances.ForceBack(c.Request.Context(), tenantID, instanceID, actorUserID, req.TargetNodeKey, req.RecordVersion); err != nil {
 		errResponse(c, err)
 		return
 	}

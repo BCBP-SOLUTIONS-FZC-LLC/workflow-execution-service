@@ -40,6 +40,18 @@ const boundaryEndsPathChangeID = "boundary-no-target-ends-path"
 // ended the instance as TERMINATED without writing the instance's status.
 const exclusiveEndCompletesPathChangeID = "exclusive-end-completes-path"
 
+// deferRoutesBackChangeID gates a defer sending the instance one completed
+// step back, as a force-back does. Before it, a defer closed the task and the
+// activity created a replacement at the same node.
+const deferRoutesBackChangeID = "defer-routes-back"
+
+// forceRouteByNodeKeyChangeID gates naming the branch an admin force-forward
+// or force-back applies to, inside a parallel step or a DEGRADED instance, by
+// the department of its target node key and by the steps a branch runs, and a
+// respawned branch that fails again keeping its steps. Before it, only an
+// exact target_dept_id matched, which no HTTP path sets.
+const forceRouteByNodeKeyChangeID = "force-route-by-node-key"
+
 // abandonedTaskSupersededChangeID gates marking SUPERSEDED the task of a stage
 // whose scope was cancelled, an interrupted call's open task among them.
 // Before it, such a task stayed open and claimable.

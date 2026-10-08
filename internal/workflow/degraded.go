@@ -33,7 +33,11 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 	preFork := in.history.PreForkEntry()
 
 	in.parallelDepth++
-	defer func() { in.parallelDepth-- }()
+	in.forkEntries = append(in.forkEntries, preFork)
+	defer func() {
+		in.parallelDepth--
+		in.forkEntries = in.forkEntries[:len(in.forkEntries)-1]
+	}()
 
 	settle := wf.NewChannel(ctx)
 	deptIDs := make([]string, 0, len(branches))
@@ -55,7 +59,7 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 			if errors.Is(err, errStageAbandoned) {
 				return // force-forwarded away; settle has no listener left for this branch
 			}
-			settle.Send(gctx, branchOutcome{Key: key, DeptID: deptID, LastNode: out.LastNode, Err: err})
+			settle.Send(gctx, branchOutcome{Key: key, DeptID: deptID, LastNode: out.LastNode, Steps: steps, Err: err})
 		})
 	}
 
@@ -169,7 +173,11 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 			c.Receive(ctx, &out)
 			respawning--
 			if out.Err != nil {
-				failed = append(failed, failedBranch{DeptID: out.DeptID, LastCompletedNode: out.LastNode, Err: out.Err})
+				fb := failedBranch{DeptID: out.DeptID, LastCompletedNode: out.LastNode, Err: out.Err}
+				if getVersion(ctx, forceRouteByNodeKeyChangeID) != wf.DefaultVersion {
+					fb.Steps = out.Steps
+				}
+				failed = append(failed, fb)
 			} else {
 				completed = append(completed, completedBranch{DeptID: out.DeptID, LastNode: out.LastNode})
 			}
@@ -194,7 +202,7 @@ func (in *interpreter) handleParallelForceForward(ctx wf.Context, keys []string,
 	deptID := sig.TargetDeptID
 	key := branchRunning(keys, branchSteps, resolved, deptID)
 	if key == "" {
-		wf.GetLogger(ctx).Warn("instance-force-forward: target_dept_id doesn't name a still-active branch of this gateway; dropping",
+		wf.GetLogger(ctx).Warn("instance-force-forward: target_node_key doesn't name a still-active branch of this gateway; dropping",
 			"target_dept_id", deptID)
 		return completedBranch{}, false
 	}
@@ -286,10 +294,10 @@ func (in *interpreter) handleParallelForceBack(ctx wf.Context, plan *dsl.Compile
 }
 
 func (in *interpreter) handleDegradedForceForward(ctx wf.Context, failed []failedBranch, sig adminSignal) ([]failedBranch, completedBranch, bool) {
-	idx := indexOfFailedBranch(failed, sig.TargetDeptID)
+	idx := in.failedBranchFor(ctx, failed, sig)
 	if idx < 0 {
-		wf.GetLogger(ctx).Warn("instance-force-forward: target_dept_id doesn't name a currently-failed branch; dropping",
-			"target_dept_id", sig.TargetDeptID)
+		wf.GetLogger(ctx).Warn("instance-force-forward: target_node_key doesn't name a currently-failed branch; dropping",
+			"target_node_key", sig.TargetNodeKey)
 		return failed, completedBranch{}, false
 	}
 	fb := failed[idx]
@@ -298,10 +306,10 @@ func (in *interpreter) handleDegradedForceForward(ctx wf.Context, failed []faile
 }
 
 func (in *interpreter) handleDegradedForceBack(ctx wf.Context, plan *dsl.CompiledPlan, failed []failedBranch, settle, admin wf.Channel, sig adminSignal) ([]failedBranch, bool) {
-	idx := indexOfFailedBranch(failed, sig.TargetDeptID)
+	idx := in.failedBranchFor(ctx, failed, sig)
 	if idx < 0 {
-		wf.GetLogger(ctx).Warn("instance-force-back: target_dept_id doesn't name a currently-failed branch; dropping",
-			"target_dept_id", sig.TargetDeptID)
+		wf.GetLogger(ctx).Warn("instance-force-back: target_node_key doesn't name a currently-failed branch; dropping",
+			"target_node_key", sig.TargetNodeKey)
 		return failed, false
 	}
 	fb := failed[idx]
@@ -310,7 +318,10 @@ func (in *interpreter) handleDegradedForceBack(ctx wf.Context, plan *dsl.Compile
 	in.msgBuf.ResetSpan([]domain.NodeKey{fb.LastCompletedNode})
 	wf.Go(ctx, func(gctx wf.Context) {
 		node, err := in.respawnBranch(gctx, plan, fb, admin)
-		settle.Send(gctx, branchOutcome{DeptID: fb.DeptID, LastNode: node, Err: err})
+		if err != nil && node == "" && getVersion(gctx, forceRouteByNodeKeyChangeID) != wf.DefaultVersion {
+			node = fb.LastCompletedNode // a branch that fails again has still completed what it had
+		}
+		settle.Send(gctx, branchOutcome{DeptID: fb.DeptID, LastNode: node, Steps: fb.Steps, Err: err})
 	})
 	return failed, true
 }
@@ -383,6 +394,28 @@ func stepsAfterDept(branchSteps []dsl.ExecutionStep, deptID string) []dsl.Execut
 		}
 	}
 	return nil
+}
+
+// failedBranchFor finds the failed branch a signal applies to. Before
+// forceRouteByNodeKeyChangeID only a branch keyed by the signal's department
+// matched. Now the branch is also the one whose steps run that department, or
+// that last completed a node of it, and a lone failed branch needs no name.
+func (in *interpreter) failedBranchFor(ctx wf.Context, failed []failedBranch, sig adminSignal) int {
+	if getVersion(ctx, forceRouteByNodeKeyChangeID) == wf.DefaultVersion {
+		return indexOfFailedBranch(failed, sig.TargetDeptID)
+	}
+	if sig.TargetDeptID == "" && len(failed) == 1 {
+		return 0
+	}
+	if idx := indexOfFailedBranch(failed, sig.TargetDeptID); idx >= 0 {
+		return idx
+	}
+	for i, fb := range failed {
+		if stepsRun(fb.Steps, sig.TargetDeptID) || deptFromNodeKey(fb.LastCompletedNode) == sig.TargetDeptID {
+			return i
+		}
+	}
+	return -1
 }
 
 func indexOfFailedBranch(failed []failedBranch, deptID string) int {

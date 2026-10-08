@@ -142,7 +142,7 @@ type InstanceService interface {
 	Cancel(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string, recordVersion int64) error
 	Terminate(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string) error
 	ForceForward(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, targetNodeKey string, recordVersion int64) error
-	ForceBack(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, recordVersion int64) error
+	ForceBack(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, targetNodeKey string, recordVersion int64) error
 
 	// AnswerOutsideWait delivers an outside party's answer to the receive task
 	// or message boundary whose wait key (dsl.ExternalWait.Key) is key, merging

@@ -751,10 +751,20 @@ func TestForceForwardInstance_TargetNodeKeyTooLong_400(t *testing.T) {
 // --- ForceBackInstance ---
 
 func TestForceBackInstance_Success(t *testing.T) {
-	fake := &fakeInstanceService{forceBack: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int64) error { return nil }}
+	fake := &fakeInstanceService{forceBack: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, int64) error { return nil }}
 	router := newRouter(newInstanceHandler(fake))
 	w := do(router, asAdmin(req(http.MethodPost, instancePath(testInstID)+"/force-back", map[string]any{"record_version": 2})))
 	assert.Equal(t, http.StatusAccepted, w.Code)
+}
+
+// A DEGRADED instance's force-back names the failed branch by one of its nodes.
+func TestForceBackInstance_PassesTheTargetNodeKey(t *testing.T) {
+	var got string
+	fake := &fakeInstanceService{forceBack: func(_ context.Context, _, _, _ uuid.UUID, target string, _ int64) error { got = target; return nil }}
+	router := newRouter(newInstanceHandler(fake))
+	w := do(router, asAdmin(req(http.MethodPost, instancePath(testInstID)+"/force-back", map[string]any{"record_version": 2, "target_node_key": "billing/prep"})))
+	require.Equal(t, http.StatusAccepted, w.Code)
+	assert.Equal(t, "billing/prep", got)
 }
 
 func TestForceBackInstance_NotAdmin_Forbidden(t *testing.T) {
@@ -764,7 +774,7 @@ func TestForceBackInstance_NotAdmin_Forbidden(t *testing.T) {
 }
 
 func TestForceBackInstance_NoSavedBranch(t *testing.T) {
-	fake := &fakeInstanceService{forceBack: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int64) error {
+	fake := &fakeInstanceService{forceBack: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, int64) error {
 		return port.ErrForceBackNoSavedBranch
 	}}
 	router := newRouter(newInstanceHandler(fake))

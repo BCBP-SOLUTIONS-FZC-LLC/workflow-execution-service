@@ -137,7 +137,7 @@ type fakeInstanceService struct {
 	cancel       func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, int64) error
 	terminate    func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) error
 	forceForward func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, int64) error
-	forceBack    func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int64) error
+	forceBack    func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, int64) error
 	listEvents   func(context.Context, uuid.UUID, uuid.UUID, port.ReadScope, port.Page) (port.PageResult[*port.WorkflowEvent], error)
 
 	answerOutsideWait func(ctx context.Context, tenantID, instanceID uuid.UUID, scope port.ReadScope, key string, variables map[string]any) error
@@ -206,9 +206,9 @@ func (f *fakeInstanceService) ForceForward(ctx context.Context, tenantID, instan
 	return nil
 }
 
-func (f *fakeInstanceService) ForceBack(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, recordVersion int64) error {
+func (f *fakeInstanceService) ForceBack(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, targetNodeKey string, recordVersion int64) error {
 	if f.forceBack != nil {
-		return f.forceBack(ctx, tenantID, instanceID, actorUserID, recordVersion)
+		return f.forceBack(ctx, tenantID, instanceID, actorUserID, targetNodeKey, recordVersion)
 	}
 	return nil
 }

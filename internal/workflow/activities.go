@@ -88,10 +88,9 @@ func updateInstanceStatus(ctx wf.Context, in port.UpdateInstanceStatusInput) err
 	return wrapActivityErr(port.ActivityUpdateInstanceStatus, err)
 }
 
-func deferTask(ctx wf.Context, in port.DeferTaskInput) (port.DeferTaskOutput, error) {
-	var out port.DeferTaskOutput
-	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityDeferTask, in).Get(ctx, &out)
-	return out, wrapActivityErr(port.ActivityDeferTask, err)
+func deferTask(ctx wf.Context, in port.DeferTaskInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityDeferTask, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityDeferTask, err)
 }
 
 func recordForceRoute(ctx wf.Context, in port.RecordForceRouteInput) error {

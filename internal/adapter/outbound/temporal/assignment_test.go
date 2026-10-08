@@ -116,7 +116,7 @@ func TestCompleteAssignment_CompleteError(t *testing.T) {
 	assert.ErrorContains(t, err, "complete assignment")
 }
 
-func TestDeferTask_CreatesRegressionTaskForDeferrer(t *testing.T) {
+func TestDeferTask_ClosesTheTaskAndNamesWhereTheInstanceGoes(t *testing.T) {
 	tenantID, deferrerID := uuid.New(), uuid.New()
 	taskID := uuid.New()
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), NodeKey: "sales/review", AssigneeMode: "single", RecordVersion: 1}
@@ -125,24 +125,20 @@ func TestDeferTask_CreatesRegressionTaskForDeferrer(t *testing.T) {
 	assignments := newFakeAssignmentRepo(assignment)
 	deps, outbox := newAssignmentTestDeps(tasks, assignments)
 
-	out, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
+	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: assignment.ID.String(), Reason: "not ready yet",
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet", DeferredToNodeKey: "sales/prepare",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, domain.TaskStatusDeferred, task.Status)
 	assert.False(t, assignment.IsActive)
-
-	newTaskID, err := uuid.Parse(out.NewTaskID)
-	require.NoError(t, err)
-	newTask := tasks.byID[newTaskID]
-	require.NotNil(t, newTask)
-	assert.Equal(t, task.NodeKey, newTask.NodeKey)
-	require.NotNil(t, newTask.DeferredFromTaskID)
-	assert.Equal(t, taskID, *newTask.DeferredFromTaskID)
+	assert.Len(t, tasks.byID, 1, "a defer creates no replacement task: the earlier node's task is made when it runs again")
 
 	require.Len(t, outbox.enqueued, 1)
 	assert.Equal(t, domain.EventWorkflowTaskDeferred, outbox.enqueued[0].Type)
+	var payload domain.WorkflowTaskDeferredPayload
+	require.NoError(t, json.Unmarshal(outbox.enqueued[0].Payload, &payload))
+	assert.Equal(t, "sales/prepare", payload.DeferredToNodeKey)
 }
 
 // TestCompleteAssignment_RetriedCall_NoOp is the regression test for the
@@ -166,38 +162,23 @@ func TestCompleteAssignment_RetriedCall_NoOp(t *testing.T) {
 	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.completed")
 }
 
-// TestDeferTask_RetriedCall_IsIdempotent is the regression test for
-// DeferTask's own missing-idempotency-key finding: a retry must resolve to
-// the same regression task, not create a second one, and must not
-// re-enqueue workflow.task.deferred.
+// TestDeferTask_RetriedCall_IsIdempotent: a retry after a lost ack finds the
+// deferring assignment completed and must not re-enqueue workflow.task.deferred.
 func TestDeferTask_RetriedCall_IsIdempotent(t *testing.T) {
 	tenantID, deferrerID := uuid.New(), uuid.New()
 	taskID := uuid.New()
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), NodeKey: "sales/review", AssigneeMode: "single", RecordVersion: 1}
 	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: deferrerID}
-	tasks := newFakeTaskRepo(task)
-	assignments := newFakeAssignmentRepo(assignment)
-	deps, outbox := newAssignmentTestDeps(tasks, assignments)
+	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(assignment))
 
 	in := port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: assignment.ID.String(), Reason: "not ready yet",
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet", DeferredToNodeKey: "sales/prepare",
 	}
 
-	out1, err := deps.DeferTask(context.Background(), in)
-	require.NoError(t, err)
+	require.NoError(t, deps.DeferTask(context.Background(), in))
+	require.NoError(t, deps.DeferTask(context.Background(), in), "a retried DeferTask must succeed idempotently, not error")
 
-	out2, err := deps.DeferTask(context.Background(), in)
-	require.NoError(t, err, "a retried DeferTask must succeed idempotently, not error")
-
-	assert.Equal(t, out1.NewTaskID, out2.NewTaskID, "retry must resolve to the same regression task")
-	regressionTaskCount := 0
-	for _, tk := range tasks.byID {
-		if tk.DeferredFromTaskID != nil && *tk.DeferredFromTaskID == taskID {
-			regressionTaskCount++
-		}
-	}
-	assert.Equal(t, 1, regressionTaskCount, "retry must not create a second regression task")
 	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.deferred")
 }
 
@@ -210,7 +191,7 @@ func TestDeferTask_GetAssignmentError(t *testing.T) {
 	assignments.getByIDErr = errBoom
 	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
 
-	_, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
+	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
 		AssignmentID: uuid.New().String(), Reason: "not ready yet",
 	})
@@ -229,7 +210,7 @@ func TestDeferTask_MarkDeferredError(t *testing.T) {
 	tasks.updateStatusErr = errBoom
 	deps, _ := newAssignmentTestDeps(tasks, newFakeAssignmentRepo(assignment))
 
-	_, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
+	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
 		AssignmentID: assignment.ID.String(), Reason: "not ready yet",
 	})
@@ -248,53 +229,12 @@ func TestDeferTask_CompleteDeferringAssignmentError(t *testing.T) {
 	assignments.completeErr = errBoom
 	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
 
-	_, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
+	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
 		AssignmentID: assignment.ID.String(), Reason: "not ready yet",
 	})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "complete deferring assignment")
-}
-
-// TestCreateRegressionTask_GetExistingErrorAfterAlreadyExists forces the
-// GetByID lookup that follows a Create-hits-ErrAlreadyExists race to itself
-// fail — distinct from the ordinary happy-path idempotent-retry case
-// (TestDeferTask_RetriedCall_IsIdempotent), which never needs this lookup to
-// error. A first DeferTask call creates the regression task for real; a
-// second DeferTask call against the same original task (a fresh, unrelated
-// assignment, so it isn't just the plain retry-no-op path) computes the same
-// deterministic regression-task ID and hits Create's ErrAlreadyExists
-// branch, whose own GetByID is then made to fail via a targeted
-// getByIDErrID — the earlier, unrelated GetByID(taskID) call at the top of
-// DeferTask is untouched by it.
-func TestCreateRegressionTask_GetExistingErrorAfterAlreadyExists(t *testing.T) {
-	tenantID, deferrerID := uuid.New(), uuid.New()
-	taskID := uuid.New()
-	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), NodeKey: "sales/review", RecordVersion: 1}
-	firstAssignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: deferrerID}
-	tasks := newFakeTaskRepo(task)
-	deps, _ := newAssignmentTestDeps(tasks, newFakeAssignmentRepo(firstAssignment))
-
-	out1, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
-		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: firstAssignment.ID.String(), Reason: "not ready yet",
-	})
-	require.NoError(t, err)
-	regressionTaskID, err := uuid.Parse(out1.NewTaskID)
-	require.NoError(t, err)
-
-	tasks.getByIDErr = errBoom
-	tasks.getByIDErrID = regressionTaskID
-	secondAssignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: deferrerID}
-	deps.Assignments.(*fakeAssignmentRepo).byID[secondAssignment.ID] = secondAssignment
-	secondAssignment.IsActive = true
-
-	_, err = deps.DeferTask(context.Background(), port.DeferTaskInput{
-		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: secondAssignment.ID.String(), Reason: "still not ready",
-	})
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "get existing regression task")
 }
 
 func TestReassignAssignment_VacatesOldInsertsNew(t *testing.T) {

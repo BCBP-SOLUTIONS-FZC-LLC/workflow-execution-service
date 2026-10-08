@@ -194,7 +194,7 @@ components:
       description: >
         READY: no assignment has been claimed. IN_PROGRESS: at least one assignment claimed,
         not all completed. COMPLETED: all active assignments completed (Temporal advances).
-        DEFERRED: reviewer sent task back; a regression task was created.
+        DEFERRED: the assignee sent the instance one step back; the earlier step's task is created when its department runs again.
         FAILED: swept up in an instance-cancel/-terminate/FAILED cascade — never an
         independent per-task failure. SUPERSEDED: bypassed by an admin instance-force-forward.
 
@@ -1700,7 +1700,9 @@ paths:
       summary: Skip the current step and jump to a target node (admin)
       description: >
         Sends a force-forward signal to the Temporal workflow. Active tasks at the current
-        node(s) are marked FAILED and the workflow function jumps to target_node_key.
+        node(s) are marked SUPERSEDED and the workflow function jumps to target_node_key.
+        Inside a parallel step or a DEGRADED instance, the department of target_node_key
+        names the branch the jump applies to.
         Use only when a step is legitimately blocked and cannot be resolved through normal
         task operations.
       security:
@@ -1807,7 +1809,8 @@ paths:
         Sends a force-back signal to the Temporal workflow. The workflow function pops
         the completedNodes stack, cancels any currently active tasks, and re-creates the
         task for the previous step. Returns 409 if there is no previous step to revert to
-        (the instance is at its first step).
+        (the instance is at its first step). In a DEGRADED instance with more than one
+        failed branch, target_node_key names a node of the branch to resume.
       security:
         - GatewayTenantContext: []
           UserContext: []
@@ -1832,6 +1835,12 @@ paths:
                     The caller's current view of the instance's record_version, checked
                     synchronously before the signal is forwarded (§5.10).
                   example: 6
+                target_node_key:
+                  type: string
+                  maxLength: 255
+                  description: >
+                    Optional. In a DEGRADED instance, a node of the failed branch to
+                    resume; may be omitted when one branch has failed.
       responses:
         "202":
           description: Force-back signal accepted.
@@ -2432,10 +2441,10 @@ paths:
       description: >
         The calling user defers their claimed assignment — indicating the task cannot
         proceed as-is (e.g. missing documents, incomplete prior step). The task status
-        transitions to DEFERRED, a regression task is created at the previous step,
-        and a task-defer signal is sent to Temporal. The response returns the deferred
-        task itself (rev 1.23) — it does not currently carry the new regression task's ID;
-        a caller that needs it must look it up separately (accepted gap, not yet designed).
+        transitions to DEFERRED and the instance goes back one step, as an admin
+        force-back does: the previous step's department runs again and creates a new
+        task for it. The response returns the deferred task itself. A task with no
+        completed step before it answers 409 INVALID_TASK_STATE.
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
         - $ref: "#/components/parameters/UserIdHeader"
@@ -2459,8 +2468,7 @@ paths:
                   maxLength: 500
                   description: >
                     Human-readable reason for deferral. Optional — not bound as required
-                    by the handler. Stored on the TaskDeferred event and on the
-                    regression task's assignment reason field.
+                    by the handler. Stored on the TaskDeferred event.
                   example: "Supporting documents are missing from the tender package."
       responses:
         "202":

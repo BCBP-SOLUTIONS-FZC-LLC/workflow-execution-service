@@ -41,7 +41,10 @@ type branchOutcome struct {
 	Key      string
 	DeptID   string
 	LastNode domain.NodeKey
-	Err      error
+	// Steps is the branch's own dispatch, kept so a respawned branch that
+	// fails again can be respawned once more.
+	Steps []dsl.ExecutionStep
+	Err   error
 }
 
 // nodeVisitKey identifies one specific visit to a node — see pending's own
@@ -65,7 +68,12 @@ type interpreter struct {
 
 	// admin is the channel the instance's parallel steps listen on for admin
 	// signals; a boundary's path runs its steps on it too.
-	admin wf.Channel
+	admin     wf.Channel
+	baseAdmin wf.Channel
+	// forkEntries holds, innermost last, the node completed just before each
+	// parallel step now running, which a defer or a force-back inside it
+	// returns to.
+	forkEntries []domain.NodeKey
 	// routing is true while an admin force-route abandons the running steps,
 	// which RecordForceRoute then supersedes with the admin as the actor.
 	routing bool

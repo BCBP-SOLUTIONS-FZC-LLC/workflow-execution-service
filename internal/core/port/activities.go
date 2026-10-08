@@ -103,17 +103,16 @@ type CompleteAssignmentOutput struct {
 	AllDone bool
 }
 
+// DeferTaskInput.DeferredToNodeKey is the earlier node the instance goes back
+// to, which the workflow reads off its history and the event names.
 type DeferTaskInput struct {
-	TaskID        string
-	TenantID      string
-	UserID        string
-	AssignmentID  string
-	Reason        string
-	RecordVersion int64
-}
-
-type DeferTaskOutput struct {
-	NewTaskID string
+	TaskID            string
+	TenantID          string
+	UserID            string
+	AssignmentID      string
+	Reason            string
+	DeferredToNodeKey string
+	RecordVersion     int64
 }
 
 // UpdateInstanceStatusInput.CompletedAt is nil for a non-terminal status.

@@ -14,7 +14,6 @@ type adminSignalWire struct {
 	AdminUserID   string
 	Reason        string
 	Initiator     string
-	TargetDeptID  string
 	TargetNodeKey string
 	RecordVersion int64
 }
@@ -91,8 +90,34 @@ func (s *InstanceService) ForceForward(ctx context.Context, tenantID, instanceID
 	})
 }
 
-func (s *InstanceService) ForceBack(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, recordVersion int64) error {
-	return s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, signalAnnotation{}, recordVersion, port.SignalInstanceForceBack)
+func (s *InstanceService) ForceBack(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, targetNodeKey string, recordVersion int64) error {
+	inst, err := s.Instances.GetByID(ctx, tenantID, instanceID)
+	if err != nil {
+		return wrapInstanceErr(err)
+	}
+	if inst.RecordVersion != recordVersion {
+		return port.ErrRecordVersionConflict
+	}
+	if err := validateInstanceStateFor(port.SignalInstanceForceBack, inst.Status); err != nil {
+		return err
+	}
+	// A running instance with no completed step has nothing to go back to; a
+	// DEGRADED one resumes a failed branch instead, which needs none.
+	if inst.Status == domain.InstanceStatusRunning {
+		done, err := hasCompletedStep(ctx, s.Tasks, tenantID, inst.ID)
+		if err != nil {
+			return err
+		}
+		if !done {
+			return port.ErrInvalidInstanceState
+		}
+	}
+	if inst.Status == domain.InstanceStatusRunning {
+		targetNodeKey = ""
+	}
+	return s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, port.SignalInstanceForceBack, adminSignalWire{
+		AdminUserID: actorUserID.String(), TargetNodeKey: targetNodeKey, RecordVersion: recordVersion,
+	})
 }
 
 func (s *InstanceService) Terminate(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string) error {

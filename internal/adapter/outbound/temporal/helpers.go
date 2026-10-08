@@ -54,7 +54,3 @@ func (d *Deps) instanceCore(ctx context.Context, tenantID, instanceID uuid.UUID)
 func deterministicAssignmentID(taskID, userID uuid.UUID) uuid.UUID {
 	return domain.DeterministicAssignmentID(taskID, userID)
 }
-
-func deterministicRegressionTaskID(deferredTaskID uuid.UUID) uuid.UUID {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:regression-task:"+deferredTaskID.String()))
-}

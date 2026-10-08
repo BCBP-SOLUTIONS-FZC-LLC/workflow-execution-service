@@ -63,6 +63,7 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 	admin := wf.NewBufferedChannel(ctx, 8)
 	in.admin = admin
 	baseAdmin := wf.NewBufferedChannel(ctx, 8)
+	in.baseAdmin = baseAdmin
 	wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
 
 	outcome, runErr := in.runTopLevel(ctx, mainPlan, admin, baseAdmin)
@@ -144,8 +145,9 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 			steps = redirectSteps(original, deptFromNodeKey(sig.TargetNodeKey))
 
 		case SignalInstanceForceBack:
-			// sig.TargetNodeKey is always empty here (only force-forward
-			// populates it), so pop the most recently completed node instead.
+			// At the top level a force-back goes to the most recently completed
+			// node whatever key the signal carries; the key names a failed
+			// branch of a DEGRADED instance.
 			target, popped, ok := in.history.PopOne()
 			if !ok {
 				wf.GetLogger(ctx).Warn("instance-force-back: no completed node to return to; dropping")
@@ -164,7 +166,9 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 // retryable failure, so an error here is non-retryable and best ignored
 // rather than aborting the instance over a best-effort audit write.
 func (in *interpreter) recordAndRedirect(ctx wf.Context, oldNodeKeys []domain.NodeKey, target domain.NodeKey, direction string, sig adminSignal) {
-	in.recordForceRouteAudit(ctx, oldNodeKeys, target, direction, sig)
+	if !sig.FromDefer {
+		in.recordForceRouteAudit(ctx, oldNodeKeys, target, direction, sig)
+	}
 	_ = updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{target},
 	})

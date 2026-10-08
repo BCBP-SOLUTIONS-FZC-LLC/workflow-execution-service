@@ -80,9 +80,7 @@ func main() {
 		activity.RegisterOptions{Name: port.ActivityRecordSLABreach},
 	)
 	w.RegisterActivityWithOptions(
-		func(_ context.Context, _ port.DeferTaskInput) (port.DeferTaskOutput, error) {
-			return port.DeferTaskOutput{}, nil
-		},
+		func(_ context.Context, _ port.DeferTaskInput) error { return nil },
 		activity.RegisterOptions{Name: port.ActivityDeferTask},
 	)
 

@@ -122,9 +122,7 @@ func TestStageDeferOnPendingStageDoesNotWipeHistory(t *testing.T) {
 		activity.RegisterOptions{Name: port.ActivityCompleteAssignment},
 	)
 	env.RegisterActivityWithOptions(
-		func(_ context.Context, _ port.DeferTaskInput) (port.DeferTaskOutput, error) {
-			return port.DeferTaskOutput{}, nil
-		},
+		func(_ context.Context, _ port.DeferTaskInput) error { return nil },
 		activity.RegisterOptions{Name: port.ActivityDeferTask},
 	)
 	env.RegisterActivityWithOptions(

@@ -121,28 +121,28 @@ func TestDeferTask_InvalidIDs(t *testing.T) {
 
 	bad := base
 	bad.TenantID = "bad"
-	_, err := deps.DeferTask(context.Background(), bad)
+	err := deps.DeferTask(context.Background(), bad)
 	require.Error(t, err)
 
 	bad = base
 	bad.TaskID = "bad"
-	_, err = deps.DeferTask(context.Background(), bad)
+	err = deps.DeferTask(context.Background(), bad)
 	require.Error(t, err)
 
 	bad = base
 	bad.AssignmentID = "bad"
-	_, err = deps.DeferTask(context.Background(), bad)
+	err = deps.DeferTask(context.Background(), bad)
 	require.Error(t, err)
 
 	bad = base
 	bad.UserID = "bad"
-	_, err = deps.DeferTask(context.Background(), bad)
+	err = deps.DeferTask(context.Background(), bad)
 	require.Error(t, err)
 }
 
 func TestDeferTask_TaskNotFound(t *testing.T) {
 	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(), newFakeAssignmentRepo())
-	_, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
+	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TaskID: uuid.New().String(), TenantID: uuid.New().String(), UserID: uuid.New().String(), AssignmentID: uuid.New().String(),
 	})
 	require.Error(t, err)
@@ -279,41 +279,6 @@ func TestRecordSLAWarning_TaskNotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestDeferTask_RegressionTaskCreateFails(t *testing.T) {
-	taskID, deferrerID := uuid.New(), uuid.New()
-	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
-	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: deferrerID}
-	tasks := newFakeTaskRepo(task)
-	tasks.createErr = errBoom
-	deps, _ := newAssignmentTestDeps(tasks, newFakeAssignmentRepo(assignment))
-
-	_, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
-		TaskID: taskID.String(), TenantID: uuid.New().String(), UserID: deferrerID.String(), AssignmentID: assignment.ID.String(),
-	})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, errBoom))
-}
-
-func TestDeferTask_RegressionAssignmentCreateFails(t *testing.T) {
-	taskID, deferrerID := uuid.New(), uuid.New()
-	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
-	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: deferrerID}
-	assignments := newFakeAssignmentRepo(assignment)
-	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
-	// Complete() on the deferring assignment succeeds normally; only the
-	// regression assignment's Create should fail, so flip createErr after
-	// the deferring-assignment Complete call would already have happened —
-	// simplest correct trigger here is failing every Create, which this
-	// path only calls once (for the regression assignment).
-	assignments.createErr = errBoom
-
-	_, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
-		TaskID: taskID.String(), TenantID: uuid.New().String(), UserID: deferrerID.String(), AssignmentID: assignment.ID.String(),
-	})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, errBoom))
-}
-
 func TestCreateTask_TasksCreateFails(t *testing.T) {
 	tasks := newFakeTaskRepo()
 	tasks.createErr = errBoom
@@ -444,30 +409,6 @@ func TestReassignAssignment_VacateFails(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errBoom))
-}
-
-// TestDeferTask_RegressionAssignmentAlreadyExists_NoOp is the coverage
-// regression test for createRegressionTask's own idempotent-retry path: the
-// regression task is created fresh, but its assignment insert already
-// exists (a retry landing between the two inserts, or simply a second
-// concurrent attempt) — must return the newly-created task, not error.
-func TestDeferTask_RegressionAssignmentAlreadyExists_NoOp(t *testing.T) {
-	tenantID, deferrerID := uuid.New(), uuid.New()
-	taskID := uuid.New()
-	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), NodeKey: "sales/review", AssigneeMode: "single", RecordVersion: 1}
-	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: deferrerID}
-	tasks := newFakeTaskRepo(task)
-	assignments := newFakeAssignmentRepo(assignment)
-	assignments.createErr = domain.ErrAlreadyExists
-	deps, _ := newAssignmentTestDeps(tasks, assignments)
-
-	out, err := deps.DeferTask(context.Background(), port.DeferTaskInput{
-		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: assignment.ID.String(), Reason: "not ready yet",
-	})
-	require.NoError(t, err)
-	_, parseErr := uuid.Parse(out.NewTaskID)
-	require.NoError(t, parseErr)
 }
 
 func TestGetCompiledPlan_InvalidVersionID_IsNonRetryable(t *testing.T) {
