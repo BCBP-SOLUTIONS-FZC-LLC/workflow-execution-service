@@ -61,6 +61,7 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 	}
 
 	admin := wf.NewBufferedChannel(ctx, 8)
+	in.admin = admin
 	baseAdmin := wf.NewBufferedChannel(ctx, 8)
 	wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
 
@@ -123,6 +124,9 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 		})
 		sel.Select(ctx)
 		abandonedNodes := in.currentPendingNodes()
+		// The cancelled steps unwind while the route is recorded below, and only
+		// they see the flag; it is cleared before the next run starts.
+		in.routing = envelope.Kind != ""
 		cancelRun()
 
 		if done {
@@ -145,12 +149,14 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 			target, popped, ok := in.history.PopOne()
 			if !ok {
 				wf.GetLogger(ctx).Warn("instance-force-back: no completed node to return to; dropping")
+				in.routing = false
 				continue
 			}
 			in.msgBuf.ResetSpan(popped)
 			in.recordAndRedirect(ctx, abandonedNodes, target, domain.ForceRouteDirectionBack, sig)
 			steps = redirectSteps(original, deptFromNodeKey(target))
 		}
+		in.routing = false
 	}
 }
 

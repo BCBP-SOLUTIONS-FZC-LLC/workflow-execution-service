@@ -40,6 +40,16 @@ const boundaryEndsPathChangeID = "boundary-no-target-ends-path"
 // ended the instance as TERMINATED without writing the instance's status.
 const exclusiveEndCompletesPathChangeID = "exclusive-end-completes-path"
 
+// abandonedTaskSupersededChangeID gates marking SUPERSEDED the task of a stage
+// whose scope was cancelled, an interrupted call's open task among them.
+// Before it, such a task stayed open and claimable.
+const abandonedTaskSupersededChangeID = "abandoned-task-superseded"
+
+// subWorkflowErrorRaisedChangeID gates raising the error class of a stage that
+// fails inside a call or subprocess to its error boundaries. Before it, such a
+// failure failed the instance whatever boundaries the call had.
+const subWorkflowErrorRaisedChangeID = "subworkflow-error-raised"
+
 // parallelJoinByBranchChangeID gates telling a Parallel step's branches apart
 // by their place in the step. Before it, they were told apart by DeptID, and
 // two branches with one DeptID never joined.

@@ -115,6 +115,7 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 
 	if abandoned {
 		cancelBoundaries()
+		in.supersedeAbandoned(ctx, out.TaskID)
 		return nodeKey, "", errStageAbandoned
 	}
 
@@ -131,21 +132,42 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 			_ = updateTaskStatus(ctx, port.UpdateTaskStatusInput{
 				TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusSuperseded,
 			})
-			if endsPath(ctx, fired) {
-				return "", "", errPathEnded
-			}
-			return in.runDepartment(ctx, plan, fired.TargetDept)
+			return in.runFiredPath(ctx, plan, fired)
 		}
 		// Non-interrupting: the host keeps running (we keep waiting below).
-		if !endsPath(ctx, fired) {
-			in.spawnNonInterruptingTarget(ctx, plan, fired.TargetDept)
-		}
+		in.spawnFiredPath(ctx, plan, fired)
 		resolveCh.Receive(ctx, &sig)
 	} else {
 		cancelBoundaries()
 	}
 
 	return in.resolveTaskStage(ctx, nodeKey, out, sig)
+}
+
+// supersedeAbandoned marks the task of a stage whose scope was cancelled
+// SUPERSEDED, so it cannot be claimed once the instance has moved on. An admin
+// force-route is left to RecordForceRoute, which names the admin as the actor.
+// The write is best-effort and made on a context the cancellation cannot
+// reach: failing the instance over bookkeeping would be the worse outcome.
+func (in *interpreter) supersedeAbandoned(ctx wf.Context, taskID string) {
+	if in.routing || getVersion(ctx, abandonedTaskSupersededChangeID) == wf.DefaultVersion {
+		return
+	}
+	dctx, _ := wf.NewDisconnectedContext(ctx)
+	_ = updateTaskStatus(dctx, port.UpdateTaskStatusInput{
+		TaskID: taskID, TenantID: in.tenantID, Status: domain.TaskStatusSuperseded,
+	})
+}
+
+// stageFailedError is a stage that failed, carrying the class it failed with,
+// which an error boundary of an enclosing call or subprocess can match.
+type stageFailedError struct {
+	NodeKey domain.NodeKey
+	Reason  string
+}
+
+func (e *stageFailedError) Error() string {
+	return fmt.Sprintf("workflow: stage %q failed: %s", e.NodeKey, e.Reason)
 }
 
 func (in *interpreter) resolveTaskStage(
@@ -157,7 +179,7 @@ func (in *interpreter) resolveTaskStage(
 		}); err != nil {
 			return nodeKey, "", err
 		}
-		return nodeKey, "", fmt.Errorf("workflow: stage %q failed: %s", nodeKey, sig.Reason)
+		return nodeKey, "", &stageFailedError{NodeKey: nodeKey, Reason: sig.Reason}
 	}
 
 	completion, err := completeAssignment(ctx, port.CompleteAssignmentInput{

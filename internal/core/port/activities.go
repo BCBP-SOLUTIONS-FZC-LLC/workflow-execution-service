@@ -202,7 +202,8 @@ type ReassignAssignmentInput struct {
 // and an interrupting boundary event abandoning an in-flight task (marking
 // it SUPERSEDED, RecordVersion left zero since that's a system-initiated
 // transition with no caller-asserted expected version to check) are its
-// callers today.
+// callers today. A SUPERSEDED write also vacates the task's assignments and
+// enqueues WorkflowTaskSuperseded, and leaves a task already settled alone.
 type UpdateTaskStatusInput struct {
 	TaskID        string
 	TenantID      string

@@ -320,6 +320,17 @@ func vacateAssignmentsFor(ctx context.Context, repo port.TaskAssignmentRepositor
 	return nil
 }
 
+// supersedeAbandoned supersedes a task the workflow abandoned: a boundary fired
+// over its scope. A task already settled stays as it is, since the abandonment
+// can race the completion that settled it. No user abandons a task, so the
+// event names no actor.
+func (d *Deps) supersedeAbandoned(ctx context.Context, tenantID uuid.UUID, task *domain.Task) error {
+	if task.Status != domain.TaskStatusReady && task.Status != domain.TaskStatusInProgress {
+		return nil
+	}
+	return d.supersedeTask(ctx, tenantID, task.WorkflowInstanceID, task, uuid.Nil)
+}
+
 func (d *Deps) UpdateTaskStatus(ctx context.Context, in port.UpdateTaskStatusInput) error {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
@@ -338,6 +349,9 @@ func (d *Deps) UpdateTaskStatus(ctx context.Context, in port.UpdateTaskStatusInp
 		}
 		if existing.Status == in.Status {
 			return nil
+		}
+		if in.Status == domain.TaskStatusSuperseded {
+			return d.supersedeAbandoned(ctx, tenantID, existing)
 		}
 		task, err := d.Tasks.UpdateStatus(ctx, tenantID, taskID, in.Status, existing.RecordVersion)
 		if err != nil {

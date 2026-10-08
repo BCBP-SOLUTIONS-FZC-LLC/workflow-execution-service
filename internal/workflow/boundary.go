@@ -28,6 +28,50 @@ type boundaryFire struct {
 	Interrupting bool
 	TargetDept   string
 	ErrorCode    string // set only for Kind == "error"
+	// Steps is the whole path the boundary leads to; empty in a plan compiled
+	// before paths were carried, whose boundary names only TargetDept.
+	Steps []dsl.ExecutionStep
+}
+
+// withSteps adds the path of the boundary being registered to what onFire
+// is told when it fires.
+func withSteps(steps []dsl.ExecutionStep, onFire func(boundaryFire)) func(boundaryFire) {
+	return func(f boundaryFire) {
+		f.Steps = steps
+		onFire(f)
+	}
+}
+
+// runFiredPath runs what an interrupting boundary leads to, in the host's
+// place: its Steps in order, after which the path ends, so nothing the host
+// would have gone on to runs. Without Steps it runs TargetDept's department
+// alone, or ends the path when there is none.
+func (in *interpreter) runFiredPath(ctx wf.Context, plan *dsl.CompiledPlan, f *boundaryFire) (domain.NodeKey, string, error) {
+	if len(f.Steps) > 0 {
+		out, err := in.runStepList(ctx, plan, f.Steps, in.admin)
+		if err != nil {
+			return out.LastNode, out.LastResult, err
+		}
+		return out.LastNode, out.LastResult, errPathEnded
+	}
+	if endsPath(ctx, f) {
+		return "", "", errPathEnded
+	}
+	return in.runDepartment(ctx, plan, f.TargetDept)
+}
+
+// spawnFiredPath runs the path of a non-interrupting boundary beside its
+// host.
+func (in *interpreter) spawnFiredPath(ctx wf.Context, plan *dsl.CompiledPlan, f *boundaryFire) {
+	if len(f.Steps) > 0 {
+		wf.Go(ctx, func(gctx wf.Context) {
+			_, _ = in.runSteps(gctx, plan, f.Steps, in.admin)
+		})
+		return
+	}
+	if !endsPath(ctx, f) {
+		in.spawnNonInterruptingTarget(ctx, plan, f.TargetDept)
+	}
 }
 
 func addTimerCase(ctx wf.Context, sel wf.Selector, duration string, interrupting bool, targetDept string, onFire func(boundaryFire)) (cancel func()) {
@@ -105,17 +149,17 @@ func addErrorCase(ctx wf.Context, sel wf.Selector, ch wf.Channel, errorPaths []d
 			wf.GetLogger(ctx).Warn("error-boundary event has no matching ErrorPath and no catch-all; dropping", "error_code", code)
 			return
 		}
-		onFire(boundaryFire{Kind: "error", TargetDept: ep.TargetDept, ErrorCode: code})
+		onFire(boundaryFire{Kind: "error", Interrupting: true, TargetDept: ep.TargetDept, ErrorCode: code, Steps: ep.Steps})
 	})
 }
 
 func registerTaskBoundaries(ctx wf.Context, sel wf.Selector, in *interpreter, host string, timer *dsl.BoundaryTimer, msg *dsl.MessagePath, onFire func(boundaryFire)) (cancel func()) {
 	var cancels []func()
 	if timer != nil {
-		cancels = append(cancels, addTimerCase(ctx, sel, timer.Duration, timer.Interrupting, timer.TargetDept, onFire))
+		cancels = append(cancels, addTimerCase(ctx, sel, timer.Duration, timer.Interrupting, timer.TargetDept, withSteps(timer.Steps, onFire)))
 	}
 	if msg != nil {
-		cancels = append(cancels, in.addMessageBoundary(ctx, sel, host, *msg, onFire))
+		cancels = append(cancels, in.addMessageBoundary(ctx, sel, host, *msg, withSteps(msg.Steps, onFire)))
 	}
 	return func() {
 		for _, c := range cancels {
@@ -127,10 +171,10 @@ func registerTaskBoundaries(ctx wf.Context, sel wf.Selector, in *interpreter, ho
 func registerSubWorkflowBoundaries(ctx wf.Context, sel wf.Selector, in *interpreter, errCh wf.Channel, sw *dsl.SubWorkflowStep, onFire func(boundaryFire)) (cancelAll func()) {
 	var cancels []func()
 	for _, t := range sw.TimerPaths {
-		cancels = append(cancels, addTimerCase(ctx, sel, t.Duration, t.Interrupting, t.TargetDept, onFire))
+		cancels = append(cancels, addTimerCase(ctx, sel, t.Duration, t.Interrupting, t.TargetDept, withSteps(t.Steps, onFire)))
 	}
 	for _, m := range sw.MessagePaths {
-		cancels = append(cancels, in.addMessageBoundary(ctx, sel, sw.NodeID, m, onFire))
+		cancels = append(cancels, in.addMessageBoundary(ctx, sel, sw.NodeID, m, withSteps(m.Steps, onFire)))
 	}
 	addErrorCase(ctx, sel, errCh, sw.ErrorPaths, onFire)
 	return func() {

@@ -414,6 +414,42 @@ func TestUpdateTaskStatus_NonFailed_NoEvent(t *testing.T) {
 	assert.Empty(t, outbox.enqueued)
 }
 
+// A task whose scope the workflow abandoned is superseded like one an admin
+// routed past: its assignments are vacated and the dashboards are told.
+func TestUpdateTaskStatus_Superseded_VacatesAndEnqueuesTaskSuperseded(t *testing.T) {
+	taskID := uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), Status: domain.TaskStatusReady, RecordVersion: 1}
+	assignee := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New(), IsActive: true}
+	assignments := newFakeAssignmentRepo(assignee)
+	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
+
+	err := deps.UpdateTaskStatus(context.Background(), port.UpdateTaskStatusInput{
+		TaskID: taskID.String(), TenantID: uuid.New().String(), Status: domain.TaskStatusSuperseded,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, domain.TaskStatusSuperseded, task.Status)
+	assert.False(t, assignee.IsActive, "the superseded task keeps no active assignment")
+	require.Len(t, outbox.enqueued, 1)
+	assert.Equal(t, domain.EventWorkflowTaskSuperseded, outbox.enqueued[0].Type)
+}
+
+// A task already settled is not superseded: the abandonment can race the
+// completion it was abandoned by.
+func TestUpdateTaskStatus_Superseded_LeavesASettledTaskAlone(t *testing.T) {
+	for _, status := range []domain.TaskStatus{domain.TaskStatusCompleted, domain.TaskStatusFailed, domain.TaskStatusSuperseded} {
+		taskID := uuid.New()
+		task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), Status: status, RecordVersion: 1}
+		deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo())
+
+		err := deps.UpdateTaskStatus(context.Background(), port.UpdateTaskStatusInput{
+			TaskID: taskID.String(), TenantID: uuid.New().String(), Status: domain.TaskStatusSuperseded,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, status, task.Status)
+		assert.Empty(t, outbox.enqueued, "status %s", status)
+	}
+}
+
 // TestUpdateTaskStatus_GetTaskError forces Tasks.GetByID to fail.
 func TestUpdateTaskStatus_GetTaskError(t *testing.T) {
 	taskID := uuid.New()

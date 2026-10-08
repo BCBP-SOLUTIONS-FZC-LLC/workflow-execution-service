@@ -63,6 +63,13 @@ type interpreter struct {
 	history *nodeHistory
 	msgBuf  *messageBuffer
 
+	// admin is the channel the instance's parallel steps listen on for admin
+	// signals; a boundary's path runs its steps on it too.
+	admin wf.Channel
+	// routing is true while an admin force-route abandons the running steps,
+	// which RecordForceRoute then supersedes with the admin as the actor.
+	routing bool
+
 	// external is the key set of the main plan's outside waits
 	// (dsl.ExternalWaits); externalWaiting holds the channel each one now
 	// waiting in is blocked on, by key (execution LLD §2.4).
