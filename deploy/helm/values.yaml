@@ -175,6 +175,10 @@ env:
   temporalTaskQueue: execution-default
   awsRegion: us-east-1
   awsUseStub: "false"
+  # Glue schema registry the API's SNS codec encodes against; required while awsUseStub is false.
+  glueRegistryName: wf-workflow-events
+  # The Org & Membership eligibility endpoint the API calls. Required: the API refuses to start without it.
+  eligibilityBaseURL: ""
   outboxPollInterval: 500ms
   outboxBatchSize: "50"
 
@@ -182,6 +186,9 @@ env:
 # secretValues is for CI/values-overlay injection — never commit real
 # values here (mirrors definition_service's dual-mode secret.yaml).
 secret:
+  # An existing Secret must carry every key secretValues lists, OUTBOX_RELAY_DATABASE_URL and
+  # SNS_TOPIC_ARN included: the render-time key checks are skipped, so a missing key shows as
+  # CreateContainerConfigError at pod start.
   existingSecretName: ""
   secretValues:
     DATABASE_URL: ""
@@ -189,6 +196,8 @@ secret:
     VALKEY_PASSWORD: ""
     TEMPORAL_HOST_PORT: ""
     SNS_TOPIC_ARN: ""
+    # The outbox relay's own DSN, a role with BYPASSRLS; required outside dev.
+    OUTBOX_RELAY_DATABASE_URL: ""
     OPENBAO_TOKEN: ""
     # This service's own token, which its internal-API callers present.
     INTERNAL_API_TOKEN: ""

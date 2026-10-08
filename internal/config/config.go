@@ -313,10 +313,10 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// validate checks value ranges only. What a binary requires to be set is
+// checked by its own Require method, so the environment of one binary does
+// not have to carry another's settings.
 func (c *Config) validate() error {
-	if c.DatabaseURL == "" {
-		return fmt.Errorf("DATABASE_URL is required")
-	}
 	if c.HTTPPort < 1 || c.HTTPPort > 65535 {
 		return fmt.Errorf("HTTP_PORT must be in [1, 65535]")
 	}
@@ -347,14 +347,6 @@ func (c *Config) validate() error {
 	if c.OutboxPollInterval <= 0 {
 		return fmt.Errorf("OUTBOX_POLL_INTERVAL must be > 0")
 	}
-	if !c.AWSUseStub {
-		if c.SNSTopicARN == "" {
-			return fmt.Errorf("SNS_TOPIC_ARN is required when AWS_USE_STUB=false")
-		}
-		if c.GlueRegistryName == "" {
-			return fmt.Errorf("GLUE_REGISTRY_NAME is required when AWS_USE_STUB=false")
-		}
-	}
 	if c.DefinitionClientTimeout <= 0 {
 		return fmt.Errorf("DEFINITION_CLIENT_TIMEOUT must be > 0")
 	}
@@ -367,8 +359,56 @@ func (c *Config) validate() error {
 	if c.QueueTopologyPollInterval <= 0 {
 		return fmt.Errorf("QUEUE_TOPOLOGY_POLL_INTERVAL must be > 0")
 	}
-	if c.AppEnv != "dev" && c.InternalAPIToken == "" {
-		return fmt.Errorf("INTERNAL_API_TOKEN is required when APP_ENV != dev")
+	return nil
+}
+
+// RequireMigrate checks what the migrate subcommand needs: a database.
+func (c *Config) RequireMigrate() error {
+	if c.MigrationDSN() == "" {
+		return fmt.Errorf("DATABASE_URL is required")
+	}
+	return nil
+}
+
+// RequireServer checks what cmd/server needs.
+func (c *Config) RequireServer() error {
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required")
+	}
+	if c.DefinitionServiceURL == "" {
+		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
+	}
+	if c.EligibilityBaseURL == "" {
+		return fmt.Errorf("ELIGIBILITY_BASE_URL is required")
+	}
+	if !c.AWSUseStub {
+		if c.SNSTopicARN == "" {
+			return fmt.Errorf("SNS_TOPIC_ARN is required when AWS_USE_STUB=false")
+		}
+		if c.GlueRegistryName == "" {
+			return fmt.Errorf("GLUE_REGISTRY_NAME is required when AWS_USE_STUB=false")
+		}
+	}
+	if c.AppEnv != "dev" {
+		if c.InternalAPIToken == "" {
+			return fmt.Errorf("INTERNAL_API_TOKEN is required when APP_ENV != dev")
+		}
+		if c.DefinitionServiceToken == "" {
+			return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required when APP_ENV != dev")
+		}
+		if c.OutboxRelayDatabaseURL == "" {
+			return fmt.Errorf("OUTBOX_RELAY_DATABASE_URL is required when APP_ENV != dev — a missing relay DSN would silently fall back to the RLS-enforced app role and see zero rows forever")
+		}
+	}
+	return nil
+}
+
+// RequireWorker checks what cmd/worker needs. Its Activities only enqueue
+// events, so it needs neither the relay DSN nor the SNS and Glue settings,
+// and it serves no internal API, so it needs no INTERNAL_API_TOKEN.
+func (c *Config) RequireWorker() error {
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required")
 	}
 	if c.DefinitionServiceURL == "" {
 		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
@@ -376,15 +416,23 @@ func (c *Config) validate() error {
 	if c.AppEnv != "dev" && c.DefinitionServiceToken == "" {
 		return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required when APP_ENV != dev")
 	}
-	if c.AppEnv != "dev" && c.OutboxRelayDatabaseURL == "" {
-		return fmt.Errorf("OUTBOX_RELAY_DATABASE_URL is required when APP_ENV != dev — a missing relay DSN would silently fall back to the RLS-enforced app role and see zero rows forever")
+	return nil
+}
+
+// RequireConnectorWorker checks what cmd/connector-worker needs that is not
+// specific to its stream: it has no database and publishes no events.
+func (c *Config) RequireConnectorWorker() error {
+	if c.DefinitionServiceURL == "" {
+		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
 	}
-	// Connector-worker-only fields (OpenBao*, ConnectorPoolSize*/
-	// ConnectorTimeout*, ExecutionServiceInternalAddr) are deliberately NOT
-	// validated here: this Config is shared by cmd/server and cmd/worker too,
-	// and a hard requirement here would break their boot for fields only
-	// cmd/connector-worker actually needs.
-	// cmd/connector-worker's own main.go checks its required fields itself.
+	if c.AppEnv != "dev" {
+		if c.DefinitionServiceToken == "" {
+			return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required when APP_ENV != dev")
+		}
+		if c.InternalAPIToken == "" {
+			return fmt.Errorf("INTERNAL_API_TOKEN is required when APP_ENV != dev")
+		}
+	}
 	return nil
 }
 

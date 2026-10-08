@@ -63,6 +63,10 @@ spec:
               value: {{ .Values.env.awsRegion | quote }}
             - name: AWS_USE_STUB
               value: {{ .Values.env.awsUseStub | quote }}
+            - name: GLUE_REGISTRY_NAME
+              value: {{ .Values.env.glueRegistryName | quote }}
+            - name: ELIGIBILITY_BASE_URL
+              value: {{ required "env.eligibilityBaseURL is required: the API refuses to start without it" .Values.env.eligibilityBaseURL | quote }}
             - name: OUTBOX_POLL_INTERVAL
               value: {{ .Values.env.outboxPollInterval | quote }}
             - name: OUTBOX_BATCH_SIZE
@@ -93,7 +97,14 @@ spec:
                 secretKeyRef:
                   name: {{ include "workflow-execution-service.secretName" . }}
                   key: SNS_TOPIC_ARN
-                  optional: true
+                  optional: {{ eq (toString .Values.env.awsUseStub) "true" }}
+            - name: OUTBOX_RELAY_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: OUTBOX_RELAY_DATABASE_URL
+                  {{- /* secret.yaml requires it outside dev */}}
+                  optional: {{ eq .Values.env.appEnv "dev" }}
             - name: DEFINITION_SERVICE_URL
               value: {{ .Values.definitionServiceURL | quote }}
             - name: DEFINITION_SERVICE_TOKEN

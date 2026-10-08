@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -38,15 +39,6 @@ func TestLoad_Success(t *testing.T) {
 	}
 }
 
-func TestLoad_MissingDatabaseURL(t *testing.T) {
-	setValidEnv(t)
-	t.Setenv("DATABASE_URL", "")
-
-	if _, err := Load(); err == nil {
-		t.Fatal("Load() error = nil, want error for missing DATABASE_URL")
-	}
-}
-
 func TestLoad_InvalidIntEnvVarFailsFast(t *testing.T) {
 	setValidEnv(t)
 	t.Setenv("HTTP_PORT", "not-a-port")
@@ -76,36 +68,10 @@ func TestValidate(t *testing.T) {
 		{"sampler ratio negative", func(c *Config) { c.OTELTracesSamplerRatio = -0.1 }, true},
 		{"outbox batch size zero", func(c *Config) { c.OutboxBatchSize = 0 }, true},
 		{"outbox poll interval zero", func(c *Config) { c.OutboxPollInterval = 0 }, true},
-		{"aws not stubbed without sns topic", func(c *Config) { c.AWSUseStub = false; c.SNSTopicARN = "" }, true},
-		{"aws not stubbed with sns topic", func(c *Config) { c.AWSUseStub = false; c.SNSTopicARN = "arn:aws:sns:x" }, false},
 		{"definition client timeout zero", func(c *Config) { c.DefinitionClientTimeout = 0 }, true},
 		{"eligibility client timeout zero", func(c *Config) { c.EligibilityClientTimeout = 0 }, true},
 		{"iam client timeout zero", func(c *Config) { c.IAMClientTimeout = 0 }, true},
 		{"queue topology poll interval zero", func(c *Config) { c.QueueTopologyPollInterval = 0 }, true},
-		{"internal api token required in prod", func(c *Config) { c.AppEnv = "prod" }, true},
-		{"internal api token required outside dev even when not prod", func(c *Config) {
-			c.AppEnv = "staging"
-			c.OutboxRelayDatabaseURL = "postgres://relay"
-		}, true},
-		{"internal api token set in prod", func(c *Config) {
-			c.AppEnv = "prod"
-			c.InternalAPIToken = "tok"
-			c.DefinitionServiceToken = "def-tok"
-			c.OutboxRelayDatabaseURL = "postgres://relay"
-		}, false},
-		{"definition service url required", func(c *Config) { c.DefinitionServiceURL = "" }, true},
-		{"definition service token required outside dev", func(c *Config) {
-			c.AppEnv = "staging"
-			c.InternalAPIToken = "tok"
-			c.OutboxRelayDatabaseURL = "postgres://relay"
-		}, true},
-		{"outbox relay database url required outside dev", func(c *Config) { c.AppEnv = "staging"; c.InternalAPIToken = "tok" }, true},
-		{"outbox relay database url set outside dev", func(c *Config) {
-			c.AppEnv = "staging"
-			c.InternalAPIToken = "tok"
-			c.DefinitionServiceToken = "def-tok"
-			c.OutboxRelayDatabaseURL = "postgres://relay"
-		}, false},
 	}
 
 	for _, tt := range tests {
@@ -122,9 +88,6 @@ func TestValidate(t *testing.T) {
 				OTELTracesSamplerRatio:    1.0,
 				OutboxBatchSize:           50,
 				OutboxPollInterval:        time.Second,
-				AWSUseStub:                true,
-				GlueRegistryName:          "wf-workflow-events",
-				DefinitionServiceURL:      "http://definition:8080",
 				DefinitionClientTimeout:   5 * time.Second,
 				EligibilityClientTimeout:  5 * time.Second,
 				IAMClientTimeout:          5 * time.Second,
@@ -228,5 +191,93 @@ func TestGetEnvDurationOrDefault(t *testing.T) {
 	}
 	if got, err := getEnvDurationOrDefault("TEST_DURATION_VAR_UNSET", want); got != want || err != nil {
 		t.Errorf("getEnvDurationOrDefault() = (%v, %v), want (%v, nil)", got, err, want)
+	}
+}
+
+// A binary needs only the settings it uses: the connector-worker has no
+// database and publishes no events, and the migrate job needs only the DSN.
+func TestLoad_ConnectorWorkerEnvironment(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("OUTBOX_RELAY_DATABASE_URL", "")
+	t.Setenv("AWS_USE_STUB", "false")
+	t.Setenv("SNS_TOPIC_ARN", "")
+	t.Setenv("GLUE_REGISTRY_NAME", "")
+	t.Setenv("DEFINITION_SERVICE_URL", "http://definition:8080")
+	t.Setenv("DEFINITION_SERVICE_TOKEN", "def-tok")
+	t.Setenv("INTERNAL_API_TOKEN", "tok")
+
+	if _, err := Load(); err != nil {
+		t.Fatalf("Load() error = %v, want nil for the connector-worker's environment", err)
+	}
+}
+
+func TestRequire(t *testing.T) {
+	prod := func(c *Config) {
+		c.AppEnv = "production"
+		c.InternalAPIToken = "tok"
+		c.DefinitionServiceToken = "def-tok"
+		c.OutboxRelayDatabaseURL = "postgres://relay"
+		c.SNSTopicARN = "arn:aws:sns:x"
+		c.GlueRegistryName = "wf-workflow-events"
+	}
+	base := func() *Config {
+		return &Config{
+			AppEnv:               "dev",
+			DatabaseURL:          "postgres://x",
+			DefinitionServiceURL: "http://definition:8080",
+			EligibilityBaseURL:   "http://eligibility",
+			AWSUseStub:           true,
+		}
+	}
+	tests := []struct {
+		name    string
+		require func(*Config) error
+		mutate  func(*Config)
+		wantErr string
+	}{
+		{"server valid in dev", (*Config).RequireServer, func(c *Config) {}, ""},
+		{"server valid in production", (*Config).RequireServer, prod, ""},
+		{"server needs a database", (*Config).RequireServer, func(c *Config) { c.DatabaseURL = "" }, "DATABASE_URL"},
+		{"server needs the definition service", (*Config).RequireServer, func(c *Config) { c.DefinitionServiceURL = "" }, "DEFINITION_SERVICE_URL"},
+		{"server needs the eligibility service", (*Config).RequireServer, func(c *Config) { c.EligibilityBaseURL = "" }, "ELIGIBILITY_BASE_URL"},
+		{"server needs sns when not stubbed", (*Config).RequireServer, func(c *Config) { c.AWSUseStub = false; c.GlueRegistryName = "g" }, "SNS_TOPIC_ARN"},
+		{"server needs glue when not stubbed", (*Config).RequireServer, func(c *Config) { c.AWSUseStub = false; c.SNSTopicARN = "arn" }, "GLUE_REGISTRY_NAME"},
+		{"server needs its token outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.InternalAPIToken = "" }, "INTERNAL_API_TOKEN"},
+		{"server needs the definition token outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.DefinitionServiceToken = "" }, "DEFINITION_SERVICE_TOKEN"},
+		{"server needs the relay dsn outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.OutboxRelayDatabaseURL = "" }, "OUTBOX_RELAY_DATABASE_URL"},
+
+		{"worker valid in dev", (*Config).RequireWorker, func(c *Config) {}, ""},
+		{"worker valid in production without the api's settings", (*Config).RequireWorker, func(c *Config) { c.AppEnv = "production"; c.DefinitionServiceToken = "def-tok" }, ""},
+		{"worker needs a database", (*Config).RequireWorker, func(c *Config) { c.DatabaseURL = "" }, "DATABASE_URL"},
+		{"worker needs the definition service", (*Config).RequireWorker, func(c *Config) { c.DefinitionServiceURL = "" }, "DEFINITION_SERVICE_URL"},
+		{"worker needs the definition token outside dev", (*Config).RequireWorker, func(c *Config) { c.AppEnv = "production" }, "DEFINITION_SERVICE_TOKEN"},
+
+		{"connector-worker valid in production without a database", (*Config).RequireConnectorWorker, func(c *Config) {
+			c.AppEnv = "production"
+			c.DatabaseURL = ""
+			c.InternalAPIToken = "tok"
+			c.DefinitionServiceToken = "def-tok"
+		}, ""},
+		{"connector-worker needs the definition service", (*Config).RequireConnectorWorker, func(c *Config) { c.DefinitionServiceURL = "" }, "DEFINITION_SERVICE_URL"},
+		{"connector-worker needs the definition token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "production"; c.InternalAPIToken = "tok" }, "DEFINITION_SERVICE_TOKEN"},
+		{"connector-worker needs the internal token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "production"; c.DefinitionServiceToken = "def-tok" }, "INTERNAL_API_TOKEN"},
+
+		{"migrate needs only a database", (*Config).RequireMigrate, func(c *Config) { *c = Config{DatabaseURL: "postgres://x"} }, ""},
+		{"migrate prefers its direct dsn", (*Config).RequireMigrate, func(c *Config) { *c = Config{MigrationDatabaseURL: "postgres://direct"} }, ""},
+		{"migrate needs a database", (*Config).RequireMigrate, func(c *Config) { c.DatabaseURL = "" }, "DATABASE_URL"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := base()
+			tt.mutate(cfg)
+			err := tt.require(cfg)
+			switch {
+			case tt.wantErr == "" && err != nil:
+				t.Errorf("error = %v, want nil", err)
+			case tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)):
+				t.Errorf("error = %v, want one naming %s", err, tt.wantErr)
+			}
+		})
 	}
 }

@@ -38,6 +38,9 @@ func main() {
 	}
 
 	cfg, err := config.Load()
+	if err == nil {
+		err = cfg.RequireWorker()
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		os.Exit(1)

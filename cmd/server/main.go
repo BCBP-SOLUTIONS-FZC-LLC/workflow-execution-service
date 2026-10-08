@@ -31,6 +31,10 @@ func main() {
 	// dedicated migration entrypoint (Kubernetes init container or pre-boot job)
 	// rather than in the service's boot path.
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if err := cfg.RequireMigrate(); err != nil {
+			fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+			os.Exit(1)
+		}
 		migrateLog, err := logger.NewLogger(cfg.AppEnv)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "logger error: %v\n", err)
@@ -41,6 +45,11 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	}
+
+	if err := cfg.RequireServer(); err != nil {
+		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		os.Exit(1)
 	}
 
 	a, err := newApp(cfg)

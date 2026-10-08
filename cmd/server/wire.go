@@ -138,11 +138,6 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, fmt.Errorf("new schema validator: %w", err)
 	}
 
-	if cfg.EligibilityBaseURL == "" {
-		unwind()
-		return nil, fmt.Errorf("ELIGIBILITY_BASE_URL is required for cmd/server")
-	}
-
 	definitions := outboundhttp.NewDefinitionClient(cfg.DefinitionServiceURL, cfg.DefinitionServiceToken, cfg.DefinitionClientTimeout)
 
 	eligibility := outboundhttp.NewEligibilityClient(cfg.EligibilityBaseURL, cfg.EligibilityClientTimeout)
