@@ -32,10 +32,10 @@ data:
     rules:
       # Expose per-pod RPS as http_requests_per_second so the HPA can use
       # type: Pods / metric: http_requests_per_second.
-      # Computed from the Prometheus counter http_requests_total scraped by
+      # Computed from the Prometheus counter platform_http_requests_total scraped by
       # the ServiceMonitor (serviceMonitor.enabled: true in Helm values) —
       # the API pod only, since the Worker has no business HTTP traffic.
-      - seriesQuery: 'http_requests_total{namespace!="",pod!="",job="workflow-execution-service-api"}'
+      - seriesQuery: 'platform_http_requests_total{namespace!="",pod!="",job="workflow-execution-service-api"}'
         resources:
           overrides:
             namespace:

@@ -65,7 +65,7 @@ COVER_THRESHOLD    := 95
 # the health server), which only `make test-e2e` exercises.
 COVER_PKG_FLOORS   := internal/workflow:88 cmd/connector-worker:55
 
-.PHONY: all tools tools-integration generate generate-sqlc mock contract-check contract-breaking \
+.PHONY: metrics-lint metrics-inventory all tools tools-integration generate generate-sqlc mock contract-check contract-breaking \
         build migrate dev test test-integration test-e2e test-ci merge-coverage \
         cover cover-func cover-gaps cover-html cover-check cover-check-pkg \
         arch-lint lint lint-fix vuln \
@@ -295,6 +295,8 @@ check:
 	go vet ./cmd/... ./internal/...
 	@echo "==> arch-lint"
 	$(MAKE) arch-lint
+	@echo "==> metrics-lint"
+	$(MAKE) metrics-lint
 	@echo "==> contract-breaking"
 	$(MAKE) contract-breaking
 	@echo "==> test-ci (unit + integration, merged coverage gate)"
@@ -320,6 +322,15 @@ lint:
 ## lint-fix: Run golangci-lint with auto-fix
 lint-fix:
 	$(GOLANGCI) run --fix ./cmd/... ./internal/... ./test/...
+
+## metrics-lint: Observability standard: collector naming, metricslint on a real scrape, alert and doc references, inventory drift
+metrics-lint:
+	@bash .github/scripts/check-metric-naming.sh
+	@bash .github/scripts/metricslint.sh
+
+## metrics-inventory: Regenerate docs/observability/metric-registry.md from the registry and a real scrape
+metrics-inventory:
+	@METRICS_INVENTORY_WRITE=1 bash .github/scripts/metricslint.sh
 
 ## vuln: Run govulncheck to detect known vulnerabilities in dependencies
 vuln:

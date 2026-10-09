@@ -51,7 +51,7 @@ var (
 var registerOnce sync.Once
 
 func Register() {
-	registerOnce.Do(register)
+	registerOnce.Do(registerServiceMetrics)
 }
 
 func must[C any](c C, err error) C {
@@ -61,7 +61,7 @@ func must[C any](c C, err error) C {
 	return c
 }
 
-func register() {
+func registerServiceMetrics() {
 	RecordVersionConflictTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_record_version_conflict_total",
 		"Total optimistic-lock record_version conflicts, by table.", "table"))

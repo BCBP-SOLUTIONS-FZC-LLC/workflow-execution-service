@@ -72,9 +72,9 @@ groups:
     rules:
       - alert: ExecutionServiceHighErrorRate
         expr: |
-          sum(rate(http_requests_total{job="workflow-execution-service-api", status_class="5xx"}[5m]))
+          sum(rate(platform_http_requests_total{job="workflow-execution-service-api", status_class="5xx"}[5m]))
             /
-          sum(rate(http_requests_total{job="workflow-execution-service-api"}[5m]))
+          sum(rate(platform_http_requests_total{job="workflow-execution-service-api"}[5m]))
           > 0.05
         for: 5m
         labels:
@@ -86,9 +86,9 @@ groups:
 
       - alert: ExecutionServiceCriticalErrorRate
         expr: |
-          sum(rate(http_requests_total{job="workflow-execution-service-api", status_class="5xx"}[5m]))
+          sum(rate(platform_http_requests_total{job="workflow-execution-service-api", status_class="5xx"}[5m]))
             /
-          sum(rate(http_requests_total{job="workflow-execution-service-api"}[5m]))
+          sum(rate(platform_http_requests_total{job="workflow-execution-service-api"}[5m]))
           > 0.20
         for: 2m
         labels:
@@ -104,7 +104,7 @@ groups:
         expr: |
           histogram_quantile(0.99,
             sum by (le) (
-              rate(http_request_duration_seconds_bucket{job="workflow-execution-service-api"}[5m])
+              rate(platform_http_request_duration_seconds_bucket{job="workflow-execution-service-api"}[5m])
             )
           ) > 2.0
         for: 10m
@@ -121,9 +121,9 @@ groups:
       # evaluated per route so the summary names the failing one.
       - alert: ExecutionServiceDefinitionCallsHighErrorRate
         expr: |
-          sum by (route) (rate(http_requests_total{job="workflow-execution-service-api", route=~"/api/v1/internal/workflows/:workflow_id/active-instances|/api/v1/internal/users/:user_id/pause-tasks", status_class="5xx"}[5m]))
+          sum by (route) (rate(platform_http_requests_total{job="workflow-execution-service-api", route=~"/api/v1/internal/workflows/:workflow_id/active-instances|/api/v1/internal/users/:user_id/pause-tasks", status_class="5xx"}[5m]))
             /
-          sum by (route) (rate(http_requests_total{job="workflow-execution-service-api", route=~"/api/v1/internal/workflows/:workflow_id/active-instances|/api/v1/internal/users/:user_id/pause-tasks"}[5m]))
+          sum by (route) (rate(platform_http_requests_total{job="workflow-execution-service-api", route=~"/api/v1/internal/workflows/:workflow_id/active-instances|/api/v1/internal/users/:user_id/pause-tasks"}[5m]))
           > 0.05
         for: 5m
         labels:
@@ -136,23 +136,23 @@ groups:
   - name: workflow_execution_service_panics
     rules:
       - alert: ExecutionServiceHTTPPanic
-        expr: increase(http_panic_total{job="workflow-execution-service-api"}[5m]) > 0
+        expr: increase(platform_http_panics_total{job="workflow-execution-service-api"}[5m]) > 0
         for: 0m
         labels:
           severity: critical
           team: platform
         annotations:
           summary: An execution-service API HTTP handler panicked
-          description: "http_panic_total increased — recovered by platform-gincommon's middleware. Check logs for the stack trace immediately."
+          description: "platform_http_panics_total increased — recovered by platform-gincommon's middleware. Check logs for the stack trace immediately."
 
 
   - name: workflow_execution_service_database
     rules:
       - alert: ExecutionServiceAPIDBErrorRate
         expr: |
-          sum(rate(pgcommon_query_total{job="workflow-execution-service-api", status="error"}[5m]))
+          sum(rate(platform_db_queries_total{job="workflow-execution-service-api", outcome="error"}[5m]))
             /
-          sum(rate(pgcommon_query_total{job="workflow-execution-service-api"}[5m]))
+          sum(rate(platform_db_queries_total{job="workflow-execution-service-api"}[5m]))
           > 0.05
         for: 5m
         labels:
@@ -164,9 +164,9 @@ groups:
 
       - alert: ExecutionServiceWorkerDBErrorRate
         expr: |
-          sum(rate(pgcommon_query_total{job="workflow-execution-service-worker", status="error"}[5m]))
+          sum(rate(platform_db_queries_total{job="workflow-execution-service-worker", outcome="error"}[5m]))
             /
-          sum(rate(pgcommon_query_total{job="workflow-execution-service-worker"}[5m]))
+          sum(rate(platform_db_queries_total{job="workflow-execution-service-worker"}[5m]))
           > 0.05
         for: 5m
         labels:
@@ -179,15 +179,15 @@ groups:
   - name: workflow_execution_service_lld
     rules:
       - alert: InstanceDegraded
-        expr: increase(instance_degraded_total[5m]) > 0
+        expr: increase(workflow_execution_service_instance_degraded_total[5m]) > 0
         labels:
           severity: page
         annotations:
-          summary: "Instance entered DEGRADED for tenant {{ $labels.tenant_id }}"
+          summary: "Instance entered DEGRADED"
           description: "A parallel-branch failure parked an instance needing admin force-forward/force-back resolution (LLD §3.3, §7.6)."
 
       - alert: OutboxDeadLettered
-        expr: increase(outbox_dead_letters_total[5m]) > 0
+        expr: increase(platform_dlq_messages_total{operation="outbox_publish"}[5m]) > 0
         labels:
           severity: page
         annotations:
@@ -195,16 +195,16 @@ groups:
           description: "An event failed all publish retries; operable via the outbox runner's DLQ replay (LLD §6.6, §7.6)."
 
       - alert: InboundEventIngestErrors
-        expr: rate(internal_events_ingest_total{result="error"}[5m]) > 0
+        expr: rate(workflow_execution_service_internal_events_ingest_total{result="error"}[5m]) > 0
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Sustained internal event ingest errors"
-          description: "Mirrors the outbound outbox_dead_letters_total pattern for inbound events (LLD §6.1, §7.6)."
+          description: "Mirrors the outbound outbox dead-letter pattern for inbound events (LLD §6.1, §7.6)."
 
       - alert: SharedWorkflowEventsConsumerOutage
-        expr: time() - internal_events_last_received_timestamp{event_type=~"DelegationStarted|TenantStateChanged"} > 900
+        expr: time() - workflow_execution_service_internal_events_last_received_timestamp{event_type=~"DelegationStarted|TenantStateChanged"} > 900
         labels:
           severity: page
         annotations:
@@ -212,11 +212,11 @@ groups:
           description: "A live event type going quiet for 15 minutes is a consumer-side stall, not a legitimately idle tenant (LLD §10.2, §7.6)."
 
       - alert: RLSViolation
-        expr: increase(rls_violations_total{type=~"missing_guc|cross_tenant"}[5m]) > 0
+        expr: increase(workflow_execution_service_rls_violations_total{violation_type=~"missing_or_invalid_guc|cross_tenant_access"}[5m]) > 0
         labels:
           severity: page
         annotations:
-          summary: "RLS violation recorded: {{ $labels.type }}"
+          summary: "RLS violation recorded: {{ $labels.violation_type }}"
           description: "Same severity as Definition Service's own RLSMissingGUC/RLSCrossTenantAccess alerts (LLD §9.2, §9.5, §7.6)."
 
       - alert: TaskSignalSLOBreach
@@ -225,7 +225,7 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "task_signal_duration_seconds p99 > 300ms"
+          summary: "workflow_execution_service_task_signal_duration_seconds p99 > 300ms"
           description: "Sustained breach of the claim/complete/defer SLO (LLD §10.3, §7.6)."
 
       - alert: InstantiationSLOBreach
@@ -234,7 +234,7 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "instance_start_duration_seconds p99 > 1s"
+          summary: "workflow_execution_service_instance_start_duration_seconds p99 > 1s"
           description: "Sustained breach of the POST /instances SLO (LLD §10.3, §7.6)."
 
       - alert: DelegationRerouteSLOBreach
@@ -243,11 +243,11 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "delegation_reroute_duration_seconds p99 > 4s"
+          summary: "workflow_execution_service_delegation_reroute_duration_seconds p99 > 4s"
           description: "Sustained breach of the DelegationStarted reroute SLO — investigate the eligibility-check batch cost (LLD §6.7, §7.6)."
 
       - alert: WorkflowReplayFailure
-        expr: increase(workflow_replay_failures_total[5m]) > 0
+        expr: increase(workflow_execution_service_workflow_replay_failures_total[5m]) > 0
         labels:
           severity: page
         annotations:
@@ -255,23 +255,23 @@ groups:
           description: "Temporal non-determinism is fatal to the affected workflow execution — the highest-severity Worker failure mode (LLD §7.6)."
 
       - alert: DegradedBacklogStale
-        expr: instance_degraded_oldest_age_seconds > 86400
+        expr: workflow_execution_service_instance_degraded_oldest_age_seconds > 86400
         labels:
           severity: warning
         annotations:
-          summary: "DEGRADED instance untouched for over a day, tenant {{ $labels.tenant_id }}"
-          description: "instance_degraded_total only fires once on entry; this catches an instance nobody has actioned (LLD §7.6)."
+          summary: "DEGRADED instance untouched for over a day"
+          description: "workflow_execution_service_instance_degraded_total only fires once on entry; this catches an instance nobody has actioned (LLD §7.6)."
 
       - alert: WorkerQueuePollingStalled
-        expr: time() - worker_queue_last_poll_timestamp > 300
+        expr: time() - workflow_execution_service_worker_queue_last_poll_timestamp > 300
         labels:
           severity: page
         annotations:
           summary: "Queue {{ $labels.queue }} has not been polled in 5 minutes"
-          description: "A Worker silently failing to poll one tenant-isolated queue is invisible to the aggregate worker_active_queues gauge alone (LLD §7.6)."
+          description: "A Worker silently failing to poll one tenant-isolated queue is invisible to the aggregate workflow_execution_service_worker_active_queues gauge alone (LLD §7.6)."
 
       - alert: UpstreamDependencyErrors
-        expr: rate(upstream_dependency_errors_total[5m]) > 0
+        expr: rate(workflow_execution_service_upstream_dependency_errors_total[5m]) > 0
         for: 5m
         labels:
           severity: warning
@@ -280,7 +280,7 @@ groups:
           description: "Separates a compiled-plan read or IAM-eligibility outage from Execution's own generic 5xx rate (LLD §7.6)."
 
       - alert: CompiledPlanCacheMissRatioHigh
-        expr: wf_cache_misses_total / (wf_cache_hits_total + wf_cache_misses_total) > 0.10
+        expr: workflow_execution_service_wf_cache_misses_total / (workflow_execution_service_wf_cache_hits_total + workflow_execution_service_wf_cache_misses_total) > 0.10
         for: 5m
         labels:
           severity: warning
@@ -291,7 +291,7 @@ groups:
       - alert: OutboxRelayWedged
         # 10 minutes is the LLD's own worked example (well above the 5s poll
         # cadence), not an invented number (LLD §7.6).
-        expr: outbox_oldest_unpublished_age_seconds > 600
+        expr: platform_outbox_oldest_pending_age > 600
         labels:
           severity: page
         annotations:
