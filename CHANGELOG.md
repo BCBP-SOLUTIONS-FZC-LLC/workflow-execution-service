@@ -10,11 +10,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Added
 
+- `workflow_execution_service_*` collectors built through `platform-gincommon`, with the `platform_*` series from the platform libraries in every scrape; `make metrics-lint`, a generated `docs/observability/metric-registry.md`, a scrape test, and a test that every metric an alert rule names is exported.
+- The metrics the design listed and nothing recorded are recorded: task-signal and instance-start durations, activity durations, version conflicts, plan-cache hits and misses, upstream dependency errors, SLA breaches, DEGRADED entries, workflow panics, sampled RLS violations (`rls_violation_log` exporter), and the DEGRADED and READY-task gauges (`OPERATIONAL_STATS_INTERVAL`).
+- A Temporal worker interceptor for activity duration and workflow panics; the worker process installs the Temporal tracing interceptor; every outbound HTTP call carries the trace context.
+- Route parity tests for the public and internal OpenAPI and AsyncAPI parity tests for produced and handled event types; a chart test that every Deployment sets the environment its binary requires.
+- `ARCHITECTURE.md`, `CONTRIBUTING.md`, `VERSIONING.md`, `.editorconfig`; a changelog gate on the release workflow.
+- `RLS_VIOLATION_EXPORT_INTERVAL`, `RLS_VIOLATION_RETENTION`, `OPERATIONAL_STATS_INTERVAL`, and `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_INSECURE`, `OTEL_TRACES_SAMPLER_RATIO` in the chart.
 - `POST /instances/:id/nodes/:node/complete` and `.../boundaries/:boundary/fire`: an outside party's answer completes a receive task, or fires a message boundary, that no send task of the plan feeds (`dsl.ExternalWaits`). Open to an admin and to a user assigned to a task of the instance; `WAIT_NOT_FOUND` (404) and `NOT_WAITING` (409) are new. The `instance-external-answer` signal and the `waiting-external` query carry it (change id `external-wait-by-key`).
 - Completed tasks' results and outside answers merge into the instance's variables, which each task is created with (change id `task-result-variables`).
 
 ### Changed
 
+- **Platform libraries** `platform-events/v2` v2.1.0, `platform-pgcommon/v2` v2.0.0, `platform-gincommon` v1.6.0, `workflow-models` v1.2.0, `workflow-connectors` v1.0.0; Go 1.26.9. The service name is `workflow-execution-service` for all three binaries and every service metric is prefixed `workflow_execution_service_`. Alerts use the platform metric names; `tenant_id` is no longer a metric label.
+- `APP_ENV` must be one of `local`, `dev`, `test`, `staging`, `prod`; `AWS_USE_STUB` must be `false` outside dev and local; the connector worker requires `OPENBAO_TOKEN` outside dev; the chart sets `appEnv: prod` and the OTLP settings, and the lint values cover every required secret.
+- The internal OpenAPI drops the retired catch-all `/api/v1/internal/events` and lists `/events/workflow-task`; the AsyncAPI documents `MembershipRevoked` and `TenantMembershipsPurged`.
+- Servers set read-header timeouts, the health servers set read, write and idle timeouts, and the request timeout runs inside the observability middleware.
+- Non-test code carries no comments.
+- The outbox existence check test runs under the tenant's context, as the code does.
 - **A defer sends the instance one completed step back** (change id `defer-routes-back`), as the public API always said: the deferred task is closed `DEFERRED` naming the earlier node, and that step runs again through the force-back path. It made a copy of the deferred task at the same node before, so nothing went back. `DeferTask` returns no output and the regression-task helper is gone; deferring with no completed step is `409 INVALID_TASK_STATE`, and an instance that is not running `INVALID_INSTANCE_STATE`. Nothing is recorded as an admin route (LLD rev 1.73).
 - **An admin force-route names a node key and nothing else** (change id `force-route-by-node-key`): the department and the branch come from the key. Force-forward in a parallel step and in a DEGRADED instance, and force-back in a DEGRADED instance, were dropped because the HTTP path never set a department. `POST /instances/:id/force-back` takes an optional `target_node_key` naming a failed branch; a branch that fails again after a respawn keeps its steps and its last completed node.
 - **A fired boundary runs its whole path.** An interrupting boundary runs its `Steps` in the host's place and ends its path, so nothing the host would have gone on to runs; a non-interrupting one runs them beside the host. A boundary with no `Steps` behaves as before (workflow-models `v1.4.0-rc.4`, LLD rev 1.72).

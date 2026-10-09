@@ -85,19 +85,25 @@ func TestOutboxRepo_ExistsForTask(t *testing.T) {
 	}))
 
 	t.Run("true for the exact type+task recorded", func(t *testing.T) {
-		exists, err := outboxRepo.ExistsForTask(ctx, "WorkflowTaskSlaWarning", taskID)
+		exists, err := outboxRepo.ExistsForTask(withGUC(ctx, tenantA), "WorkflowTaskSlaWarning", taskID)
 		require.NoError(t, err)
 		assert.True(t, exists)
 	})
 
+	t.Run("false under another tenant's context", func(t *testing.T) {
+		exists, err := outboxRepo.ExistsForTask(withGUC(ctx, uuid.New()), "WorkflowTaskSlaWarning", taskID)
+		require.NoError(t, err)
+		assert.False(t, exists)
+	})
+
 	t.Run("false for a different event type on the same task", func(t *testing.T) {
-		exists, err := outboxRepo.ExistsForTask(ctx, "WorkflowTaskSlaBreached", taskID)
+		exists, err := outboxRepo.ExistsForTask(withGUC(ctx, tenantA), "WorkflowTaskSlaBreached", taskID)
 		require.NoError(t, err)
 		assert.False(t, exists)
 	})
 
 	t.Run("false for the same event type on a different task", func(t *testing.T) {
-		exists, err := outboxRepo.ExistsForTask(ctx, "WorkflowTaskSlaWarning", uuid.New())
+		exists, err := outboxRepo.ExistsForTask(withGUC(ctx, tenantA), "WorkflowTaskSlaWarning", uuid.New())
 		require.NoError(t, err)
 		assert.False(t, exists)
 	})

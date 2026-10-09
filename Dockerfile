@@ -20,7 +20,7 @@
 # `make pin-base-images` — it preserves each FROM line's own `AS <stage>`
 # regardless of how many stages share a base image.
 
-FROM golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS builder
+FROM golang:1.26-alpine@sha256:c95332c2af86b6d89b91bd0500f4b9529ccbd090a0d1855c6d1ceaa142ae8615 AS builder
 
 ARG BUILD_VERSION=dev
 ENV CGO_ENABLED=0 \
@@ -63,7 +63,7 @@ RUN go build \
 
 # gcr.io/distroless/static-debian12: no shell, no libc, no package manager.
 # Runs as nonroot (uid 65532) by default.
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a061191539b905b82ec395de78cbfae51f20e35 AS server
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS server
 
 COPY --from=builder /build/bin/server /server
 
@@ -71,7 +71,7 @@ EXPOSE 8080
 
 ENTRYPOINT ["/server"]
 
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a061191539b905b82ec395de78cbfae51f20e35 AS worker
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS worker
 
 COPY --from=builder /build/bin/worker /worker
 
@@ -82,7 +82,7 @@ ENTRYPOINT ["/worker"]
 # cmd/connector-worker polls a Valkey Stream and reports outcomes back over
 # HTTP — it serves nothing inbound but its own /healthz + /metrics
 # (WORKER_HEALTH_PORT, default 8081).
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a061191539b905b82ec395de78cbfae51f20e35 AS connector-worker
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS connector-worker
 
 COPY --from=builder /build/bin/connector-worker /connector-worker
 
