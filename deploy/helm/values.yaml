@@ -165,8 +165,12 @@ definitionServiceURL: http://workflow-definition-service:8080
 # fields. Secrets (INTERNAL_API_TOKEN, DEFINITION_SERVICE_TOKEN, ...) come from
 # the Secret below.
 env:
-  appEnv: production
-  otelServiceName: execution-service
+  appEnv: prod
+  otelServiceName: workflow-execution-service
+  # OTLP collector address, for example otel-collector.observability:4317. Empty disables trace export.
+  otelExporterEndpoint: ""
+  otelExporterInsecure: "false"
+  otelTracesSamplerRatio: "1.0"
   temporalNamespace: default
   temporalTaskQueue: execution-default
   awsRegion: us-east-1

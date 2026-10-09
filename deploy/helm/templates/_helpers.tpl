@@ -82,3 +82,12 @@ operator-provided existingSecretName, or this release's own.
 {{- define "workflow-execution-service.secretName" -}}
 {{- .Values.secret.existingSecretName | default (include "workflow-execution-service.fullname" .) }}
 {{- end }}
+
+{{/*
+The platform's APP_ENV vocabulary; any other value fails the render.
+*/}}
+{{- define "workflow-execution-service.validateEnv" -}}
+{{- if not (has .Values.env.appEnv (list "local" "dev" "test" "staging" "prod")) -}}
+{{- fail (printf "env.appEnv must be one of local, dev, test, staging, prod (got %q)" .Values.env.appEnv) -}}
+{{- end -}}
+{{- end }}

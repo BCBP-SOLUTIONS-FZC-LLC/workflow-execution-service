@@ -16,13 +16,36 @@ env:
   IMAGE_BASE: ghcr.io/bcbp-solutions-fzc-llc/workflow-execution-service
 
 jobs:
+  changelog-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Require a CHANGELOG entry for the tag
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${REF_NAME#v}"
+          if ! grep -qF "## [${version}]" CHANGELOG.md; then
+            echo "No CHANGELOG entry for ${version}. Update CHANGELOG.md before tagging." >&2
+            exit 1
+          fi
+
   validate-quality:
     name: Validate / Quality
+    needs: [changelog-gate]
     uses: ./.github/workflows/validate-quality.yml
     secrets: inherit
 
   validate-test:
     name: Validate / Test
+    needs: [changelog-gate]
     uses: ./.github/workflows/validate-test.yml
     secrets: inherit
 

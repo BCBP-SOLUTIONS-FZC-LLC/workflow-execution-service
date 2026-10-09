@@ -394,7 +394,13 @@ lint-workflows:
 HELM_LINT_VALUES := --set-string secret.secretValues.DATABASE_URL=placeholder \
 	  --set-string secret.secretValues.TEMPORAL_HOST_PORT=placeholder \
 	  --set-string secret.secretValues.INTERNAL_API_TOKEN=placeholder \
-	  --set-string secret.secretValues.DEFINITION_SERVICE_TOKEN=placeholder
+	  --set-string secret.secretValues.DEFINITION_SERVICE_TOKEN=placeholder \
+	  --set-string secret.secretValues.OUTBOX_RELAY_DATABASE_URL=placeholder \
+	  --set-string secret.secretValues.SNS_TOPIC_ARN=placeholder \
+	  --set-string secret.secretValues.OPENBAO_TOKEN=placeholder \
+	  --set-string secret.secretValues.VALKEY_ADDR=placeholder \
+	  --set-string env.eligibilityBaseURL=http://eligibility.invalid \
+	  --set-string env.tokenServiceBaseURL=http://token-service.invalid
 
 # The render goes to a file first: piped straight into kubeconform, a failed
 # render reached it as empty input and passed.

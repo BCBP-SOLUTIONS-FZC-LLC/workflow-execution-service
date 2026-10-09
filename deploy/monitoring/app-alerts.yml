@@ -220,7 +220,7 @@ groups:
           description: "Same severity as Definition Service's own RLSMissingGUC/RLSCrossTenantAccess alerts (LLD §9.2, §9.5, §7.6)."
 
       - alert: TaskSignalSLOBreach
-        expr: histogram_quantile(0.99, rate(task_signal_duration_seconds_bucket[5m])) > 0.3
+        expr: histogram_quantile(0.99, sum by (le) (rate(workflow_execution_service_task_signal_duration_seconds_bucket[5m]))) > 0.3
         for: 5m
         labels:
           severity: warning
@@ -229,7 +229,7 @@ groups:
           description: "Sustained breach of the claim/complete/defer SLO (LLD §10.3, §7.6)."
 
       - alert: InstantiationSLOBreach
-        expr: histogram_quantile(0.99, rate(instance_start_duration_seconds_bucket[5m])) > 1.0
+        expr: histogram_quantile(0.99, sum by (le) (rate(workflow_execution_service_instance_start_duration_seconds_bucket[5m]))) > 1.0
         for: 5m
         labels:
           severity: warning
@@ -238,7 +238,7 @@ groups:
           description: "Sustained breach of the POST /instances SLO (LLD §10.3, §7.6)."
 
       - alert: DelegationRerouteSLOBreach
-        expr: histogram_quantile(0.99, rate(delegation_reroute_duration_seconds_bucket[5m])) > 4
+        expr: histogram_quantile(0.99, sum by (le) (rate(workflow_execution_service_delegation_reroute_duration_seconds_bucket[5m]))) > 4
         for: 5m
         labels:
           severity: warning

@@ -55,7 +55,13 @@ spec:
             - name: BUILD_VERSION
               value: {{ .Values.image.tag | default .Chart.AppVersion | quote }}
             - name: OTEL_SERVICE_NAME
-              value: {{ printf "%s-connector-worker" .Values.env.otelServiceName | quote }}
+              value: {{ .Values.env.otelServiceName | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.env.otelExporterEndpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_INSECURE
+              value: {{ .Values.env.otelExporterInsecure | quote }}
+            - name: OTEL_TRACES_SAMPLER_RATIO
+              value: {{ .Values.env.otelTracesSamplerRatio | quote }}
             - name: CONNECTOR_STREAM_KEY
               value: {{ .Values.connectorWorker.streamKey | quote }}
             - name: CONNECTOR_STREAM_GROUP

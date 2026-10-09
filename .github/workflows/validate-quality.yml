@@ -89,6 +89,9 @@ jobs:
       - name: Lint
         run: make lint
 
+      - name: Observability standard lint
+        run: make metrics-lint
+
       - name: Vulnerability check
         run: make vuln
 

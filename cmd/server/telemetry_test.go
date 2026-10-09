@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -68,6 +69,20 @@ func TestStandard_LibrariesShareRegistryCollectors(t *testing.T) {
 		assert.True(t, names[want], "%s must be exported", want)
 	}
 
+	for _, rules := range []string{"../../deploy/monitoring/app-alerts.yml", "../../deploy/helm/templates/prometheusrule.yaml"} {
+		body, readErr := os.ReadFile(rules)
+		require.NoError(t, readErr)
+		for _, line := range strings.Split(string(body), "\n") {
+			if strings.Contains(line, "name: workflow_execution_service_") {
+				continue
+			}
+			for _, token := range ruleMetricPattern.FindAllString(line, -1) {
+				name := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(token, "_bucket"), "_count"), "_sum")
+				assert.True(t, names[name], "%s references %s, which the service does not export", rules, token)
+			}
+		}
+	}
+
 	rep, err := obsregistry.Validate(gincommon.MetricsGatherer(), obsregistry.Options{})
 	require.NoError(t, err)
 	assert.Empty(t, rep.Errors(), "scrape must conform to the Platform Observability Registry")
@@ -80,6 +95,8 @@ func TestStandard_LibrariesShareRegistryCollectors(t *testing.T) {
 		require.NoError(t, os.WriteFile(out, scrape.Body.Bytes(), 0o600))
 	}
 }
+
+var ruleMetricPattern = regexp.MustCompile(`workflow_execution_service_[a-z_]+`)
 
 func exerciseEveryCollector() {
 	observability.IncCounterVec(observability.RecordVersionConflictTotal, "workflow_instance")

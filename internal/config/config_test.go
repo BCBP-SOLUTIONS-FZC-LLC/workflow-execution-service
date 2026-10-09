@@ -288,10 +288,12 @@ func TestRequire(t *testing.T) {
 			c.DatabaseURL = ""
 			c.InternalAPIToken = "tok"
 			c.DefinitionServiceToken = "def-tok"
+			c.OpenBaoToken = "bao-tok"
 		}, ""},
 		{"connector-worker needs the definition service", (*Config).RequireConnectorWorker, func(c *Config) { c.DefinitionServiceURL = "" }, "DEFINITION_SERVICE_URL"},
-		{"connector-worker needs the definition token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "prod"; c.InternalAPIToken = "tok" }, "DEFINITION_SERVICE_TOKEN"},
-		{"connector-worker needs the internal token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "prod"; c.DefinitionServiceToken = "def-tok" }, "INTERNAL_API_TOKEN"},
+		{"connector-worker needs the definition token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "prod"; c.InternalAPIToken = "tok"; c.OpenBaoToken = "bao-tok" }, "DEFINITION_SERVICE_TOKEN"},
+		{"connector-worker needs the internal token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "prod"; c.DefinitionServiceToken = "def-tok"; c.OpenBaoToken = "bao-tok" }, "INTERNAL_API_TOKEN"},
+		{"connector-worker needs the openbao token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "prod"; c.DefinitionServiceToken = "def-tok"; c.InternalAPIToken = "tok" }, "OPENBAO_TOKEN"},
 
 		{"migrate needs only a database", (*Config).RequireMigrate, func(c *Config) { *c = Config{DatabaseURL: "postgres://x"} }, ""},
 		{"migrate prefers its direct dsn", (*Config).RequireMigrate, func(c *Config) { *c = Config{MigrationDatabaseURL: "postgres://direct"} }, ""},

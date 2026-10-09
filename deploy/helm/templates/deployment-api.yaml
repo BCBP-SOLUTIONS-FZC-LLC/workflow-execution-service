@@ -1,3 +1,4 @@
+{{- include "workflow-execution-service.validateEnv" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -54,7 +55,13 @@ spec:
             - name: BUILD_VERSION
               value: {{ .Values.image.tag | default .Chart.AppVersion | quote }}
             - name: OTEL_SERVICE_NAME
-              value: {{ printf "%s-api" .Values.env.otelServiceName | quote }}
+              value: {{ .Values.env.otelServiceName | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.env.otelExporterEndpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_INSECURE
+              value: {{ .Values.env.otelExporterInsecure | quote }}
+            - name: OTEL_TRACES_SAMPLER_RATIO
+              value: {{ .Values.env.otelTracesSamplerRatio | quote }}
             - name: TEMPORAL_NAMESPACE
               value: {{ .Values.env.temporalNamespace | quote }}
             - name: TEMPORAL_TASK_QUEUE
@@ -66,7 +73,7 @@ spec:
             - name: GLUE_REGISTRY_NAME
               value: {{ .Values.env.glueRegistryName | quote }}
             - name: TOKEN_SERVICE_BASE_URL
-              {{- if ne .Values.env.appEnv "dev" }}
+              {{- if not (has .Values.env.appEnv (list "dev" "local")) }}
               value: {{ required "env.tokenServiceBaseURL is required outside dev: the API reads each tenant's automation principal from it" .Values.env.tokenServiceBaseURL | quote }}
               {{- else }}
               value: {{ .Values.env.tokenServiceBaseURL | quote }}
@@ -110,7 +117,7 @@ spec:
                   name: {{ include "workflow-execution-service.secretName" . }}
                   key: OUTBOX_RELAY_DATABASE_URL
                   {{- /* secret.yaml requires it outside dev */}}
-                  optional: {{ eq .Values.env.appEnv "dev" }}
+                  optional: {{ has .Values.env.appEnv (list "dev" "local") }}
             - name: DEFINITION_SERVICE_URL
               value: {{ .Values.definitionServiceURL | quote }}
             - name: DEFINITION_SERVICE_TOKEN
@@ -119,14 +126,14 @@ spec:
                   name: {{ include "workflow-execution-service.secretName" . }}
                   key: DEFINITION_SERVICE_TOKEN
                   {{- /* secret.yaml requires it outside dev */}}
-                  optional: {{ eq .Values.env.appEnv "dev" }}
+                  optional: {{ has .Values.env.appEnv (list "dev" "local") }}
             - name: INTERNAL_API_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "workflow-execution-service.secretName" . }}
                   key: INTERNAL_API_TOKEN
                   {{- /* secret.yaml requires it outside dev */}}
-                  optional: {{ eq .Values.env.appEnv "dev" }}
+                  optional: {{ has .Values.env.appEnv (list "dev" "local") }}
             {{- if .Values.temporalMTLS.enabled }}
             - name: TEMPORAL_TLS_CERT_PATH
               value: /etc/temporal-tls/tls.crt

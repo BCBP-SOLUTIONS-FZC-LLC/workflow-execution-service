@@ -466,6 +466,9 @@ func (c *Config) RequireConnectorWorker() error {
 		if c.InternalAPIToken == "" {
 			return fmt.Errorf("INTERNAL_API_TOKEN is required outside dev and local")
 		}
+		if c.OpenBaoToken == "" {
+			return fmt.Errorf("OPENBAO_TOKEN is required outside dev and local")
+		}
 	}
 	return nil
 }
