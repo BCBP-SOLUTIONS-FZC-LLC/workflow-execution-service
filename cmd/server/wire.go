@@ -23,6 +23,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporalclient"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkeystream"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
@@ -108,6 +109,22 @@ func newApp(cfg *config.Config) (*app, error) {
 		unwind()
 		return nil, fmt.Errorf("outbox runner: %w", err)
 	}
+
+	rlsExporter := service.NewRLSViolationExporter(service.RLSViolationExporterDeps{
+		Log:       postgres.NewRLSViolationRepo(relayPool),
+		Record:    observability.AddRLSViolations,
+		Interval:  cfg.RLSViolationExportInterval,
+		Retention: cfg.RLSViolationRetention,
+		Logger:    log,
+	})
+	statsSampler := service.NewOperationalGaugeSampler(service.OperationalGaugeSamplerDeps{
+		Stats: postgres.NewOperationalStatsRepo(relayPool),
+		Record: func(s domain.OperationalStats) {
+			observability.RecordOperationalStats(s.DegradedInstances, s.OldestDegradedAgeSeconds, s.OldestReadyTaskAgeSeconds)
+		},
+		Interval: cfg.OperationalStatsInterval,
+		Logger:   log,
+	})
 
 	var interceptors []interceptor.ClientInterceptor
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
@@ -235,6 +252,8 @@ func newApp(cfg *config.Config) (*app, error) {
 		httpServer:      httpServer,
 		metricsServer:   metricsServer,
 		outboxRelay:     relay,
+		rlsExporter:     rlsExporter,
+		statsSampler:    statsSampler,
 		sdkClient:       sdkClient,
 		tracingShutdown: tracingShutdown,
 	}, nil

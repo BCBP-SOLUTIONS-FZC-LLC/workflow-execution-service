@@ -14,6 +14,8 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/logger"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/contrib/opentelemetry"
+	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/worker"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
@@ -62,14 +64,22 @@ func main() {
 	}
 	defer cleanup()
 
-	sdk, err := client.Dial(client.Options{HostPort: cfg.TemporalHostPort, Namespace: cfg.TemporalNamespace})
+	var clientInterceptors []interceptor.ClientInterceptor
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
+		tracingInterceptor, err := observability.NewTemporalTracingInterceptor(opentelemetry.TracerOptions{})
+		if err != nil {
+			log.Fatalf("cmd/worker: temporal tracing interceptor: %v", err)
+		}
+		clientInterceptors = append(clientInterceptors, tracingInterceptor)
+	}
+	sdk, err := client.Dial(client.Options{HostPort: cfg.TemporalHostPort, Namespace: cfg.TemporalNamespace, Interceptors: clientInterceptors})
 	if err != nil {
 		log.Fatalf("cmd/worker: dial temporal: %v", err)
 	}
 	defer sdk.Close()
 
 	registry := newWorkerRegistry()
-	defaultWorker, err := startWorkerForQueue(sdk, deps, cfg.TemporalTaskQueue, worker.Options{WorkerStopTimeout: 25 * time.Second})
+	defaultWorker, err := startWorkerForQueue(sdk, deps, cfg.TemporalTaskQueue, worker.Options{WorkerStopTimeout: 25 * time.Second, Interceptors: []interceptor.WorkerInterceptor{observability.NewTemporalMetricsInterceptor()}})
 	if err != nil {
 		log.Fatalf("cmd/worker: start default worker: %v", err)
 	}

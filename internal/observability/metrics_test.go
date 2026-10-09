@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
@@ -140,11 +141,38 @@ func TestRegister_PreInitializesClosedLabelSets(t *testing.T) {
 
 	for name, label := range map[string][]string{
 		"workflow_execution_service_task_signal_duration_seconds":     {"operation=claim", "operation=complete", "operation=defer"},
-		"workflow_execution_service_rls_violations_total":             {"type=missing_guc", "type=cross_tenant"},
+		"workflow_execution_service_rls_violations_total":             {"violation_type=missing_or_invalid_guc", "violation_type=cross_tenant_access"},
 		"workflow_execution_service_upstream_dependency_errors_total": {"dependency=definition_service", "dependency=iam"},
 	} {
 		for _, l := range label {
 			require.Truef(t, series[name][l], "expected pre-initialized series %s{%s}", name, l)
 		}
 	}
+}
+
+func TestRecordOperationalStats_SetsTheThreeGauges(t *testing.T) {
+	initIdentity(t)
+
+	observability.RecordOperationalStats(4, 120.5, 7)
+
+	body := scrape(t)
+	for _, want := range []string{
+		"workflow_execution_service_instance_degraded_current",
+		"workflow_execution_service_instance_degraded_oldest_age_seconds",
+		"workflow_execution_service_oldest_ready_task_age_seconds",
+	} {
+		require.Contains(t, body, want)
+	}
+	require.Equal(t, 4.0, testutil.ToFloat64(observability.InstanceDegradedCurrent))
+	require.Equal(t, 120.5, testutil.ToFloat64(observability.InstanceDegradedOldestAgeSeconds))
+	require.Equal(t, 7.0, testutil.ToFloat64(observability.OldestReadyTaskAgeSeconds))
+}
+
+func TestAddRLSViolations_AddsByType(t *testing.T) {
+	initIdentity(t)
+	before := testutil.ToFloat64(observability.RLSViolationsTotal.WithLabelValues("cross_tenant_access"))
+
+	observability.AddRLSViolations("cross_tenant_access", 3)
+
+	require.Equal(t, before+3, testutil.ToFloat64(observability.RLSViolationsTotal.WithLabelValues("cross_tenant_access")))
 }

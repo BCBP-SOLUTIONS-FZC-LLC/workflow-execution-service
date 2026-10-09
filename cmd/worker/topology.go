@@ -8,6 +8,7 @@ import (
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/worker"
 	sdkworkflow "go.temporal.io/sdk/workflow"
 
@@ -25,6 +26,7 @@ var dynamicQueueWorkerOptions = worker.Options{
 	MaxConcurrentActivityExecutionSize:     200,
 	MaxConcurrentWorkflowTaskExecutionSize: 200,
 	WorkerStopTimeout:                      25 * time.Second,
+	Interceptors:                           []interceptor.WorkerInterceptor{observability.NewTemporalMetricsInterceptor()},
 }
 
 // workerRegistry tracks every worker.Worker this process has started, keyed

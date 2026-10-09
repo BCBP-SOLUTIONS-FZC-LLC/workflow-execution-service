@@ -57,7 +57,11 @@ type Config struct {
 	AWSEndpointURL string
 
 	OutboxPollInterval time.Duration
-	OutboxBatchSize    int
+
+	RLSViolationExportInterval time.Duration
+	RLSViolationRetention      time.Duration
+	OperationalStatsInterval   time.Duration
+	OutboxBatchSize            int
 
 	// OutboxRelayDatabaseURL is the outbox relay's own connection string —
 	// a distinct role with BYPASSRLS, since the relay must scan every
@@ -242,9 +246,13 @@ func Load() (*Config, error) {
 		SNSTopicARN:    getEnvOrDefault("SNS_TOPIC_ARN", ""),
 		AWSEndpointURL: getEnvOrDefault("AWS_ENDPOINT_URL", ""),
 
-		OutboxPollInterval:     envDuration("OUTBOX_POLL_INTERVAL", 500*time.Millisecond),
-		OutboxBatchSize:        envInt("OUTBOX_BATCH_SIZE", 50),
-		OutboxRelayDatabaseURL: getEnvOrDefault("OUTBOX_RELAY_DATABASE_URL", ""),
+		OutboxPollInterval: envDuration("OUTBOX_POLL_INTERVAL", 500*time.Millisecond),
+
+		RLSViolationExportInterval: envDuration("RLS_VIOLATION_EXPORT_INTERVAL", 30*time.Second),
+		RLSViolationRetention:      envDuration("RLS_VIOLATION_RETENTION", 7*24*time.Hour),
+		OperationalStatsInterval:   envDuration("OPERATIONAL_STATS_INTERVAL", 30*time.Second),
+		OutboxBatchSize:            envInt("OUTBOX_BATCH_SIZE", 50),
+		OutboxRelayDatabaseURL:     getEnvOrDefault("OUTBOX_RELAY_DATABASE_URL", ""),
 
 		DefinitionServiceURL:    getEnvOrDefault("DEFINITION_SERVICE_URL", ""),
 		DefinitionServiceToken:  getEnvOrDefault("DEFINITION_SERVICE_TOKEN", ""),
@@ -351,6 +359,15 @@ func (c *Config) validate() error {
 	}
 	if c.OutboxBatchSize <= 0 {
 		return fmt.Errorf("OUTBOX_BATCH_SIZE must be > 0")
+	}
+	if c.RLSViolationExportInterval <= 0 {
+		return fmt.Errorf("RLS_VIOLATION_EXPORT_INTERVAL must be > 0")
+	}
+	if c.RLSViolationRetention <= 0 {
+		return fmt.Errorf("RLS_VIOLATION_RETENTION must be > 0")
+	}
+	if c.OperationalStatsInterval <= 0 {
+		return fmt.Errorf("OPERATIONAL_STATS_INTERVAL must be > 0")
 	}
 	if c.OutboxPollInterval <= 0 {
 		return fmt.Errorf("OUTBOX_POLL_INTERVAL must be > 0")

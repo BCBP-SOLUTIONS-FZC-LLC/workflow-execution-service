@@ -16,6 +16,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 )
 
 type app struct {
@@ -29,6 +30,10 @@ type app struct {
 	httpServer    *http.Server
 	metricsServer *http.Server
 	outboxRelay   *outbox.Runner
+
+	rlsExporter     *service.RLSViolationExporter
+	statsSampler    *service.OperationalGaugeSampler
+	cancelExporters context.CancelFunc
 
 	sdkClient client.Client
 
@@ -51,6 +56,11 @@ func (a *app) run() {
 }
 
 func (a *app) startServers() {
+	exportCtx, cancelExporters := context.WithCancel(context.Background())
+	a.cancelExporters = cancelExporters
+	go a.rlsExporter.Run(exportCtx)
+	go a.statsSampler.Run(exportCtx)
+
 	go func() {
 		a.log.Info("HTTP server starting", map[string]any{"addr": a.httpServer.Addr})
 		if err := a.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -83,6 +93,7 @@ func (a *app) startServers() {
 }
 
 func (a *app) stopServers(ctx context.Context) {
+	a.cancelExporters()
 	if err := a.httpServer.Shutdown(ctx); err != nil {
 		a.log.Error("HTTP server shutdown error", map[string]any{"error": err.Error()})
 	}

@@ -97,7 +97,7 @@ func register() {
 		"Unix timestamp of the last successfully dispatched POST /internal/events call, by event_type.", "event_type"))
 	RLSViolationsTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_rls_violations_total",
-		"Total RLS policy violations recorded by rls_check_tenant, by type.", "type"))
+		"Sampled row-level-security violations recorded in rls_violation_log, by violation_type.", "violation_type"))
 	WorkflowReplayFailuresTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_workflow_replay_failures_total",
 		"Total Temporal workflow replay/non-determinism failures, by workflow_type.", "workflow_type"))
@@ -133,7 +133,7 @@ func preInitializeClosedLabelSets() {
 	for _, op := range []string{"claim", "complete", "defer"} {
 		TaskSignalDurationSeconds.WithLabelValues(op)
 	}
-	for _, violationType := range []string{"missing_guc", "cross_tenant"} {
+	for _, violationType := range []string{"missing_or_invalid_guc", "cross_tenant_access"} {
 		RLSViolationsTotal.WithLabelValues(violationType)
 	}
 	for _, dep := range []string{"definition_service", "iam"} {
@@ -169,4 +169,16 @@ func SetGauge(g prometheus.Gauge, v float64) {
 	if g != nil {
 		g.Set(v)
 	}
+}
+
+func AddRLSViolations(violationType string, n float64) {
+	if RLSViolationsTotal != nil {
+		RLSViolationsTotal.WithLabelValues(violationType).Add(n)
+	}
+}
+
+func RecordOperationalStats(degraded int64, oldestDegradedAgeSeconds, oldestReadyTaskAgeSeconds float64) {
+	SetGauge(InstanceDegradedCurrent, float64(degraded))
+	SetGauge(InstanceDegradedOldestAgeSeconds, oldestDegradedAgeSeconds)
+	SetGauge(OldestReadyTaskAgeSeconds, oldestReadyTaskAgeSeconds)
 }
