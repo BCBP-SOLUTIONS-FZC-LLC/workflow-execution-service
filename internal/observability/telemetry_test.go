@@ -54,3 +54,30 @@ func TestStartSpan_ReturnsEnd(t *testing.T) {
 	require.NotNil(t, ctx)
 	require.NotPanics(t, end)
 }
+
+func TestInitTelemetry_IsRepeatable(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "none")
+	log, err := logger.NewLogger("test")
+	require.NoError(t, err)
+	ginCfg := observability.GinConfig("workflow-execution-service", "test", "test", log)
+
+	first, err := observability.InitTelemetry(ginCfg, log)
+	require.NoError(t, err)
+	t.Cleanup(first)
+	second, err := observability.InitTelemetry(ginCfg, log)
+	require.NoError(t, err)
+	t.Cleanup(second)
+}
+
+func TestInitTelemetry_FailsWithoutAServiceName(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "none")
+	t.Setenv("OTEL_SERVICE_NAME", "")
+	log, err := logger.NewLogger("test")
+	require.NoError(t, err)
+
+	shutdown, err := observability.InitTelemetry(observability.GinConfig("", "test", "test", log), log)
+	if err == nil {
+		shutdown()
+	}
+	require.Error(t, err)
+}

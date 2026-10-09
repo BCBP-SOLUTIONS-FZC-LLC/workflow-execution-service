@@ -50,8 +50,8 @@ COVER_HTML         := $(COVERAGE_DIR)/coverage.html
 # Exclude generated packages (sqlc db/, mockgen mocks/) and the two
 # composition roots with no tests of their own (cmd/server, cmd/worker) from
 # the coverage denominator.
-COVER_EXCLUDE_PKG  := /postgres/db$$\|/mocks$$\|/cmd/server$$\|/cmd/worker$$
-COVER_EXCLUDE_FILE := /postgres/db/\|/mocks/\|/cmd/server/\|/cmd/worker/
+COVER_EXCLUDE_PKG  := /postgres/db$$\|/mocks$$\|/obstest$$\|/cmd/server$$\|/cmd/worker$$
+COVER_EXCLUDE_FILE := /postgres/db/\|/mocks/\|/obstest/\|/cmd/server/\|/cmd/worker/
 COVER_THRESHOLD    := 95
 # Per-package floors: packages not listed must meet COVER_THRESHOLD.
 # internal/workflow (the Temporal interpreter) sits at ~91.3% isolated
@@ -63,7 +63,10 @@ COVER_THRESHOLD    := 95
 # cmd/connector-worker (~58.9%) holds its dispatch logic, unit-tested, beside
 # its composition root (buildDeps, main, the read/reclaim/heartbeat loops,
 # the health server), which only `make test-e2e` exercises.
-COVER_PKG_FLOORS   := internal/workflow:88 cmd/connector-worker:55
+# internal/observability (~92%) keeps the error-wrapping branches of the
+# telemetry initialisation, which fail only when a platform library refuses
+# its own identity, and the Search Attribute upsert failure.
+COVER_PKG_FLOORS   := internal/workflow:88 cmd/connector-worker:55 internal/observability:90
 
 .PHONY: metrics-lint metrics-inventory all tools tools-integration generate generate-sqlc mock contract-check contract-breaking \
         build migrate dev test test-integration test-e2e test-ci merge-coverage \

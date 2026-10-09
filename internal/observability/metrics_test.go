@@ -176,3 +176,26 @@ func TestAddRLSViolations_AddsByType(t *testing.T) {
 
 	require.Equal(t, before+3, testutil.ToFloat64(observability.RLSViolationsTotal.WithLabelValues("cross_tenant_access")))
 }
+
+func TestRecordingHelpers_IgnoreUnregisteredCollectors(t *testing.T) {
+	require.NotPanics(t, func() {
+		observability.IncCounter(nil)
+		observability.IncCounterVec(nil, "x")
+		observability.ObserveHistogram(nil, 1)
+		observability.ObserveHistogramVec(nil, 1, "x")
+		observability.SetGauge(nil, 1)
+	})
+}
+
+func TestRecordingHelpers_RecordOnRegisteredCollectors(t *testing.T) {
+	initIdentity(t)
+	hits := testutil.ToFloat64(observability.WFCacheHitsTotal)
+	observability.IncCounter(observability.WFCacheHitsTotal)
+	require.Equal(t, hits+1, testutil.ToFloat64(observability.WFCacheHitsTotal))
+
+	require.NotPanics(t, func() {
+		observability.ObserveHistogram(observability.InstanceStartDurationSeconds, 0.2)
+		observability.ObserveHistogramVec(observability.TaskSignalDurationSeconds, 0.2, "claim")
+		observability.IncCounterVec(observability.UpstreamDependencyErrorsTotal, "iam")
+	})
+}
