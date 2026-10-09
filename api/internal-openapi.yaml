@@ -104,8 +104,8 @@ components:
       type: object
       description: >
         The platform-events envelope forwarded verbatim by the shared Workflow-Events
-        Consumer to POST /internal/events — matches the shape published to SNS
-        (execution_service_rework/asyncapi.yaml's EventEnvelope schema), except payload is
+        Consumer to the category routes under /internal/events — matches the shape published
+        to SNS (the EventEnvelope schema of api/asyncapi.yaml), except payload is
         opaque here since the consumer forwards any subscribed event type without
         deserializing it.
       required: [id, type, subject, source, tenant_id, time, specversion]
@@ -408,77 +408,13 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-  /api/v1/internal/events:
-    post:
-      operationId: ingestInternalEvent
-      tags: [Internal (Events)]
-      summary: Ingest a forwarded domain-event envelope
-      description: >
-        Service-to-service ingest endpoint called by the shared Workflow-Events Consumer,
-        which subscribes Execution's inbound SNS topics (iam.membership.events,
-        iam.user.events, wf.template.events, §6.1) and forwards each envelope here over
-        HTTP, exactly as it does for Definition Service. Sets the RLS GUC from the
-        envelope's tenant_id and dispatches by type (§6.2). Idempotent: a repeated envelope
-        id (paired with a fixed per-subscription consumer name) returns 2xx with no side
-        effects. An unrecognized type is accepted and ignored with 200, never an error. Not
-        exposed on the public Envoy gateway; carries no gateway identity headers.
-      security:
-        - InternalServiceAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/EventEnvelope" }
-      responses:
-        "200":
-          description: >
-            Event processed, or an idempotent no-op for an already-seen envelope id, or an
-            unrecognized type accepted and ignored. No response body in any case.
-        "400":
-          description: Malformed envelope or payload — non-retryable, the consumer routes to its DLQ.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/ProblemDetails" }
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "415":
-          $ref: "#/components/responses/UnsupportedMediaType"
-        "500":
-          description: >
-            Transient processing failure. The consumer retries until the queue's
-            maxReceiveCount (5) moves the message to its DLQ.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/ProblemDetails" }
-        "502":
-          description: >
-            EVENT_DECODE_FAILED — the envelope carries a dataschema (schema-registry payload)
-            that could not be decoded: a missing/misconfigured decoder, or a schema-registry
-            decode failure. Retryable infra problem, never a malformed client payload — the
-            consumer must retry this rather than route it to its DLQ.
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ProblemDetails"
-              example:
-                type: "https://errors.bcbp.io/execution/event-decode-failed"
-                title: "Event Decode Failed"
-                status: 502
-                detail: "schema-registry payload decode failed"
-                instance: "/api/v1/internal/events"
-                code: "EVENT_DECODE_FAILED"
-        "503":
-          $ref: "#/components/responses/ServiceUnavailable"
-
   /api/v1/internal/events/delegation:
     post:
       operationId: ingestDelegationEvent
       tags: [Internal (Events)]
       summary: Ingest DelegationStarted / DelegationEnded directly
       description: >
-        Same contract as ingestInternalEvent (§6.1), scoped to
+        Service-to-service ingest of an envelope forwarded by the shared Workflow-Events Consumer (§6.1); sets the RLS GUC from the tenant_id, is idempotent per envelope id, and is scoped to
         DelegationStarted/DelegationEnded. A type outside this category
         (should the consumer ever send one) is accepted and ignored with 200,
         same as the catch-all's unrecognized-type behavior.
@@ -517,7 +453,7 @@ paths:
       tags: [Internal (Events)]
       summary: Ingest UserDeleted / UserAvailabilityChanged directly
       description: >
-        Same contract as ingestInternalEvent (§6.1), scoped to
+        Service-to-service ingest of an envelope forwarded by the shared Workflow-Events Consumer (§6.1); sets the RLS GUC from the tenant_id, is idempotent per envelope id, and is scoped to
         UserDeleted/UserAvailabilityChanged. A type outside this category
         is accepted and ignored with 200.
       security:
@@ -555,8 +491,46 @@ paths:
       tags: [Internal (Events)]
       summary: Ingest TenantStateChanged directly
       description: >
-        Same contract as ingestInternalEvent (§6.1), scoped to
+        Service-to-service ingest of an envelope forwarded by the shared Workflow-Events Consumer (§6.1); sets the RLS GUC from the tenant_id, is idempotent per envelope id, and is scoped to
         TenantStateChanged. A type outside this category is accepted and
+        ignored with 200.
+      security:
+        - InternalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventEnvelope" }
+      responses:
+        "200":
+          description: Event processed, an idempotent no-op, or an out-of-category type accepted and ignored. No response body.
+        "400":
+          description: Malformed envelope or payload — non-retryable, the consumer routes to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          description: Transient processing failure. The consumer retries until the queue's maxReceiveCount (5) moves the message to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/internal/events/workflow-task:
+    post:
+      operationId: ingestWorkflowTaskEvent
+      tags: [Internal (Events)]
+      summary: Ingest WorkflowTaskCreated directly
+      description: >
+        Service-to-service ingest of an envelope forwarded by the shared Workflow-Events Consumer (§6.1); sets the RLS GUC from the tenant_id, is idempotent per envelope id, and is scoped to
+        WorkflowTaskCreated. A type outside this category is accepted and
         ignored with 200.
       security:
         - InternalServiceAuth: []

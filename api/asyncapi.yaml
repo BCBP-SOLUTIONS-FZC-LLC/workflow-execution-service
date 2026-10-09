@@ -1,16 +1,14 @@
 asyncapi: 3.0.0
 info:
-  title: workflow-execution-svc events
+  title: workflow-execution-service events
   version: 1.0.0
   description: >
     Event contract for the Workflow Execution Service. Outbound: 18 workflow-
     lifecycle events published to the SNS topic wf-workflow-events (SNS → SQS
-    fan-out), governed by platform-schemagov exactly as workflow-definition-svc
-    governs its own. Inbound: the events Execution consumes off the shared
-    Workflow-Events Consumer (POST /internal/events) — documented here as
-    `receive` operations for completeness, but their payload schemas are owned
-    and registered by the producing service (IAM / Definition), NOT
-    re-registered by Execution.
+    fan-out), governed by platform-schemagov. Inbound: the events Execution
+    consumes through the shared Workflow-Events Consumer, which forwards them to
+    the category routes under /api/v1/internal/events. Their payload schemas are
+    owned and registered by the producing service and are not re-registered here.
   x-forward-compatibility:
     open-schemas: >
       Every governed <Name>Payload sets additionalProperties:true. Consumers MUST
@@ -80,6 +78,7 @@ channels:
       DelegationStarted:  { $ref: '#/components/messages/DelegationStartedInbound' }
       DelegationEnded:    { $ref: '#/components/messages/DelegationEndedInbound' }
       TenantStateChanged: { $ref: '#/components/messages/TenantStateChangedInbound' }
+      TenantMembershipsPurged: { $ref: '#/components/messages/TenantMembershipsPurgedInbound' }
   iam/user/events:
     address: iam-user-events
     description: Consumed off user-wf-q (dedup consumer `user-execution`).
@@ -94,17 +93,14 @@ channels:
     messages:
       UserDeleted:              { $ref: '#/components/messages/UserDeletedInbound' }
       UserAvailabilityChanged:  { $ref: '#/components/messages/UserAvailabilityChangedInbound' }
+      MembershipRevoked:        { $ref: '#/components/messages/MembershipRevokedInbound' }
 
   self/task-dispatch:
-    address: /api/v1/internal/events
+    address: /api/v1/internal/events/workflow-task
     description: >
-      Not a queue subscription: this service reacts to its own
-      WorkflowTaskCreated publish, delivered back to it over the same
-      POST /api/v1/internal/events HTTP surface every other inbound event
-      above arrives on (internal_events_connector.go). Whether this service
-      is actually subscribed to its own WorkflowTaskCreated topic in any real
-      subscription topology is unconfirmed (LLD §6.1, Appendix B) — this
-      channel documents the receiving contract if/when it is.
+      Not a queue subscription. This service reacts to its own WorkflowTaskCreated
+      publish, delivered back over the internal HTTP surface. For a connector-typed
+      stage the event triggers the connector-worker handoff.
     messages:
       WorkflowTaskCreated: { $ref: '#/components/messages/WorkflowTaskCreated' }
 
@@ -164,20 +160,12 @@ components:
           messageAttributes:
             type: object
             description: >
-              execution_service's GlueCodec (internal/adapter/outbound/glue) now
-              matches definition_service's and iam-user-profile's own GlueCodec:
-              it prepends the AWS Glue Schema Registry's 18-byte binary header
-              ([0x03][0x00][16-byte schema-version UUID]) to the plain-JSON
-              payload. This is safe because platform-events v1.4.0's
-              events.WithCodec applies that encoding at SNS-publish time, after
-              the plain-JSON envelope has already been safely inserted into the
-              outbox — outbox.Enqueue's json.Marshal never sees the header-prefixed
-              bytes. GlueCodec still resolves each event's latest registered
-              schema version via GetSchemaVersion first, failing closed if the
-              schema is missing from the registry. See
-              internal/adapter/outbound/glue/codec.go's doc comment. SNS
-              MessageAttributes below carry the routing keys consumer filter
-              policies match on.
+              The AWS Glue Schema Registry wire format: the encoder prepends the 18-byte
+              header ([0x03][0x00][16-byte schema-version UUID]) to the plain-JSON payload at
+              SNS publish time, after the plain-JSON envelope is stored in the outbox. The
+              latest registered schema version of the event type is resolved first, and a
+              missing schema fails the publish. The SNS message attributes below carry the
+              routing keys consumer filter policies match on.
             properties:
               EventType:  { type: string, description: 'PascalCase wire type, e.g. WorkflowInstanceStarted' }
               TenantID:   { type: string, format: uuid }
@@ -443,6 +431,24 @@ components:
         multi-assignee task's instance keeps running if a co-assignee remains active.
       x-schema-owner: iam-user-profile
       payload: { $ref: '#/components/schemas/UserDeletedInbound' }
+    TenantMembershipsPurgedInbound:
+      name: TenantMembershipsPurged
+      x-lifecycle: { status: active }
+      title: Tenant memberships purged (owned by IAM Org & Membership)
+      description: >
+        Consumed as the tenant offboarding signal: terminates the tenant's instances,
+        the same outcome as TenantStateChanged with status offboarded.
+      x-schema-owner: iam-org-membership
+      payload: { $ref: '#/components/schemas/TenantMembershipsPurgedInbound' }
+    MembershipRevokedInbound:
+      name: MembershipRevoked
+      x-lifecycle: { status: active }
+      title: Membership revoked (owned by IAM Org & Membership)
+      description: >
+        Consumed to vacate every active assignment the user holds in the tenant, the
+        same per-assignment effect as UserDeleted.
+      x-schema-owner: iam-org-membership
+      payload: { $ref: '#/components/schemas/MembershipRevokedInbound' }
     UserAvailabilityChangedInbound:
       name: UserAvailabilityChanged
       x-lifecycle: { status: active }
@@ -785,6 +791,16 @@ components:
         previous_plan:   { type: string }
         changed_at:      { type: string, format: date-time }
         cause:           { type: string, description: 'source lifecycle event type, e.g. TenantSuspended' }
+    TenantMembershipsPurgedInbound:
+      type: object
+      additionalProperties: true
+      description: The tenant is identified by the envelope's tenant_id; the payload carries no required field.
+    MembershipRevokedInbound:
+      type: object
+      additionalProperties: true
+      required: [user_id]
+      properties:
+        user_id: { type: string, format: uuid }
     UserDeletedInbound:
       type: object
       additionalProperties: true

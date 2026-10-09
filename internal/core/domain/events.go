@@ -13,6 +13,16 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
+func OutboundEventTypes() []string {
+	return []string{
+		EventWorkflowInstanceStarted, EventWorkflowInstancePaused, EventWorkflowInstanceResumed, EventWorkflowInstanceCancelled,
+		EventWorkflowInstanceTerminated, EventWorkflowInstanceDegraded, EventWorkflowInstanceFailed, EventWorkflowInstanceFinished,
+		EventWorkflowInstanceForceRouted, EventWorkflowTaskCreated, EventWorkflowTaskClaimed, EventWorkflowTaskCompleted,
+		EventWorkflowTaskDeferred, EventWorkflowTaskReassigned, EventWorkflowTaskSuperseded, EventWorkflowTaskFailed,
+		EventWorkflowTaskSLAWarning, EventWorkflowTaskSLABreached,
+	}
+}
+
 const EventSource = "workflow-execution-svc"
 
 // Outbound wire-type constants (LLD §6.4). PascalCase, platform-wide

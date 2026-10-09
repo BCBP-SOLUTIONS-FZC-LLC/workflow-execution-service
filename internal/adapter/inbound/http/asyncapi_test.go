@@ -83,8 +83,8 @@ func TestAsyncAPIHandler(t *testing.T) {
 		}
 		body := w.Body.String()
 		for _, want := range []string{
-			"workflow-execution-svc events", // info.title
-			"wf-workflow-events",            // static SNS topic reference
+			"workflow-execution-service events", // info.title
+			"wf-workflow-events",                // static SNS topic reference
 			`id="msg-WorkflowInstanceStarted"`,
 			`id="schema-EventEnvelope"`,
 			"STAGING", // ENV env var plumbed through
@@ -1033,7 +1033,7 @@ func TestRenderPage(t *testing.T) {
 		renderPage(&buf, real, "")
 		got := buf.String()
 
-		if !strings.Contains(got, "workflow-execution-svc events") {
+		if !strings.Contains(got, "workflow-execution-service events") {
 			t.Errorf("missing title")
 		}
 		if !strings.Contains(got, `href="#msg-WorkflowInstanceStarted"`) {

@@ -62,6 +62,13 @@ const (
 	eventTypeWorkflowTaskCreated     = "WorkflowTaskCreated"
 )
 
+func HandledEventTypes() []string {
+	return []string{
+		eventTypeDelegationStarted, eventTypeDelegationEnded, eventTypeUserDeleted, eventTypeUserAvailabilityChanged,
+		eventTypeMembershipRevoked, eventTypeTenantStateChanged, eventTypeTenantMembershipsPurged, eventTypeWorkflowTaskCreated,
+	}
+}
+
 // parseEventID and parseTenantID share the "invalid event id"/"invalid
 // tenant_id" 400 message every one of the five handlers needs for the
 // envelope's own ID/TenantID fields, as opposed to a payload field.
