@@ -10,6 +10,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
 // RecordForceRoute is RecordForceRouteActivity (LLD §3.1): marks the task(s)
@@ -150,7 +151,8 @@ func (d *Deps) recordSLAEvent(
 	}
 
 	ctx = withTenantGUC(ctx, tenantID)
-	return d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
+	recorded := false
+	err = d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
 		task, err := d.Tasks.GetByID(ctx, tenantID, taskID)
 		if err != nil {
 			return fmt.Errorf("get task: %w", err)
@@ -188,6 +190,11 @@ func (d *Deps) recordSLAEvent(
 			}
 			return err
 		}
+		recorded = true
 		return nil
 	})
+	if err == nil && recorded && eventType == domain.EventWorkflowTaskSLABreached {
+		observability.IncCounter(observability.SLABreachesTotal)
+	}
+	return err
 }

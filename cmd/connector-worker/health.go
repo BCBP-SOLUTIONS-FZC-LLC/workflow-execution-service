@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
 
 // newHealthServer builds cmd/connector-worker's plain net/http health/ready/
@@ -19,7 +19,7 @@ func newHealthServer(addr string, d *deps) *http.Server {
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.HandleFunc("/readyz", readyzHandler(d))
-	mux.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/metrics", gincommon.MetricsHandler())
 	return &http.Server{Addr: addr, Handler: mux}
 }
 

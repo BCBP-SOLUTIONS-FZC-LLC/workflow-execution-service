@@ -10,6 +10,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability/obstest"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl/dsltest"
 )
@@ -52,6 +53,24 @@ type goldenDefinitions struct{}
 
 func (goldenDefinitions) GetCompiledWorkflow(context.Context, uuid.UUID, uuid.UUID) (*port.CompiledWorkflow, error) {
 	return &port.CompiledWorkflow{Status: "PUBLISHED", IsValid: true, CompiledPlanJSON: string(dsltest.LibraryCalls())}, nil
+}
+
+func TestCompiledPlanCache_CountsMissesThenHits(t *testing.T) {
+	obstest.Init(t)
+	const hits, misses = "workflow_execution_service_wf_cache_hits_total", "workflow_execution_service_wf_cache_misses_total"
+	cache := newCompiledPlanCache(goldenDefinitions{}, noopLogger{})
+	tenantID, versionID := uuid.New(), uuid.New()
+	hitsBefore, missesBefore := obstest.Sum(t, hits, nil), obstest.Sum(t, misses, nil)
+
+	_, err := cache.mainPlan(context.Background(), tenantID, versionID)
+	require.NoError(t, err)
+	assert.Equal(t, missesBefore+1, obstest.Sum(t, misses, nil), "the first read of a version is a miss")
+	assert.Equal(t, hitsBefore, obstest.Sum(t, hits, nil))
+
+	_, err = cache.mainPlan(context.Background(), tenantID, versionID)
+	require.NoError(t, err)
+	assert.Equal(t, hitsBefore+1, obstest.Sum(t, hits, nil), "the second read is a hit")
+	assert.Equal(t, missesBefore+1, obstest.Sum(t, misses, nil))
 }
 
 // A module task's required level is found through its call-scoped node key,

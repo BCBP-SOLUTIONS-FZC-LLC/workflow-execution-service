@@ -26,6 +26,9 @@ import (
 // and silently no-op otherwise, which would make internal_events_test.go's
 // sample-count assertions read zero forever.
 func TestMain(m *testing.M) {
+	_ = gincommon.ObservabilityMiddlewares(gincommon.Config{
+		ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: observability.Domain, Environment: "test",
+	})
 	observability.Register()
 	os.Exit(m.Run())
 }
@@ -688,7 +691,7 @@ func newRouter(h *handler.Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.UseRawPath = true
-	for _, mw := range gincommon.ProtectedMiddlewares(gincommon.Config{}) {
+	for _, mw := range gincommon.ProtectedMiddlewares(gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: observability.Domain, Environment: "test"}) {
 		r.Use(mw)
 	}
 	rg := r.Group("/api/v1")

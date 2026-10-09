@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
 type signalAcceptedResp struct {
@@ -178,6 +179,7 @@ type startInstanceReq struct {
 }
 
 func (h *Handler) StartInstance(c *gin.Context) {
+	start := time.Now()
 	tenantID, userID, ok := callerIdentity(c)
 	if !ok {
 		return
@@ -213,6 +215,7 @@ func (h *Handler) StartInstance(c *gin.Context) {
 		errResponse(c, err)
 		return
 	}
+	observability.ObserveHistogram(observability.InstanceStartDurationSeconds, time.Since(start).Seconds())
 	c.JSON(http.StatusCreated, toInstanceSummaryResp(instance))
 }
 

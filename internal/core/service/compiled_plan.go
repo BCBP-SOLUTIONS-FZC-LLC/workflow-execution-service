@@ -76,8 +76,10 @@ func (c *compiledPlanCache) mainPlan(ctx context.Context, tenantID, versionID uu
 
 func (c *compiledPlanCache) readMainPlan(ctx context.Context, tenantID, versionID uuid.UUID) (*dsl.CompiledPlan, error) {
 	if plan, ok := c.byVersion[versionID]; ok {
+		observability.IncCounter(observability.WFCacheHitsTotal)
 		return plan, nil
 	}
+	observability.IncCounter(observability.WFCacheMissesTotal)
 	compiled, err := c.definitions.GetCompiledWorkflow(ctx, tenantID, versionID)
 	if err != nil {
 		return nil, err

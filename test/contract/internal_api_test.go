@@ -52,7 +52,7 @@ func (p *pauser) PauseUserTasks(_ context.Context, tenantID, userID uuid.UUID) e
 func internalRouter(g *guard, p *pauser) http.Handler {
 	gin.SetMode(gin.TestMode)
 	return httpadapter.NewRouter(httpadapter.RouterConfig{
-		GinConfig: gincommon.Config{ServiceName: "execution-contract-test"}, AppEnv: "test", InternalAPIToken: "internal-secret",
+		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"}, AppEnv: "test", InternalAPIToken: "internal-secret",
 		Handler: handler.New(handler.Services{ArchiveGuard: g, UserTaskPauser: p}),
 		DB:      upDB{}, Cache: upPinger{}, Temporal: upPinger{},
 	}).Handler()

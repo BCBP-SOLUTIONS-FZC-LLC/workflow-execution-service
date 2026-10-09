@@ -9,6 +9,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
 // toPortInstance mirrors domain.Instance -> port.Instance field-for-field
@@ -168,7 +169,7 @@ func domainEventTypeToPort(eventType string) (port.WorkflowEventType, bool) {
 
 // outboxEnvelope is the minimal shape of the stored outbox_events.payload
 // column this service needs: the full events.Envelope[json.RawMessage]
-// wire shape (platform-events/pkg/events), decoded by hand rather than by
+// wire shape (platform-events/v2/pkg/events), decoded by hand rather than by
 // importing that package's own Envelope type, since only a few of its
 // fields matter here.
 type outboxEnvelope struct {
@@ -255,6 +256,7 @@ func wrapInstanceErr(err error) error {
 	case errors.Is(err, domain.ErrNotFound):
 		return port.ErrInstanceNotFound
 	case errors.Is(err, domain.ErrRecordVersionConflict):
+		observability.IncCounterVec(observability.RecordVersionConflictTotal, "workflow_instance")
 		return port.ErrRecordVersionConflict
 	case errors.Is(err, domain.ErrDuplicateBusinessKey):
 		return port.ErrDuplicateBusinessKey
@@ -272,6 +274,7 @@ func wrapTaskErr(err error) error {
 	case errors.Is(err, domain.ErrNotFound):
 		return port.ErrTaskNotFound
 	case errors.Is(err, domain.ErrRecordVersionConflict):
+		observability.IncCounterVec(observability.RecordVersionConflictTotal, "workflow_task")
 		return port.ErrRecordVersionConflict
 	default:
 		return err

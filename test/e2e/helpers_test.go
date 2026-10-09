@@ -21,7 +21,7 @@ import (
 	sdkworkflow "go.temporal.io/sdk/workflow"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 
 	httpadapter "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
@@ -184,7 +184,7 @@ func buildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, definitio
 		Delegation: delegationReconciler,
 	})
 	return httpadapter.NewRouter(httpadapter.RouterConfig{
-		GinConfig: gincommon.Config{ServiceName: "execution-service-e2e-test", BuildVersion: "test"},
+		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"},
 		AppEnv:    "dev",
 		Handler:   h,
 		DB:        alwaysHealthy{}, Cache: alwaysHealthy{}, Temporal: alwaysHealthy{},

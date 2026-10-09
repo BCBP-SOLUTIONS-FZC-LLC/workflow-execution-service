@@ -13,6 +13,7 @@ import (
 	outboundtemporal "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability/obstest"
 )
 
 func TestRecordForceRoute_SupersedesBypassedTaskAndEnqueuesBoth(t *testing.T) {
@@ -301,10 +302,14 @@ func TestRecordSLABreach_EnqueuesAuditEventOnly(t *testing.T) {
 		Outbox: outbox, Transactor: fakeTransactor{}, Validator: realValidator(),
 	}
 
+	obstest.Init(t)
+	before := obstest.Sum(t, "workflow_execution_service_sla_breaches_total", nil)
+
 	err := deps.RecordSLABreach(context.Background(), port.RecordSLABreachInput{
 		InstanceID: instanceID.String(), TenantID: uuid.New().String(), TaskID: taskID.String(), NodeKey: "sales/review",
 	})
 	require.NoError(t, err)
 	require.Len(t, outbox.enqueued, 1)
 	assert.Equal(t, domain.EventWorkflowTaskSLABreached, outbox.enqueued[0].Type)
+	assert.Equal(t, before+1, obstest.Sum(t, "workflow_execution_service_sla_breaches_total", nil), "a recorded breach adds one to sla_breaches_total")
 }

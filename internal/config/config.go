@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -213,7 +214,7 @@ func Load() (*Config, error) {
 		WorkerHealthPort:  envInt("WORKER_HEALTH_PORT", 8081),
 		WorkerMetricsPort: envInt("WORKER_METRICS_PORT", 8082),
 
-		OTELServiceName:        getEnvOrDefault("OTEL_SERVICE_NAME", "execution-service"),
+		OTELServiceName:        getEnvOrDefault("OTEL_SERVICE_NAME", "workflow-execution-service"),
 		OTELExporterEndpoint:   getEnvOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
 		OTELExporterInsecure:   envBool("OTEL_EXPORTER_OTLP_INSECURE", true),
 		OTELTracesSamplerRatio: envFloat64("OTEL_TRACES_SAMPLER_RATIO", 1.0),
@@ -314,7 +315,16 @@ func Load() (*Config, error) {
 // validate checks value ranges only. What a binary requires to be set is
 // checked by its own Require method, so the environment of one binary does
 // not have to carry another's settings.
+var appEnvs = []string{"local", "dev", "test", "staging", "prod"}
+
+func (c *Config) IsDev() bool {
+	return c.AppEnv == "dev" || c.AppEnv == "local"
+}
+
 func (c *Config) validate() error {
+	if !slices.Contains(appEnvs, c.AppEnv) {
+		return fmt.Errorf("APP_ENV must be one of %s", strings.Join(appEnvs, ", "))
+	}
 	if c.HTTPPort < 1 || c.HTTPPort > 65535 {
 		return fmt.Errorf("HTTP_PORT must be in [1, 65535]")
 	}
@@ -382,6 +392,9 @@ func (c *Config) RequireServer() error {
 	if c.EligibilityBaseURL == "" {
 		return fmt.Errorf("ELIGIBILITY_BASE_URL is required")
 	}
+	if c.AWSUseStub && !c.IsDev() {
+		return fmt.Errorf("AWS_USE_STUB must be false outside dev and local")
+	}
 	if !c.AWSUseStub {
 		if c.SNSTopicARN == "" {
 			return fmt.Errorf("SNS_TOPIC_ARN is required when AWS_USE_STUB=false")
@@ -390,18 +403,18 @@ func (c *Config) RequireServer() error {
 			return fmt.Errorf("GLUE_REGISTRY_NAME is required when AWS_USE_STUB=false")
 		}
 	}
-	if c.AppEnv != "dev" {
+	if !c.IsDev() {
 		if c.InternalAPIToken == "" {
-			return fmt.Errorf("INTERNAL_API_TOKEN is required when APP_ENV != dev")
+			return fmt.Errorf("INTERNAL_API_TOKEN is required outside dev and local")
 		}
 		if c.DefinitionServiceToken == "" {
-			return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required when APP_ENV != dev")
+			return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required outside dev and local")
 		}
 		if c.TokenServiceBaseURL == "" {
-			return fmt.Errorf("TOKEN_SERVICE_BASE_URL is required when APP_ENV != dev")
+			return fmt.Errorf("TOKEN_SERVICE_BASE_URL is required outside dev and local")
 		}
 		if c.OutboxRelayDatabaseURL == "" {
-			return fmt.Errorf("OUTBOX_RELAY_DATABASE_URL is required when APP_ENV != dev — a missing relay DSN would silently fall back to the RLS-enforced app role and see zero rows forever")
+			return fmt.Errorf("OUTBOX_RELAY_DATABASE_URL is required outside dev and local — a missing relay DSN would silently fall back to the RLS-enforced app role and see zero rows forever")
 		}
 	}
 	return nil
@@ -417,8 +430,8 @@ func (c *Config) RequireWorker() error {
 	if c.DefinitionServiceURL == "" {
 		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
 	}
-	if c.AppEnv != "dev" && c.DefinitionServiceToken == "" {
-		return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required when APP_ENV != dev")
+	if !c.IsDev() && c.DefinitionServiceToken == "" {
+		return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required outside dev and local")
 	}
 	return nil
 }
@@ -429,12 +442,12 @@ func (c *Config) RequireConnectorWorker() error {
 	if c.DefinitionServiceURL == "" {
 		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
 	}
-	if c.AppEnv != "dev" {
+	if !c.IsDev() {
 		if c.DefinitionServiceToken == "" {
-			return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required when APP_ENV != dev")
+			return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required outside dev and local")
 		}
 		if c.InternalAPIToken == "" {
-			return fmt.Errorf("INTERNAL_API_TOKEN is required when APP_ENV != dev")
+			return fmt.Errorf("INTERNAL_API_TOKEN is required outside dev and local")
 		}
 	}
 	return nil

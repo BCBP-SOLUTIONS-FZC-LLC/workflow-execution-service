@@ -16,7 +16,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
 )
 
-var testGinConfig = gincommon.Config{ServiceName: "execution-service-test"}
+var testGinConfig = gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"}
 
 type fakePinger struct{ err error }
 

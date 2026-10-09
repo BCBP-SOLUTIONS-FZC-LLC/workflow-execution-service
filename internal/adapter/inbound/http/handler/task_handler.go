@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
 type taskResp struct {
@@ -219,6 +220,7 @@ type claimReq struct {
 }
 
 func (h *Handler) ClaimTask(c *gin.Context) {
+	start := time.Now()
 	tenantID, userID, ok := callerIdentity(c)
 	if !ok {
 		return
@@ -237,6 +239,7 @@ func (h *Handler) ClaimTask(c *gin.Context) {
 		errResponse(c, err)
 		return
 	}
+	observability.ObserveHistogramVec(observability.TaskSignalDurationSeconds, time.Since(start).Seconds(), "claim")
 	c.JSON(http.StatusAccepted, toTaskResp(task))
 }
 
@@ -248,6 +251,7 @@ type completeReq struct {
 // CompleteTask forwards the caller's own x-user-id as-is (§5.6)
 // against the task's assignee downstream, 403 NOT_ASSIGNEE on mismatch.
 func (h *Handler) CompleteTask(c *gin.Context) {
+	start := time.Now()
 	tenantID, userID, ok := callerIdentity(c)
 	if !ok {
 		return
@@ -266,6 +270,7 @@ func (h *Handler) CompleteTask(c *gin.Context) {
 		errResponse(c, err)
 		return
 	}
+	observability.ObserveHistogramVec(observability.TaskSignalDurationSeconds, time.Since(start).Seconds(), "complete")
 	c.JSON(http.StatusAccepted, toTaskResp(task))
 }
 
@@ -275,6 +280,7 @@ type deferReq struct {
 }
 
 func (h *Handler) DeferTask(c *gin.Context) {
+	start := time.Now()
 	tenantID, userID, ok := callerIdentity(c)
 	if !ok {
 		return
@@ -293,6 +299,7 @@ func (h *Handler) DeferTask(c *gin.Context) {
 		errResponse(c, err)
 		return
 	}
+	observability.ObserveHistogramVec(observability.TaskSignalDurationSeconds, time.Since(start).Seconds(), "defer")
 	c.JSON(http.StatusAccepted, toTaskResp(task))
 }
 

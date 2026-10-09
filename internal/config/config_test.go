@@ -72,6 +72,10 @@ func TestValidate(t *testing.T) {
 		{"eligibility client timeout zero", func(c *Config) { c.EligibilityClientTimeout = 0 }, true},
 		{"iam client timeout zero", func(c *Config) { c.IAMClientTimeout = 0 }, true},
 		{"token service client timeout zero", func(c *Config) { c.TokenServiceClientTimeout = 0 }, true},
+		{"app env unknown", func(c *Config) { c.AppEnv = "production" }, true},
+		{"app env empty", func(c *Config) { c.AppEnv = "" }, true},
+		{"app env local", func(c *Config) { c.AppEnv = "local" }, false},
+		{"app env staging", func(c *Config) { c.AppEnv = "staging" }, false},
 		{"queue topology poll interval zero", func(c *Config) { c.QueueTopologyPollInterval = 0 }, true},
 	}
 
@@ -102,6 +106,19 @@ func TestValidate(t *testing.T) {
 				t.Errorf("validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestLoad_DefaultServiceName(t *testing.T) {
+	setValidEnv(t)
+	t.Setenv("OTEL_SERVICE_NAME", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.OTELServiceName != "workflow-execution-service" {
+		t.Errorf("OTELServiceName = %q, want workflow-execution-service", cfg.OTELServiceName)
 	}
 }
 
@@ -199,7 +216,7 @@ func TestGetEnvDurationOrDefault(t *testing.T) {
 // A binary needs only the settings it uses: the connector-worker has no
 // database and publishes no events, and the migrate job needs only the DSN.
 func TestLoad_ConnectorWorkerEnvironment(t *testing.T) {
-	t.Setenv("APP_ENV", "production")
+	t.Setenv("APP_ENV", "prod")
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("OUTBOX_RELAY_DATABASE_URL", "")
 	t.Setenv("AWS_USE_STUB", "false")
@@ -216,11 +233,12 @@ func TestLoad_ConnectorWorkerEnvironment(t *testing.T) {
 
 func TestRequire(t *testing.T) {
 	prod := func(c *Config) {
-		c.AppEnv = "production"
+		c.AppEnv = "prod"
 		c.InternalAPIToken = "tok"
 		c.DefinitionServiceToken = "def-tok"
 		c.OutboxRelayDatabaseURL = "postgres://relay"
 		c.TokenServiceBaseURL = "http://token-service"
+		c.AWSUseStub = false
 		c.SNSTopicARN = "arn:aws:sns:x"
 		c.GlueRegistryName = "wf-workflow-events"
 	}
@@ -246,26 +264,28 @@ func TestRequire(t *testing.T) {
 		{"server needs the eligibility service", (*Config).RequireServer, func(c *Config) { c.EligibilityBaseURL = "" }, "ELIGIBILITY_BASE_URL"},
 		{"server needs sns when not stubbed", (*Config).RequireServer, func(c *Config) { c.AWSUseStub = false; c.GlueRegistryName = "g" }, "SNS_TOPIC_ARN"},
 		{"server needs glue when not stubbed", (*Config).RequireServer, func(c *Config) { c.AWSUseStub = false; c.SNSTopicARN = "arn" }, "GLUE_REGISTRY_NAME"},
+		{"server refuses the stubbed publisher outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.AWSUseStub = true }, "AWS_USE_STUB"},
+		{"server allows the stubbed publisher in local", (*Config).RequireServer, func(c *Config) { c.AppEnv = "local" }, ""},
 		{"server needs its token outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.InternalAPIToken = "" }, "INTERNAL_API_TOKEN"},
 		{"server needs the definition token outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.DefinitionServiceToken = "" }, "DEFINITION_SERVICE_TOKEN"},
 		{"server needs the token service outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.TokenServiceBaseURL = "" }, "TOKEN_SERVICE_BASE_URL"},
 		{"server needs the relay dsn outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.OutboxRelayDatabaseURL = "" }, "OUTBOX_RELAY_DATABASE_URL"},
 
 		{"worker valid in dev", (*Config).RequireWorker, func(c *Config) {}, ""},
-		{"worker valid in production without the api's settings", (*Config).RequireWorker, func(c *Config) { c.AppEnv = "production"; c.DefinitionServiceToken = "def-tok" }, ""},
+		{"worker valid in production without the api's settings", (*Config).RequireWorker, func(c *Config) { c.AppEnv = "prod"; c.DefinitionServiceToken = "def-tok" }, ""},
 		{"worker needs a database", (*Config).RequireWorker, func(c *Config) { c.DatabaseURL = "" }, "DATABASE_URL"},
 		{"worker needs the definition service", (*Config).RequireWorker, func(c *Config) { c.DefinitionServiceURL = "" }, "DEFINITION_SERVICE_URL"},
-		{"worker needs the definition token outside dev", (*Config).RequireWorker, func(c *Config) { c.AppEnv = "production" }, "DEFINITION_SERVICE_TOKEN"},
+		{"worker needs the definition token outside dev", (*Config).RequireWorker, func(c *Config) { c.AppEnv = "prod" }, "DEFINITION_SERVICE_TOKEN"},
 
 		{"connector-worker valid in production without a database", (*Config).RequireConnectorWorker, func(c *Config) {
-			c.AppEnv = "production"
+			c.AppEnv = "prod"
 			c.DatabaseURL = ""
 			c.InternalAPIToken = "tok"
 			c.DefinitionServiceToken = "def-tok"
 		}, ""},
 		{"connector-worker needs the definition service", (*Config).RequireConnectorWorker, func(c *Config) { c.DefinitionServiceURL = "" }, "DEFINITION_SERVICE_URL"},
-		{"connector-worker needs the definition token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "production"; c.InternalAPIToken = "tok" }, "DEFINITION_SERVICE_TOKEN"},
-		{"connector-worker needs the internal token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "production"; c.DefinitionServiceToken = "def-tok" }, "INTERNAL_API_TOKEN"},
+		{"connector-worker needs the definition token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "prod"; c.InternalAPIToken = "tok" }, "DEFINITION_SERVICE_TOKEN"},
+		{"connector-worker needs the internal token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "prod"; c.DefinitionServiceToken = "def-tok" }, "INTERNAL_API_TOKEN"},
 
 		{"migrate needs only a database", (*Config).RequireMigrate, func(c *Config) { *c = Config{DatabaseURL: "postgres://x"} }, ""},
 		{"migrate prefers its direct dsn", (*Config).RequireMigrate, func(c *Config) { *c = Config{MigrationDatabaseURL: "postgres://direct"} }, ""},

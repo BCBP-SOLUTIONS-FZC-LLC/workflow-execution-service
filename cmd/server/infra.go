@@ -9,16 +9,16 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/pkg/events"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/pkg/events/mock"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events/mock"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/glue"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pglogger"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pgtracer"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkey"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
 
 // newAppPool builds the RLS-enforced execution_app pool every ordinary
@@ -32,7 +32,7 @@ func newAppPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgco
 		SlowQueryThreshold: time.Duration(cfg.PGSlowQueryThresholdMS) * time.Millisecond,
 		GUCProvider:        pgcommon.GUCSetFromContext,
 		Logger:             pglogger.New(log),
-		Tracer:             pgtracer.New(cfg.OTELServiceName),
+		Tracer:             gincommon.NewSpanTracer(cfg.OTELServiceName),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("app db pool: %w", err)
@@ -50,7 +50,7 @@ func newRelayPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pg
 		MinConns:      cfg.PGMinConns,
 		PGBouncerMode: cfg.PGBouncerMode,
 		Logger:        pglogger.New(log),
-		Tracer:        pgtracer.New(cfg.OTELServiceName),
+		Tracer:        gincommon.NewSpanTracer(cfg.OTELServiceName),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("outbox relay db pool: %w", err)

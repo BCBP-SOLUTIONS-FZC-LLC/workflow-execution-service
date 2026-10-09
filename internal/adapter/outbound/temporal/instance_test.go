@@ -13,6 +13,7 @@ import (
 	outboundtemporal "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability/obstest"
 )
 
 func newInstanceTestDeps(inst *domain.Instance, tasks *fakeTaskRepo, assignments *fakeAssignmentRepo) (*outboundtemporal.Deps, *fakeOutbox) {
@@ -323,6 +324,25 @@ func TestFailTask_ListActiveAssignmentsError(t *testing.T) {
 // test for the missing-DEGRADED-event finding: this transition must now
 // build and enqueue workflow.instance.degraded, carrying the FailedBranches
 // internal/workflow/degraded.go passes in.
+func TestUpdateInstanceStatus_Degraded_CountsEachTransitionOnce(t *testing.T) {
+	obstest.Init(t)
+	const name = "workflow_execution_service_instance_degraded_total"
+	instanceID, tenantID := uuid.New(), uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1}
+	deps, _ := newInstanceTestDeps(inst, nil, nil)
+	in := port.UpdateInstanceStatusInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), Status: domain.InstanceStatusDegraded,
+		FailedBranches: []domain.FailedBranch{{DepartmentID: uuid.New(), LastNodeKey: "legal_review/approve"}},
+	}
+	before := obstest.Sum(t, name, nil)
+
+	require.NoError(t, deps.UpdateInstanceStatus(context.Background(), in))
+	assert.Equal(t, before+1, obstest.Sum(t, name, nil), "entering DEGRADED adds one")
+
+	require.NoError(t, deps.UpdateInstanceStatus(context.Background(), in))
+	assert.Equal(t, before+1, obstest.Sum(t, name, nil), "a retried activity attempt on an already DEGRADED instance adds nothing")
+}
+
 func TestUpdateInstanceStatus_Degraded_EnqueuesDegradedEvent(t *testing.T) {
 	instanceID, tenantID := uuid.New(), uuid.New()
 	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1}

@@ -51,14 +51,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	observability.Register()
-	tracingShutdown := observability.InitTracing()
-	defer tracingShutdown()
-
 	wlog, err := logger.NewLogger(cfg.AppEnv)
 	if err != nil {
 		log.Fatalf("cmd/connector-worker: new logger: %v", err)
 	}
+	tracingShutdown, err := observability.InitTelemetry(observability.GinConfig(cfg.OTELServiceName, cfg.BuildVersion, cfg.AppEnv, wlog), wlog)
+	if err != nil {
+		log.Fatalf("cmd/connector-worker: telemetry: %v", err)
+	}
+	defer tracingShutdown()
 
 	deps, cleanup, err := buildDeps(cfg)
 	if err != nil {

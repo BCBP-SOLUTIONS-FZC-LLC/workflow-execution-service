@@ -11,7 +11,22 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability/obstest"
 )
+
+func TestVersionConflicts_AreCountedByTable(t *testing.T) {
+	obstest.Init(t)
+	const name = "workflow_execution_service_record_version_conflict_total"
+	for table, wrap := range map[string]func(error) error{"workflow_instance": wrapInstanceErr, "workflow_task": wrapTaskErr} {
+		before := obstest.Sum(t, name, map[string]string{"table": table})
+		assert.ErrorIs(t, wrap(domain.ErrRecordVersionConflict), port.ErrRecordVersionConflict)
+		assert.Equal(t, before+1, obstest.Sum(t, name, map[string]string{"table": table}), table)
+
+		other := wrap(domain.ErrNotFound)
+		require.Error(t, other)
+		assert.Equal(t, before+1, obstest.Sum(t, name, map[string]string{"table": table}), "only conflicts are counted")
+	}
+}
 
 func TestToPortInstance(t *testing.T) {
 	now := time.Now().UTC()

@@ -7,12 +7,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/contrib/opentelemetry"
 	"go.temporal.io/sdk/interceptor"
 
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/pkg/outbox"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/outbox"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/logger"
 
@@ -50,14 +49,11 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, fmt.Errorf("logger: %w", err)
 	}
 
-	// Must run before any gin engine/ObservabilityMiddlewares is constructed:
-	// gincommon.ObservabilityMiddlewares installs a TracerProvider only if
-	// none is registered yet, so whichever of the two runs first wins and
-	// produces the real, capturable shutdown func.
-	observability.Register()
-	observability.RegisterPGMetrics(cfg.OTELServiceName, cfg.BuildVersion)
-	observability.RegisterEventsMetrics(cfg.OTELServiceName, cfg.BuildVersion)
-	tracingShutdown := observability.InitTracing()
+	ginCfg := observability.GinConfig(cfg.OTELServiceName, cfg.BuildVersion, cfg.AppEnv, log)
+	tracingShutdown, err := observability.InitTelemetry(ginCfg, log)
+	if err != nil {
+		return nil, err
+	}
 	cleanups = append(cleanups, tracingShutdown)
 
 	ctx := context.Background()
@@ -68,7 +64,6 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, err
 	}
 	cleanups = append(cleanups, appPool.Close)
-	observability.RegisterPoolStats(appPool, cfg.OTELServiceName+"-app")
 
 	relayPool, err := newRelayPool(ctx, cfg, log)
 	if err != nil {
@@ -76,7 +71,6 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, err
 	}
 	cleanups = append(cleanups, relayPool.Close)
-	observability.RegisterPoolStats(relayPool, cfg.OTELServiceName+"-relay")
 
 	cache, cacheClient, err := newCacheStore(ctx, cfg)
 	if err != nil {
@@ -206,7 +200,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	})
 
 	router := httpadapter.NewRouter(httpadapter.RouterConfig{
-		GinConfig:        gincommon.Config{Logger: log, ServiceName: cfg.OTELServiceName, BuildVersion: cfg.BuildVersion},
+		GinConfig:        ginCfg,
 		AppEnv:           cfg.AppEnv,
 		InternalAPIToken: cfg.InternalAPIToken,
 		Handler:          h,
@@ -223,7 +217,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 
 	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsMux.Handle("/metrics", gincommon.MetricsHandler())
 	metricsServer := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.MetricsPort),
 		Handler:      metricsMux,

@@ -12,19 +12,19 @@ import (
 	"time"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/logger"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
 	outboundhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pglogger"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pgtracer"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
 	outboundtemporal "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
 
 // version is stamped at build time by the Dockerfile's
@@ -46,12 +46,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	observability.Register()
-	observability.RegisterPGMetrics(cfg.OTELServiceName, cfg.BuildVersion)
-	tracingShutdown := observability.InitTracing()
+	wlog, err := logger.NewLogger(cfg.AppEnv)
+	if err != nil {
+		log.Fatalf("cmd/worker: new logger: %v", err)
+	}
+	tracingShutdown, err := observability.InitTelemetry(observability.GinConfig(cfg.OTELServiceName, cfg.BuildVersion, cfg.AppEnv, wlog), wlog)
+	if err != nil {
+		log.Fatalf("cmd/worker: telemetry: %v", err)
+	}
 	defer tracingShutdown()
 
-	deps, queueRepo, pool, wlog, cleanup, err := buildDeps(cfg)
+	deps, queueRepo, pool, cleanup, err := buildDeps(cfg, wlog)
 	if err != nil {
 		log.Fatalf("cmd/worker: %v", err)
 	}
@@ -114,12 +119,7 @@ func main() {
 	wg.Wait()
 }
 
-func buildDeps(cfg *config.Config) (*outboundtemporal.Deps, port.ActiveTaskQueueRepository, *pgcommon.Pool, port.Logger, func(), error) {
-	wlog, err := logger.NewLogger(cfg.AppEnv)
-	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("new logger: %w", err)
-	}
-
+func buildDeps(cfg *config.Config, wlog port.Logger) (*outboundtemporal.Deps, port.ActiveTaskQueueRepository, *pgcommon.Pool, func(), error) {
 	pool, err := pgcommon.NewPool(context.Background(), pgcommon.Config{
 		DSN:                cfg.DatabaseURL,
 		MaxConns:           cfg.PGMaxConns,
@@ -128,17 +128,16 @@ func buildDeps(cfg *config.Config) (*outboundtemporal.Deps, port.ActiveTaskQueue
 		SlowQueryThreshold: time.Duration(cfg.PGSlowQueryThresholdMS) * time.Millisecond,
 		GUCProvider:        pgcommon.GUCSetFromContext,
 		Logger:             pglogger.New(wlog),
-		Tracer:             pgtracer.New(cfg.OTELServiceName),
+		Tracer:             gincommon.NewSpanTracer(cfg.OTELServiceName),
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("new postgres pool: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("new postgres pool: %w", err)
 	}
-	observability.RegisterPoolStats(pool, cfg.OTELServiceName+"-worker")
 
 	validator, err := eventbus.NewSchemaValidator()
 	if err != nil {
 		pool.Close()
-		return nil, nil, nil, nil, nil, fmt.Errorf("new schema validator: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("new schema validator: %w", err)
 	}
 
 	definitions := outboundhttp.NewDefinitionClient(cfg.DefinitionServiceURL, cfg.DefinitionServiceToken, cfg.DefinitionClientTimeout)
@@ -160,5 +159,5 @@ func buildDeps(cfg *config.Config) (*outboundtemporal.Deps, port.ActiveTaskQueue
 		defer cancel()
 		_ = pool.DrainAndClose(ctx)
 	}
-	return deps, queueRepo, pool, wlog, cleanup, nil
+	return deps, queueRepo, pool, cleanup, nil
 }

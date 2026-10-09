@@ -7,16 +7,15 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"go.opentelemetry.io/otel/trace"
-
-	pgdomain "github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/domain"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
+	pgdomain "github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 	"github.com/google/uuid"
 
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/pkg/events"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
 func withTenantGUC(ctx context.Context, tenantID uuid.UUID) context.Context {
@@ -46,8 +45,8 @@ func BuildEnvelope[T any](
 	if actor != "" {
 		opts = append(opts, events.WithActor(actor))
 	}
-	if sc := trace.SpanFromContext(ctx).SpanContext(); sc.IsValid() {
-		opts = append(opts, events.WithTraceID(sc.TraceID().String()))
+	if traceID := observability.TraceID(ctx); traceID != "" {
+		opts = append(opts, events.WithTraceID(traceID))
 	}
 	return events.NewEnvelope[json.RawMessage](eventType, domain.EventSource, raw, opts...), nil
 }

@@ -7,19 +7,35 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/logger"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
+
+func initIdentity(t *testing.T) {
+	t.Helper()
+	log, err := logger.NewLogger("dev")
+	require.NoError(t, err)
+	_ = gincommon.ObservabilityMiddlewares(gincommon.Config{
+		Logger:       log,
+		ServiceName:  "workflow-execution-service",
+		BuildVersion: "test",
+		Domain:       observability.Domain,
+		Environment:  "test",
+	})
+	observability.Register()
+}
 
 // scrape registers metrics and returns the default registry's /metrics body.
 func scrape(t *testing.T) string {
 	t.Helper()
 
-	observability.Register()
+	initIdentity(t)
 
-	srv := httptest.NewServer(promhttp.Handler())
+	srv := httptest.NewServer(gincommon.MetricsHandler())
 	t.Cleanup(srv.Close)
 
 	resp, err := http.Get(srv.URL) //nolint:noctx,gosec // test-only, fixed httptest URL
@@ -41,7 +57,7 @@ func scrape(t *testing.T) string {
 // eventually trigger it, rather than asserting on incidental zero-value
 // output.
 func TestRegister_EveryMetricIsScrapable(t *testing.T) {
-	observability.Register()
+	initIdentity(t)
 
 	observability.RecordVersionConflictTotal.WithLabelValues("workflow_instance").Inc()
 	observability.DelegationScopeUnhandledTotal.WithLabelValues("some-new-scope").Inc()
@@ -50,15 +66,15 @@ func TestRegister_EveryMetricIsScrapable(t *testing.T) {
 	observability.TaskSignalDurationSeconds.WithLabelValues("claim").Observe(0.1)
 	observability.InstanceStartDurationSeconds.Observe(0.5)
 	observability.WorkflowActivityDurationSeconds.WithLabelValues("CreateTaskActivity", "success").Observe(0.2)
-	observability.InstanceDegradedTotal.WithLabelValues("tenant-1").Inc()
+	observability.InstanceDegradedTotal.Inc()
 	observability.WorkerActiveQueues.Set(1)
 	observability.InternalEventsLastReceivedTimestamp.WithLabelValues("DelegationStarted").Set(1)
 	observability.WorkflowReplayFailuresTotal.WithLabelValues("InstanceWorkflow").Inc()
-	observability.InstanceDegradedCurrent.WithLabelValues("tenant-1").Set(1)
-	observability.InstanceDegradedOldestAgeSeconds.WithLabelValues("tenant-1").Set(1)
+	observability.InstanceDegradedCurrent.Set(1)
+	observability.InstanceDegradedOldestAgeSeconds.Set(1)
 	observability.WorkerQueueLastPollTimestamp.WithLabelValues("tenant-1-queue").Set(1)
-	observability.SLABreachesTotal.WithLabelValues("tenant-1").Inc()
-	observability.OldestReadyTaskAgeSeconds.WithLabelValues("tenant-1").Set(1)
+	observability.SLABreachesTotal.Inc()
+	observability.OldestReadyTaskAgeSeconds.Set(1)
 	// RLSViolationsTotal and UpstreamDependencyErrorsTotal are skipped here —
 	// both are already pre-initialized (fully closed label sets), so they
 	// already appear in any post-Register scrape; incrementing them here
@@ -66,31 +82,29 @@ func TestRegister_EveryMetricIsScrapable(t *testing.T) {
 	// assertion, since both tests share the process-global default registry.
 	observability.WFCacheHitsTotal.Inc()
 	observability.WFCacheMissesTotal.Inc()
-	observability.OutboxOldestUnpublishedAgeSeconds.Set(1)
 
 	body := scrape(t)
 
 	metricNames := []string{
-		"record_version_conflict_total",
-		"internal_events_ingest_total",
-		"delegation_reroute_duration_seconds",
-		"task_signal_duration_seconds",
-		"instance_start_duration_seconds",
-		"workflow_activity_duration_seconds",
-		"instance_degraded_total",
-		"worker_active_queues",
-		"internal_events_last_received_timestamp",
-		"rls_violations_total",
-		"workflow_replay_failures_total",
-		"instance_degraded_current",
-		"instance_degraded_oldest_age_seconds",
-		"worker_queue_last_poll_timestamp",
-		"sla_breaches_total",
-		"oldest_ready_task_age_seconds",
-		"upstream_dependency_errors_total",
-		"wf_cache_hits_total",
-		"wf_cache_misses_total",
-		"outbox_oldest_unpublished_age_seconds",
+		"workflow_execution_service_record_version_conflict_total",
+		"workflow_execution_service_internal_events_ingest_total",
+		"workflow_execution_service_delegation_reroute_duration_seconds",
+		"workflow_execution_service_task_signal_duration_seconds",
+		"workflow_execution_service_instance_start_duration_seconds",
+		"workflow_execution_service_workflow_activity_duration_seconds",
+		"workflow_execution_service_instance_degraded_total",
+		"workflow_execution_service_worker_active_queues",
+		"workflow_execution_service_internal_events_last_received_timestamp",
+		"workflow_execution_service_rls_violations_total",
+		"workflow_execution_service_workflow_replay_failures_total",
+		"workflow_execution_service_instance_degraded_current",
+		"workflow_execution_service_instance_degraded_oldest_age_seconds",
+		"workflow_execution_service_worker_queue_last_poll_timestamp",
+		"workflow_execution_service_sla_breaches_total",
+		"workflow_execution_service_oldest_ready_task_age_seconds",
+		"workflow_execution_service_upstream_dependency_errors_total",
+		"workflow_execution_service_wf_cache_hits_total",
+		"workflow_execution_service_wf_cache_misses_total",
 	}
 
 	for _, name := range metricNames {
@@ -99,6 +113,7 @@ func TestRegister_EveryMetricIsScrapable(t *testing.T) {
 }
 
 func TestRegister_IsIdempotent(t *testing.T) {
+	initIdentity(t)
 	require.NotPanics(t, func() {
 		observability.Register()
 		observability.Register()
@@ -106,17 +121,30 @@ func TestRegister_IsIdempotent(t *testing.T) {
 }
 
 func TestRegister_PreInitializesClosedLabelSets(t *testing.T) {
-	body := scrape(t)
+	initIdentity(t)
 
-	for _, sample := range []string{
-		`task_signal_duration_seconds_count{operation="claim"}`,
-		`task_signal_duration_seconds_count{operation="complete"}`,
-		`task_signal_duration_seconds_count{operation="defer"}`,
-		`rls_violations_total{type="missing_guc"} 0`,
-		`rls_violations_total{type="cross_tenant"} 0`,
-		`upstream_dependency_errors_total{dependency="definition_service"} 0`,
-		`upstream_dependency_errors_total{dependency="iam"} 0`,
+	gathered, err := gincommon.MetricsGatherer().Gather()
+	require.NoError(t, err)
+
+	series := map[string]map[string]bool{}
+	for _, mf := range gathered {
+		for _, m := range mf.GetMetric() {
+			for _, lp := range m.GetLabel() {
+				if series[mf.GetName()] == nil {
+					series[mf.GetName()] = map[string]bool{}
+				}
+				series[mf.GetName()][lp.GetName()+"="+lp.GetValue()] = true
+			}
+		}
+	}
+
+	for name, label := range map[string][]string{
+		"workflow_execution_service_task_signal_duration_seconds":     {"operation=claim", "operation=complete", "operation=defer"},
+		"workflow_execution_service_rls_violations_total":             {"type=missing_guc", "type=cross_tenant"},
+		"workflow_execution_service_upstream_dependency_errors_total": {"dependency=definition_service", "dependency=iam"},
 	} {
-		require.Truef(t, strings.Contains(body, sample), "expected pre-initialized series %q", sample)
+		for _, l := range label {
+			require.Truef(t, series[name][l], "expected pre-initialized series %s{%s}", name, l)
+		}
 	}
 }

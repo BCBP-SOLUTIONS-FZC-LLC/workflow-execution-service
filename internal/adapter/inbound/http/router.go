@@ -44,6 +44,8 @@ type RouterConfig struct {
 	Temporal Pinger
 }
 
+const requestTimeout = 30 * time.Second
+
 type Router struct {
 	engine *gin.Engine
 }
@@ -51,7 +53,8 @@ type Router struct {
 func (r *Router) Handler() http.Handler { return r.engine }
 
 func NewRouter(cfg RouterConfig) *Router {
-	if cfg.AppEnv != "dev" {
+	dev := cfg.AppEnv == "dev" || cfg.AppEnv == "local"
+	if !dev {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
@@ -66,12 +69,11 @@ func NewRouter(cfg RouterConfig) *Router {
 	r.UseRawPath = true
 	h := cfg.Handler
 
-	r.Use(gincommon.TimeoutMiddleware(30 * time.Second))
-
-	if cfg.AppEnv == "dev" {
+	if dev {
 		r.GET("/asyncapi", AsyncAPIHandler)
 	}
 
+	cfg.GinConfig.RequestTimeout = requestTimeout
 	for _, mw := range gincommon.ObservabilityMiddlewares(cfg.GinConfig) {
 		r.Use(mw)
 	}

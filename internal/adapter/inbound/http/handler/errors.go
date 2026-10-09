@@ -9,6 +9,7 @@ import (
 
 	adapterhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
 // ErrCode is this task's RFC-9457 `code` vocabulary.
@@ -179,6 +180,9 @@ func bindErrResponse(c *gin.Context, err error) {
 
 func errResponse(c *gin.Context, err error) {
 	status, code, detail := mapErr(err)
+	if dependency := upstreamDependency(err); dependency != "" {
+		observability.IncCounterVec(observability.UpstreamDependencyErrorsTotal, dependency)
+	}
 	writeProblem(c, status, code, detail, invalidParamsFor(err))
 }
 
@@ -196,6 +200,16 @@ func invalidParamsFor(err error) []invalidParam {
 		return params
 	}
 	return nil
+}
+
+func upstreamDependency(err error) string {
+	if errors.Is(err, port.ErrDefinitionUnavailable) || errors.Is(err, port.ErrDefinitionRejected) {
+		return "definition_service"
+	}
+	if errors.Is(err, adapterhttp.ErrUpstreamUnavailable) {
+		return "iam"
+	}
+	return ""
 }
 
 func mapErr(err error) (status int, code ErrCode, detail string) {

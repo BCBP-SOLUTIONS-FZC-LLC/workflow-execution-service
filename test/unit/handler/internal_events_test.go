@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -356,10 +356,10 @@ func TestHandleInternalEvent_DelegationStarted_ObservesRerouteDuration(t *testin
 // internal_events.go registers it via promauto with no custom registerer.
 func rerouteDurationSampleCount(t *testing.T) uint64 {
 	t.Helper()
-	families, err := prometheus.DefaultGatherer.Gather()
+	families, err := gincommon.MetricsGatherer().Gather()
 	require.NoError(t, err)
 	for _, f := range families {
-		if f.GetName() == "delegation_reroute_duration_seconds" {
+		if f.GetName() == "workflow_execution_service_delegation_reroute_duration_seconds" {
 			return f.GetMetric()[0].GetHistogram().GetSampleCount()
 		}
 	}
@@ -1432,10 +1432,10 @@ func TestHandleInternalEvent_NoSchemaID_SkipsDecodeStep(t *testing.T) {
 // registry - mirrors rerouteDurationSampleCount's pattern above.
 func decodeFailedSampleCount(t *testing.T, eventType string) float64 {
 	t.Helper()
-	families, err := prometheus.DefaultGatherer.Gather()
+	families, err := gincommon.MetricsGatherer().Gather()
 	require.NoError(t, err)
 	for _, f := range families {
-		if f.GetName() != "internal_events_ingest_total" {
+		if f.GetName() != "workflow_execution_service_internal_events_ingest_total" {
 			continue
 		}
 		for _, m := range f.GetMetric() {

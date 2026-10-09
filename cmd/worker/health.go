@@ -5,8 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 	"go.temporal.io/sdk/client"
 )
 
@@ -29,7 +30,7 @@ func newHealthServer(addr string, pool *pgcommon.Pool, sdk client.Client) *http.
 // httpServer/metricsServer split (cmd/server/wire.go).
 func newMetricsServer(addr string) *http.Server {
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/metrics", gincommon.MetricsHandler())
 	return &http.Server{
 		Addr:         addr,
 		Handler:      mux,

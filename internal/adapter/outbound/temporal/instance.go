@@ -9,6 +9,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
 // UpdateInstanceStatus is UpdateInstanceStatusActivity (LLD §3.1). Completed
@@ -32,7 +33,8 @@ func (d *Deps) UpdateInstanceStatus(ctx context.Context, in port.UpdateInstanceS
 	}
 
 	ctx = withTenantGUC(ctx, tenantID)
-	return d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
+	enteredDegraded := false
+	err = d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
 		inst, err := d.Instances.GetByID(ctx, tenantID, instanceID)
 		if err != nil {
 			return fmt.Errorf("get instance: %w", err)
@@ -67,7 +69,11 @@ func (d *Deps) UpdateInstanceStatus(ctx context.Context, in port.UpdateInstanceS
 
 		case domain.InstanceStatusDegraded:
 			payload := domain.NewWorkflowInstanceDegradedPayload(core, in.FailedBranches)
-			return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowInstanceDegraded, payload)
+			if err := d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowInstanceDegraded, payload); err != nil {
+				return err
+			}
+			enteredDegraded = true
+			return nil
 
 		case domain.InstanceStatusRunning:
 			payload := domain.NewWorkflowInstanceResumedPayload(core, updated.StartedByUserID, domain.InitiatorDegradedRecovery, nil)
@@ -81,6 +87,10 @@ func (d *Deps) UpdateInstanceStatus(ctx context.Context, in port.UpdateInstanceS
 			return nil
 		}
 	})
+	if err == nil && enteredDegraded {
+		observability.IncCounter(observability.InstanceDegradedTotal)
+	}
+	return err
 }
 
 // PauseInstance is PauseInstanceActivity (LLD §3.1).
