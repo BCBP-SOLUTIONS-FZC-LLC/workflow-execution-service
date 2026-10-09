@@ -8,10 +8,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// evaluateCondition evaluates a single binary equality/inequality expression
-// (`<field> == "<literal>"` or `!=`) against the just-completed stage's
-// result_json — the interpreter's permanent scope limit for exclusive-gateway
-// conditions (LLD §2.6, Appendix A.1 #6). No expression engine: do not extend this.
 func evaluateCondition(expr, resultJSON string) (bool, error) {
 	op := "=="
 	parts := strings.SplitN(expr, "==", 2)
@@ -36,14 +32,11 @@ func evaluateCondition(expr, resultJSON string) (bool, error) {
 	switch op {
 	case "==":
 		return actual == literal, nil
-	default: // "!="
+	default:
 		return actual != literal, nil
 	}
 }
 
-// selectBranch picks the winning ExclusiveBranch per LLD §2.6 — the compiler
-// enforces exactly one conditionless flow per gateway (the implicit else).
-// Returns nil if no branch matches and no implicit else exists.
 func selectBranch(branches []dsl.ExclusiveBranch, resultJSON string) (*dsl.ExclusiveBranch, error) {
 	var implicitElse *dsl.ExclusiveBranch
 	for i := range branches {

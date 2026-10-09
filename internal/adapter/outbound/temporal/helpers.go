@@ -21,8 +21,6 @@ func nonRetryable(errType string, err error) error {
 	return temporal.NewApplicationErrorWithCause(err.Error(), errType, err) //nolint:wrapcheck // must stay *temporal.ApplicationError for NonRetryableErrorTypes matching
 }
 
-// deptUUID must resolve identically to instance_service.go's own copy —
-// their outputs are compared directly in delegation_reconciler.go.
 func deptUUID(iamDeptID string) uuid.UUID {
 	id, _ := uuid.Parse(iamDeptID)
 	return id
@@ -32,12 +30,6 @@ func deterministicTaskID(instanceID uuid.UUID, nodeKey string, visitCount int64)
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:task:"+instanceID.String()+"/"+nodeKey+"/"+strconv.FormatInt(visitCount, 10)))
 }
 
-// instanceCore builds an event's common core from the instance the task belongs
-// to. Built from a read rather than from the task alone because an instance's
-// identity — subject, key, version — lives on the instance row; a core carrying
-// only the instance id ships a payload whose identifiers are empty strings and
-// zero UUIDs, which the schema validator accepts (present satisfies `required`,
-// and `format` is annotation-only).
 func (d *Deps) instanceCore(ctx context.Context, tenantID, instanceID uuid.UUID) (domain.CommonCore, error) {
 	inst, err := d.Instances.GetByID(ctx, tenantID, instanceID)
 	if err != nil {

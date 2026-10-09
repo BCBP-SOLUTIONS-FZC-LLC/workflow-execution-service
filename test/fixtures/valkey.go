@@ -10,10 +10,6 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// NewTestValkey starts a throwaway Valkey instance (the same image
-// docker-compose.yml's own valkey service uses) and returns its "host:port"
-// address. Skipped under -short, same convention as NewTestPool/
-// NewTestTemporalServer.
 func NewTestValkey(t *testing.T) string {
 	t.Helper()
 

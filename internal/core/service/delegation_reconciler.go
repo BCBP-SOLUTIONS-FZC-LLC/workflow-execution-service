@@ -136,9 +136,6 @@ func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID
 			if _, err := s.Assignments.Vacate(ctx, tenantID, c.assignment.ID); err != nil {
 				return err
 			}
-			// IsLead carries across: an assignee_mode="all" task the delegator had
-			// claimed would otherwise come out of the reroute with no lead row, and
-			// the action path reads that as nobody being able to act on it (LLD §3.1).
 			newAssignment := &domain.TaskAssignment{
 				ID: uuid.New(), TenantID: tenantID, TaskID: c.task.ID, UserID: newUserID,
 				Reason: reason, IsLead: c.assignment.IsLead,

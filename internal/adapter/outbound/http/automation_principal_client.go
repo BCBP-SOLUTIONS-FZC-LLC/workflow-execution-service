@@ -9,21 +9,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
+
 	"github.com/google/uuid"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-// iamSystemUserID is the reserved iam-system principal every identity
-// subsystem internal route expects as the caller.
 const iamSystemUserID = "00000000-0000-0000-0000-0000000000a1"
 
 var _ port.AutomationPrincipalResolver = (*AutomationPrincipalClient)(nil)
 
-// AutomationPrincipalClient reads a tenant's automation principal from the
-// Token Service and remembers each answer for a short time. The principal's
-// identifier survives a re-mint, so a stale entry cannot name a wrong actor;
-// the lifetime only bounds how long an offboarded tenant keeps one.
 type AutomationPrincipalClient struct {
 	baseURL string
 	client  *http.Client
@@ -63,6 +59,7 @@ func (c *AutomationPrincipalClient) AutomationPrincipal(ctx context.Context, ten
 	req.Header.Set("x-user-id", iamSystemUserID)
 	req.Header.Set("x-tenant-id", tenantID.String())
 
+	gincommon.InjectTraceContext(req.Context(), req.Header)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("%w: token service: %v", ErrUpstreamUnavailable, err)

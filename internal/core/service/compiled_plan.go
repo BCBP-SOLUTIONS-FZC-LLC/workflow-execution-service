@@ -37,11 +37,6 @@ func scopeMatches(ctx context.Context, log port.Logger, plans *compiledPlanCache
 		}
 		return false
 	default:
-		// A subject-scoped delegation's scope_id is the bare subject identifier,
-		// which is what subject_id holds (LLD §4.2). "tender" is the one such value
-		// the identity subsystem's own scope enum carries today; any other reaching
-		// here is a value added upstream that this service has never seen, matched
-		// the same way and counted so the addition is visible (LLD §5, §11).
 		if scope != scopeTender {
 			if observability.DelegationScopeUnhandledTotal != nil {
 				observability.DelegationScopeUnhandledTotal.WithLabelValues(scope).Inc()
@@ -64,8 +59,6 @@ func newCompiledPlanCache(definitions port.DefinitionServiceClient, log port.Log
 	return &compiledPlanCache{definitions: definitions, log: log, byVersion: make(map[uuid.UUID]*dsl.CompiledPlan)}
 }
 
-// mainPlan logs why a plan could not be read, so its callers log only what
-// they skipped.
 func (c *compiledPlanCache) mainPlan(ctx context.Context, tenantID, versionID uuid.UUID) (*dsl.CompiledPlan, error) {
 	plan, err := c.readMainPlan(ctx, tenantID, versionID)
 	if err != nil {
@@ -111,10 +104,6 @@ func requiredLevelForTask(plan *dsl.CompiledPlan, task *domain.Task) (string, bo
 	return "", false
 }
 
-// decodeCollaboration decodes a stored compiled plan with its calls expanded,
-// the shape every consumer reads: a module task exists only once expanded. A
-// plan of another schema major is returned as stored. One that cannot be
-// expanded is an invalid version, since nothing about it will change.
 func decodeCollaboration(planJSON string) (*dsl.CompiledCollaboration, error) {
 	var collab dsl.CompiledCollaboration
 	if err := json.Unmarshal([]byte(planJSON), &collab); err != nil {

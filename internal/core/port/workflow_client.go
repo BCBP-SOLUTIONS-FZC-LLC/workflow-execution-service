@@ -26,17 +26,11 @@ type DelegateImpactInput struct {
 	Page           Page
 }
 
-// DelegateImpactResult keeps ReassignedCount (a cheap, unpaginated total) separate
-// from WorkflowIDs (the paginated preview) per LLD §5.9's rev-1.10 correction —
-// PageResult[T] alone has no slot for a second, non-paginated count.
 type DelegateImpactResult struct {
 	ReassignedCount int
 	WorkflowIDs     PageResult[uuid.UUID]
 }
 
-// WorkflowClient is the port the three /internal/workflows/* routes (LLD
-// §5.8) code against; internal/core/service implements it separately,
-// handler tests fake it directly.
 type WorkflowClient interface {
 	ReassignDelegate(ctx context.Context, in ReassignDelegateInput) (reassigned int, err error)
 	CancelByDelegate(ctx context.Context, in CancelByDelegateInput) (cancelled int, err error)

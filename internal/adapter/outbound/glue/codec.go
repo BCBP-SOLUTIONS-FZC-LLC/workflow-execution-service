@@ -1,4 +1,3 @@
-// Package glue implements events.Codec against AWS Glue Schema Registry.
 package glue
 
 import (
@@ -21,14 +20,10 @@ import (
 
 var _ events.Codec = (*Codec)(nil)
 
-// glueHeaderVersion, glueNoCompression, and glueHeaderSize describe the AWS
-// Glue Schema Registry wire-format header: a 1-byte format version, a 1-byte
-// compression flag, and the 16-byte schema-version UUID, prepended to every
-// encoded payload.
 const (
 	glueHeaderVersion byte = 0x03
 	glueNoCompression byte = 0x00
-	glueHeaderSize         = 18 // 1 (version) + 1 (compression) + 16 (schema-version UUID)
+	glueHeaderSize         = 18
 )
 
 type schemaVersionGetter interface {
@@ -40,18 +35,6 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
-// Codec resolves an event type's latest registered schema version in AWS
-// Glue Schema Registry and prepends the registry's wire-format header to the
-// payload before it publishes - a fail-closed check that a payload's schema
-// actually exists in the registry, and real framing for downstream
-// Glue-aware consumers.
-//
-// This type is injected via events.WithCodec(...) into the real
-// events.NewSNSPublisher(...) call in cmd/server's composition root
-// (cmd/server/infra.go's newPublisher) - platform-events' publisher
-// base64-wraps Encode's returned bytes before assigning them to
-// Envelope.Payload, so the envelope's "data" field stays valid JSON
-// regardless of what Codec.Encode returns.
 type Codec struct {
 	client       schemaVersionGetter
 	registryName string
@@ -97,9 +80,6 @@ func (c *Codec) Encode(ctx context.Context, schemaName string, payload json.RawM
 	return encoded, versionID, nil
 }
 
-// Decode reverses Encode: the version UUID travels self-contained in the
-// header bytes, so the schemaID recorded on the envelope (mirrored here to
-// satisfy events.Codec/port.EventDecoder) isn't needed to strip it back off.
 func (c *Codec) Decode(_ context.Context, _ string, encoded []byte) (json.RawMessage, error) {
 	if len(encoded) < glueHeaderSize {
 		return nil, fmt.Errorf("glue codec: encoded payload is %d bytes — shorter than the %d-byte Glue header", len(encoded), glueHeaderSize)
@@ -123,16 +103,6 @@ func prependGlueHeader(versionID string, payload []byte) ([]byte, error) {
 	return out, nil
 }
 
-// registrySchemaName converts a PascalCase wire event type (e.g.
-// "WorkflowTaskCreated") to the snake_case form platform-schemagov's register
-// command actually uses in Glue - the JSON schema filename stem
-// (internal/eventschema/workflow_task_created.json), verbatim. There is no
-// name-override in platform-schemagov's register command, so this is the
-// only naming convention that matches what's really registered. platform-
-// schemagov's own coverage check folds the same way when no SNS event_type
-// attribute value is declared (execution_service's own case) — a plain
-// CamelCase→snake_case split on each uppercase letter, e.g. "Sla" within
-// "WorkflowTaskSlaWarning" folds to "_sla", not "_s_l_a".
 func registrySchemaName(eventType string) string {
 	var b strings.Builder
 	for i, r := range eventType {

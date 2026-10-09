@@ -21,8 +21,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
 
-// newAppPool builds the RLS-enforced execution_app pool every ordinary
-// tenant-scoped repo call runs against.
 func newAppPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgcommon.Pool, error) {
 	pool, err := pgcommon.NewPool(ctx, pgcommon.Config{
 		DSN:                cfg.DatabaseURL,
@@ -40,9 +38,6 @@ func newAppPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgco
 	return pool, nil
 }
 
-// newRelayPool builds the BYPASSRLS execution_outbox_relay pool the outbox
-// relay uses to scan every tenant's unpublished rows in one query. No
-// GUCProvider: the relay role bypasses RLS, so a GUC would be meaningless.
 func newRelayPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgcommon.Pool, error) {
 	pool, err := pgcommon.NewPool(ctx, pgcommon.Config{
 		DSN:           cfg.OutboxRelayDSN(),

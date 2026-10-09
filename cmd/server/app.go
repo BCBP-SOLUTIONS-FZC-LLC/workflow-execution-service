@@ -82,10 +82,6 @@ func (a *app) startServers() {
 			"poll_interval": a.cfg.OutboxPollInterval.String(),
 			"batch_size":    a.cfg.OutboxBatchSize,
 		})
-		// Deliberately decoupled from the shutdown ctx: an in-flight publish
-		// must not be cut mid-flight. Outbox rows are durable, so this only
-		// avoids needless redelivery. Stop() (LIFO in stopServers) is the
-		// real shutdown signal.
 		if err := a.outboxRelay.Start(context.Background()); err != nil {
 			a.log.Error("outbox relay exited", map[string]any{"error": err.Error()})
 		}
@@ -116,6 +112,5 @@ func (a *app) stopServers(ctx context.Context) {
 	}
 	a.sdkClient.Close()
 
-	// Last: everything above might still emit a span until tracing stops.
 	a.tracingShutdown()
 }

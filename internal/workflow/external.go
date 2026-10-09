@@ -11,19 +11,13 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// SignalInstanceExternalAnswer carries an outside party's answer to the
-// outside wait it names (execution LLD §2.4, §5.11).
 const SignalInstanceExternalAnswer = "instance-external-answer"
 
-// externalAnswerSignal is the payload of SignalInstanceExternalAnswer: the
-// wait's key (dsl.ExternalWait.Key) and the variables the answer adds.
 type externalAnswerSignal struct {
 	Key       string
 	Variables map[string]any
 }
 
-// externalWaitKeys is the set of outside waits of the collaboration's main
-// plan, by key.
 func externalWaitKeys(collab *dsl.CompiledCollaboration) map[string]bool {
 	keys := map[string]bool{}
 	if collab == nil {
@@ -35,9 +29,6 @@ func externalWaitKeys(collab *dsl.CompiledCollaboration) map[string]bool {
 	return keys
 }
 
-// waitExternal registers an outside wait under key and returns the channel
-// its answer arrives on. cancel must be called if the caller stops waiting
-// without the channel ever firing, as messageBuffer.waitChannel's must.
 func (in *interpreter) waitExternal(ctx wf.Context, key string) (ch wf.Channel, cancel func()) {
 	ch = wf.NewBufferedChannel(ctx, 1)
 	in.externalWaiting[key] = ch
@@ -48,9 +39,6 @@ func (in *interpreter) waitExternal(ctx wf.Context, key string) (ch wf.Channel, 
 	}
 }
 
-// handleExternalAnswer merges an answer's variables and completes the outside
-// wait it names. An answer that finds nothing waiting is dropped, so it can
-// never complete a later visit to the same step.
 func (in *interpreter) handleExternalAnswer(ctx wf.Context, sig externalAnswerSignal) {
 	logger := wf.GetLogger(ctx)
 	if err := validateSignal(in.status, SignalInstanceExternalAnswer); err != nil {
@@ -70,8 +58,6 @@ func (in *interpreter) handleExternalAnswer(ctx wf.Context, sig externalAnswerSi
 	ch.Send(ctx, domain.NodeKey(sig.Key))
 }
 
-// mergeVariables sets each of vars in the instance's variables, replacing a
-// key already set.
 func (in *interpreter) mergeVariables(vars map[string]any) error {
 	if len(vars) == 0 {
 		return nil
@@ -93,8 +79,6 @@ func (in *interpreter) mergeVariables(vars map[string]any) error {
 	return nil
 }
 
-// mergeResult merges a completed task's result_json into the instance's
-// variables. A result that is not a JSON object adds nothing.
 func (in *interpreter) mergeResult(resultJSON string) error {
 	if resultJSON == "" {
 		return nil
@@ -106,7 +90,6 @@ func (in *interpreter) mergeResult(resultJSON string) error {
 	return in.mergeVariables(vars)
 }
 
-// registerWaitingExternalQuery wires QueryWaitingExternal.
 func (in *interpreter) registerWaitingExternalQuery(ctx wf.Context) error {
 	err := wf.SetQueryHandler(ctx, QueryWaitingExternal, func() ([]string, error) {
 		keys := make([]string, 0, len(in.externalWaiting))
@@ -122,9 +105,6 @@ func (in *interpreter) registerWaitingExternalQuery(ctx wf.Context) error {
 	return nil
 }
 
-// receive blocks a receive task until its message arrives: an outside party's
-// answer to its node key when it is an outside wait, otherwise a send task's
-// message from the buffer.
 func (in *interpreter) receive(ctx wf.Context, nodeKey domain.NodeKey, messageName string) {
 	if in.external[string(nodeKey)] && getVersion(ctx, externalWaitChangeID) != wf.DefaultVersion {
 		ch, cancel := in.waitExternal(ctx, string(nodeKey))
@@ -136,9 +116,6 @@ func (in *interpreter) receive(ctx wf.Context, nodeKey domain.NodeKey, messageNa
 	in.msgBuf.Receive(ctx, messageName)
 }
 
-// addMessageBoundary registers a message boundary of host as a Selector case:
-// on its own key when it is an outside wait, otherwise on its message in the
-// buffer (addMessageCase).
 func (in *interpreter) addMessageBoundary(ctx wf.Context, sel wf.Selector, host string, m dsl.MessagePath, onFire func(boundaryFire)) (cancel func()) {
 	key := dsl.BoundaryWaitKey(host, m.BoundaryID)
 	if m.BoundaryID != "" && in.external[key] && getVersion(ctx, externalWaitChangeID) != wf.DefaultVersion {

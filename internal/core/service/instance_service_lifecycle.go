@@ -101,8 +101,6 @@ func (s *InstanceService) ForceBack(ctx context.Context, tenantID, instanceID, a
 	if err := validateInstanceStateFor(port.SignalInstanceForceBack, inst.Status); err != nil {
 		return err
 	}
-	// A running instance with no completed step has nothing to go back to; a
-	// DEGRADED one resumes a failed branch instead, which needs none.
 	if inst.Status == domain.InstanceStatusRunning {
 		done, err := hasCompletedStep(ctx, s.Tasks, tenantID, inst.ID)
 		if err != nil {

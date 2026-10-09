@@ -11,8 +11,6 @@ func DeterministicAssignmentID(taskID, userID uuid.UUID) uuid.UUID {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:assignment:"+taskID.String()+"/"+userID.String()))
 }
 
-// TaskAssignment is one assignee on a task (LLD §4.4). A row is never
-// deleted on reassignment, only vacated and superseded by a fresh insert.
 type TaskAssignment struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID

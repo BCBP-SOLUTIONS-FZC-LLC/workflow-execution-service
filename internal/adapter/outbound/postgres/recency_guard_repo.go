@@ -41,9 +41,6 @@ func (r *RecencyGuardRepo) ShouldApply(ctx context.Context, scopeKey string, eve
 	return shouldApply, err
 }
 
-// CheckAndCommit's RETURNING clause yields zero rows (pgx.ErrNoRows) exactly
-// when the conditional UPDATE's WHERE clause didn't match — i.e. eventTime
-// was not strictly newer than what's stored, so applied is false.
 func (r *RecencyGuardRepo) CheckAndCommit(ctx context.Context, scopeKey string, eventTime time.Time) (bool, error) {
 	var applied bool
 	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
@@ -73,13 +70,6 @@ func (r *RecencyGuardRepo) Commit(ctx context.Context, scopeKey string, eventTim
 	})
 }
 
-// WithLock holds scopeKey's session-level advisory lock on one dedicated
-// connection for fn's entire duration. fn's own calls to ShouldApply/Commit
-// each acquire their own connection from the same pool rather than reusing
-// this one — safe as long as the pool has more than one connection (true of
-// every real deployment; PG_MIN_CONNS/PG_MAX_CONNS default to 2/10), since
-// the lock only needs to be held by this session, not by whichever
-// connection issues the guarded statements.
 func (r *RecencyGuardRepo) WithLock(ctx context.Context, scopeKey string, fn func(context.Context) error) error {
 	err := r.pool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
 		if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock(hashtext($1))", scopeKey); err != nil {

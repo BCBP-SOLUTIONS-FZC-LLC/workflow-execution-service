@@ -2,8 +2,6 @@ package port
 
 import "errors"
 
-// Sentinel errors TaskService methods return, mapped to HTTP status/codes by
-// the handler layer (LLD §5.10).
 var (
 	ErrTaskNotFound          = errors.New("task not found")
 	ErrNotAssignee           = errors.New("caller is not the task's active assignee")
@@ -15,16 +13,10 @@ var (
 	ErrOverrideNoOp          = errors.New("new assignee is already the current assignee")
 	ErrNotAuthorizedForRead  = errors.New("caller is not authorized to read this resource")
 
-	// ErrTenantMismatch is the port.WorkflowClient family's own sentinel
-	// (LLD §5.7/§5.8): a supplied delegation_id belongs to a different
-	// tenant than the request's own tenant_id.
 	ErrTenantMismatch = errors.New("delegation_id belongs to a different tenant than tenant_id")
 
-	// ErrIdempotencyKeyReplay signals an Idempotency-Key reused with a
-	// different request body (LLD §5.9).
 	ErrIdempotencyKeyReplay = errors.New("idempotency key replay with different payload")
 
-	// The sentinels below are InstanceService's own failure modes (LLD §5.10).
 	ErrInstanceNotFound        = errors.New("instance not found")
 	ErrTargetNodeNotFound      = errors.New("target node not found in the compiled plan")
 	ErrDuplicateBusinessKey    = errors.New("business key already active for this subject")
@@ -38,40 +30,17 @@ var (
 	ErrNotWaiting              = errors.New("instance is not waiting there")
 	ErrOverrideMapInvalid      = errors.New("override_map references an unknown node key or invalid value")
 
-	// ErrAssigneeIneligible is Start's own §5.5 bulk eligibility re-check
-	// failure; maps to the existing CodeAssigneeIneligible.
 	ErrAssigneeIneligible = errors.New("one or more default assignees no longer satisfy their node's eligibility requirement")
 
-	// ErrTaskNotHumanActionable rejects a human-action method (Claim/
-	// Complete/Defer/Reassign/OverrideAssignee) called against a
-	// connector-typed task — one with zero assignments, ever, whose only
-	// legitimate completion path is the stage-transition/stage-fail signal
-	// path cmd/connector-worker will eventually use.
 	ErrTaskNotHumanActionable = errors.New("task is connector-typed and has no human assignee to act on")
 
-	// ErrAssigneeUnavailable closes LLD Appendix B's own documented gap
-	// ("Task actions never re-verify the assignee's live OOO/delegation/
-	// deleted status at the moment of the action") — a live IAM status
-	// check confirming the assignee is deleted or currently OOO, not merely
-	// an inability to check (which fails open, see IAMClient's own doc
-	// comment).
 	ErrAssigneeUnavailable = errors.New("assignee is no longer available (deleted or out-of-office)")
 
-	// ErrTaskNotConnectorTyped rejects ConnectorTaskService's Complete/Fail
-	// called against a task with no connector_type — the inverse gate of
-	// ErrTaskNotHumanActionable, closing the same seam from the other side.
 	ErrTaskNotConnectorTyped = errors.New("task is not connector-typed")
 
-	// ErrNoAutomationPrincipal means IAM holds no automation principal for the
-	// tenant (not yet minted, or offboarded), so a connector step has no actor
-	// to be recorded under.
 	ErrNoAutomationPrincipal = errors.New("tenant has no automation principal")
 )
 
-// AssigneeIneligibleError is ErrAssigneeIneligible's node-carrying form (LLD
-// §5.5 step 3: "naming every offending node in one payload so the caller
-// resolves all of them before a single retry"). errors.Is(err,
-// ErrAssigneeIneligible) still matches, via Unwrap.
 type AssigneeIneligibleError struct {
 	Nodes []string
 }

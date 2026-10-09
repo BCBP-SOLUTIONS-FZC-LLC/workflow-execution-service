@@ -1,5 +1,3 @@
-// Package http's router.go is the single source of truth for this
-// service's HTTP surface: every path, method, middleware, and route group.
 package http
 
 import (
@@ -15,8 +13,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/middleware"
 )
 
-// Pinger is satisfied by any /readyz dependency that only needs a
-// healthy/unhealthy verdict — the Valkey cache and Temporal frontend today.
 type Pinger interface {
 	Ping(ctx context.Context) error
 }
@@ -58,14 +54,6 @@ func NewRouter(cfg RouterConfig) *Router {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
-	// A compiled NodeKey is always "<deptID>/<stageID>" (dsl.NodeKey) — every
-	// real call to POST /instances/:id/nodes/:node/override needs that literal
-	// "/" preserved inside :node's single path segment, which gin's default
-	// routing can't do (it 404s: an unescaped "/" splits into an extra
-	// segment, and a raw path match without UseRawPath decodes %2F back to
-	// "/" before ever reaching the router tree). UseRawPath makes gin match on
-	// the still-encoded path and only unescape the matched param value
-	// afterward — callers must percent-encode the node key's "/" as %2F.
 	r.UseRawPath = true
 	h := cfg.Handler
 
@@ -81,7 +69,6 @@ func NewRouter(cfg RouterConfig) *Router {
 	r.GET("/healthz", gincommon.HealthHandler())
 	r.GET("/readyz", readyzHandler(cfg.DB, cfg.Cache, cfg.Temporal))
 
-	// /api/v1/internal is service-to-service only.
 	internal := r.Group("/api/v1/internal")
 	internal.Use(middleware.RequireInternalToken(cfg.InternalAPIToken))
 
@@ -134,12 +121,6 @@ func NewRouter(cfg RouterConfig) *Router {
 	return &Router{engine: r}
 }
 
-// readyzHandler checks the app pool, cache, and Temporal frontend, each
-// under its own bounded timeout. Failing readiness when Temporal is
-// unreachable is standard readiness-probe behavior: it removes the pod from
-// load-balancer rotation until the next successful check adds it back —
-// there's no real alternative to serving traffic from a pod that can't
-// reach a hard dependency.
 func readyzHandler(db DBPinger, cache, temporal Pinger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		dbCtx, dbCancel := context.WithTimeout(c.Request.Context(), 2*time.Second)

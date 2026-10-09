@@ -9,11 +9,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-// The three /internal/workflows/* handlers below carry no gateway identity
-// headers at all (LLD §5.7/§9.2) — tenant_id comes from the request
-// body/query, never from gincommon.RequestContext/callerIdentity, which does
-// not apply to this route family.
-
 type reassignDelegateReq struct {
 	TenantID      uuid.UUID  `json:"tenant_id" binding:"required"`
 	OldDelegateID uuid.UUID  `json:"old_delegate_id" binding:"required"`
@@ -25,8 +20,6 @@ type reassignDelegateResp struct {
 	Reassigned int `json:"reassigned"`
 }
 
-// ReassignDelegate is not stubbed for Idempotency-Key here — see router.go,
-// which wraps this handler with Idempotent.
 func (h *Handler) ReassignDelegate(c *gin.Context) {
 	var req reassignDelegateReq
 	if !bindJSON(c, &req) {

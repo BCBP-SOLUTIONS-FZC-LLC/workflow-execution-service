@@ -13,10 +13,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
-// RecordForceRoute is RecordForceRouteActivity (LLD §3.1): marks the task(s)
-// bypassed by an instance-force-forward SUPERSEDED, vacates their
-// assignments, and writes one workflow.task.superseded per bypassed task
-// plus one workflow.instance.force-routed for the instance.
 func (d *Deps) RecordForceRoute(ctx context.Context, in port.RecordForceRouteInput) error {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
@@ -54,9 +50,6 @@ func (d *Deps) RecordForceRoute(ctx context.Context, in port.RecordForceRouteInp
 	})
 }
 
-// supersedeBypassedTasks marks every still-open task at one of oldNodeKeys
-// SUPERSEDED, vacating its active assignments, and enqueues one
-// workflow.task.superseded per task.
 func (d *Deps) supersedeBypassedTasks(ctx context.Context, tenantID, instanceID uuid.UUID, oldNodeKeys []domain.NodeKey, actorUserID uuid.UUID) error {
 	bypassed := make(map[string]bool, len(oldNodeKeys))
 	for _, k := range oldNodeKeys {
@@ -107,8 +100,6 @@ func (d *Deps) supersedeTask(ctx context.Context, tenantID, instanceID uuid.UUID
 	return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowTaskSuperseded, payload)
 }
 
-// RecordSLAWarning is RecordSLAWarningActivity (LLD §3.1): audit-only, no
-// status change — enqueues workflow.task.sla-warning.
 func (d *Deps) RecordSLAWarning(ctx context.Context, in port.RecordSLAWarningInput) error {
 	return d.recordSLAEvent(ctx, in.TenantID, in.InstanceID, in.TaskID, domain.EventWorkflowTaskSLAWarning,
 		func(core domain.CommonCore, taskCore domain.TaskScopedCore, task *domain.Task) any {
@@ -120,8 +111,6 @@ func (d *Deps) RecordSLAWarning(ctx context.Context, in port.RecordSLAWarningInp
 		})
 }
 
-// RecordSLABreach is RecordSLABreachActivity (LLD §3.1): audit-only, no
-// status change — enqueues workflow.task.sla-breached.
 func (d *Deps) RecordSLABreach(ctx context.Context, in port.RecordSLABreachInput) error {
 	return d.recordSLAEvent(ctx, in.TenantID, in.InstanceID, in.TaskID, domain.EventWorkflowTaskSLABreached,
 		func(core domain.CommonCore, taskCore domain.TaskScopedCore, task *domain.Task) any {
@@ -157,10 +146,6 @@ func (d *Deps) recordSLAEvent(
 		if err != nil {
 			return fmt.Errorf("get task: %w", err)
 		}
-		// Audit-only: no status mutation this retry could gate on, so a
-		// retried attempt checks the outbox itself for whether it already
-		// recorded this exact event for this task, rather than
-		// double-emitting workflow.task.sla-warning/sla-breached.
 		exists, err := d.Outbox.ExistsForTask(ctx, eventType, taskID)
 		if err != nil {
 			return fmt.Errorf("check existing sla event: %w", err)
@@ -183,9 +168,6 @@ func (d *Deps) recordSLAEvent(
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
 		if err := d.enqueueInstanceEvent(ctx, tenantID, instanceID, eventType, buildPayload(core, taskCore, task)); err != nil {
 			if errors.Is(err, domain.ErrAlreadyExists) {
-				// Lost the race against a concurrent attempt that reached
-				// ExistsForTask first — idx_outbox_events_sla_task_unique's
-				// backstop, not a real error.
 				return nil
 			}
 			return err

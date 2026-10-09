@@ -15,10 +15,6 @@ type externalAnswerWire struct {
 	Variables map[string]any
 }
 
-// AnswerOutsideWait refuses an answer the instance cannot take, and signals
-// the one it can (execution LLD §5.11). The query is a courtesy that lets the
-// caller hear "not waiting"; the interpreter drops an answer that finds
-// nothing waiting, which covers the moment between the query and the signal.
 func (s *InstanceService) AnswerOutsideWait(ctx context.Context, tenantID, instanceID uuid.UUID, scope port.ReadScope, key string, variables map[string]any) error {
 	inst, err := s.Instances.GetByID(ctx, tenantID, instanceID)
 	if err != nil {

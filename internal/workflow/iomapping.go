@@ -7,9 +7,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// applyIOMapping applies m.Inputs to contextJSON on entry to the step that
-// carries them (LLD §2.1). Outputs are never re-applied on exit — the step's
-// own work writes context directly.
 func applyIOMapping(contextJSON string, m *dsl.IOMapping, byInputRule bool) (string, error) {
 	if m == nil || len(m.Inputs) == 0 {
 		return contextJSON, nil

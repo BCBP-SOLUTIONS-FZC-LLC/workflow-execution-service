@@ -14,8 +14,6 @@ import (
 
 var _ port.TaskService = (*TaskService)(nil)
 
-// Every mutating method performs its own synchronous record_version/state
-// pre-check before forwarding a signal.
 type TaskService struct {
 	Instances   port.InstanceRepository
 	Tasks       port.TaskRepository
@@ -43,10 +41,6 @@ type reassignSignalWire struct {
 	RecordVersion int64
 }
 
-// deptAndSuffix splits a NodeKey ("dept/rest") back into its two halves —
-// the inverse of dsl.NodeKey, matching internal/adapter/outbound/temporal's
-// own deptIDFromNodeKey convention (each duplicated locally, arch-lint's
-// service/adapter dependency direction forbids importing either).
 func deptAndSuffix(nodeKey string) (deptID, suffix string) {
 	deptID, suffix, _ = strings.Cut(nodeKey, "/")
 	return deptID, suffix
@@ -133,19 +127,10 @@ func (s *TaskService) ActiveByUser(ctx context.Context, tenantID, userID uuid.UU
 	return port.PageResult[*port.ActiveUserTask]{Items: items, NextCursor: encodeNextCursor(next)}, nil
 }
 
-// checkUserLive is the live pre-check LLD Appendix B documents as
-// undesigned. Fails open on any error checking the status (the IAMClient
-// contract isn't confirmed with the IAM team yet, see its own doc comment;
-// treating "couldn't check" the same as "confirmed unavailable" would make
-// every task action fail the moment this dependency has any hiccup) —
-// only a successful, confirmed deleted/OOO response rejects the action.
 func (s *TaskService) checkUserLive(ctx context.Context, tenantID, userID uuid.UUID) error {
 	return checkUserLiveWith(ctx, s.IAM, s.logger(), tenantID, userID)
 }
 
-// checkUserLiveWith is checkUserLive's shared implementation — also used by
-// WorkflowClient.ReassignDelegate, which needs the identical fail-open
-// liveness gate on a bulk-reassignment's replacement delegate.
 func checkUserLiveWith(ctx context.Context, iam port.IAMClient, log port.Logger, tenantID, userID uuid.UUID) error {
 	if iam == nil {
 		return nil
@@ -161,11 +146,6 @@ func checkUserLiveWith(ctx context.Context, iam port.IAMClient, log port.Logger,
 	return nil
 }
 
-// checkHumanActionable rejects a connector-typed task (LLD's own §5.1
-// "domain service does not distinguish who or what called it" describes the
-// interpreter's signal handling, not whether TaskService's human-facing
-// methods should accept a call against a task with zero human assignments,
-// ever — they don't).
 func checkHumanActionable(task *domain.Task) error {
 	if task.ConnectorType != nil && *task.ConnectorType != "" {
 		return port.ErrTaskNotHumanActionable
@@ -245,8 +225,6 @@ func (s *TaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.U
 	return toPortTask(updated), nil
 }
 
-// stageTransitionWire mirrors internal/workflow/signals.go's own unexported
-// stageTransitionSignal field-for-field.
 type stageTransitionWire struct {
 	DeptID        string
 	ToStage       string
@@ -256,10 +234,7 @@ type stageTransitionWire struct {
 	RecordVersion int64
 	Failed        bool
 	Reason        string
-	// VisitCount lets the interpreter tell this signal apart from a stale
-	// leftover buffered signal from an earlier visit to the same node (see
-	// domain.Task.VisitCount's own doc comment).
-	VisitCount int64
+	VisitCount    int64
 }
 
 func (s *TaskService) Complete(ctx context.Context, tenantID, taskID, userID uuid.UUID, resultJSON json.RawMessage, recordVersion int64) (*port.Task, error) {
@@ -282,20 +257,14 @@ func (s *TaskService) Complete(ctx context.Context, tenantID, taskID, userID uui
 	return toPortTask(task), nil
 }
 
-// stageDeferWire mirrors internal/workflow/signals.go's own unexported
-// stageDeferSignal field-for-field.
 type stageDeferWire struct {
 	DeptID        string
 	FromStage     string
 	Reason        string
 	UserID        string
 	RecordVersion int64
-	// TaskID/AssignmentID are the real rows DeferTaskActivity operates on —
-	// the interpreter's own signal-router goroutine (signals.go's
-	// handleStageDefer) has no other way to resolve them, since it only
-	// ever sees DeptID/FromStage off the wire, not a real UUID.
-	TaskID       string
-	AssignmentID string
+	TaskID        string
+	AssignmentID  string
 }
 
 func (s *TaskService) Defer(ctx context.Context, tenantID, taskID, userID uuid.UUID, reason string, recordVersion int64) (*port.Task, error) {
@@ -386,12 +355,6 @@ func (s *TaskService) sendReassignSignal(ctx context.Context, inst *domain.Insta
 	return nil
 }
 
-// checkReassignEligibility is Reassign/SignalReassign's own gate on the
-// replacement assignee — closes the gap found reviewing this path: unlike
-// DelegationReconciler's Reroute/Reverse, nothing here ever checked whether
-// newUserID is actually eligible for the task's department/role before
-// committing the reassignment. Nil-guarded like checkUserLive: eligibility
-// wiring is optional in tests that don't exercise this path.
 func (s *TaskService) checkReassignEligibility(ctx context.Context, inst *domain.Instance, task *domain.Task, newUserID uuid.UUID) error {
 	if s.Eligibility == nil || s.Definitions == nil {
 		return nil
@@ -415,8 +378,6 @@ func (s *TaskService) checkReassignEligibility(ctx context.Context, inst *domain
 	return nil
 }
 
-// precheckTaskAction is Claim/Complete/Defer's shared version+state+
-// assignee+liveness pre-check.
 func (s *TaskService) precheckTaskAction(ctx context.Context, tenantID, taskID, userID uuid.UUID, recordVersion int64) (*domain.Task, error) {
 	task, err := s.Tasks.GetByID(ctx, tenantID, taskID)
 	if err != nil {
@@ -447,14 +408,6 @@ func checkTaskActive(task *domain.Task) error {
 	return nil
 }
 
-// OverrideAssignee performs LLD §5.4 steps 1 (validate + version check) and
-// 3 (persist) only — the caller (handler) already ran step 2 (eligibility)
-// before invoking this, and fires step 4 (the instance-reassign signal, via
-// SignalReassign below) only after this call succeeds. This method writes
-// only the assignee_overrides audit row; the actual workflow_task_assignment
-// vacate+insert happens asynchronously, worker-side, once the paired signal
-// is processed (ReassignAssignmentActivity) — matching the Signal-Only
-// pattern's one documented persist-then-signal exception (LLD §5.7).
 func (s *TaskService) OverrideAssignee(ctx context.Context, in port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
 	task, err := s.Tasks.GetByInstanceAndNode(ctx, in.TenantID, in.InstanceID, in.NodeKey)
 	if err != nil {

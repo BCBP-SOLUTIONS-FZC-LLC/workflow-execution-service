@@ -7,57 +7,37 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// ExecuteInput is the input to the Execute workflow function.
 type ExecuteInput struct {
 	TenantID    string
 	InstanceID  string
 	VersionID   string
 	ContextJSON string
-	// OverrideMap is POST /instances' node-key -> user-ID override map
-	// (already persisted to workflow_instance.override_map by the HTTP/DB
-	// layer). Threaded through, unmodified, to every CreateTaskActivity call
-	// so the Activity itself can apply whichever entry (if any) matches the
-	// node being dispatched.
 	OverrideMap map[string]string
 }
 
-// ExecuteOutput is the terminal output of the Execute workflow function.
 type ExecuteOutput struct {
 	Status domain.InstanceStatus
 }
 
-// stepOutcome is what runSteps returns: the last node reached, its result
-// (if any), and whether an ExclusiveBranch with Terminates:true ended the
-// plan early.
 type stepOutcome struct {
 	LastNode   domain.NodeKey
 	LastResult string
 	Terminated bool
 }
 
-// branchOutcome is what a Parallel branch's goroutine reports back to the
-// aggregator (dispatch.go), consumed by the DEGRADED aggregator (degraded.go).
 type branchOutcome struct {
 	Key      string
 	DeptID   string
 	LastNode domain.NodeKey
-	// Steps is the branch's own dispatch, kept so a respawned branch that
-	// fails again can be respawned once more.
-	Steps []dsl.ExecutionStep
-	Err   error
+	Steps    []dsl.ExecutionStep
+	Err      error
 }
 
-// nodeVisitKey identifies one specific visit to a node — see pending's own
-// doc comment for why a bare domain.NodeKey isn't enough to key the
-// resolution maps below.
 type nodeVisitKey struct {
 	Node  domain.NodeKey
 	Visit int64
 }
 
-// interpreter is the workflow-local state for one instance: not safe to
-// share outside its own workflow execution (fine, since Temporal coroutines
-// are cooperatively scheduled, never truly concurrent).
 type interpreter struct {
 	tenantID   string
 	instanceID string
@@ -66,74 +46,29 @@ type interpreter struct {
 	history *nodeHistory
 	msgBuf  *messageBuffer
 
-	// admin is the channel the instance's parallel steps listen on for admin
-	// signals; a boundary's path runs its steps on it too.
-	admin     wf.Channel
-	baseAdmin wf.Channel
-	// forkEntries holds, innermost last, the node completed just before each
-	// parallel step now running, which a defer or a force-back inside it
-	// returns to.
+	admin       wf.Channel
+	baseAdmin   wf.Channel
 	forkEntries []domain.NodeKey
-	// routing is true while an admin force-route abandons the running steps,
-	// which RecordForceRoute then supersedes with the admin as the actor.
-	routing bool
+	routing     bool
 
-	// external is the key set of the main plan's outside waits
-	// (dsl.ExternalWaits); externalWaiting holds the channel each one now
-	// waiting in is blocked on, by key (execution LLD §2.4).
 	external        map[string]bool
 	externalWaiting map[string]wf.Channel
 
-	// Instance-wide, not per-branch scoped (LLD §2.4).
 	contextJSON string
 
-	// overrideMap is ExecuteInput.OverrideMap, carried as-is for the
-	// instance's entire lifetime and passed whole to every CreateTaskInput
-	// (LLD §5.4's node-key -> user-ID override).
 	overrideMap map[string]string
 
-	// pending: (node key, visit) -> the channel a runTaskStage call is
-	// blocked on. Keyed by nodeVisitKey, not bare NodeKey, so a stale signal
-	// left over from an earlier visit to the same node (see pendingSignals
-	// below) can never resolve a later, unrelated revisit.
 	pending map[nodeVisitKey]wf.Channel
 
-	// pendingSignals buffers a stage-transition signal that arrives before
-	// its runTaskStage call has registered in pending. Keyed by
-	// (NodeKey, VisitCount) — the sender (TaskService.Complete/
-	// ConnectorTaskService.Complete/Fail) reads VisitCount off the task row
-	// it loaded (domain.Task.VisitCount) and carries it on the wire
-	// (stageTransitionWire/stageFailWire), so a duplicate/late redelivery of
-	// an OLD visit's signal can only ever buffer under that old visit's own
-	// key, never collide with a later revisit's fresh registration — closing
-	// the stale-signal bug known_issues.md tracks.
 	pendingSignals map[nodeVisitKey]stageTransitionSignal
 
-	// taskVisits counts runTaskStage calls per NodeKey within this
-	// instance's lifetime — CreateTaskInput.VisitCount's source. A node
-	// revisited via an exclusive-gateway back-edge (dispatch.go's
-	// runExclusiveRevert) or an admin instance-force-back signal gets a
-	// fresh count, so CreateTaskActivity's deterministic task ID
-	// (instanceID+NodeKey+VisitCount) distinguishes that legitimate second
-	// task from a Temporal at-least-once retry of the same runTaskStage
-	// call, which always replays the same count.
 	taskVisits map[domain.NodeKey]int64
 
-	// pauseGates: department -> one-shot resume channel for a branch paused
-	// by an active-parallel-gateway force-back (LLD §2.7).
 	pauseGates map[string]wf.Channel
 
 	status         domain.InstanceStatus
 	pauseInitiator string
 
-	// parallelDepth >0 while a Parallel gateway is aggregating; routes each
-	// admin signal to admin (runParallel/enterDegraded) or baseAdmin
-	// (runTopLevel), never both.
-	//
-	// Known gap: a flat counter, not per-nesting-level — a Parallel gateway
-	// nested inside another's branch delivers a signal to only one level,
-	// not necessarily the addressed one. Not exercised by any fixture today
-	// (execution LLD §2.5).
 	parallelDepth int
 }
 
@@ -156,8 +91,6 @@ func newInterpreter(tenantID, instanceID, initialContextJSON string, collab *dsl
 	}
 }
 
-// checkPaused blocks if deptID is paused by an in-flight force-back,
-// checked only between stages, never via cancellation (LLD §2.7 point 2).
 func (in *interpreter) checkPaused(ctx wf.Context, deptID string) {
 	if ch, ok := in.pauseGates[deptID]; ok {
 		ch.Receive(ctx, nil)

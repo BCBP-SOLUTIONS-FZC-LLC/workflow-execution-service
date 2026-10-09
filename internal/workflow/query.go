@@ -8,23 +8,10 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 )
 
-// QueryGetWorkflowStatus is the LLD §3.1 Query name — internal
-// reconciliation/test tooling only, never HTTP-exposed. A Query handler can
-// only be registered from inside the workflow function itself
-// (workflow.SetQueryHandler), so this must live in this package.
 const QueryGetWorkflowStatus = "get-workflow-status"
 
-// QueryWaitingExternal returns the keys of the outside waits (dsl.ExternalWaits)
-// the instance is waiting in now, which the HTTP layer reads before it accepts
-// an outside party's answer.
 const QueryWaitingExternal = "waiting-external"
 
-// WorkflowStatusQuery mirrors LLD §3.1's {status, current_node_keys,
-// active_tasks[], saved_sibling_branches[]} shape. ActiveTasks reports the
-// same NodeKeys as CurrentNodeKeys — this interpreter doesn't separately
-// track richer per-task metadata (TaskID isn't retained after
-// CreateTaskActivity returns); reconcile with the real shape once a sibling
-// task needs more than NodeKey identity here.
 type WorkflowStatusQuery struct {
 	Status               domain.InstanceStatus
 	CurrentNodeKeys      []domain.NodeKey
@@ -32,10 +19,6 @@ type WorkflowStatusQuery struct {
 	SavedSiblingBranches []string
 }
 
-// registerStatusQuery wires QueryGetWorkflowStatus. The handler only reads
-// workflow-local state and returns it — no activities, no signals, no
-// commands — so it's safe to call at any point during replay regardless of
-// map iteration order (queries are never recorded into workflow history).
 func (in *interpreter) registerStatusQuery(ctx wf.Context) error {
 	err := wf.SetQueryHandler(ctx, QueryGetWorkflowStatus, func() (WorkflowStatusQuery, error) {
 		keys := make([]domain.NodeKey, 0, len(in.pending))

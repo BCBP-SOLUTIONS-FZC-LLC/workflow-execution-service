@@ -1,7 +1,3 @@
-// Package workflow is the Temporal workflow-function interpreter for
-// execution_service's compiled BPMN DSL. It is a peer of internal/core/service,
-// not internal/adapter: never imported by adapter/, never imports it back,
-// wired into cmd/worker only via Temporal's runtime registration.
 package workflow
 
 import (
@@ -76,11 +72,6 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 		finalStatus = domain.InstanceStatusTerminated
 	}
 	in.status = finalStatus
-	// A Terminated outcome already went through cancelInstance (at whichever
-	// of runTopLevel/runParallel/enterDegraded received the signal), which
-	// writes TERMINATED + the task-FAILED cascade + both event classes in one
-	// Activity — calling the generic update again here would be a redundant,
-	// spurious status-update event on top of an already-complete write.
 	if finalStatus != domain.InstanceStatusTerminated {
 		now := wf.Now(ctx)
 		if err := updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
@@ -93,9 +84,6 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 	return ExecuteOutput{Status: finalStatus}, runErr
 }
 
-// Listens on baseAdmin rather than admin (runParallel/enterDegraded's own
-// channel) — the router sends each signal to exactly one, since two
-// Selectors racing the same channel would make delivery ambiguous.
 func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin, baseAdmin wf.Channel) (stepOutcome, error) {
 	original := plan.Execution.Steps
 	steps := original
@@ -107,7 +95,7 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 		wf.Go(runCtx, func(gctx wf.Context) {
 			outcome, runErr = in.runSteps(gctx, plan, steps, admin)
 			if errors.Is(runErr, errStageAbandoned) {
-				return // force-forwarded away; doneCh has no listener left for this iteration
+				return
 			}
 			doneCh.Send(gctx, struct{}{})
 		})
@@ -125,8 +113,6 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 		})
 		sel.Select(ctx)
 		abandonedNodes := in.currentPendingNodes()
-		// The cancelled steps unwind while the route is recorded below, and only
-		// they see the flag; it is cleared before the next run starts.
 		in.routing = envelope.Kind != ""
 		cancelRun()
 
@@ -140,14 +126,10 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 			return stepOutcome{Terminated: true}, in.cancelInstanceOnSignal(ctx, sig)
 
 		case SignalInstanceForceFwd:
-			// Unlike force-back, this must never call history.PopTo.
 			in.recordAndRedirect(ctx, abandonedNodes, sig.TargetNodeKey, domain.ForceRouteDirectionForward, sig)
 			steps = redirectSteps(original, deptFromNodeKey(sig.TargetNodeKey))
 
 		case SignalInstanceForceBack:
-			// At the top level a force-back goes to the most recently completed
-			// node whatever key the signal carries; the key names a failed
-			// branch of a DEGRADED instance.
 			target, popped, ok := in.history.PopOne()
 			if !ok {
 				wf.GetLogger(ctx).Warn("instance-force-back: no completed node to return to; dropping")
@@ -162,9 +144,6 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 	}
 }
 
-// Errors are deliberately swallowed: both already retry unlimited on any
-// retryable failure, so an error here is non-retryable and best ignored
-// rather than aborting the instance over a best-effort audit write.
 func (in *interpreter) recordAndRedirect(ctx wf.Context, oldNodeKeys []domain.NodeKey, target domain.NodeKey, direction string, sig adminSignal) {
 	if !sig.FromDefer {
 		in.recordForceRouteAudit(ctx, oldNodeKeys, target, direction, sig)
@@ -182,13 +161,6 @@ func (in *interpreter) recordForceRouteAudit(ctx wf.Context, oldNodeKeys []domai
 	})
 }
 
-// redirectSteps resumes at deptID by finding it within original — the
-// plan's own top-level steps, never an already-redirected list, so repeated
-// redirects don't compound — recursing into Parallel branches, Exclusive
-// branches, and inline SubWorkflow steps to find it wherever it's nested,
-// and always preserving whatever steps were still owed after the containing
-// step once found (never truncating the rest of the plan). A deptID found
-// nowhere in original runs in isolation, with nothing queued after it.
 func redirectSteps(original []dsl.ExecutionStep, deptID string) []dsl.ExecutionStep {
 	if cont, ok := findRedirectTarget(original, deptID); ok {
 		return cont
@@ -196,9 +168,6 @@ func redirectSteps(original []dsl.ExecutionStep, deptID string) []dsl.ExecutionS
 	return []dsl.ExecutionStep{{Sequential: []string{deptID}}}
 }
 
-// findRedirectTarget searches steps in order, returning deptID's isolated
-// continuation (itself, plus whatever its own containing structure still
-// owed it) followed by every step after the one it was found in.
 func findRedirectTarget(steps []dsl.ExecutionStep, deptID string) ([]dsl.ExecutionStep, bool) {
 	for i := range steps {
 		if cont, ok := redirectWithinStep(&steps[i], deptID); ok {
@@ -208,8 +177,6 @@ func findRedirectTarget(steps []dsl.ExecutionStep, deptID string) ([]dsl.Executi
 	return nil, false
 }
 
-// redirectWithinStep looks for deptID inside one ExecutionStep's Sequential,
-// Parallel, Exclusive, and SubWorkflow variants.
 func redirectWithinStep(step *dsl.ExecutionStep, deptID string) ([]dsl.ExecutionStep, bool) {
 	for j, d := range step.Sequential {
 		if d == deptID {
@@ -222,9 +189,6 @@ func redirectWithinStep(step *dsl.ExecutionStep, deptID string) ([]dsl.Execution
 			return cont, true
 		}
 		if b.DeptID == deptID {
-			// b.Steps is the branch's own full dispatch for deptID — never
-			// prepend a bare {Sequential: [deptID]} ahead of it, or deptID
-			// would run twice.
 			return b.Steps, true
 		}
 	}

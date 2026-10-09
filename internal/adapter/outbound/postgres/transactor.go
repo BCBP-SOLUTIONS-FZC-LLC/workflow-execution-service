@@ -12,9 +12,6 @@ import (
 
 var _ port.Transactor = (*Transactor)(nil)
 
-// serializableRetry backs RunInTxWithRetry: SERIALIZABLE isolation with
-// bounded exponential backoff on 40001/40P01, matching definition_service's
-// own transactor exactly.
 var serializableRetry = pgcommon.RetryOptions{
 	MaxAttempts:    5,
 	InitialWait:    10 * time.Millisecond,

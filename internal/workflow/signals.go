@@ -9,18 +9,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-// Signal name prefixes, per LLD §3.1's signal catalogue. Every channel this
-// package listens on is named prefix + ":" + instanceID — even
-// instance-reassign, whose payload identifies one specific task (TaskID),
-// not the whole instance. Temporal signals a workflow execution by
-// workflowID (== instanceID here), so a caller must resolve taskID ->
-// instanceID before signaling regardless of how the channel itself is
-// named; keying the channel by taskID would buy nothing. stage-transition/
-// stage-defer share this same instanceID-keyed channel and instead route to
-// one specific in-flight runTaskStage call via the pending/pendingSignals
-// maps below; instance-reassign has no in-flight call to resolve — it's a
-// pure side-effecting DB write — so it skips that indirection entirely (see
-// handleInstanceReassign).
 const (
 	SignalStageTransition   = "stage-transition"
 	SignalStageDefer        = "stage-defer"
@@ -33,9 +21,6 @@ const (
 	SignalInstanceReassign  = "instance-reassign"
 )
 
-// signalPreconditions is the instance-status precondition each signal
-// requires, and the ONLY gate a signal passes through before reaching any
-// Selector (execution LLD §3.1, §7.2 test #5).
 var signalPreconditions = map[string][]domain.InstanceStatus{
 	SignalStageTransition:   {domain.InstanceStatusRunning, domain.InstanceStatusDegraded},
 	SignalStageDefer:        {domain.InstanceStatusRunning, domain.InstanceStatusDegraded},
@@ -50,9 +35,6 @@ var signalPreconditions = map[string][]domain.InstanceStatus{
 	SignalInstanceExternalAnswer: {domain.InstanceStatusRunning, domain.InstanceStatusDegraded},
 }
 
-// validateSignal is the pure precondition gate: does signal make sense given
-// the instance's current status? Table-driven tested without any Temporal
-// environment (test/workflow/signals_test.go).
 func validateSignal(status domain.InstanceStatus, signal string) error {
 	allowed, ok := signalPreconditions[signal]
 	if !ok {
@@ -73,7 +55,6 @@ func canResume(pausedBy, resumeInitiator string) bool {
 	return resumeInitiator == pausedBy
 }
 
-// stageTransitionSignal is the payload of SignalStageTransition (LLD §3.1).
 type stageTransitionSignal struct {
 	DeptID        string
 	ToStage       string
@@ -83,22 +64,9 @@ type stageTransitionSignal struct {
 	RecordVersion int64
 	Failed        bool
 	Reason        string
-	// VisitCount identifies which visit to this node the signal resolves —
-	// see domain.Task.VisitCount's doc comment and pending/pendingSignals'
-	// own (types.go).
-	VisitCount int64
+	VisitCount    int64
 }
 
-// stageFailSignal is the wire payload of SignalStageFail — execution_service.md
-// §3.1's documented shape, snake_case json tags included. A dedicated struct
-// rather than reusing stageTransitionSignal: no sender exists anywhere yet
-// (cmd/connector-worker, this signal's only intended caller, isn't built),
-// so there is no wire format to preserve here — unlike
-// SignalStageTransition, which has real replay history and must not have
-// its own wire encoding touched. handleStageFail converts this into a
-// stageTransitionSignal internally so runTaskStage's resolution/pending-map
-// machinery (typed against stageTransitionSignal, with real replay history
-// of its own) needs no changes at all.
 type stageFailSignal struct {
 	DeptID        string `json:"dept_id"`
 	NodeID        string `json:"node_id"`
@@ -108,9 +76,6 @@ type stageFailSignal struct {
 	VisitCount    int64  `json:"visit_count"`
 }
 
-// stageDeferSignal is the payload of SignalStageDefer (LLD §3.1). TaskID/
-// AssignmentID are the real rows DeferTaskActivity operates on — this
-// package has no other way to resolve them from DeptID/FromStage alone.
 type stageDeferSignal struct {
 	DeptID        string
 	FromStage     string
@@ -121,10 +86,6 @@ type stageDeferSignal struct {
 	AssignmentID  string
 }
 
-// reassignSignal is the payload of SignalInstanceReassign (LLD §3.1): unlike
-// adminSignal's instance-wide scope, it identifies one specific task
-// (TaskID) whose assignment is being vacated and re-inserted for a new
-// user — the node-override HTTP path's eventual runtime counterpart.
 type reassignSignal struct {
 	TaskID        string
 	OldUserID     string
@@ -133,28 +94,16 @@ type reassignSignal struct {
 	RecordVersion int64
 }
 
-// adminSignal is the shared payload shape for every instance-level admin
-// signal (pause/resume/cancel/force-forward/force-back).
-//
-// TargetDeptID isn't in the LLD's literal §3.1 payload table — added to
-// disambiguate which failed branch a signal applies to when DEGRADED has
-// more than one; a documented, smallest-reasonable assumption pending
-// confirmation from whichever task owns the real signal payload contract.
 type adminSignal struct {
 	AdminUserID   string
 	Reason        string
-	Initiator     string // set only for instance-pause/instance-resume
+	Initiator     string
 	TargetDeptID  string
-	TargetNodeKey domain.NodeKey // instance-force-forward; for instance-force-back, optionally a node of the failed branch
+	TargetNodeKey domain.NodeKey
 	RecordVersion int64
-	// FromDefer marks a force-back an assignee's defer sent; no admin routed
-	// it, so no force-route is recorded for it.
-	FromDefer bool
+	FromDefer     bool
 }
 
-// runSignalRouter is the always-on background goroutine (started once, in
-// Execute) draining every raw signal channel for this instance, validating
-// each before anything else can react to it (execution LLD §7.2 test #5).
 func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Channel) {
 	in.admin, in.baseAdmin = admin, baseAdmin
 	logger := wf.GetLogger(ctx)
@@ -215,7 +164,6 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 				}
 				in.handleInstanceResume(ctx, sig)
 			default:
-				// instance-cancel, instance-force-forward, instance-force-back.
 				if sig.TargetDeptID == "" && sig.TargetNodeKey != "" && getVersion(ctx, forceRouteByNodeKeyChangeID) != wf.DefaultVersion {
 					sig.TargetDeptID = deptFromNodeKey(sig.TargetNodeKey)
 				}
@@ -229,8 +177,6 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 	}
 }
 
-// handleStageTransition resolves a stage-transition signal against whichever
-// runTaskStage call is (or isn't yet) waiting on this node.
 func (in *interpreter) handleStageTransition(ctx wf.Context, sig stageTransitionSignal) {
 	if err := validateSignal(in.status, SignalStageTransition); err != nil {
 		wf.GetLogger(ctx).Warn("dropping stage-transition signal", "error", err)
@@ -248,23 +194,10 @@ func (in *interpreter) handleStageTransition(ctx wf.Context, sig stageTransition
 	if ch, ok := in.pending[visitKey]; ok {
 		ch.Send(ctx, sig)
 	} else {
-		// No runTaskStage call has registered for this node yet —
-		// buffer it so a later registration picks it up immediately
-		// instead of silently missing a resolution that arrived first.
 		in.pendingSignals[visitKey] = sig
 	}
 }
 
-// handleStageFail resolves a stage-fail signal against whichever
-// runTaskStage call is (or isn't yet) waiting on this node — the same
-// task-level correlation pattern handleStageTransition uses above, not the
-// instance-wide adminSignal pattern pause/resume/cancel use, since a
-// stage-fail signal always targets one specific in-flight task. Converts the
-// wire-shaped stageFailSignal into a stageTransitionSignal (Failed=true,
-// Reason=sig.ErrorClass) so runTaskStage's resolution/pending-map machinery
-// — typed against stageTransitionSignal, with real replay history of its
-// own — needs no changes for this. ConnectorType isn't consumed here:
-// runTaskStage's resolution doesn't need it, only the sender did.
 func (in *interpreter) handleStageFail(ctx wf.Context, sig stageFailSignal) {
 	if err := validateSignal(in.status, SignalStageFail); err != nil {
 		wf.GetLogger(ctx).Warn("dropping stage-fail signal", "error", err)
@@ -287,9 +220,6 @@ func (in *interpreter) handleStageFail(ctx wf.Context, sig stageFailSignal) {
 	}
 }
 
-// routeAdminSignal hands an instance-level signal that changes the route to
-// whichever steps are listening: the parallel step running, if there is one,
-// else the top level.
 func (in *interpreter) routeAdminSignal(ctx wf.Context, kind string, sig adminSignal) {
 	envelope := adminSignalEnvelope{Kind: kind, Signal: sig}
 	if in.parallelDepth > 0 {
@@ -299,9 +229,6 @@ func (in *interpreter) routeAdminSignal(ctx wf.Context, kind string, sig adminSi
 	}
 }
 
-// handleStageDefer sends the instance one completed step back, routing as
-// instance-force-back does. The deferred stage is never in the history, so the
-// target is the last completed node, or the pre-fork node inside a parallel step.
 func (in *interpreter) handleStageDefer(ctx wf.Context, sig stageDeferSignal) {
 	if err := validateSignal(in.status, SignalStageDefer); err != nil {
 		wf.GetLogger(ctx).Warn("dropping stage-defer signal", "error", err)
@@ -337,11 +264,6 @@ func (in *interpreter) handleStageDefer(ctx wf.Context, sig stageDeferSignal) {
 	})
 }
 
-// handleInstanceReassign calls ReassignAssignmentActivity (vacates the old
-// assignment, inserts the new one) for an instance-reassign signal.
-// Best-effort, mirroring handleStageDefer's own convention above: unlike
-// cancelInstanceOnSignal's terminal-state write, a failure here isn't fatal
-// to the instance, so it's logged and the workflow keeps running.
 func (in *interpreter) handleInstanceReassign(ctx wf.Context, sig reassignSignal) {
 	if err := validateSignal(in.status, SignalInstanceReassign); err != nil {
 		wf.GetLogger(ctx).Warn("dropping instance-reassign signal", "error", err)
@@ -355,11 +277,6 @@ func (in *interpreter) handleInstanceReassign(ctx wf.Context, sig reassignSignal
 	}
 }
 
-// handleInstancePause flips the in-memory status gate (checked by
-// validateSignal) and persists the pause + writes the matching event via
-// PauseInstanceActivity. A persistence failure is logged, not propagated —
-// mirroring stage-defer's own best-effort convention above; the signal was
-// already synchronously version-checked at the HTTP layer before being sent.
 func (in *interpreter) handleInstancePause(ctx wf.Context, sig adminSignal) {
 	in.status = domain.InstanceStatusPaused
 	in.pauseInitiator = sig.Initiator
@@ -371,7 +288,6 @@ func (in *interpreter) handleInstancePause(ctx wf.Context, sig adminSignal) {
 	}
 }
 
-// handleInstanceResume is handleInstancePause's mirror image.
 func (in *interpreter) handleInstanceResume(ctx wf.Context, sig adminSignal) {
 	in.status = domain.InstanceStatusRunning
 	in.pauseInitiator = ""
@@ -383,12 +299,6 @@ func (in *interpreter) handleInstanceResume(ctx wf.Context, sig adminSignal) {
 	}
 }
 
-// cancelInstanceOnSignal calls CancelInstanceActivity (task-FAILED cascade +
-// assignment vacate + TERMINATED status + both event classes, in one write)
-// for an instance-cancel signal received at any of runTopLevel/runParallel/
-// enterDegraded. Its error, unlike pause/resume's, is not swallowed — it
-// propagates as stepOutcome's own error so Execute's runErr handling can
-// fall back to FAILED rather than reporting a false Terminated success.
 func (in *interpreter) cancelInstanceOnSignal(ctx wf.Context, sig adminSignal) error {
 	var reason *string
 	if sig.Reason != "" {
@@ -400,8 +310,6 @@ func (in *interpreter) cancelInstanceOnSignal(ctx wf.Context, sig adminSignal) e
 	})
 }
 
-// adminSignalEnvelope tags an adminSignal with which signal name delivered
-// it, since admin is a single shared channel multiplexing all three.
 type adminSignalEnvelope struct {
 	Kind   string
 	Signal adminSignal

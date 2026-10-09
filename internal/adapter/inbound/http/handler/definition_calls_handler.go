@@ -7,16 +7,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// The two handlers below serve the Definition Service (execution LLD §5.3).
-// Like every internal route they carry no gateway identity: the tenant comes
-// from the query or the body.
-
 type activeInstancesResp struct {
 	HasActive bool  `json:"has_active"`
 	Count     int32 `json:"count"`
 }
 
-// ActiveInstances backs the Definition Service's archive guard.
 func (h *Handler) ActiveInstances(c *gin.Context) {
 	workflowID, err := uuid.Parse(c.Param("workflow_id"))
 	if err != nil {
@@ -40,8 +35,6 @@ type pauseUserTasksReq struct {
 	TenantID uuid.UUID `json:"tenant_id" binding:"required"`
 }
 
-// PauseUserTasks pauses every running instance holding a task of a member
-// the Definition Service has seen removed.
 func (h *Handler) PauseUserTasks(c *gin.Context) {
 	userID, err := uuid.Parse(c.Param("user_id"))
 	if err != nil {

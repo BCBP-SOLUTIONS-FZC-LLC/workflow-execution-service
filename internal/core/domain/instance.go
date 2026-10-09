@@ -7,9 +7,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// Instance is the dashboard-facing projection of a running/completed workflow
-// instance (LLD §4.2) — Temporal's own execution state is authoritative,
-// this row is a query-optimized mirror of it.
 type Instance struct {
 	ID                 uuid.UUID
 	TenantID           uuid.UUID

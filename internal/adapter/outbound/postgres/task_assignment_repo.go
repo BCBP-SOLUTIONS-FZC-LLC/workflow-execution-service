@@ -233,11 +233,6 @@ func (r *TaskAssignmentRepo) SetLead(ctx context.Context, tenantID, taskID, id u
 	return assignment, err
 }
 
-// bumpTaskRecordVersion is Complete/SetLead's optimistic-concurrency guard:
-// the LLD frames workflow_task.record_version, not the assignment (which has
-// no version column of its own), as claim/complete's contested resource. A
-// zero-row result is disambiguated the same way UpdateWorkflowTaskStatus's
-// own conflict path already does (notFoundOrVersionConflict).
 func bumpTaskRecordVersion(ctx context.Context, q *db.Queries, taskID uuid.UUID, recordVersion int64) error {
 	_, err := q.BumpWorkflowTaskRecordVersion(ctx, db.BumpWorkflowTaskRecordVersionParams{
 		ID:            taskID,

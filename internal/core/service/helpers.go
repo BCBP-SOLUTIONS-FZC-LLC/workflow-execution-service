@@ -1,5 +1,3 @@
-// Package service holds the envelope/codec plumbing every outbound-event
-// producing call site (T1.5-T1.8) builds on top of.
 package service
 
 import (
@@ -57,7 +55,6 @@ func (noopValidator) Validate(_ context.Context, _ string, _ json.RawMessage) er
 	return nil
 }
 
-// Callers must only invoke this when !scope.IsAdmin
 func readScopeFilter(scope port.ReadScope) *port.ScopeFilter {
 	deptIDs := make([]uuid.UUID, len(scope.Departments))
 	for i, d := range scope.Departments {
@@ -82,10 +79,10 @@ func encodeNextCursor(c *port.Cursor) string {
 
 type noopLogger struct{}
 
-func (noopLogger) Debug(string, map[string]any) { /* no-op fallback */ }
-func (noopLogger) Info(string, map[string]any)  { /* no-op fallback */ }
-func (noopLogger) Warn(string, map[string]any)  { /* no-op fallback */ }
-func (noopLogger) Error(string, map[string]any) { /* no-op fallback */ }
+func (noopLogger) Debug(string, map[string]any) {}
+func (noopLogger) Info(string, map[string]any)  {}
+func (noopLogger) Warn(string, map[string]any)  {}
+func (noopLogger) Error(string, map[string]any) {}
 
 func instanceCore(inst *domain.Instance) domain.CommonCore {
 	return domain.CommonCore{WorkflowInstanceID: inst.ID, SubjectID: inst.SubjectID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}

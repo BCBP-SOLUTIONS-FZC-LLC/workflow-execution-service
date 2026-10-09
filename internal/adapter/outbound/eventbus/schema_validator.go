@@ -1,6 +1,3 @@
-// Package eventbus holds outbound-event wire plumbing: SchemaValidator is a
-// runtime JSON-Schema safety net applied before an event payload is
-// embedded in an outbound envelope.
 package eventbus
 
 import (
@@ -15,15 +12,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/eventschema"
 )
 
-// SchemaValidator validates each outbound event payload against its JSON
-// Schema. A payload that doesn't conform to its schema, or an event type
-// with no registered schema, is rejected before it ever reaches
-// buildEnvelope - preventing malformed or unrecognized events from
-// corrupting the wf.workflow.events stream and all downstream consumers.
-// Ported from iam-user-profile's internal/adapter/outbound/eventbus.ValidatingCodec,
-// adapted to port.EventValidator's validate-only contract now that
-// wire-format encoding is handled separately by a platform-events
-// events.Codec at SNS-publish time.
 type SchemaValidator struct {
 	schemas map[string]*jsonschema.Schema
 }
@@ -35,9 +23,6 @@ type schemaEntry struct {
 	src  []byte
 }
 
-// defaultSchemaEntries are the 18 event schemas embedded at build time
-// (internal/eventschema). Every wire type in domain's Event* consts must
-// have an entry here - Validate fails closed for any type that doesn't.
 var defaultSchemaEntries = []schemaEntry{
 	{domain.EventWorkflowInstanceStarted, eventschema.WorkflowInstanceStarted},
 	{domain.EventWorkflowInstancePaused, eventschema.WorkflowInstancePaused},
@@ -59,8 +44,6 @@ var defaultSchemaEntries = []schemaEntry{
 	{domain.EventWorkflowTaskSLABreached, eventschema.WorkflowTaskSLABreached},
 }
 
-// NewSchemaValidator compiles the 18 embedded event schemas and returns a
-// validator that checks payloads against them.
 func NewSchemaValidator() (*SchemaValidator, error) {
 	return newSchemaValidatorFromEntries(defaultSchemaEntries)
 }

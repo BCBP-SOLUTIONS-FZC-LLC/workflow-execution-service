@@ -13,10 +13,6 @@ import (
 
 var _ port.ActiveTaskQueueRepository = (*ActiveTaskQueueRepo)(nil)
 
-// ActiveTaskQueueRepo has no RLS tenant scoping — active_task_queues is
-// deliberately excluded from row-level security (db/migrations' own note): a
-// Worker process legitimately reads every tenant's registered queue in one
-// query, so none of these methods sets the tenant GUC.
 type ActiveTaskQueueRepo struct {
 	pool *pgcommon.Pool
 }

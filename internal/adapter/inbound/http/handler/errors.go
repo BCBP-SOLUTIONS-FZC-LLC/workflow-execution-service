@@ -12,7 +12,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
-// ErrCode is this task's RFC-9457 `code` vocabulary.
 type ErrCode string
 
 const (
@@ -186,10 +185,6 @@ func errResponse(c *gin.Context, err error) {
 	writeProblem(c, status, code, detail, invalidParamsFor(err))
 }
 
-// invalidParamsFor extracts the invalid_params list (LLD §5.5 step 3: "naming
-// every offending node in one payload") from error types that carry one —
-// today, only *port.AssigneeIneligibleError. Every other error returns nil,
-// which problemDetails.InvalidParams (omitempty) simply omits.
 func invalidParamsFor(err error) []invalidParam {
 	var ineligible *port.AssigneeIneligibleError
 	if errors.As(err, &ineligible) {
@@ -272,19 +267,11 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusConflict, CodeNoAutomationPrincipal, err.Error()
 	case errors.Is(err, adapterhttp.ErrUpstreamUnavailable):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, err.Error()
-	// This catalogue has no narrower code than UPSTREAM_UNAVAILABLE for a
-	// Definition Service rejection (LLD §5.10), so both of its outcomes map here.
-	// The cause carries the Definition Service's internal URL and the tenant,
-	// so the detail is fixed; the service that read the plan logs the cause.
 	case errors.Is(err, port.ErrDefinitionUnavailable), errors.Is(err, port.ErrDefinitionRejected):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "the Definition Service could not serve the workflow version"
 	case errors.Is(err, context.DeadlineExceeded):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "request timed out"
 	default:
-		// Catch-all for anything TaskService returns that isn't one of the
-		// sentinels above. Extend this switch with a new port.Err* sentinel
-		// and ErrCode as narrower failure modes are identified — don't route
-		// new cases through the generic 500 by default.
 		return http.StatusInternalServerError, CodeInternal, "an unexpected error occurred"
 	}
 }

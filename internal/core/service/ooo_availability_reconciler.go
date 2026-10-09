@@ -11,21 +11,6 @@ import (
 
 var _ port.OOOAvailabilityReconciler = (*OOOAvailabilityReconciler)(nil)
 
-// OOOAvailabilityReconciler implements port.OOOAvailabilityReconciler (LLD
-// §6.2 item 6): status=ooo pauses the user's RUNNING instances
-// (initiator=ooo); status=available resumes them. Never a reroute driver —
-// DelegateUserID is informational only; an actual reroute only ever happens
-// via the paired DelegationStarted event, whose own DelegationReconciler
-// also resumes any OOO-paused instances it touches.
-//
-// Resume is a best-effort approximation of the LLD's own "initiator=ooo
-// filtered" resume: PauseInstanceInput/ResumeInstanceInput
-// (internal/core/port/activities.go, internal/workflow's own Activity
-// callers) carry no initiator/reason field today, so nothing persists which
-// admin/tenant_state/ooo/safety_net signal actually paused a given instance
-// — every currently-PAUSED instance among the user's active assignments is
-// resumed. A future task threading Reason through those Activity inputs
-// would let this filter precisely instead.
 type OOOAvailabilityReconciler struct {
 	Instances   port.InstanceRepository
 	Assignments port.TaskAssignmentRepository
@@ -55,22 +40,6 @@ func (s *OOOAvailabilityReconciler) Apply(ctx context.Context, in port.UserAvail
 	}
 }
 
-// signalActiveInstances establishes the distinct instances backing userID's
-// active assignments and signals every one unconditionally — it does not
-// pre-check inst.Status against the signal's own expected starting state.
-// This isn't a redundant check to skip: two concurrent, conflicting
-// UserAvailabilityChanged deliveries for the same user (LLD §6.3's own
-// documented non-FIFO-delivery concern) serialize under RecencyGuard's
-// advisory lock, but the *effect* of the first (a pause signal already
-// sent) can still be in flight — not yet reflected in this table — by the
-// time the second (a resume) reads inst.Status here. A stale-read gate would
-// then wrongly skip the resume, leaving the instance stuck PAUSED forever
-// with no further event to undo it. Sending unconditionally instead lets
-// in.status validation (signals.go's signalPreconditions) — the single
-// source of truth on the workflow's own goroutine, never stale — be the
-// only gate, exactly as it already is for every other signal path
-// (execution LLD §7.2 test #5). An unreadable task/instance or a per-
-// instance signal failure is logged and skipped, never aborts the batch.
 func (s *OOOAvailabilityReconciler) signalActiveInstances(ctx context.Context, tenantID, userID uuid.UUID, signalName string) error {
 	assignments, err := s.Assignments.ListActiveByUser(ctx, tenantID, userID)
 	if err != nil {

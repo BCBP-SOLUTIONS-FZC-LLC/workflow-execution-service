@@ -29,11 +29,6 @@ type streamConsumer interface {
 	Touch(ctx context.Context, streamKey, group, consumerName string, ids []string) error
 }
 
-// deps is cmd/connector-worker's own held composition-root state. There is
-// no shared port.XxxDeps struct to build against here (unlike cmd/worker's
-// outboundtemporal.Deps) — this binary's dependency shape (Stream consumer,
-// OpenBao reader, per-connector-type dispatch pools) is unique to it and has
-// no Temporal Activity counterpart.
 type deps struct {
 	valkeyClient *redis.Client
 	consumer     streamConsumer
@@ -56,11 +51,6 @@ type deps struct {
 	now           func() time.Time
 }
 
-// buildDeps is cmd/connector-worker's composition root (mirrors cmd/worker's
-// buildDeps/cmd/server's newApp convention). It never dials Temporal — this
-// binary reaches the workflow only through completionClient's HTTP calls
-// into execution_service's own /api/v1/internal/connector-tasks endpoints (LLD
-// workflow_connectors.md §6.1 Decision #2).
 func buildDeps(cfg *config.Config) (*deps, func(), error) {
 	aliases, err := fetchAliases(context.Background(), cfg.DefinitionServiceURL, cfg.DefinitionServiceToken, cfg.ConnectorAliasFetchTimeout)
 	if err != nil {
@@ -88,10 +78,6 @@ func buildDeps(cfg *config.Config) (*deps, func(), error) {
 		return nil, nil, fmt.Errorf("ensure consumer group: %w", err)
 	}
 
-	// These keys are the compiled task's own IOMapping `provider` value, not
-	// names of our own choosing. `aws-s3`/`azure-blob`/`gcp-gcs` share one
-	// constructor, which re-reads `provider` from the same params to pick
-	// the driver; `google-drive` gets its own client.
 	connectorSet, err := connectors.New(connectors.Config{
 		Aliases:       aliases,
 		InternalToken: cfg.InternalAPIToken,
@@ -145,9 +131,6 @@ func buildDeps(cfg *config.Config) (*deps, func(), error) {
 	return d, cleanup, nil
 }
 
-// typePool is one connector type's bounded dispatch pool (LLD §6.5 step 2):
-// sem gates concurrency, timeout covers total dispatch time including
-// retries/backoff, retry is the ratified per-type policy (Decision #6).
 type typePool struct {
 	connectorType string
 	sem           chan struct{}

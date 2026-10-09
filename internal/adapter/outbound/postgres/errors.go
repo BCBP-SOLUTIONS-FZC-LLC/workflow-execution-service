@@ -17,9 +17,6 @@ const (
 	constraintSLAEventTaskUnique   = "idx_outbox_events_sla_task_unique"
 )
 
-// notFoundOrVersionConflict disambiguates a zero-row optimistic-lock UPDATE
-// via a same-transaction probe lookup by id alone: mirrors
-// definition_service's statusOrNotFound.
 func notFoundOrVersionConflict(probeErr error) error {
 	if errors.Is(probeErr, pgx.ErrNoRows) {
 		return domain.ErrNotFound
@@ -44,17 +41,8 @@ func mapErr(err error) error {
 		case constraintTaskAssignmentActive:
 			return domain.ErrDuplicateActiveAssignment
 		case constraintTaskPK, constraintTaskAssignmentPK:
-			// A retried CreateTask/DeferTask activity (deterministic ID,
-			// derived from stable inputs so a retry reproduces it exactly)
-			// hits its own primary key on the second attempt — the intended
-			// idempotency signal, not a real conflict. Callers treat this as
-			// "already created," not an error.
 			return domain.ErrAlreadyExists
 		case constraintSLAEventTaskUnique:
-			// recordSLAEvent's check-then-enqueue (ExistsForTask) races under
-			// READ COMMITTED: two overlapping activity attempts can both pass
-			// the check before either commits. This unique index is the
-			// backstop — the loser hits it here instead of double-enqueueing.
 			return domain.ErrAlreadyExists
 		}
 	}

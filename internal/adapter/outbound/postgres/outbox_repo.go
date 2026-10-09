@@ -26,10 +26,6 @@ func NewOutboxRepo(pool *pgcommon.Pool) *OutboxRepo {
 	return &OutboxRepo{pool: pool}
 }
 
-// Enqueue writes env to the outbox_events table within the transaction
-// stored in ctx. The caller must be inside a Transactor.RunInTx callback;
-// enqueueing outside a transaction is rejected because the outbox insert and
-// the business write must be atomic.
 func (r *OutboxRepo) Enqueue(ctx context.Context, env events.Envelope[json.RawMessage]) error {
 	tx, ok := txFromContext(ctx)
 	if !ok {
@@ -38,8 +34,6 @@ func (r *OutboxRepo) Enqueue(ctx context.Context, env events.Envelope[json.RawMe
 	return mapErr(outbox.Enqueue(ctx, tx, env))
 }
 
-// ExistsForTask reports whether eventType has already been enqueued for
-// taskID — see the port.OutboxRepository doc comment for why this exists.
 func (r *OutboxRepo) ExistsForTask(ctx context.Context, eventType string, taskID uuid.UUID) (bool, error) {
 	var exists bool
 	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
@@ -56,7 +50,6 @@ func (r *OutboxRepo) ExistsForTask(ctx context.Context, eventType string, taskID
 	return exists, err
 }
 
-// ListByInstance reads the instance-timeline audit trail (LLD §4.5, §4.10).
 func (r *OutboxRepo) ListByInstance(
 	ctx context.Context,
 	tenantID, instanceID uuid.UUID,

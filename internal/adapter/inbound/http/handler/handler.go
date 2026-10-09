@@ -1,8 +1,3 @@
-// Package handler implements the HTTP surface for /tasks, /instances,
-// GET /workflows/active-by-user, POST /instances/:id/nodes/:node/override,
-// and the /internal/* and /internal/events/* handler methods. Route
-// registration lives in the parent http package's router.go — this package
-// never starts a gin.Engine or touches cmd/server.
 package handler
 
 import (
@@ -18,7 +13,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
 
-// adminRoles are the x-tenant-roles values granting AdminRole (LLD §9.2).
 var adminRoles = map[string]bool{
 	"tenant_admin": true,
 	"tenant_owner": true,
@@ -29,16 +23,11 @@ const (
 	maxPageLimit      = 100
 	departmentsHeader = "x-departments"
 
-	// maxBodyBytes bounds every request body this package binds (LLD §5.10:
-	// 413 is a floor on every operation with a body).
 	maxBodyBytes = 10 << 20
 )
 
-// defaultIdempotencyTTL is used when Services.IdempotencyTTL is left zero.
 const defaultIdempotencyTTL = 24 * time.Hour
 
-// Handler codes against port interfaces, not a concrete internal/core/service
-// implementation; tests inject hand-rolled fakes.
 type Handler struct {
 	tasks          port.TaskService
 	instances      port.InstanceService
@@ -67,40 +56,22 @@ type Services struct {
 	Instances      port.InstanceService
 	Eligibility    port.EligibilityChecker
 	WorkflowClient port.WorkflowClient
-	// Cache is nil-safe: WithIdempotency no-ops when it's nil, which is the
-	// expected state until T2.1's composition root constructs a real
-	// valkey.Cache and passes it in.
 	Cache          port.CacheStore
 	IdempotencyTTL time.Duration
 
-	ProcessedEvents port.ProcessedEventRepository
-	Recency         port.RecencyGuard
-	Delegation      port.DelegationReconciler
-	TenantLifecycle port.TenantLifecycleReconciler
-	UserSafetyNet   port.UserSafetyNetReconciler
-	OOOAvailability port.OOOAvailabilityReconciler
-	// EventDecoder is nil-safe: HandleInternalEvent treats a nil decoder as
-	// a decode failure only for envelopes that actually carry a SchemaID -
-	// until a real events.Codec is wired up in cmd/server, no producer sets
-	// SchemaID, so this stays unused in practice today.
-	EventDecoder port.EventDecoder
-	// ConnectorTasks backs the new POST /api/v1/internal/connector-tasks/:id/{complete,fail}
-	// endpoints cmd/connector-worker calls.
-	ConnectorTasks port.ConnectorTaskService
-	// ConnectorEvents is nil-safe: handleWorkflowTaskCreated logs and drops a
-	// connector-typed event rather than failing the request when unset —
-	// matches this package's established nil-safe-dependency convention
-	// (Cache, Log, etc.).
-	ConnectorEvents port.ConnectorEventPublisher
-	// AutomationPrincipals is nil-safe like the rest: with none, a connector
-	// dispatch skips the principal check and the callback still resolves one.
+	ProcessedEvents      port.ProcessedEventRepository
+	Recency              port.RecencyGuard
+	Delegation           port.DelegationReconciler
+	TenantLifecycle      port.TenantLifecycleReconciler
+	UserSafetyNet        port.UserSafetyNetReconciler
+	OOOAvailability      port.OOOAvailabilityReconciler
+	EventDecoder         port.EventDecoder
+	ConnectorTasks       port.ConnectorTaskService
+	ConnectorEvents      port.ConnectorEventPublisher
 	AutomationPrincipals port.AutomationPrincipalResolver
-	// ArchiveGuard and UserTaskPauser back the two endpoints the Definition
-	// Service calls (execution LLD §5.3).
-	ArchiveGuard   port.ArchiveGuard
-	UserTaskPauser port.UserTaskPauser
-	// Log is nil-safe throughout this package — every call site guards it.
-	Log port.Logger
+	ArchiveGuard         port.ArchiveGuard
+	UserTaskPauser       port.UserTaskPauser
+	Log                  port.Logger
 }
 
 func New(s Services) *Handler {
@@ -151,7 +122,6 @@ func callerIdentity(c *gin.Context) (tenantID, userID uuid.UUID, ok bool) {
 	return tenantID, userID, true
 }
 
-// isAdmin bypasses the intra-tenant read-scope check entirely (LLD §9.2).
 func isAdmin(c *gin.Context) bool {
 	rc, ok := gincommon.RequestContext(c)
 	if !ok {
@@ -165,9 +135,6 @@ func isAdmin(c *gin.Context) bool {
 	return false
 }
 
-// requireAdmin writes 403 FORBIDDEN and returns false if the caller lacks
-// AdminRole (LLD §9.2) — a hard gate for admin-only endpoints, unlike
-// isAdmin's use inside readScope() as a visibility-check bypass.
 func requireAdmin(c *gin.Context) bool {
 	if !isAdmin(c) {
 		writeProblem(c, http.StatusForbidden, CodeForbidden, "caller lacks tenant_admin/tenant_owner role", nil)
@@ -176,12 +143,6 @@ func requireAdmin(c *gin.Context) bool {
 	return true
 }
 
-// callerDepartments parses x-departments' "<department_id>:<role>" pairs.
-// A token missing the ":" separator, or whose ID half isn't a valid UUID,
-// is dropped rather than guessed at — this previously split only on "," and
-// left each raw "<uuid>:<role>" string uncompared against anything but
-// itself, so department-scoped visibility (taskInScope/callerInScope) could
-// never match a real department UUID.
 func callerDepartments(c *gin.Context) []port.DepartmentRole {
 	raw := c.GetHeader(departmentsHeader)
 	if raw == "" {
@@ -207,9 +168,6 @@ func callerDepartments(c *gin.Context) []port.DepartmentRole {
 	return departments
 }
 
-// bindJSON enforces the request-body floor every mutating endpoint documents
-// (LLD §5.10): 415 on a non-JSON Content-Type, 413 on a body over
-// maxBodyBytes, 400 on anything else ShouldBindJSON rejects.
 func bindJSON(c *gin.Context, req any) bool {
 	if ct := c.GetHeader("Content-Type"); ct != "" && !strings.HasPrefix(ct, "application/json") {
 		writeProblem(c, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "request body must be application/json", nil)
@@ -250,14 +208,6 @@ func (h *Handler) logError(msg string, fields map[string]any) {
 	}
 }
 
-// pageParams decodes and validates both query params (LLD §5.9); the false
-// return means the caller must return immediately, the response is already
-// written. LimitQuery: values above 100 are clamped, not rejected; values
-// <= 0 (or a non-integer) are rejected with 400. CursorQuery: an unparseable
-// or tampered cursor is rejected with 400 rather than silently treated as
-// "no cursor", which would mask a client-side bug as a quietly-restarted
-// page — decoding happens here, once, so the port boundary only ever sees an
-// already-validated CursorPosition, never a raw client string.
 func pageParams(c *gin.Context) (port.Page, bool) {
 	limit := defaultPageLimit
 	if raw := c.Query("limit"); raw != "" {

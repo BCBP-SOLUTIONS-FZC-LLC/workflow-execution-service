@@ -44,10 +44,6 @@ var resolvedStatuses = map[port.TaskStatus]bool{
 	port.TaskStatusSuperseded: true,
 }
 
-// OverrideNodeAssignee implements LLD §5.4's ordered contract: validate ->
-// eligibility -> persist -> signal. Do not reorder — no override row may
-// exist for a request later rejected on eligibility, and a signal failure
-// after persist is an accepted residual (Appendix B), not to be "fixed" here.
 func (h *Handler) OverrideNodeAssignee(c *gin.Context) {
 	tenantID, actorUserID, ok := callerIdentity(c)
 	if !ok {
@@ -93,9 +89,6 @@ func (h *Handler) OverrideNodeAssignee(c *gin.Context) {
 		return
 	}
 
-	// TaskService re-checks the version at persist time — the race-safe
-	// authoritative gate when two concurrent overrides both pass the checks
-	// above and both call eligibility.
 	override, err := h.tasks.OverrideAssignee(ctx, port.AssigneeOverrideInput{
 		TenantID:      tenantID,
 		InstanceID:    instanceID,
@@ -110,8 +103,6 @@ func (h *Handler) OverrideNodeAssignee(c *gin.Context) {
 		return
 	}
 
-	// Carries the pre-persist record_version (not override.RecordVersion) so
-	// the in-workflow check stays consistent with the one validated above.
 	if err := h.tasks.SignalReassign(ctx, tenantID, task.ID, actorUserID, override.PreviousUserID, req.NewUserID, req.RecordVersion); err != nil {
 		errResponse(c, err)
 		return

@@ -15,13 +15,9 @@ type Config struct {
 	AppEnv       string
 	BuildVersion string
 
-	HTTPPort         int
-	MetricsPort      int
-	WorkerHealthPort int
-	// WorkerMetricsPort isolates cmd/worker's /metrics onto its own listener,
-	// separate from WorkerHealthPort's /healthz+/readyz — mirrors cmd/server's
-	// HTTPPort/MetricsPort split, so a NetworkPolicy port rule can restrict
-	// metrics scraping without also gating liveness/readiness probes.
+	HTTPPort          int
+	MetricsPort       int
+	WorkerHealthPort  int
 	WorkerMetricsPort int
 
 	OTELServiceName        string
@@ -34,11 +30,7 @@ type Config struct {
 	PGMinConns             int32
 	PGSlowQueryThresholdMS int
 	PGBouncerMode          bool
-	// MigrationDatabaseURL overrides DatabaseURL for the migrate subcommand.
-	// Set to a direct Postgres DSN when DATABASE_URL points to PgBouncer —
-	// golang-migrate uses session advisory locks that PgBouncer transaction
-	// pooling drops. Falls back to DatabaseURL when unset.
-	MigrationDatabaseURL string
+	MigrationDatabaseURL   string
 
 	ValkeyAddr         string
 	ValkeyPassword     string
@@ -63,100 +55,45 @@ type Config struct {
 	OperationalStatsInterval   time.Duration
 	OutboxBatchSize            int
 
-	// OutboxRelayDatabaseURL is the outbox relay's own connection string —
-	// a distinct role with BYPASSRLS, since the relay must scan every
-	// tenant's unpublished rows in one query (db/migrations' own
-	// 000005_outbox_rls.up.sql enables RLS on outbox_events). Required
-	// outside dev: a silent fallback to DatabaseURL would run the relay
-	// under the RLS-enforced app role with no tenant GUC set, and
-	// app_tenant_id() returning NULL means it would see zero rows forever,
-	// with no error — a silently wedged event pipeline, worse than a
-	// startup failure. Local dev's single Postgres role is a superuser
-	// (bypasses RLS regardless), which is why the fallback is safe there
-	// only. Use OutboxRelayDSN(), not this field directly.
 	OutboxRelayDatabaseURL string
 
-	// DefinitionServiceURL is the Definition Service's internal HTTP base URL
-	// (LLD §5.3), which cmd/server, cmd/worker and cmd/connector-worker all
-	// call. DefinitionServiceToken is that service's INTERNAL_API_TOKEN.
 	DefinitionServiceURL    string
 	DefinitionServiceToken  string
 	DefinitionClientTimeout time.Duration
 
-	// EligibilityBaseURL is required for cmd/server (InstanceService/
-	// DelegationReconciler's Eligibility field is not nil-safe) but not
-	// enforced here: cmd/server fails fast inline instead.
 	EligibilityBaseURL       string
 	EligibilityClientTimeout time.Duration
 
-	// IAMBaseURL is optional: IAMClient is a permanent stub today
-	// (ErrIAMContractNotConfirmed) and TaskService.IAM nil-guards its own
-	// use, so an empty value is harmless either way.
 	IAMBaseURL       string
 	IAMClientTimeout time.Duration
 
-	// TokenServiceBaseURL is the identity subsystem's Token Service, read for
-	// each tenant's automation principal. Required by cmd/server outside dev.
 	TokenServiceBaseURL       string
 	TokenServiceClientTimeout time.Duration
 
-	// QueueTopologyPollInterval is how often cmd/worker polls
-	// active_task_queues for isolated tenant queues to start a Worker
-	// against (LLD §3.2 item 2, proposed 60s).
 	QueueTopologyPollInterval time.Duration
 
-	// InternalAPIToken authenticates the internal route group
-	// (middleware.RequireInternalToken). Empty disables
-	// the check — dev mode only; required in prod (see validate()).
 	InternalAPIToken string
 
-	// GlueRegistryName/GlueSchemaCacheTTL configure the Glue schema-registry
-	// codec — only meaningful when AWSUseStub is false.
 	GlueRegistryName   string
 	GlueSchemaCacheTTL time.Duration
 
-	// ConnectorStreamKey/Group are shared between cmd/server (which
-	// publishes onto the Stream via internal_events.go's workflow.task.created
-	// handler) and cmd/connector-worker (which consumes it) — both need
-	// sensible defaults, unlike the connector-worker-only fields below.
-	ConnectorStreamKey   string
-	ConnectorStreamGroup string
-	// ConnectorStreamConsumerName is cmd/connector-worker-only; left empty
-	// here on purpose — main.go resolves an os.Hostname() fallback when
-	// unset, since config.go itself does no such host-environment lookups
-	// elsewhere.
-	ConnectorStreamConsumerName string
-	ConnectorStreamBlockTimeout time.Duration
-	// ConnectorStreamClaimMinIdle is XAUTOCLAIM's eligibility threshold —
-	// how long an entry must go untouched by its consumer before another
-	// may reclaim it (LLD workflow_connectors.md §6.5 step 0).
-	ConnectorStreamClaimMinIdle time.Duration
-	ConnectorStreamBatchSize    int64
-	// An entry delivered more often than this is moved to
-	// ConnectorStreamDeadLetterKey instead of being dispatched again.
+	ConnectorStreamKey           string
+	ConnectorStreamGroup         string
+	ConnectorStreamConsumerName  string
+	ConnectorStreamBlockTimeout  time.Duration
+	ConnectorStreamClaimMinIdle  time.Duration
+	ConnectorStreamBatchSize     int64
 	ConnectorStreamMaxDeliveries int64
 	ConnectorStreamDeadLetterKey string
 
-	// OpenBao KV-v2 read side — cmd/connector-worker only. Deliberately NOT
-	// validated below (see validate()'s own doc comment on why
-	// connector-worker-only fields skip that): cmd/connector-worker checks
-	// these itself at startup.
 	OpenBaoAddr    string
 	OpenBaoToken   string
 	OpenBaoMount   string
 	OpenBaoTimeout time.Duration
 
-	// cmd/connector-worker fetches the alias registry from the Definition
-	// Service's GET /api/v1/internal/connector-aliases at DefinitionServiceURL
-	// (LLD Decision #21).
 	ConnectorAliasFetchTimeout    time.Duration
 	ConnectorAliasRefreshInterval time.Duration
 
-	// Per-connector-type dispatch pool sizing + internal execution timeout
-	// (LLD §6.5 step 2 — one bounded pool + one timeout per connector type).
-	// A flat field-per-type list, not a nested structure: config.Load() has
-	// no existing convention for parsing a map from env, and six types is
-	// small enough this doesn't need one. connector-worker-only.
 	ConnectorPoolSizeStorage         int
 	ConnectorPoolSizeSendEmail       int
 	ConnectorPoolSizeDocumentExtract int
@@ -170,11 +107,6 @@ type Config struct {
 	ConnectorTimeoutSQLQuery         time.Duration
 	ConnectorTimeoutChatNotify       time.Duration
 
-	// ExecutionServiceInternalAddr/ConnectorCompletionTimeout: where
-	// cmd/connector-worker calls the new
-	// POST /api/v1/internal/connector-tasks/:id/{complete,fail} endpoints.
-	// Reuses the existing InternalAPIToken field as the shared secret those
-	// endpoints already check — connector-worker-only, not validated here.
 	ExecutionServiceInternalAddr string
 	ConnectorCompletionTimeout   time.Duration
 }
@@ -320,9 +252,6 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// validate checks value ranges only. What a binary requires to be set is
-// checked by its own Require method, so the environment of one binary does
-// not have to carry another's settings.
 var appEnvs = []string{"local", "dev", "test", "staging", "prod"}
 
 func (c *Config) IsDev() bool {
@@ -390,7 +319,6 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// RequireMigrate checks what the migrate subcommand needs: a database.
 func (c *Config) RequireMigrate() error {
 	if c.MigrationDSN() == "" {
 		return fmt.Errorf("DATABASE_URL is required")
@@ -398,7 +326,6 @@ func (c *Config) RequireMigrate() error {
 	return nil
 }
 
-// RequireServer checks what cmd/server needs.
 func (c *Config) RequireServer() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
@@ -437,9 +364,6 @@ func (c *Config) RequireServer() error {
 	return nil
 }
 
-// RequireWorker checks what cmd/worker needs. Its Activities only enqueue
-// events, so it needs neither the relay DSN nor the SNS and Glue settings,
-// and it serves no internal API, so it needs no INTERNAL_API_TOKEN.
 func (c *Config) RequireWorker() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
@@ -453,8 +377,6 @@ func (c *Config) RequireWorker() error {
 	return nil
 }
 
-// RequireConnectorWorker checks what cmd/connector-worker needs that is not
-// specific to its stream: it has no database and publishes no events.
 func (c *Config) RequireConnectorWorker() error {
 	if c.DefinitionServiceURL == "" {
 		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
@@ -473,10 +395,6 @@ func (c *Config) RequireConnectorWorker() error {
 	return nil
 }
 
-// OutboxRelayDSN returns the outbox relay's own connection string.
-// OutboxRelayDatabaseURL is required outside dev (see validate()); this
-// fallback to DatabaseURL only ever applies in dev, where the local
-// Postgres role is a superuser and bypasses RLS regardless.
 func (c *Config) OutboxRelayDSN() string {
 	if c.OutboxRelayDatabaseURL != "" {
 		return c.OutboxRelayDatabaseURL
@@ -498,11 +416,6 @@ func getEnvOrDefault(key, fallback string) string {
 	return fallback
 }
 
-// getEnvIntOrDefault, getEnvBoolOrDefault, getEnvFloat64OrDefault, and
-// getEnvDurationOrDefault return a non-nil error alongside the fallback when
-// the variable is set but fails to parse — a typo'd value must fail config
-// loading, not silently boot with a default nobody asked for. Load's own
-// envInt/envBool/envFloat64/envDuration closures collect these.
 func getEnvIntOrDefault(key string, fallback int) (int, error) {
 	v := os.Getenv(key)
 	if v == "" {
@@ -551,12 +464,6 @@ func getEnvDurationOrDefault(key string, fallback time.Duration) (time.Duration,
 	return d, nil
 }
 
-// VersionRequested reports whether the process was invoked as
-// `<binary> version`. Callers check it before Load, so the subcommand works
-// on an image carrying no environment at all — which is what makes it
-// usable as CI's "this image's binary starts" smoke check. Every other
-// entrypoint legitimately needs DATABASE_URL and friends, so none of them
-// can serve that purpose.
 func VersionRequested() bool {
 	return len(os.Args) > 1 && os.Args[1] == "version"
 }

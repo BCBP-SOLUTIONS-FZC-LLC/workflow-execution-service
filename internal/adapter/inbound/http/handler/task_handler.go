@@ -248,8 +248,6 @@ type completeReq struct {
 	RecordVersion int64           `json:"record_version" binding:"required"`
 }
 
-// CompleteTask forwards the caller's own x-user-id as-is (§5.6)
-// against the task's assignee downstream, 403 NOT_ASSIGNEE on mismatch.
 func (h *Handler) CompleteTask(c *gin.Context) {
 	start := time.Now()
 	tenantID, userID, ok := callerIdentity(c)

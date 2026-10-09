@@ -47,13 +47,6 @@ type eligibilityCheck struct {
 	req     port.EligibilityCheckRequest
 }
 
-// resolveStageAssignees returns the user IDs a stage would be assigned to. An
-// override replaces the stage's defaults entirely. An unparseable default is
-// dropped, so a stage whose every default is malformed resolves to nobody and
-// the caller refuses the instantiation. That is deliberate: the task
-// interpreter parses the same values when it creates the task and fails the
-// activity there instead, which strands an instance mid-run rather than
-// refusing it up front.
 func resolveStageAssignees(stage *dsl.StageDef, nodeKey string, overrideMap map[string]uuid.UUID) []uuid.UUID {
 	if override, ok := overrideMap[nodeKey]; ok {
 		return []uuid.UUID{override}
@@ -69,11 +62,6 @@ func resolveStageAssignees(stage *dsl.StageDef, nodeKey string, overrideMap map[
 	return userIDs
 }
 
-// collectAssigneeChecks walks the plan once, returning the eligibility checks to
-// run and the node keys that resolved to nobody. A node naming no one it can
-// resolve is ineligible without asking IAM: Execution would create a task with
-// no assignment rows, which its claim path refuses, so the instance would never
-// advance (LLD §5.5).
 func collectAssigneeChecks(
 	plan *dsl.CompiledPlan,
 	overrideMap map[string]uuid.UUID,

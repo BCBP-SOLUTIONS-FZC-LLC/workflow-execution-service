@@ -61,13 +61,13 @@ type asyncSchema struct {
 	Type          string               `yaml:"type"`
 	Required      []string             `yaml:"required"`
 	Properties    map[string]asyncProp `yaml:"properties"`
-	PropertyOrder []string             // YAML insertion order; populated by UnmarshalYAML
-	AllOf         []asyncSchema        `yaml:"allOf"`
-	Ref           string               `yaml:"$ref"`
+	PropertyOrder []string
+	AllOf         []asyncSchema `yaml:"allOf"`
+	Ref           string        `yaml:"$ref"`
 }
 
 func (s *asyncSchema) UnmarshalYAML(value *yaml.Node) error {
-	type rawSchema asyncSchema // breaks the method set so Decode doesn't recurse here
+	type rawSchema asyncSchema
 	if err := value.Decode((*rawSchema)(s)); err != nil {
 		return fmt.Errorf("decode asyncapi schema node: %w", err)
 	}
@@ -96,11 +96,6 @@ type asyncProp struct {
 	Items   *asyncProp `yaml:"items"`
 }
 
-// UnmarshalYAML lets Type accept either a scalar ("string") or the
-// JSON-Schema nullable-field idiom (["string", "null"]), joining a sequence
-// with "|" and dropping "null" — plain yaml.Unmarshal into a string field
-// errors on the sequence form, which this spec's own promoted_from_version_id
-// property already uses.
 func (p *asyncProp) UnmarshalYAML(value *yaml.Node) error {
 	type rawProp struct {
 		Type    yaml.Node  `yaml:"type"`
@@ -140,9 +135,6 @@ func flattenTypeNode(n *yaml.Node) string {
 	case yaml.ScalarNode:
 		return n.Value
 	case yaml.DocumentNode, yaml.MappingNode, yaml.AliasNode:
-		// "type:" is never one of these shapes in an AsyncAPI/JSON-Schema
-		// property — fall back to empty rather than guess at n.Value's
-		// meaning for a node kind that doesn't carry a scalar value.
 		return ""
 	default:
 		return ""
@@ -188,7 +180,7 @@ func renderPage(w *bytes.Buffer, s *asyncSpec, env string) {
 	if envLabel == "" {
 		envLabel = "DEV"
 	}
-	envColor := "#22c55e" // green — dev/unknown
+	envColor := "#22c55e"
 	switch strings.ToLower(env) {
 	case "prod", "production":
 		envColor = "#ec4b3c"
@@ -304,11 +296,6 @@ func renderServers(w *bytes.Buffer, node *yaml.Node) {
 	w.WriteString(`</div></div>`)
 }
 
-// isInboundMessage reports whether a components.messages key documents a
-// consumed (receive) event rather than one this service publishes. Inbound
-// entries deliberately carry an "Inbound" key suffix — see api/asyncapi.yaml
-// — since their payload schema is owned/registered by the producing service,
-// not this one.
 func isInboundMessage(name string) bool {
 	return strings.HasSuffix(name, "Inbound")
 }

@@ -2,10 +2,6 @@ package workflow
 
 import "github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 
-// DSL schema compatibility: see "execution LLD" §2.5.
-
-// schemaStrategy normalizes one SchemaVersion major's CompiledCollaboration
-// shape into whatever runSteps expects today.
 type schemaStrategy interface {
 	normalize(collab *dsl.CompiledCollaboration) *dsl.CompiledCollaboration
 }

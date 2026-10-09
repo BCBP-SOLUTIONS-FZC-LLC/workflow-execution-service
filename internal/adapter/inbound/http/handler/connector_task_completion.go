@@ -7,15 +7,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// completeConnectorTaskReq/failConnectorTaskReq are cmd/connector-worker's
-// only way to resolve a connector-typed task — the human /tasks/:id/complete
-// path explicitly rejects these (checkHumanActionable), and
-// cmd/connector-worker itself never touches the Temporal SDK (LLD
-// workflow_connectors.md §6.1 Decision #2), so this is the one place that
-// signal gets sent on its behalf. No record_version in the request body:
-// unlike the human path, a connector task has exactly one legitimate
-// resolver (the worker that dispatched it), never a concurrent human racing
-// it, so the service reads the task's own current RecordVersion itself.
 type completeConnectorTaskReq struct {
 	TenantID uuid.UUID      `json:"tenant_id" binding:"required"`
 	Output   map[string]any `json:"output"`
@@ -26,7 +17,6 @@ type failConnectorTaskReq struct {
 	ErrorClass string    `json:"error_class" binding:"required"`
 }
 
-// CompleteConnectorTask is POST /api/v1/internal/connector-tasks/:id/complete.
 func (h *Handler) CompleteConnectorTask(c *gin.Context) {
 	taskID, ok := parseIDParam(c)
 	if !ok {
@@ -44,7 +34,6 @@ func (h *Handler) CompleteConnectorTask(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// FailConnectorTask is POST /api/v1/internal/connector-tasks/:id/fail.
 func (h *Handler) FailConnectorTask(c *gin.Context) {
 	taskID, ok := parseIDParam(c)
 	if !ok {

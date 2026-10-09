@@ -1,9 +1,3 @@
-// Package temporalclient implements port.TemporalClient — the API process's
-// own Temporal SDK client wrapper, wired only into cmd/server. A peer of
-// internal/adapter/outbound/temporal (the Worker process's Activity-body
-// package): the two serve opposite processes despite what design/LLD/
-// execution_service.md §1.7's prose currently says about outbound/temporal's
-// role — see that package's own doc comment.
 package temporalclient
 
 import (
@@ -27,13 +21,6 @@ func New(sdk client.Client) *Client {
 	return &Client{sdk: sdk}
 }
 
-// executeWorkflowInput mirrors internal/workflow.ExecuteInput field-for-field.
-// This package cannot import internal/workflow (arch-lint's adapter/workflow
-// peer-package rule, LLD §1.7), so it carries its own wire-compatible copy —
-// Temporal's default JSON data converter matches by field name, not type
-// identity, so this only stays correct as long as the two structs' field
-// names agree. The testsuite.WorkflowTestSuite round-trip test in
-// test/workflow/ exists specifically to catch drift between the two.
 type executeWorkflowInput struct {
 	TenantID    string
 	InstanceID  string
@@ -60,10 +47,6 @@ func (c *Client) StartWorkflow(ctx context.Context, in port.StartWorkflowInput) 
 	return port.StartWorkflowOutput{TemporalWorkflowID: run.GetID(), TemporalRunID: run.GetRunID()}, nil
 }
 
-// SignalWorkflow constructs the exact channel name internal/workflow's signal
-// router listens on (signalName + ":" + instanceID) — see port.TemporalClient's
-// own doc comment for why temporalWorkflowID and instanceID must both be
-// supplied, and must not be conflated.
 func (c *Client) SignalWorkflow(ctx context.Context, temporalWorkflowID string, instanceID uuid.UUID, signalName string, payload any) error {
 	channelName := signalName + ":" + instanceID.String()
 	if err := c.sdk.SignalWorkflow(ctx, temporalWorkflowID, "", channelName, payload); err != nil {

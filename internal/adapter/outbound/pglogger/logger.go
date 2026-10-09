@@ -1,7 +1,3 @@
-// Package pglogger adapts this service's port.Logger to
-// platform-pgcommon's domain.Logger, so pgcommon.Config.Logger and
-// migrate.Runner.Logger can share the one logger every other composition
-// root wiring in this codebase already uses, instead of going unset.
 package pglogger
 
 import (
@@ -14,7 +10,6 @@ type adapter struct {
 	log port.Logger
 }
 
-// New wraps log so it satisfies platform-pgcommon's domain.Logger interface.
 func New(log port.Logger) pgdomain.Logger {
 	return adapter{log: log}
 }

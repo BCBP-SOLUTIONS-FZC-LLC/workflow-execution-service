@@ -9,13 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
+
 	"github.com/google/uuid"
 )
 
-// completionClient calls execution_service's own
-// POST /api/v1/internal/connector-tasks/:id/{complete,fail} endpoints — the one
-// place this binary reaches back into the workflow, since it never touches
-// the Temporal SDK directly (LLD workflow_connectors.md §6.1 Decision #2).
 type completionClient struct {
 	addr  string
 	token string
@@ -29,8 +27,6 @@ func newCompletionClient(addr, token string, timeout time.Duration) *completionC
 	}
 }
 
-// The body names no actor: Execution records the tenant's automation principal
-// itself, so a worker cannot attribute work to the wrong one.
 type completeRequest struct {
 	TenantID uuid.UUID      `json:"tenant_id"`
 	Output   map[string]any `json:"output"`
@@ -65,6 +61,7 @@ func (c *completionClient) post(ctx context.Context, path string, body []byte) e
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-internal-token", c.token)
 
+	gincommon.InjectTraceContext(req.Context(), req.Header)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("call %s: %w", path, err)

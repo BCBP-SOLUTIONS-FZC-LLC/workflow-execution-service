@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
+
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/connectors/aliasconfig"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/connectors/restcall"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/registry"
@@ -54,6 +56,7 @@ func fetchAliases(ctx context.Context, addr, internalToken string, timeout time.
 	}
 	req.Header.Set("x-internal-token", internalToken)
 
+	gincommon.InjectTraceContext(req.Context(), req.Header)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return aliasconfig.Config{}, fmt.Errorf("fetch aliases from %s: %w", url, err)

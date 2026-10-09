@@ -24,11 +24,6 @@ const (
 	maxBackoff     = 10 * time.Second
 )
 
-// runDispatchLoop is cmd/connector-worker's main consume loop — the
-// equivalent of cmd/worker's pollQueueTopology goroutine. Ctx cancellation
-// stops picking up new work; in-flight dispatches are tracked via wg and
-// drained by main.go before the process exits. It returns only once the
-// reclaim loop has too, so nothing adds to wg after main starts waiting.
 func runDispatchLoop(ctx context.Context, d *deps, wg *sync.WaitGroup, wlog port.Logger) {
 	var reclaim sync.WaitGroup
 	reclaim.Add(1)
@@ -58,9 +53,6 @@ func runDispatchLoop(ctx context.Context, d *deps, wg *sync.WaitGroup, wlog port
 	}
 }
 
-// dispatchBatch marks the whole batch in flight before dispatching any of it,
-// since later entries wait behind earlier ones for a pool slot. An entry this
-// consumer already holds is skipped: its first copy acks it.
 func dispatchBatch(ctx context.Context, d *deps, wg *sync.WaitGroup, entries []valkeystream.Entry, wlog port.Logger) {
 	claimed := make([]valkeystream.Entry, 0, len(entries))
 	for _, entry := range entries {
@@ -73,9 +65,6 @@ func dispatchBatch(ctx context.Context, d *deps, wg *sync.WaitGroup, entries []v
 	}
 }
 
-// reclaimLoop periodically claims entries idle for at least claimMinIdle and
-// still pending under the group — an entry whose original consumer died
-// mid-dispatch becomes reclaimable this way rather than stuck forever.
 func reclaimLoop(ctx context.Context, d *deps, wg *sync.WaitGroup, wlog port.Logger) {
 	ticker := time.NewTicker(d.claimMinIdle)
 	defer ticker.Stop()
@@ -94,8 +83,6 @@ func reclaimLoop(ctx context.Context, d *deps, wg *sync.WaitGroup, wlog port.Log
 	}
 }
 
-// dispatchJob is one Stream entry, parsed into its typed fields
-// (valkeystream.EventPublisher's own field names on the producer side).
 type dispatchJob struct {
 	tenantID       uuid.UUID
 	taskID         uuid.UUID
@@ -129,11 +116,6 @@ func parseDispatchJob(entry valkeystream.Entry) (dispatchJob, error) {
 	}, nil
 }
 
-// handleEntry routes entry to its connector type's bounded pool. A
-// malformed entry (can't even identify the task) is acked and dropped —
-// nothing else is possible. Everything that could stop the outcome being
-// reported is settled before the connector runs, and a task that already has
-// an outcome only re-sends it (workflow_connectors.md §6.5 step 0).
 func handleEntry(ctx context.Context, d *deps, wg *sync.WaitGroup, entry valkeystream.Entry, wlog port.Logger) {
 	handedOff := false
 	defer func() {
@@ -176,9 +158,6 @@ func handleEntry(ctx context.Context, d *deps, wg *sync.WaitGroup, entry valkeys
 	}()
 }
 
-// resendRecordedOutcome reports whether the entry has been handled without
-// running anything: either the task's outcome was re-sent, or it could not
-// be read and the entry is left pending rather than risk a second run.
 func resendRecordedOutcome(ctx context.Context, d *deps, job dispatchJob, entryID string, wlog port.Logger) bool {
 	outcome, found, err := recordedOutcome(ctx, d, job.taskID)
 	if err != nil {
@@ -191,11 +170,6 @@ func resendRecordedOutcome(ctx context.Context, d *deps, job dispatchJob, entryI
 	return found
 }
 
-// runJob takes the task's execution lease, resolves secret_ref inputs,
-// dispatches with the pool's own retry/backoff policy, records the outcome,
-// and only then reports it. Once started, a run is detached from shutdown:
-// its side effect may already have happened, so it must still be recorded
-// and reported.
 func runJob(ctx context.Context, d *deps, pool *typePool, job dispatchJob, entryID string, wlog port.Logger) {
 	if ctx.Err() != nil {
 		return
@@ -206,8 +180,6 @@ func runJob(ctx context.Context, d *deps, pool *typePool, job dispatchJob, entry
 		return
 	}
 	d.inflight.setDeadline(entryID, d.clock().Add(leaseTTL))
-	// A previous lease holder may have finished between the check in
-	// handleEntry and this lease.
 	if resendRecordedOutcome(ctx, d, job, entryID, wlog) {
 		return
 	}
@@ -255,15 +227,6 @@ func ackEntry(ctx context.Context, d *deps, entryID string, wlog port.Logger) {
 	}
 }
 
-// resolveSecrets sets every registry.Field.IsSecretRef() input to the
-// tenant's stored credential, immediately before Execute() is called —
-// Connector implementations never see a path, only the resolved value (LLD
-// §6.2 Decision #5). The path is always the job's own, and nothing a diagram
-// says chooses it: the worker's OpenBao token spans every tenant, so a value
-// an old plan still carries for a secret field is discarded unread. A field
-// the tenant stored nothing for is left out: the registry does not say which
-// of a type's fields a provider needs, so the connector refuses an absent
-// credential itself (workflow_connectors.md §6.2).
 func resolveSecrets(ctx context.Context, reader *openbao.Reader, job dispatchJob) (map[string]any, error) {
 	def, ok := registry.All()[job.connectorType]
 	if !ok {
@@ -290,14 +253,10 @@ func resolveSecrets(ctx context.Context, reader *openbao.Reader, job dispatchJob
 	return out, nil
 }
 
-// ownSecretPath mirrors definition_service's WriteCredential path.
 func ownSecretPath(job dispatchJob, fieldName string) string {
 	return fmt.Sprintf("connectors/%s/%s/%s", job.tenantID, job.connectorType, fieldName)
 }
 
-// isRetryable resolves the ratified per-type retry policy (LLD Decision #6):
-// safe types always retry, unsafe types never do, and rest-call's
-// conditional policy depends on the resolved alias's own HTTP method.
 func isRetryable(policy registry.RetryPolicy, connectorType string, input map[string]any, aliases aliasconfig.Config) bool {
 	switch policy {
 	case registry.RetryPolicySafe:
@@ -319,10 +278,6 @@ func isRetryable(policy registry.RetryPolicy, connectorType string, input map[st
 	}
 }
 
-// runWithRetry retries with capped exponential backoff until ctx's own
-// deadline fires — the pool's timeout is the retry ceiling, not a fixed
-// attempt count (LLD §6.5 step 2: "the per-type internal execution timeout
-// covers total time including retries/backoff").
 func runWithRetry(ctx context.Context, c connectors.Connector, retryable bool, input map[string]any) (map[string]any, error) {
 	if !retryable {
 		out, err := c.Execute(ctx, input)
@@ -349,10 +304,6 @@ func runWithRetry(ctx context.Context, c connectors.Connector, retryable bool, i
 	}
 }
 
-// classifyError maps a dispatch failure to the small, closed error_class
-// vocabulary the completion endpoint's Fail call carries — a real
-// misconfiguration (secret_not_found, validation_error) vs. an infra blip
-// (upstream_error, timeout).
 func classifyError(err error) string {
 	switch {
 	case errors.Is(err, openbao.ErrSecretNotFound):

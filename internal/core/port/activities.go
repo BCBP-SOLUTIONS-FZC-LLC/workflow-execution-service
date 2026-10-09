@@ -1,11 +1,3 @@
-// Package port defines the narrow contract internal/workflow calls through
-// workflow.ExecuteActivity: Activity name constants and their input/output
-// shapes. It never defines Activity bodies — those are a separate,
-// persistence-layer task (see .claude/CLAUDE.md's Clean Architecture rules).
-//
-// These shapes are a soft coordination point with whichever task lands
-// internal/core/service in parallel: state them explicitly in review rather
-// than treating them as an already-fixed contract.
 package port
 
 import (
@@ -16,9 +8,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// Activity names, matching what cmd/worker registers via worker.RegisterActivity
-// (a separate sibling task). internal/workflow references these constants only
-// — it never imports the activity implementations themselves.
 const (
 	ActivityGetCompiledPlan      = "GetCompiledPlanActivity"
 	ActivityCreateTask           = "CreateTaskActivity"
@@ -42,28 +31,18 @@ type GetCompiledPlanInput struct {
 	VersionID string
 }
 
-// GetCompiledPlanOutput's Collaboration is held for the instance's entire
-// lifetime — never re-fetched (LLD §2.5).
 type GetCompiledPlanOutput struct {
 	Collaboration dsl.CompiledCollaboration
 }
 
-// CreateTaskInput.VisitCount is the interpreter's own per-NodeKey counter
-// (internal/workflow/stage.go), incremented once per runTaskStage call for
-// that NodeKey — disambiguates a legitimate revisit of an already-seen node
-// (an exclusive-gateway back-edge or admin force-back) from a Temporal
-// at-least-once retry of the same call, both of which would otherwise
-// derive the identical task ID from InstanceID+NodeKey alone.
 type CreateTaskInput struct {
-	InstanceID   string
-	TenantID     string
-	NodeKey      domain.NodeKey
-	CompiledNode json.RawMessage
-	ContextJSON  string
-	OverrideMap  map[string]string
-	VisitCount   int64
-	// IAMDepartmentID is the department's real IAM UUID, if the compiled
-	// plan carries one; empty falls back to CreateTask's placeholder.
+	InstanceID      string
+	TenantID        string
+	NodeKey         domain.NodeKey
+	CompiledNode    json.RawMessage
+	ContextJSON     string
+	OverrideMap     map[string]string
+	VisitCount      int64
 	IAMDepartmentID string
 }
 
@@ -77,8 +56,6 @@ type UpdateInstanceNodesInput struct {
 	NodeKeys   []domain.NodeKey
 }
 
-// ClaimAssignmentInput only applies to multi-assignee (assignee_mode='all')
-// tasks; single-assignee tasks skip claim entirely (LLD §3.1).
 type ClaimAssignmentInput struct {
 	AssignmentID  string
 	TenantID      string
@@ -94,17 +71,10 @@ type CompleteAssignmentInput struct {
 	RecordVersion int64
 }
 
-// CompleteAssignmentOutput.AllDone reports that no assignment remains active
-// on the task, which is the gate for writing its COMPLETED status (LLD §4.3).
-// A call carrying no acting user completes nothing and reports false: it
-// enqueues no WorkflowTaskCompleted either, and a task must not reach a
-// terminal status that no consumer was told about.
 type CompleteAssignmentOutput struct {
 	AllDone bool
 }
 
-// DeferTaskInput.DeferredToNodeKey is the earlier node the instance goes back
-// to, which the workflow reads off its history and the event names.
 type DeferTaskInput struct {
 	TaskID            string
 	TenantID          string
@@ -115,10 +85,6 @@ type DeferTaskInput struct {
 	RecordVersion     int64
 }
 
-// UpdateInstanceStatusInput.CompletedAt is nil for a non-terminal status.
-// FailedBranches is set only for a Degraded transition (workflow.instance.
-// degraded's own payload) — the parallel-aggregation join is the only
-// caller with this data available (internal/workflow/degraded.go).
 type UpdateInstanceStatusInput struct {
 	InstanceID     string
 	TenantID       string
@@ -127,8 +93,6 @@ type UpdateInstanceStatusInput struct {
 	FailedBranches []domain.FailedBranch
 }
 
-// RecordForceRouteInput.OldNodeKeys must be captured before
-// UpdateInstanceNodesActivity overwrites them (LLD §3.1).
 type RecordForceRouteInput struct {
 	InstanceID    string
 	TenantID      string
@@ -139,8 +103,6 @@ type RecordForceRouteInput struct {
 	RecordVersion int64
 }
 
-// RecordSLAWarningInput/RecordSLABreachInput are audit-only — neither
-// changes instance/task status (LLD §3.4).
 type RecordSLAWarningInput struct {
 	InstanceID string
 	TenantID   string
@@ -155,9 +117,6 @@ type RecordSLABreachInput struct {
 	NodeKey    domain.NodeKey
 }
 
-// PauseInstanceInput/ResumeInstanceInput share the same shape (LLD §3.1's
-// admin lifecycle signals): a version-checked status update, writing the
-// matching event on success.
 type PauseInstanceInput struct {
 	InstanceID    string
 	TenantID      string
@@ -174,9 +133,6 @@ type ResumeInstanceInput struct {
 	RecordVersion int64
 }
 
-// CancelInstanceInput drives instance-cancel (LLD §3.1): marks active tasks
-// FAILED and vacates their assignments, then updates status to TERMINATED,
-// writing both event classes.
 type CancelInstanceInput struct {
 	InstanceID    string
 	TenantID      string
@@ -185,8 +141,6 @@ type CancelInstanceInput struct {
 	RecordVersion int64
 }
 
-// ReassignAssignmentInput drives instance-reassign (LLD §3.1): vacates the
-// old assignment and inserts a new one.
 type ReassignAssignmentInput struct {
 	TaskID        string
 	TenantID      string
@@ -196,13 +150,6 @@ type ReassignAssignmentInput struct {
 	RecordVersion int64
 }
 
-// UpdateTaskStatusInput drives a task-status-only transition — stage-fail
-// (marking a workflow_task row FAILED without touching any assignment row)
-// and an interrupting boundary event abandoning an in-flight task (marking
-// it SUPERSEDED, RecordVersion left zero since that's a system-initiated
-// transition with no caller-asserted expected version to check) are its
-// callers today. A SUPERSEDED write also vacates the task's assignments and
-// enqueues WorkflowTaskSuperseded, and leaves a task already settled alone.
 type UpdateTaskStatusInput struct {
 	TaskID        string
 	TenantID      string

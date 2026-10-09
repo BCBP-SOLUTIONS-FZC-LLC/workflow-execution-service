@@ -1,6 +1,3 @@
-// Package contract checks HTTP exchanges against an OpenAPI document, so a
-// server's handlers and a client's requests are both held to the spec that
-// governs them (execution LLD §5.3).
 package contract
 
 import (
@@ -17,14 +14,11 @@ import (
 	"github.com/getkin/kin-openapi/routers/legacy"
 )
 
-// Spec is a loaded, valid OpenAPI document.
 type Spec struct {
 	doc    *openapi3.T
 	router routers.Router
 }
 
-// Load reads and validates the document at path, failing the test if it is
-// not a valid OpenAPI 3 document.
 func Load(t testing.TB, path string) *Spec {
 	t.Helper()
 	loader := openapi3.NewLoader()
@@ -43,9 +37,6 @@ func Load(t testing.TB, path string) *Spec {
 	return &Spec{doc: doc, router: router}
 }
 
-// options skips the security check, since whether a token is right is the
-// middleware's concern, tested on its own; and it refuses a status the
-// document does not declare.
 var options = &openapi3filter.Options{AuthenticationFunc: openapi3filter.NoopAuthenticationFunc, IncludeResponseStatus: true}
 
 func (s *Spec) input(t testing.TB, req *http.Request) *openapi3filter.RequestValidationInput {
@@ -57,8 +48,6 @@ func (s *Spec) input(t testing.TB, req *http.Request) *openapi3filter.RequestVal
 	return &openapi3filter.RequestValidationInput{Request: req, PathParams: params, Route: route, Options: options}
 }
 
-// Request fails the test unless req is one the spec accepts. req's body is
-// read and restored.
 func (s *Spec) Request(t testing.TB, req *http.Request) {
 	t.Helper()
 	body := readBody(t, req)
@@ -69,8 +58,6 @@ func (s *Spec) Request(t testing.TB, req *http.Request) {
 	}
 }
 
-// Response fails the test unless the status, headers and body are a response
-// the spec declares for req.
 func (s *Spec) Response(t testing.TB, req *http.Request, status int, header http.Header, body []byte) {
 	t.Helper()
 	in := &openapi3filter.ResponseValidationInput{RequestValidationInput: s.input(t, req), Status: status, Header: header, Options: options}
@@ -99,8 +86,6 @@ func restore(req *http.Request, body []byte) {
 	req.Body = io.NopCloser(bytes.NewReader(body))
 }
 
-// Example returns the JSON example the spec gives for a response: the media
-// type's own, or else its schema's.
 func (s *Spec) Example(t testing.TB, method, path string, status int) []byte {
 	t.Helper()
 	item := s.doc.Paths.Find(path)

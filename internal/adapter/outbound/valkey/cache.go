@@ -19,7 +19,7 @@ func NewCache(client redis.Cmdable) *Cache {
 
 func (c *Cache) Get(ctx context.Context, key string) (string, error) {
 	val, err := c.client.Get(ctx, key).Result()
-	if errors.Is(err, redis.Nil) { // redis.Nil signals a cache miss, not an error
+	if errors.Is(err, redis.Nil) {
 		return "", nil
 	}
 	if err != nil {

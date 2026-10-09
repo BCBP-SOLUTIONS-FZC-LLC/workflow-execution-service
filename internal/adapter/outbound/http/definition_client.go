@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
+
 	"github.com/google/uuid"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -21,17 +23,12 @@ const (
 
 var _ port.DefinitionServiceClient = (*DefinitionClient)(nil)
 
-// DefinitionClient reads compiled plans from the Definition Service's
-// internal API, specified in api/contracts/definition-internal-openapi.yaml
-// (LLD §5.3).
 type DefinitionClient struct {
 	baseURL string
 	token   string
 	client  *http.Client
 }
 
-// NewDefinitionClient bounds each attempt by timeout; token is the
-// Definition Service's INTERNAL_API_TOKEN.
 func NewDefinitionClient(baseURL, token string, timeout time.Duration) *DefinitionClient {
 	return &DefinitionClient{baseURL: baseURL, token: token, client: &http.Client{Timeout: timeout}}
 }
@@ -76,6 +73,7 @@ func (c *DefinitionClient) tryGet(ctx context.Context, rawURL string) (*port.Com
 	if c.token != "" {
 		req.Header.Set(internalTokenHeader, c.token)
 	}
+	gincommon.InjectTraceContext(req.Context(), req.Header)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, ctx.Err() == nil, fmt.Errorf("%w: compiled plan: %w", port.ErrDefinitionUnavailable, err)

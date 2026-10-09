@@ -10,10 +10,6 @@ import (
 	"go.temporal.io/sdk/client"
 )
 
-// NewTestTemporalServer starts a throwaway Temporal dev server (single
-// container, in-memory persistence — the same image/command
-// docker-compose.yml's own temporal service uses) and returns a connected
-// client.Client. Skipped under -short, same convention as NewTestPool.
 func NewTestTemporalServer(t *testing.T) client.Client {
 	t.Helper()
 
@@ -48,8 +44,6 @@ func NewTestTemporalServer(t *testing.T) client.Client {
 	}
 	hostPort := host + ":" + port.Port()
 
-	// The gRPC port opens before start-dev's namespace registration finishes
-	// — retry Dial+CheckHealth rather than treating the port as ready.
 	var sdk client.Client
 	deadline := time.Now().Add(60 * time.Second)
 	for {

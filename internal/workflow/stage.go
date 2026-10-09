@@ -13,12 +13,8 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/enums"
 )
 
-// errStageAbandoned means ctx was canceled (a force-forward past this
-// branch), not a completion or a failure.
 var errStageAbandoned = errors.New("workflow: stage abandoned")
 
-// stage.Type is a plain string, not enums.StageType: an unrecognized value
-// is a valid forward-compat passthrough, never a failure.
 func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, stage *dsl.StageDef) (domain.NodeKey, string, error) {
 	nodeKey := domain.NodeKey(dsl.NodeKey(deptID, stage))
 
@@ -123,18 +119,11 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 		cancelBoundaries()
 		if fired.Interrupting {
 			delete(in.pending, visitKey)
-			// The task row createTask created above is now abandoned — mark
-			// it SUPERSEDED so it doesn't sit open/claimable forever with no
-			// terminal status. Best-effort: an error here would abort the
-			// whole instance over what's ultimately an audit/bookkeeping
-			// write, a worse outcome than proceeding with the boundary
-			// transfer the compiled plan actually calls for.
 			_ = updateTaskStatus(ctx, port.UpdateTaskStatusInput{
 				TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusSuperseded,
 			})
 			return in.runFiredPath(ctx, plan, fired)
 		}
-		// Non-interrupting: the host keeps running (we keep waiting below).
 		in.spawnFiredPath(ctx, plan, fired)
 		resolveCh.Receive(ctx, &sig)
 	} else {
@@ -144,11 +133,6 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	return in.resolveTaskStage(ctx, nodeKey, out, sig)
 }
 
-// supersedeAbandoned marks the task of a stage whose scope was cancelled
-// SUPERSEDED, so it cannot be claimed once the instance has moved on. An admin
-// force-route is left to RecordForceRoute, which names the admin as the actor.
-// The write is best-effort and made on a context the cancellation cannot
-// reach: failing the instance over bookkeeping would be the worse outcome.
 func (in *interpreter) supersedeAbandoned(ctx wf.Context, taskID string) {
 	if in.routing || getVersion(ctx, abandonedTaskSupersededChangeID) == wf.DefaultVersion {
 		return
@@ -159,8 +143,6 @@ func (in *interpreter) supersedeAbandoned(ctx wf.Context, taskID string) {
 	})
 }
 
-// stageFailedError is a stage that failed, carrying the class it failed with,
-// which an error boundary of an enclosing call or subprocess can match.
 type stageFailedError struct {
 	NodeKey domain.NodeKey
 	Reason  string
@@ -188,9 +170,6 @@ func (in *interpreter) resolveTaskStage(
 	if err != nil {
 		return nodeKey, "", err
 	}
-	// Version first, data second: GetVersion caches per run on the first call
-	// that reaches it, so gating it behind AllDone would split instances by
-	// their assignee counts rather than by whether they predate this change.
 	if getVersion(ctx, taskCompletedStatusChangeID) != wf.DefaultVersion && completion.AllDone {
 		if err := updateTaskStatus(ctx, port.UpdateTaskStatusInput{
 			TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusCompleted,

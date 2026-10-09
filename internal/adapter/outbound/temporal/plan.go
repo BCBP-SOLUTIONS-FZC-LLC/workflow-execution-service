@@ -12,13 +12,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// GetCompiledPlan is GetCompiledPlanActivity (LLD §3.1): the workflow
-// function's first activity, always — a single read-only call to the
-// Definition Service's internal API, no DB write. Any error here is folded into
-// "DefinitionServiceClientError", the one NonRetryableErrorTypes entry
-// externalCallActivityOptions already declares (internal/workflow/activities.go)
-// — a malformed ID is exactly as permanent as an upstream rejection, neither
-// is worth retrying.
 func (d *Deps) GetCompiledPlan(ctx context.Context, in port.GetCompiledPlanInput) (port.GetCompiledPlanOutput, error) {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
@@ -41,10 +34,6 @@ func (d *Deps) GetCompiledPlan(ctx context.Context, in port.GetCompiledPlanInput
 	if err := json.Unmarshal([]byte(cw.CompiledPlanJSON), &collab); err != nil {
 		return port.GetCompiledPlanOutput{}, nonRetryable("DefinitionServiceClientError", fmt.Errorf("unmarshal compiled plan: %w", err))
 	}
-	// Expanded here, not in the workflow, so the recorded activity result is
-	// what replays: a later change to ExpandCalls never alters a running plan.
-	// Expansion follows the current schema; the workflow's schema check
-	// refuses or normalizes any other major as stored.
 	if collab.SchemaVersion != dsl.CurrentSchemaVersion {
 		return port.GetCompiledPlanOutput{Collaboration: collab}, nil
 	}

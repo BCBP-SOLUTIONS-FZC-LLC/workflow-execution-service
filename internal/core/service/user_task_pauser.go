@@ -11,12 +11,6 @@ import (
 
 var _ port.UserTaskPauser = (*UserTaskPauser)(nil)
 
-// UserTaskPauser implements port.UserTaskPauser — the pause-tasks call the
-// Definition Service makes on the internal API, the membership-revocation
-// safety-net pause vehicle (LLD §5.3). Bulk-signal-loop exception: a per-instance
-// version mismatch or non-pausable status is logged and skipped, never
-// aborts the whole batch, since this iterates every instance a single event
-// affects with no per-instance human review.
 type UserTaskPauser struct {
 	Instances   port.InstanceRepository
 	Assignments port.TaskAssignmentRepository

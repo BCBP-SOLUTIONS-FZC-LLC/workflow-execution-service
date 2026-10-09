@@ -9,9 +9,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-// slaTimerParams bundles addSLATimers' identifying fields — a struct rather
-// than individual parameters to stay under the project's function-arity
-// lint threshold.
 type slaTimerParams struct {
 	TenantID     string
 	InstanceID   string
@@ -21,15 +18,6 @@ type slaTimerParams struct {
 	FollowUpDate string
 }
 
-// addSLATimers registers a Selector case per non-empty DueDate/FollowUpDate
-// (raw ISO-8601, unparsed by the compiler — FEEL out of scope, same
-// permanent limit as the exclusive-gateway comparator) alongside the
-// stage's own resolution case, on the SAME sel the caller re-Selects in a
-// loop — that loop is what "loops back to the wait" after a timer fires
-// (LLD §3.4); this function only registers cases, it doesn't loop itself.
-// cancel must run once the host's own resolution wins the race. A branch
-// respawned after DEGRADED calls this fresh — it never resumes a cancelled
-// timer's remaining duration.
 func addSLATimers(ctx wf.Context, sel wf.Selector, p slaTimerParams) (cancel func()) {
 	var cancels []func()
 
@@ -51,7 +39,7 @@ func addSLATimers(ctx wf.Context, sel wf.Selector, p slaTimerParams) (cancel fun
 		future := wf.NewTimer(timerCtx, waitDur)
 		sel.AddFuture(future, func(f wf.Future) {
 			if f.Get(timerCtx, nil) != nil {
-				return // cancelled, not fired
+				return
 			}
 			onFire(ctx)
 		})

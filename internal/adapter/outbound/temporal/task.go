@@ -15,8 +15,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// Idempotent under at-least-once retry: task.ID is deterministic, so a
-// retried attempt hits its own primary key and is treated as already done.
 func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
@@ -128,7 +126,6 @@ func resolveConnectorInputs(contextJSON string, m *dsl.IOMapping) (map[string]an
 	return resolved, nil
 }
 
-// An override, if present for this node, replaces DefaultAssignees entirely.
 func resolveAssignees(defaultAssignees []string, override string) ([]uuid.UUID, error) {
 	raw := defaultAssignees
 	if override != "" {

@@ -10,11 +10,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Consumer wraps the Valkey Stream consumer-group primitives
-// cmd/connector-worker's dispatch loop needs: EnsureGroup once at startup,
-// then ReadGroup/Ack/ReclaimStale/Touch in its main loop. An entry is acked
-// once its outcome has been reported, or when it is dead-lettered; until then
-// it stays pending, and reclaimable once its consumer stops touching it.
 type Consumer struct {
 	client redis.Cmdable
 }
@@ -23,9 +18,6 @@ func NewConsumer(client redis.Cmdable) *Consumer {
 	return &Consumer{client: client}
 }
 
-// EnsureGroup creates group on streamKey (MKSTREAM: the stream itself may
-// not exist yet if nothing has published to it), tolerating a BUSYGROUP
-// error as success — this runs every startup, not just the first.
 func (c *Consumer) EnsureGroup(ctx context.Context, streamKey, group string) error {
 	err := c.client.XGroupCreateMkStream(ctx, streamKey, group, "0").Err()
 	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
@@ -34,8 +26,6 @@ func (c *Consumer) EnsureGroup(ctx context.Context, streamKey, group string) err
 	return nil
 }
 
-// ReadGroup blocks up to block for up to count new entries (">" — never yet
-// delivered to this group) on streamKey.
 func (c *Consumer) ReadGroup(ctx context.Context, streamKey, group, consumerName string, count int64, block time.Duration) ([]Entry, error) {
 	streams, err := c.client.XReadGroup(ctx, &redis.XReadGroupArgs{
 		Group: group, Consumer: consumerName, Streams: []string{streamKey, ">"}, Count: count, Block: block,
@@ -53,7 +43,6 @@ func (c *Consumer) ReadGroup(ctx context.Context, streamKey, group, consumerName
 	return entries, nil
 }
 
-// Ack acknowledges entryID on streamKey/group.
 func (c *Consumer) Ack(ctx context.Context, streamKey, group, entryID string) error {
 	if err := c.client.XAck(ctx, streamKey, group, entryID).Err(); err != nil {
 		return fmt.Errorf("valkeystream ack: %w", err)
@@ -61,10 +50,6 @@ func (c *Consumer) Ack(ctx context.Context, streamKey, group, entryID string) er
 	return nil
 }
 
-// ReclaimStale claims entries idle for at least minIdle and still pending
-// under group, reassigning them to consumerName — the modern XAUTOCLAIM
-// replacement for hand-rolled XPENDING+XCLAIM, picking up entries whose
-// original consumer died mid-dispatch.
 func (c *Consumer) ReclaimStale(ctx context.Context, streamKey, group, consumerName string, minIdle time.Duration, count int64) ([]Entry, error) {
 	messages, _, err := c.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
 		Stream: streamKey, Group: group, Consumer: consumerName, MinIdle: minIdle, Start: "0", Count: count,
@@ -72,8 +57,6 @@ func (c *Consumer) ReclaimStale(ctx context.Context, streamKey, group, consumerN
 	if err != nil {
 		return nil, fmt.Errorf("valkeystream reclaim stale: %w", err)
 	}
-	// The entries are claimed and counted already, so a count that can't be
-	// read leaves Deliveries at 0 rather than dropping them.
 	entries := toEntriesFromMessages(messages)
 	for i := range entries {
 		pending, err := c.client.XPendingExt(ctx, &redis.XPendingExtArgs{
@@ -86,8 +69,6 @@ func (c *Consumer) ReclaimStale(ctx context.Context, streamKey, group, consumerN
 	return entries, nil
 }
 
-// Touch resets the idle time of entries this consumer is still handling.
-// XCLAIM with JUSTID leaves the delivery count alone.
 func (c *Consumer) Touch(ctx context.Context, streamKey, group, consumerName string, ids []string) error {
 	err := c.client.XClaimJustID(ctx, &redis.XClaimArgs{
 		Stream: streamKey, Group: group, Consumer: consumerName, MinIdle: 0, Messages: ids,
@@ -98,8 +79,6 @@ func (c *Consumer) Touch(ctx context.Context, streamKey, group, consumerName str
 	return nil
 }
 
-// DeadLetter copies entry onto deadLetterKey with the reason it was given
-// up on, then acks it on streamKey.
 func (c *Consumer) DeadLetter(ctx context.Context, streamKey, group, deadLetterKey string, entry Entry, reason string) error {
 	values := make(map[string]any, len(entry.Fields)+2)
 	for k, v := range entry.Fields {

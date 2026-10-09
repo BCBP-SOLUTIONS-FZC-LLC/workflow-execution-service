@@ -29,8 +29,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
 
-// version is stamped at build time by the Dockerfile's
-// -ldflags "-X main.version=${BUILD_VERSION}".
 var version = "dev"
 
 func main() {

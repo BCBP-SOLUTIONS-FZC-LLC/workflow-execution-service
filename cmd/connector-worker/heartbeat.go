@@ -9,16 +9,11 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-// inflightSet holds the stream entries this consumer has read and not yet
-// finished with, each with the deadline of its run's lease once it has one.
-// Its zero value is ready to use.
 type inflightSet struct {
 	mu        sync.Mutex
 	deadlines map[string]time.Time
 }
 
-// claim reports whether id was not already in flight here. A second copy of
-// an entry this consumer holds is left to the first.
 func (s *inflightSet) claim(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -44,8 +39,6 @@ func (s *inflightSet) remove(id string) {
 	delete(s.deadlines, id)
 }
 
-// live lists the entries still worth keeping: queued, or running within their
-// lease. A run past its lease is treated as hung and left to be reclaimed.
 func (s *inflightSet) live(now time.Time) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -58,9 +51,6 @@ func (s *inflightSet) live(now time.Time) []string {
 	return ids
 }
 
-// heartbeatLoop keeps this consumer's entries from looking idle while they
-// wait for a pool slot or run, so the reclaim wait detects a dead consumer
-// and nothing else (workflow_connectors.md §6.5 step 0).
 func heartbeatLoop(ctx context.Context, d *deps, wlog port.Logger) {
 	ticker := time.NewTicker(d.claimMinIdle / 3)
 	defer ticker.Stop()

@@ -1,6 +1,3 @@
-// Command gen bootstraps a replay fixture: runs Execute for real against a
-// local Temporal dev server, then the temporal CLI exports its history.
-// Never run by CI — see test/workflow/replay/README.md for the full command.
 package main
 
 import (

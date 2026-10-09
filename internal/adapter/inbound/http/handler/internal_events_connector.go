@@ -13,16 +13,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// --- WorkflowTaskCreated (connector dispatch) ---
-
-// workflowTaskCreatedPayload is a narrow view of domain.WorkflowTaskCreatedPayload
-// (internal/core/domain/events.go) — this handler only needs the fields a
-// connector-typed task's Stream push requires, not the full event shape.
-// Unlike this file's sibling handlers, WorkflowTaskCreated is emitted BY
-// execution_service itself (CreateTaskActivity), not by another service —
-// this only fires if execution_service is subscribed to its own
-// WorkflowTaskCreated topic via the platform event bus's subscription
-// topology; confirm that with whoever owns it before relying on this path.
 type workflowTaskCreatedPayload struct {
 	WorkflowInstanceID string         `json:"workflow_instance_id"`
 	TaskID             string         `json:"task_id"`
@@ -50,8 +40,6 @@ func (h *Handler) handleWorkflowTaskCreated(c *gin.Context, env events.Envelope[
 	}
 
 	if p.ConnectorType == nil || *p.ConnectorType == "" {
-		// Non-connector task creation — nothing to push onto the Stream,
-		// but still a recognized, successfully handled event type.
 		h.markOK(eventType)
 		c.Status(http.StatusOK)
 		return

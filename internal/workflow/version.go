@@ -12,73 +12,28 @@ const stageFailChangeID = "stage-fail-signal"
 
 const taskStageCancelChangeID = "task-stage-cancel"
 
-// nodeVisitKeyChangeID gates re-keying pending/pendingSignals by
-// (NodeKey, VisitCount) instead of bare NodeKey (the stale-signal fix,
-// known_issues.md) — DefaultVersion always resolves to visit 0 (a single
-// implicit slot per NodeKey, matching the pre-fix behavior byte-for-byte)
-// so replaying a history recorded before this change never diverges.
 const nodeVisitKeyChangeID = "node-visit-key-signal-buffer"
 
-// taskCompletedStatusChangeID gates the extra UpdateTaskStatus activity that
-// writes COMPLETED once a stage's last assignment is done (LLD §4.3). A
-// history recorded before the change has no such activity, so DefaultVersion
-// keeps the old sequence.
 const taskCompletedStatusChangeID = "task-completed-status"
 
-// isoTimerDurationChangeID gates reading a boundary timer's duration as an
-// ISO 8601 period (P5D) when it is not a Go duration. Before it, such a timer
-// was dropped with a warning, so an older history has no timer to replay.
 const isoTimerDurationChangeID = "iso-timer-duration"
 
-// boundaryEndsPathChangeID gates ending a path at an interrupting boundary
-// that has no target department, which is how a boundary leading straight to
-// an end event compiles. Before it, such a boundary failed the instance.
 const boundaryEndsPathChangeID = "boundary-no-target-ends-path"
 
-// exclusiveEndCompletesPathChangeID gates ending only the path, as an end
-// event does, when an exclusive branch leads to one. Before it, such a branch
-// ended the instance as TERMINATED without writing the instance's status.
 const exclusiveEndCompletesPathChangeID = "exclusive-end-completes-path"
 
-// deferRoutesBackChangeID gates a defer sending the instance one completed
-// step back, as a force-back does. Before it, a defer closed the task and the
-// activity created a replacement at the same node.
 const deferRoutesBackChangeID = "defer-routes-back"
 
-// forceRouteByNodeKeyChangeID gates naming the branch an admin force-forward
-// or force-back applies to, inside a parallel step or a DEGRADED instance, by
-// the department of its target node key and by the steps a branch runs, and a
-// respawned branch that fails again keeping its steps. Before it, only an
-// exact target_dept_id matched, which no HTTP path sets.
 const forceRouteByNodeKeyChangeID = "force-route-by-node-key"
 
-// abandonedTaskSupersededChangeID gates marking SUPERSEDED the task of a stage
-// whose scope was cancelled, an interrupted call's open task among them.
-// Before it, such a task stayed open and claimable.
 const abandonedTaskSupersededChangeID = "abandoned-task-superseded"
 
-// subWorkflowErrorRaisedChangeID gates raising the error class of a stage that
-// fails inside a call or subprocess to its error boundaries. Before it, such a
-// failure failed the instance whatever boundaries the call had.
 const subWorkflowErrorRaisedChangeID = "subworkflow-error-raised"
 
-// parallelJoinByBranchChangeID gates telling a Parallel step's branches apart
-// by their place in the step. Before it, they were told apart by DeptID, and
-// two branches with one DeptID never joined.
 const parallelJoinByBranchChangeID = "parallel-join-by-branch"
 
-// ioInputRuleChangeID gates reading an IOMapping input by workflow-models'
-// rule: "=name" is the variable name and any other text is a literal. Before
-// it, a source was always a variable name, so an authored "=name" read a
-// variable called "=name".
 const ioInputRuleChangeID = "io-input-rule"
 
-// taskResultVariablesChangeID gates merging a completed task's result_json
-// into the instance's variables. Before it, only the start context and call
-// inputs wrote them.
 const taskResultVariablesChangeID = "task-result-variables"
 
-// externalWaitChangeID gates waiting for an outside wait (dsl.ExternalWaits)
-// under its key, where an outside party's answer can complete it. Before it,
-// such a wait sat in the message buffer, which nothing outside the plan feeds.
 const externalWaitChangeID = "external-wait-by-key"

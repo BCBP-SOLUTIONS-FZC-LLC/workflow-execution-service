@@ -28,13 +28,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
-// newApp is cmd/server's composition root (LLD §1.7): the only place this
-// binary wires concrete adapters into internal/core/service's struct
-// literals. Every construction step appends its own cleanup to cleanups so a
-// failure partway through unwinds everything already built, most-recent
-// first.
-// automationPrincipalCacheTTL bounds how long an offboarded tenant keeps a
-// cached principal; the principal's identifier itself does not change.
 const automationPrincipalCacheTTL = 5 * time.Minute
 
 func newApp(cfg *config.Config) (*app, error) {
@@ -80,10 +73,6 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 	cleanups = append(cleanups, func() { _ = cacheClient.Close() })
 
-	// connectorEvents reuses cacheClient's own Valkey connection — the same
-	// instance backs both the plain KV cache above and the connector-task
-	// Stream cmd/connector-worker consumes; no separate client needed for a
-	// producer-only role.
 	connectorEvents := valkeystream.NewEventPublisher(valkeystream.NewProducer(cacheClient), cfg.ConnectorStreamKey)
 
 	glueCodec, err := newGlueCodec(ctx, cfg)
@@ -226,21 +215,23 @@ func newApp(cfg *config.Config) (*app, error) {
 		Temporal:         temporalPinger{sdk: sdkClient},
 	})
 	httpServer := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
-		Handler:      router.Handler(),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              fmt.Sprintf(":%d", cfg.HTTPPort),
+		Handler:           router.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", gincommon.MetricsHandler())
 	metricsServer := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.MetricsPort),
-		Handler:      metricsMux,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              fmt.Sprintf(":%d", cfg.MetricsPort),
+		Handler:           metricsMux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	return &app{

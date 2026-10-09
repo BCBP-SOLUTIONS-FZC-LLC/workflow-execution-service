@@ -8,11 +8,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
 
-// newHealthServer builds cmd/connector-worker's plain net/http health/ready/
-// metrics surface — mirrors cmd/worker's own newHealthServer shape. /readyz
-// checks Valkey reachability only: this binary never dials Temporal at all
-// (LLD workflow_connectors.md §6.1 Decision #2), so there is no SDK health
-// check to run here the way cmd/server/cmd/worker both do.
 func newHealthServer(addr string, d *deps) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -20,7 +15,10 @@ func newHealthServer(addr string, d *deps) *http.Server {
 	})
 	mux.HandleFunc("/readyz", readyzHandler(d))
 	mux.Handle("/metrics", gincommon.MetricsHandler())
-	return &http.Server{Addr: addr, Handler: mux}
+	return &http.Server{
+		Addr: addr, Handler: mux,
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
+	}
 }
 
 func readyzHandler(d *deps) http.HandlerFunc {

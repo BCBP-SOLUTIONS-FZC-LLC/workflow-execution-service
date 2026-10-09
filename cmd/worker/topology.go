@@ -18,10 +18,6 @@ import (
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
 )
 
-// dynamicQueueWorkerOptions caps per-tenant queue concurrency below the
-// default queue's own defaults so one busy tenant can't starve pool/DB
-// capacity shared with the default queue. Placeholder values pending real
-// sizing (LLD §3.2 flags the whole capacity model as provisional).
 var dynamicQueueWorkerOptions = worker.Options{
 	MaxConcurrentActivityExecutionSize:     200,
 	MaxConcurrentWorkflowTaskExecutionSize: 200,
@@ -29,9 +25,6 @@ var dynamicQueueWorkerOptions = worker.Options{
 	Interceptors:                           []interceptor.WorkerInterceptor{observability.NewTemporalMetricsInterceptor()},
 }
 
-// workerRegistry tracks every worker.Worker this process has started, keyed
-// by task queue name, so the topology poller never double-starts one and
-// shutdown can stop them all.
 type workerRegistry struct {
 	mu      sync.Mutex
 	workers map[string]worker.Worker
@@ -64,18 +57,11 @@ func (r *workerRegistry) all() []worker.Worker {
 	return out
 }
 
-// registerAll registers the Execute workflow and every Activity in deps
-// against w. Must stay in lockstep with internal/core/port/activities.go —
-// checked by test/workflow's fake-activity registration mirroring the same
-// name list.
 func registerAll(w worker.Worker, deps *outboundtemporal.Deps) {
 	w.RegisterWorkflowWithOptions(wfengine.Execute, sdkworkflow.RegisterOptions{Name: port.WorkflowTypeExecute})
 	registerActivities(w, deps)
 }
 
-// startWorkerForQueue constructs, registers, and starts (non-blocking) a
-// worker.Worker on queueName. Multiple worker.Worker instances safely share
-// one client.Client (Stop never touches the client, only its own pollers).
 func startWorkerForQueue(sdk client.Client, deps *outboundtemporal.Deps, queueName string, opts worker.Options) (worker.Worker, error) {
 	w := worker.New(sdk, queueName, opts)
 	registerAll(w, deps)
@@ -85,14 +71,6 @@ func startWorkerForQueue(sdk client.Client, deps *outboundtemporal.Deps, queueNa
 	return w, nil
 }
 
-// pollQueueTopology polls queues.ListActive on interval and starts a new
-// worker.Worker for every queue not yet in registry — additive only. A
-// queue whose row later disappears keeps its already-started worker running
-// (LLD §3.2: a running workflow execution is permanently bound to the task
-// queue it started on; stopping an idle worker for a deregistered queue is a
-// possible future optimization, not a correctness requirement here). Every
-// registered queue's own tenant identity is irrelevant to the loop itself —
-// only the queue name is used to start/dedupe workers.
 func pollQueueTopology(
 	ctx context.Context,
 	sdk client.Client,
@@ -152,10 +130,6 @@ func pollQueueTopologyOnce(
 	}
 }
 
-// registerActivities registers every Activity constant in
-// internal/core/port/activities.go against its implementation in deps —
-// the two must stay in lockstep, checked by test/workflow's fake-activity
-// registration mirroring the same name list.
 func registerActivities(w worker.Worker, deps *outboundtemporal.Deps) {
 	w.RegisterActivityWithOptions(deps.GetCompiledPlan, activity.RegisterOptions{Name: port.ActivityGetCompiledPlan})
 	w.RegisterActivityWithOptions(deps.CreateTask, activity.RegisterOptions{Name: port.ActivityCreateTask})

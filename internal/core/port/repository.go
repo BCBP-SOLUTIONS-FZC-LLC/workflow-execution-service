@@ -20,7 +20,6 @@ type PageRequest struct {
 	Limit int
 }
 
-// ScopeFilter narrows a List query to what a non-admin caller is allowed to see.
 type ScopeFilter struct {
 	DepartmentIDs []uuid.UUID
 	CallerUserID  uuid.UUID

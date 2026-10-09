@@ -10,26 +10,18 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-// Activity retry-policy classes, per LLD §3.3's retry-policy table.
 var (
 	dbWriteActivityOptions = wf.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
 		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval:    time.Second,
-			BackoffCoefficient: 2.0,
-			MaximumInterval:    60 * time.Second,
-			MaximumAttempts:    0, // unlimited
-			// VersionConflict is a permanent rejection for that attempt — a
-			// stale expected record_version can never start matching again on
-			// retry.
+			InitialInterval:        time.Second,
+			BackoffCoefficient:     2.0,
+			MaximumInterval:        60 * time.Second,
+			MaximumAttempts:        0,
 			NonRetryableErrorTypes: []string{"ValidationError", "NotFoundError", "VersionConflict"},
 		},
 	}
 
-	// externalCallActivityOptions backs GetCompiledPlanActivity. Its
-	// permanent failures, including a plan that cannot be expanded, come back
-	// as DefinitionServiceClientError; a DSL schema-major mismatch is refused
-	// by Execute's own strategy check (execution LLD §2.5, compat.go).
 	externalCallActivityOptions = wf.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Second,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -49,10 +41,6 @@ func withExternalCallOptions(ctx wf.Context) wf.Context {
 	return wf.WithActivityOptions(ctx, externalCallActivityOptions)
 }
 
-// wrapActivityErr labels an Activity failure with the Activity name it came
-// from, since every wrapper below otherwise returns the SDK's bare error
-// (satisfies wrapcheck: errors crossing out of go.temporal.io/sdk's own
-// Future.Get must be wrapped, not passed through raw).
 func wrapActivityErr(activityName string, err error) error {
 	if err == nil {
 		return nil

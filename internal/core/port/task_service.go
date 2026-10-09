@@ -1,5 +1,3 @@
-// Package port defines the interfaces internal/adapter code depends on and
-// internal/core/service will implement.
 package port
 
 import (
@@ -26,29 +24,14 @@ type Task struct {
 	TenantID           uuid.UUID
 	WorkflowInstanceID uuid.UUID
 	NodeKey            string
-	// TaskType is reserved for future extension (LLD §4.2: default "userTask"
-	// today) — zero-valued until a real compiled-plan source populates it.
-	TaskType     string
-	DepartmentID uuid.UUID
-	// RequiredLevel is the node's eligibility-level requirement, supplied to
-	// the outbound eligibility check alongside DepartmentID (LLD §5.4 step 2).
-	RequiredLevel string
-	Status        TaskStatus
-	RecordVersion int64
-	AssigneeMode  string
-	// AssigneeCount is the expected number of active assignments for this
-	// task, zero-valued until multi-assignee counting (LLD Appendix B,
-	// "multi-assignee claim-release mechanics undesigned") is built.
-	AssigneeCount int
-	// ConnectorType is non-nil only for a connector-typed automatic task
-	// (workflow_connectors.md) — such a task has zero human assignments,
-	// ever, and every human-action TaskService method rejects it with
-	// ErrTaskNotHumanActionable rather than silently no-op on an
-	// assignment-less task.
-	ConnectorType *string
-	// ExtrasJSON carries {"resolved_inputs": {...}} for a connector-typed
-	// task (CreateTaskActivity's own convention) — surfaced here purely for
-	// admin/observability visibility, never consumed by TaskService itself.
+	TaskType           string
+	DepartmentID       uuid.UUID
+	RequiredLevel      string
+	Status             TaskStatus
+	RecordVersion      int64
+	AssigneeMode       string
+	AssigneeCount      int
+	ConnectorType      *string
 	ExtrasJSON         json.RawMessage
 	DeferredFromTaskID *uuid.UUID
 	DueAt              *time.Time
@@ -93,30 +76,17 @@ type TaskFilter struct {
 	DueBefore          *time.Time
 }
 
-// ReadScope is the intra-tenant read-scope check's input (LLD §9.2): a
-// caller may read a task only if they are (or were) an assignee, their
-// current departments include the resource's, or IsAdmin bypasses the check.
 type ReadScope struct {
 	CallerUserID uuid.UUID
 	Departments  []DepartmentRole
 	IsAdmin      bool
 }
 
-// DepartmentRole is one parsed entry from the caller's x-departments header
-// ("<department_id>:<role>", comma-separated, per definition_service.md §3.1
-// and IAM HLD v1.41). Role is carried for future finer-grained gating but
-// not consumed by any check today — only DepartmentID identity matters for
-// the current department-membership visibility check.
 type DepartmentRole struct {
 	DepartmentID uuid.UUID
 	Role         string
 }
 
-// Page is a list endpoint's decoded, validated pagination input. Cursor is
-// nil on a first page — by the time a Page reaches this port boundary, an
-// incoming cursor has already been decoded and validated (CursorPosition),
-// never a raw, unchecked string (LLD §5.9's "unparseable or tampered cursor
-// is rejected outright" requirement).
 type Page struct {
 	Cursor *CursorPosition
 	Limit  int
@@ -149,9 +119,6 @@ type AssigneeOverride struct {
 	CreatedAt          time.Time
 }
 
-// TaskService is the port internal/adapter/inbound/http/handler codes
-// against. Every mutating method performs its own synchronous
-// record_version/state pre-check before forwarding a signal (LLD §5.10).
 type TaskService interface {
 	List(ctx context.Context, tenantID uuid.UUID, scope ReadScope, filter TaskFilter, page Page) (PageResult[*Task], error)
 	Get(ctx context.Context, tenantID, taskID uuid.UUID, scope ReadScope) (*Task, []*TaskAssignment, error)
@@ -162,9 +129,6 @@ type TaskService interface {
 	Defer(ctx context.Context, tenantID, taskID, userID uuid.UUID, reason string, recordVersion int64) (*Task, error)
 	Reassign(ctx context.Context, tenantID, taskID, actorUserID, newUserID uuid.UUID, recordVersion int64) (*Task, error)
 
-	// OverrideAssignee performs LLD §5.4 step 1 (validate + version check)
-	// and step 3 (persist); the caller runs step 2 (eligibility) first and
-	// fires step 4 (signal) only after this call succeeds.
 	OverrideAssignee(ctx context.Context, in AssigneeOverrideInput) (*AssigneeOverride, error)
 	SignalReassign(ctx context.Context, tenantID, taskID, actorUserID, previousUserID, newUserID uuid.UUID, recordVersion int64) error
 

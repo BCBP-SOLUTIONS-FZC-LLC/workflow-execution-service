@@ -90,9 +90,6 @@ func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, t
 	}
 	target := assignmentFor(active, userID)
 	if target == nil {
-		// Chiefly a retry whose earlier attempt completed the assignment and
-		// lost its ack: the completion and its event already happened, so the
-		// gate must still report done or the task never leaves IN_PROGRESS.
 		return port.CompleteAssignmentOutput{AllDone: len(active) == 0}, nil
 	}
 	completed, err := d.Assignments.Complete(ctx, tenantID, target.ID, []byte(resultJSON), task.RecordVersion)
@@ -117,12 +114,6 @@ func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, t
 	return out, nil
 }
 
-// DeferTask closes the task an assignee deferred: it marks it DEFERRED,
-// completes the deferring assignment and enqueues workflow.task.deferred
-// naming the earlier node the instance goes back to. It creates no
-// replacement: the earlier node's task is created when its department runs
-// again. A retry after a lost ack finds the assignment completed and does
-// nothing.
 func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) error {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
@@ -206,14 +197,8 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 			return fmt.Errorf("list active assignments: %w", err)
 		}
 		if assignmentActiveFor(active, newUserID) {
-			// Already reassigned by a prior attempt whose ack was lost —
-			// idempotent no-op, including skipping the event re-enqueue.
 			return nil
 		}
-		// Two concurrent reassign requests can both pass their own version
-		// check upstream before either commits; this bump lets only the
-		// first through — the second gets a permanent, non-retryable
-		// rejection rather than corrupting the assignment set.
 		if _, err := d.Tasks.BumpRecordVersion(ctx, tenantID, taskID, in.RecordVersion); err != nil {
 			if errors.Is(err, domain.ErrRecordVersionConflict) {
 				return nonRetryable("VersionConflict", fmt.Errorf("reassign: lost the record_version race: %w", err))
@@ -259,8 +244,6 @@ func assignmentFor(active []*domain.TaskAssignment, userID uuid.UUID) *domain.Ta
 	return nil
 }
 
-// naturally idempotent under retry, since a retried attempt's active list
-// won't include an assignment a prior attempt already vacated.
 func vacateAssignmentsFor(ctx context.Context, repo port.TaskAssignmentRepository, tenantID uuid.UUID, active []*domain.TaskAssignment, userID uuid.UUID) error {
 	for _, a := range active {
 		if a.UserID != userID {
@@ -273,10 +256,6 @@ func vacateAssignmentsFor(ctx context.Context, repo port.TaskAssignmentRepositor
 	return nil
 }
 
-// supersedeAbandoned supersedes a task the workflow abandoned: a boundary fired
-// over its scope. A task already settled stays as it is, since the abandonment
-// can race the completion that settled it. No user abandons a task, so the
-// event names no actor.
 func (d *Deps) supersedeAbandoned(ctx context.Context, tenantID uuid.UUID, task *domain.Task) error {
 	if task.Status != domain.TaskStatusReady && task.Status != domain.TaskStatusInProgress {
 		return nil

@@ -8,12 +8,8 @@ import (
 	"time"
 )
 
-// isoDurationRe is the ISO 8601 period Definition's validator accepts: weeks
-// alone, or days and a time part. Years and months are not accepted there, so
-// every accepted period has a fixed length.
 var isoDurationRe = regexp.MustCompile(`^P(?:(\d+)W|(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?)$`)
 
-// parseISODuration reads an ISO 8601 period such as P5D or PT1H30M.
 func parseISODuration(s string) (time.Duration, error) {
 	m := isoDurationRe.FindStringSubmatch(s)
 	if m == nil {

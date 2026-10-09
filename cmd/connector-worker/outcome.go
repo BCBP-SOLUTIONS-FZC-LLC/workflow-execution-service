@@ -11,16 +11,11 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-// A redelivered entry re-sends the recorded outcome instead of re-running the
-// connector, so the record has to outlive every redelivery the cap allows
-// (workflow_connectors.md §6.5 step 0; checkRequiredConfig enforces it).
 const (
 	outcomeTTL           = 24 * time.Hour
 	executionLeaseMargin = 10 * time.Second
 )
 
-// dispatchOutcome is what a connector run produced: its output on success,
-// or the error class it failed with.
 type dispatchOutcome struct {
 	Output     map[string]any `json:"output,omitempty"`
 	ErrorClass string         `json:"error_class,omitempty"`
@@ -54,9 +49,6 @@ func recordOutcome(ctx context.Context, d *deps, taskID uuid.UUID, outcome dispa
 	}
 }
 
-// takeLease reports whether this consumer may run the task's connector now.
-// The lease is left to expire rather than released: once the run ends, the
-// recorded outcome is what stops a second run.
 func takeLease(ctx context.Context, d *deps, taskID uuid.UUID, ttl time.Duration, wlog port.Logger) bool {
 	ok, err := d.dedup.SetNX(ctx, leaseKey(taskID), "1", ttl)
 	if err != nil {
@@ -69,8 +61,6 @@ func takeLease(ctx context.Context, d *deps, taskID uuid.UUID, ttl time.Duration
 	return ok
 }
 
-// report sends outcome to execution_service and acks the entry only once that
-// call has succeeded, so an unreported outcome stays reclaimable.
 func report(ctx context.Context, d *deps, job dispatchJob, outcome dispatchOutcome, entryID string, wlog port.Logger) {
 	var err error
 	if outcome.ErrorClass != "" {

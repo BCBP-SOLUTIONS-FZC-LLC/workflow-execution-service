@@ -10,8 +10,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-// hasCompletedStep reports whether the instance has a completed task: a step
-// a defer or a force-back has to go back to.
 func hasCompletedStep(ctx context.Context, tasks port.TaskRepository, tenantID, instanceID uuid.UUID) (bool, error) {
 	var cursor *port.Cursor
 	for {

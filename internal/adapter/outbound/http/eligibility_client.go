@@ -1,5 +1,3 @@
-// Package http is the outbound IAM eligibility HTTP client (LLD §5.4 step 2,
-// §9.2), the sole implementation of port.EligibilityChecker.
 package http
 
 import (
@@ -12,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
+
 	"github.com/google/uuid"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -21,15 +21,10 @@ var ErrUpstreamUnavailable = errors.New("upstream service unavailable")
 
 const maxEligibilityAttempts = 3
 
-// maxEligibilityBatchConcurrency caps CheckEligibilityBatch's fan-out — a
-// large batch must not open one goroutine (and one HTTP connection) per
-// item with no ceiling.
 const maxEligibilityBatchConcurrency = 20
 
 var _ port.EligibilityChecker = (*EligibilityClient)(nil)
 
-// EligibilityClient calls Org & Membership's assignee-eligibility endpoint.
-// Request authentication, if any, is injected via a custom http.Client.
 type EligibilityClient struct {
 	baseURL string
 	client  *http.Client
@@ -49,12 +44,6 @@ type eligibilityReq struct {
 	ActorID       uuid.UUID `json:"actor_id"`
 }
 
-// CheckEligibilityBatch fans out concurrently over CheckEligibility, one real
-// HTTP call per request — a correct, working implementation today, but not
-// yet the round-trip reduction LLD §5.5/§6.7 actually wants (Org & Membership
-// has no confirmed real batch endpoint yet). Swapping in a true server-side
-// batch call later needs no port.EligibilityChecker change, only this
-// method's body.
 func (c *EligibilityClient) CheckEligibilityBatch(
 	ctx context.Context,
 	requests []port.EligibilityCheckRequest,
@@ -124,6 +113,7 @@ func (c *EligibilityClient) tryCheckEligibility(
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	gincommon.InjectTraceContext(req.Context(), req.Header)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return false, true, fmt.Errorf("%w: eligibility check: %w", ErrUpstreamUnavailable, err)
@@ -137,10 +127,6 @@ func (c *EligibilityClient) tryCheckEligibility(
 		return false, false, fmt.Errorf("%w: eligibility endpoint returned %d", ErrUpstreamUnavailable, resp.StatusCode)
 	}
 
-	// Eligible is a pointer so a response body missing the field entirely
-	// (an unrecognized shape) is distinguishable from an explicit false —
-	// the former fails closed via ErrUpstreamUnavailable rather than being
-	// silently read as "ineligible".
 	var out struct {
 		Eligible *bool `json:"eligible"`
 	}

@@ -1,8 +1,3 @@
-// Package domain holds Execution Service's outbound event catalogue (LLD
-// §6.4): 18 wire-type constants, their payload structs, and one builder
-// function per event for sibling tasks (T1.5-T1.8) to call. Shaped after
-// iam-user-profile's internal/core/domain/events.go convention — consts,
-// payload structs, and the type->message-name mapping colocated in one file.
 package domain
 
 import (
@@ -25,9 +20,6 @@ func OutboundEventTypes() []string {
 
 const EventSource = "workflow-execution-svc"
 
-// Outbound wire-type constants (LLD §6.4). PascalCase, platform-wide
-// convention (design/IAM/event-naming-conventions.md) — the SNS `EventType`
-// attribute and the envelope `type` field both carry this exact string.
 const (
 	EventWorkflowInstanceStarted     = "WorkflowInstanceStarted"
 	EventWorkflowInstancePaused      = "WorkflowInstancePaused"
@@ -49,53 +41,37 @@ const (
 	EventWorkflowTaskSLABreached     = "WorkflowTaskSlaBreached"
 )
 
-// Initiator values for workflow.instance.paused/.resumed (LLD §6.4 table).
 const (
 	InitiatorAdmin            = "admin"
 	InitiatorTenantState      = "tenant_state"
-	InitiatorSafetyNet        = "safety_net" // paused only
+	InitiatorSafetyNet        = "safety_net"
 	InitiatorOOO              = "ooo"
-	InitiatorDegradedRecovery = "degraded_recovery" // resumed only
+	InitiatorDegradedRecovery = "degraded_recovery"
 )
 
-// Initiator values for workflow.instance.terminated (LLD §6.4).
 const (
 	TerminatedInitiatorAdmin       = "admin"
 	TerminatedInitiatorTenantState = "tenant_state"
 )
 
-// Initiator values for workflow.task.reassigned.
 const (
 	ReassignInitiatorAdmin      = "admin"
 	ReassignInitiatorOverride   = "override"
 	ReassignInitiatorDelegation = "delegation"
 )
 
-// Direction values for workflow.instance.force-routed.
 const (
 	ForceRouteDirectionForward = "forward"
 	ForceRouteDirectionBack    = "back"
 )
 
-// CommonCore is embedded in every one of the 18 outbound event payloads
-// (LLD §6.4's "common payload core, all events"). Embedding promotes these
-// fields to the top level of the marshaled JSON, so every payload stays a
-// flat object even though the Go struct is composed.
 type CommonCore struct {
 	WorkflowInstanceID uuid.UUID `json:"workflow_instance_id"`
-	// SubjectID and BusinessKey travel together because an instance's identity is
-	// the pair: the key identifies one instance within its subject, so a consumer
-	// correlating on the key alone would group every subject's instance of the
-	// same stage (LLD §4.2).
-	SubjectID         string    `json:"subject_id"`
-	BusinessKey       string    `json:"business_key"`
-	WorkflowVersionID uuid.UUID `json:"workflow_version_id"`
+	SubjectID          string    `json:"subject_id"`
+	BusinessKey        string    `json:"business_key"`
+	WorkflowVersionID  uuid.UUID `json:"workflow_version_id"`
 }
 
-// TaskScopedCore is additionally embedded in the 9 workflow.task.* events
-// (LLD §6.4's "task-scoped events add" rule). AssigneeUserIDs carries raw
-// user IDs only - the Dashboard Stream Gateway owns all display-name
-// enrichment (LLD §6.4 Dashboard Stream Gateway payload rule).
 type TaskScopedCore struct {
 	TaskID          uuid.UUID   `json:"task_id"`
 	NodeKey         string      `json:"node_key"`
@@ -108,12 +84,6 @@ type FailedBranch struct {
 	LastNodeKey  string    `json:"last_node_key"`
 }
 
-// MessageName maps a wire event-type constant to its
-// api/asyncapi.yaml components.messages key. Doc/test cross-referencing
-// only - it has no runtime role in Glue schema resolution, which uses the
-// wire type string directly (see internal/adapter/outbound/glue.Codec). Now
-// that the wire type constants are themselves PascalCase, the AsyncAPI
-// message key is identical to the wire type — this is an identity function.
 func MessageName(eventType string) string {
 	return eventType
 }
@@ -199,8 +169,6 @@ func NewWorkflowInstanceFinishedPayload(core CommonCore, startedByUserID uuid.UU
 	return WorkflowInstanceFinishedPayload{CommonCore: core, StartedByUserID: startedByUserID, CompletedAt: completedAt}
 }
 
-// workflow.instance.force-routed is instance-scoped despite the "instance"
-// naming already implying it - it does NOT get TaskScopedCore.
 type WorkflowInstanceForceRoutedPayload struct {
 	CommonCore
 	ActorUserID  uuid.UUID `json:"actor_user_id"`

@@ -16,8 +16,6 @@ import (
 
 var _ port.ConnectorTaskService = (*ConnectorTaskService)(nil)
 
-// connectorSignalDedupTTL only needs to outlast real Temporal
-// signal-delivery + activity-commit latency (seconds)
 const connectorSignalDedupTTL = 5 * time.Minute
 
 type ConnectorTaskService struct {
@@ -26,9 +24,8 @@ type ConnectorTaskService struct {
 	Assignments port.TaskAssignmentRepository
 	Temporal    port.TemporalClient
 	Cache       port.CacheStore
-	// Principals names the actor: the tenant's automation principal, never a value a caller supplies.
-	Principals port.AutomationPrincipalResolver
-	Log        port.Logger
+	Principals  port.AutomationPrincipalResolver
+	Log         port.Logger
 }
 
 func (s *ConnectorTaskService) logger() port.Logger {
@@ -44,9 +41,7 @@ type stageFailWire struct {
 	ConnectorType string `json:"connector_type"`
 	ErrorClass    string `json:"error_class"`
 	RecordVersion int64  `json:"record_version"`
-	// VisitCount mirrors stageTransitionWire's own field (task_service.go) —
-	// see domain.Task.VisitCount's doc comment.
-	VisitCount int64 `json:"visit_count"`
+	VisitCount    int64  `json:"visit_count"`
 }
 
 func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID uuid.UUID, output map[string]any) error {
@@ -107,9 +102,6 @@ func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.U
 		return nil
 	}
 
-	// The same row a completion creates: the failed task's event reads its
-	// assignees off the task, so without it a connector failure names nobody
-	// and the actor the callback required is retained nowhere.
 	if err := s.assignActor(ctx, tenantID, taskID, actorUserID); err != nil {
 		s.releaseSignalReservation(ctx, taskID)
 		return err
@@ -126,8 +118,6 @@ func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.U
 	return nil
 }
 
-// automationPrincipal fails closed when no resolver is wired, rather than
-// recording a callback under no actor.
 func (s *ConnectorTaskService) automationPrincipal(ctx context.Context, tenantID uuid.UUID) (uuid.UUID, error) {
 	if s.Principals == nil {
 		return uuid.Nil, port.ErrNoAutomationPrincipal
@@ -170,9 +160,6 @@ func (s *ConnectorTaskService) loadConnectorTask(ctx context.Context, tenantID, 
 	return task, false, nil
 }
 
-// A second identical signal can arrive in the short window before the
-// task's own status has advanced past the first one's write — the status
-// check above doesn't catch that, so a dedup claim guards it directly.
 func (s *ConnectorTaskService) reserveSignal(ctx context.Context, taskID uuid.UUID) bool {
 	if s.Cache == nil {
 		return true
@@ -185,8 +172,6 @@ func (s *ConnectorTaskService) reserveSignal(ctx context.Context, taskID uuid.UU
 	return ok
 }
 
-// Releases reserveSignal's claim after a failed send, so a retry isn't
-// blocked by a stale claim for the rest of its TTL.
 func (s *ConnectorTaskService) releaseSignalReservation(ctx context.Context, taskID uuid.UUID) {
 	if s.Cache == nil {
 		return
@@ -204,7 +189,6 @@ type connectorTaskExtras struct {
 	OutputMapping []dsl.IOVar `json:"output_mapping"`
 }
 
-// renames output's top-level keys into the workflow context variable names
 func applyOutputMapping(extrasJSON json.RawMessage, output map[string]any) (json.RawMessage, error) {
 	var extras connectorTaskExtras
 	if len(extrasJSON) == 0 {

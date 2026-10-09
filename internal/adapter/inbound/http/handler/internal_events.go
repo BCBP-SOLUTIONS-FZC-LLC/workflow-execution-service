@@ -18,12 +18,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
-// The three metric vars this file used to self-register via promauto
-// (internal_events_ingest_total, delegation_reroute_duration_seconds,
-// internal_events_last_received_timestamp) now live in internal/observability
-// — nil until Register() runs at real process boot, hence the nil-guards
-// below rather than a direct package-level var block here.
-
 func incIngestTotal(eventType, result string) {
 	if observability.InternalEventsIngestTotal != nil {
 		observability.InternalEventsIngestTotal.WithLabelValues(eventType, result).Inc()
@@ -48,9 +42,6 @@ const (
 	consumerConnector  = "connector-stream-execution"
 )
 
-// Event type strings — shared between HandleInternalEvent's legacy catch-all
-// switch and each category entrypoint's own smaller switch, so the two never
-// drift apart on the literal.
 const (
 	eventTypeDelegationStarted       = "DelegationStarted"
 	eventTypeDelegationEnded         = "DelegationEnded"
@@ -69,9 +60,6 @@ func HandledEventTypes() []string {
 	}
 }
 
-// parseEventID and parseTenantID share the "invalid event id"/"invalid
-// tenant_id" 400 message every one of the five handlers needs for the
-// envelope's own ID/TenantID fields, as opposed to a payload field.
 func (h *Handler) parseEventID(c *gin.Context, eventType, raw string) (uuid.UUID, bool) {
 	id, err := uuid.Parse(raw)
 	if err != nil {
@@ -90,9 +78,6 @@ func (h *Handler) parseTenantID(c *gin.Context, eventType, raw string) (uuid.UUI
 	return id, true
 }
 
-// decodeEnvelope binds and schema-decodes an inbound event envelope — the
-// preamble every category entrypoint below shares before dispatching on
-// env.Type. Returns ok=false once it has already written the error response.
 func (h *Handler) decodeEnvelope(c *gin.Context) (events.Envelope[json.RawMessage], bool) {
 	var env events.Envelope[json.RawMessage]
 	if !bindJSON(c, &env) {
@@ -104,9 +89,6 @@ func (h *Handler) decodeEnvelope(c *gin.Context) (events.Envelope[json.RawMessag
 		return env, false
 	}
 	if env.Timestamp.IsZero() {
-		// A zero timestamp would silently corrupt the recency-guard scope key
-		// and the delegation-reroute duration metric (time.Since(zero) reads
-		// as a multi-decade "duration").
 		h.badPayload(c, env.Type, "missing or zero envelope timestamp")
 		return env, false
 	}
@@ -121,11 +103,6 @@ func (h *Handler) decodeEnvelope(c *gin.Context) (events.Envelope[json.RawMessag
 	return env, true
 }
 
-// unhandledType still returns 200 (an unrecognized type must never train the
-// upstream event bridge to retry forever), but records its own
-// "unhandled_type" result label rather than markOK's "ok" — folding it into
-// "ok" made a wire-format mismatch (a wrong-cased or misspelled event type)
-// indistinguishable from a real success in ingest metrics/dashboards.
 func (h *Handler) unhandledType(c *gin.Context, eventType string) {
 	h.logWarn("internal events: ignoring unhandled type", map[string]any{"event_type": eventType})
 	incIngestTotal(eventType, "unhandled_type")
@@ -133,8 +110,6 @@ func (h *Handler) unhandledType(c *gin.Context, eventType string) {
 	c.Status(http.StatusOK)
 }
 
-// HandleDelegationEvents is POST /events/delegation — event_consumer routes
-// DelegationStarted/DelegationEnded here directly (internal/forwarder/category.go).
 func (h *Handler) HandleDelegationEvents(c *gin.Context) {
 	env, ok := h.decodeEnvelope(c)
 	if !ok {
@@ -150,7 +125,6 @@ func (h *Handler) HandleDelegationEvents(c *gin.Context) {
 	}
 }
 
-// HandleUserProfileEvents is POST /events/user-profile.
 func (h *Handler) HandleUserProfileEvents(c *gin.Context) {
 	env, ok := h.decodeEnvelope(c)
 	if !ok {
@@ -168,7 +142,6 @@ func (h *Handler) HandleUserProfileEvents(c *gin.Context) {
 	}
 }
 
-// HandleTenantEvents is POST /events/tenant.
 func (h *Handler) HandleTenantEvents(c *gin.Context) {
 	env, ok := h.decodeEnvelope(c)
 	if !ok {
@@ -184,12 +157,6 @@ func (h *Handler) HandleTenantEvents(c *gin.Context) {
 	}
 }
 
-// HandleWorkflowTaskEvents is POST /events/workflow-task — event_consumer
-// routes WorkflowTaskCreated here directly (internal/forwarder/category.go).
-// Unlike the other three category routes, this one has no legacy generic
-// /events fallback to fall back to (removed once every routed event type had
-// its own dedicated subpath) — a new event type must be wired here and in
-// event_consumer's category map together before it can reach execution.
 func (h *Handler) HandleWorkflowTaskEvents(c *gin.Context) {
 	env, ok := h.decodeEnvelope(c)
 	if !ok {
@@ -219,23 +186,11 @@ func (h *Handler) reconcilerError(c *gin.Context, eventType string, err error) {
 	writeProblem(c, http.StatusInternalServerError, CodeInternal, "failed to process event", nil)
 }
 
-// decodeFailed responds to a schema-registry decode failure with a 502: this
-// is a retryable infra problem (missing/misconfigured decoder, or a registry
-// hiccup reversing otherwise-valid encoded bytes), never a malformed client
-// payload, so the shared event-delivery bridge that forwards these HTTP
-// requests must retry it rather than treat it as permanently rejected like
-// badPayload's 400 does.
 func (h *Handler) decodeFailed(c *gin.Context, eventType, detail string) {
 	incIngestTotal(eventType, "decode_failed")
 	writeProblem(c, http.StatusBadGateway, CodeEventDecodeFailed, detail, nil)
 }
 
-// decodeSchemaRegistryPayload reverses what events.WithCodec does to an
-// outbound envelope's Payload on the way out (base64-wrap the codec's native
-// wire bytes as a JSON string, domain.WrapCodecPayload) so the typed
-// per-event handlers below always see plain JSON. platform-events' own
-// unwrap step (domain.UnwrapCodecPayload) isn't exported, so its two steps
-// are replicated here.
 func (h *Handler) decodeSchemaRegistryPayload(c *gin.Context, env events.Envelope[json.RawMessage]) (json.RawMessage, bool) {
 	if h.eventDecoder == nil {
 		h.decodeFailed(c, env.Type, "event carries a schema id but no event decoder is configured")
@@ -261,8 +216,6 @@ func (h *Handler) decodeSchemaRegistryPayload(c *gin.Context, env events.Envelop
 	return decoded, true
 }
 
-// respondOK finishes every successful dispatch path: dedup recorded last
-// (LLD §6.3), then the standard ok metrics, then 200.
 func (h *Handler) respondOK(c *gin.Context, eventID uuid.UUID, consumer, eventType string) {
 	if _, err := h.processedEvents.RecordIfNew(c.Request.Context(), eventID, consumer, eventType); err != nil {
 		h.logWarn("internal events: RecordIfNew failed after side effects committed", map[string]any{
@@ -273,9 +226,6 @@ func (h *Handler) respondOK(c *gin.Context, eventID uuid.UUID, consumer, eventTy
 	c.Status(http.StatusOK)
 }
 
-// alreadyProcessed is the §6.3-permitted cheap up-front read: a genuine
-// replay skips straight to ok/200 without calling the business port or
-// RecordIfNew again.
 func (h *Handler) alreadyProcessed(c *gin.Context, eventID uuid.UUID, consumer, eventType string) bool {
 	processed, err := h.processedEvents.IsProcessed(c.Request.Context(), eventID, consumer)
 	if err != nil {
@@ -296,21 +246,14 @@ func guCtx(c *gin.Context, tenantID string) context.Context {
 	return pgcommon.WithGUCSet(c.Request.Context(), pgdomain.GUCSet{TenantID: tenantID})
 }
 
-// --- DelegationStarted ---
-
 type delegationStartedPayload struct {
-	DelegationID string `json:"delegation_id"`
-	DelegatorID  string `json:"delegator_id"`
-	DelegateID   string `json:"delegate_id"`
-	// Scope is "all", "department" (scoped by ScopeID as a department UUID),
-	// or any other value treated as subject-scoped (ScopeID compared against
-	// the instance's subject_id) — see scopeMatches. "tender" is the one
-	// subject-scoped value the upstream scope enum carries today.
-	Scope    string  `json:"scope"`
-	ScopeID  *string `json:"scope_id"`
-	StartsAt string  `json:"starts_at"`
-	// EndsAt is nil for an open-ended delegation.
-	EndsAt *string `json:"ends_at"`
+	DelegationID string  `json:"delegation_id"`
+	DelegatorID  string  `json:"delegator_id"`
+	DelegateID   string  `json:"delegate_id"`
+	Scope        string  `json:"scope"`
+	ScopeID      *string `json:"scope_id"`
+	StartsAt     string  `json:"starts_at"`
+	EndsAt       *string `json:"ends_at"`
 }
 
 func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[json.RawMessage]) {
@@ -383,16 +326,11 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 	h.respondOK(c, eventID, consumerMembership, eventType)
 }
 
-// --- DelegationEnded ---
-
 type delegationEndedPayload struct {
 	DelegationID string `json:"delegation_id"`
 	DelegatorID  string `json:"delegator_id"`
 	DelegateID   string `json:"delegate_id"`
-	// EndedReason is "expired" | "cancelled" | "delegate_removed" |
-	// "review_expired"; an unrecognized value is logged and treated as a
-	// generic end, per knownEndedReason below — never rejected.
-	EndedReason string `json:"ended_reason"`
+	EndedReason  string `json:"ended_reason"`
 }
 
 func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json.RawMessage]) {
@@ -430,8 +368,6 @@ func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json
 		return
 	}
 
-	// Unknown ended_reason values are logged and treated as a generic end
-	// (LLD §6.2) — still processed, never an error.
 	if !knownEndedReason(p.EndedReason) {
 		h.logInfo("internal events: unknown DelegationEnded ended_reason, treating as generic end", map[string]any{
 			"ended_reason": p.EndedReason,
@@ -461,8 +397,6 @@ func knownEndedReason(reason string) bool {
 		return false
 	}
 }
-
-// --- UserDeleted ---
 
 type userDeletedPayload struct {
 	UserID    string `json:"user_id"`
@@ -512,17 +446,11 @@ func (h *Handler) handleUserDeleted(c *gin.Context, env events.Envelope[json.Raw
 	h.respondOK(c, eventID, consumerUser, eventType)
 }
 
-// --- UserAvailabilityChanged ---
-
 type userAvailabilityChangedPayload struct {
-	UserID string `json:"user_id"`
-	// Status is "available" | "ooo" | "busy". Only ooo/available drive a
-	// pause/resume signal; other values are accepted but currently no-ops.
-	Status   string  `json:"status"`
-	OOOFrom  *string `json:"ooo_from"`
-	OOOUntil *string `json:"ooo_until"`
-	// DelegateUserID is informational only — never a reroute driver, per
-	// port.UserAvailabilityInput.
+	UserID         string  `json:"user_id"`
+	Status         string  `json:"status"`
+	OOOFrom        *string `json:"ooo_from"`
+	OOOUntil       *string `json:"ooo_until"`
 	DelegateUserID *string `json:"delegate_user_id"`
 }
 
@@ -581,12 +509,6 @@ func (h *Handler) handleUserAvailabilityChanged(c *gin.Context, env events.Envel
 	h.respondOK(c, eventID, consumerUser, eventType)
 }
 
-// applyUserAvailabilityLocked runs the recency-check-apply-commit sequence
-// under scopeKey's advisory lock — see applyTenantStateChangeLocked's
-// identical comment for why: IAM's standard, non-FIFO delivery means two
-// conflicting availability events for the same user can otherwise have
-// their Apply calls execute out of timestamp order even though Commit
-// correctly records the newer one.
 func (h *Handler) applyUserAvailabilityLocked(
 	c *gin.Context, env events.Envelope[json.RawMessage], input port.UserAvailabilityInput, scopeKey string,
 ) error {
@@ -604,10 +526,6 @@ func (h *Handler) applyUserAvailabilityLocked(
 			return err
 		}
 
-		// Recency commits only after Apply has actually succeeded — never
-		// up front — so a transient Apply failure never leaves the guard
-		// advanced past an event that was never really applied (which would
-		// otherwise cause a legitimate retry to be silently skipped as stale).
 		if err := h.recency.Commit(ctx, scopeKey, env.Timestamp); err != nil {
 			h.logWarn("internal events: recency Commit failed after Apply succeeded", map[string]any{
 				"event_type": eventTypeUserAvailabilityChanged, "scope_key": scopeKey, "error": err.Error(),
@@ -629,19 +547,14 @@ func (h *Handler) parseOptionalTime(c *gin.Context, eventType string, raw *strin
 	return &v, true
 }
 
-// --- TenantStateChanged ---
-
 type tenantStateChangedPayload struct {
-	TenantID string `json:"tenant_id"`
-	// Status is one of trial | active | past_due | cancelled | suspended |
-	// trial_expired | offboarded.
+	TenantID       string `json:"tenant_id"`
 	Status         string `json:"status"`
 	PreviousStatus string `json:"previous_status"`
 	Plan           string `json:"plan"`
 	PreviousPlan   string `json:"previous_plan"`
 	ChangedAt      string `json:"changed_at"`
-	// Cause is the source lifecycle event type, e.g. "TenantSuspended".
-	Cause string `json:"cause"`
+	Cause          string `json:"cause"`
 }
 
 type membershipRevokedPayload struct {
@@ -725,9 +638,6 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 	if !ok {
 		return
 	}
-	// env.TenantID is authoritative for the RLS GUC; the payload's own
-	// tenant_id is validated for shape but not cross-checked against it —
-	// the LLD doesn't specify a mismatch behavior.
 	tenantID, ok := h.parseTenantID(c, eventType, env.TenantID)
 	if !ok {
 		return
@@ -755,14 +665,6 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 	h.respondOK(c, eventID, consumerMembership, eventType)
 }
 
-// applyTenantStateChangeLocked runs the recency-check-apply-commit sequence
-// under scopeKey's advisory lock (LLD §6.2 item 4): IAM's standard, non-FIFO
-// SNS/SQS delivery gives no ordering guarantee, and overlapping delivery for
-// the same tenant is documented as expected during bursts, not rare —
-// without the lock, an older event's Apply could execute after a newer
-// event's Apply even though Commit correctly records the newer timestamp.
-// offboarded is terminal and never skipped, even if changedAt looks stale
-// (Appendix A #26) — every other transition goes through the recency guard.
 func (h *Handler) applyTenantStateChangeLocked(
 	c *gin.Context, env events.Envelope[json.RawMessage], p tenantStateChangedPayload,
 	tenantID uuid.UUID, scopeKey string, changedAt time.Time,
@@ -791,8 +693,6 @@ func (h *Handler) applyTenantStateChangeLocked(
 			return err
 		}
 
-		// Recency commits once, after every sub-transaction Apply carried has
-		// committed successfully — never per sub-transaction (LLD §6.2 item 4.3).
 		if err := h.recency.Commit(ctx, scopeKey, changedAt); err != nil {
 			h.logWarn("internal events: recency Commit failed after Apply succeeded", map[string]any{
 				"event_type": eventTypeTenantStateChanged, "scope_key": scopeKey, "error": err.Error(),

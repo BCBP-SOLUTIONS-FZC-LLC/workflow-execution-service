@@ -10,19 +10,10 @@ import (
 
 var _ port.ConnectorEventPublisher = (*EventPublisher)(nil)
 
-// streamPublisher is the narrow seam EventPublisher depends on instead of
-// the concrete *Producer type — lets unit tests exercise the field-mapping
-// logic below with a fake, while *Producer itself only has real integration
-// coverage (this repo's own convention for the raw Stream-command wrappers,
-// matching internal/adapter/outbound/valkey.Cache's own test-tier split).
 type streamPublisher interface {
 	Publish(ctx context.Context, streamKey string, fields map[string]string) (string, error)
 }
 
-// EventPublisher implements port.ConnectorEventPublisher by flattening a
-// ConnectorTaskCreatedEvent onto streamKey via a streamPublisher — Stream
-// fields are string-only, so ResolvedInputs/OutputMapping travel as JSON
-// strings.
 type EventPublisher struct {
 	publisher streamPublisher
 	streamKey string

@@ -1,14 +1,3 @@
-// cmd/connector-worker executes connector-typed tasks: it consumes the
-// Valkey Stream execution_service's internal-events handler pushes
-// connector-typed workflow.task.created events onto, dispatches to a real
-// workflow-connectors.Connector, and reports the outcome back via
-// execution_service's own /api/v1/internal/connector-tasks HTTP endpoints.
-//
-// This binary never imports go.temporal.io/sdk — see design/LLD/
-// workflow_connectors.md §6.1 Decision #2. It reaches the workflow only
-// through execution_service's own HTTP completion endpoint
-// (internal/adapter/inbound/http/handler/connector_task_completion.go),
-// never the Temporal SDK directly.
 package main
 
 import (
@@ -28,8 +17,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
-// version is stamped at build time by the Dockerfile's
-// -ldflags "-X main.version=${BUILD_VERSION}".
 var version = "dev"
 
 func main() {
@@ -90,9 +77,6 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 
-	// Stop picking up new work. A started run is detached from this
-	// cancellation, so the drain waits for the slowest one to report, and the
-	// heartbeat keeps its entry from being reclaimed meanwhile.
 	cancel()
 
 	drained := make(chan struct{})
@@ -128,7 +112,6 @@ func checkRequiredConfig(cfg *config.Config) error {
 		return fmt.Errorf("CONNECTOR_STREAM_DEAD_LETTER_KEY is required and must differ from CONNECTOR_STREAM_KEY")
 	case cfg.ConnectorStreamClaimMinIdle < 3*time.Second:
 		return fmt.Errorf("CONNECTOR_STREAM_CLAIM_MIN_IDLE must be at least 3s, the heartbeat runs three times within it")
-	// Reclaim runs every claim-min-idle, so redeliveries land up to twice that apart.
 	case 2*time.Duration(cfg.ConnectorStreamMaxDeliveries)*cfg.ConnectorStreamClaimMinIdle >= outcomeTTL:
 		return fmt.Errorf("2 x CONNECTOR_STREAM_MAX_DELIVERIES x CONNECTOR_STREAM_CLAIM_MIN_IDLE must stay under the %s outcome record", outcomeTTL)
 	}

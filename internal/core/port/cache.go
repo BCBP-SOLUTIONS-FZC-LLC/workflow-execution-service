@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-// CacheStore is the Valkey-backed cache contract, used today for
-// Idempotency-Key replay caching (LLD §5.9).
 type CacheStore interface {
 	Get(ctx context.Context, key string) (string, error)
 	Set(ctx context.Context, key string, value string, ttl time.Duration) error

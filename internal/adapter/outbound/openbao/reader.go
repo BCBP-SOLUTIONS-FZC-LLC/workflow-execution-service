@@ -11,23 +11,11 @@ import (
 	"time"
 )
 
-// validSecretPath matches definition_service's own write-side path
-// convention exactly: connectors/{tenantID}/{connectorType}/{fieldName}
-// (definition_service/internal/core/service/connector_service.go's
-// WriteCredential). This package can't import that service's own
-// validConnectorSegment regex directly — execution_service can't depend on
-// a sibling service's internal packages — so it's duplicated here,
-// non-negotiably: a path arrives inside a connector-task-created event
-// payload, untrusted input, not a value this package can assume is already
-// safe, given the 2026-08-14 path-traversal vulnerability fixed on the
-// write side.
 var (
 	validSecretPath = regexp.MustCompile(`^connectors/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+$`)
 	validFieldName  = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 )
 
-// Reader is the KV-v2 read client. addr/token/mount mirror
-// definition_service's SecretsClient constructor exactly.
 type Reader struct {
 	addr, token, mount string
 	client             *http.Client
@@ -43,9 +31,6 @@ type openBaoReadResponse struct {
 	} `json:"data"`
 }
 
-// Read GETs {addr}/v1/{mount}/data/{path} and returns data.data[fieldName] —
-// the KV-v2 response envelope's inner data map, keyed by the same fieldName
-// WriteCredential used as both the map key and the path's own last segment.
 func (r *Reader) Read(ctx context.Context, path, fieldName string) (string, error) {
 	if !validSecretPath.MatchString(path) {
 		return "", fmt.Errorf("%w: %q", ErrInvalidPath, path)

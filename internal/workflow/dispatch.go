@@ -13,8 +13,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
 )
 
-// runSteps runs one plan level's steps. A path that ends at a boundary ends
-// this level normally.
 func (in *interpreter) runSteps(ctx wf.Context, plan *dsl.CompiledPlan, steps []dsl.ExecutionStep, admin wf.Channel) (stepOutcome, error) {
 	out, err := in.runStepList(ctx, plan, steps, admin)
 	if errors.Is(err, errPathEnded) {
@@ -25,10 +23,6 @@ func (in *interpreter) runSteps(ctx wf.Context, plan *dsl.CompiledPlan, steps []
 
 func (in *interpreter) runStepList(ctx wf.Context, plan *dsl.CompiledPlan, steps []dsl.ExecutionStep, admin wf.Channel) (stepOutcome, error) {
 	var last domain.NodeKey
-	// lastResult is scoped to this one runSteps call (goroutine-local for a
-	// Parallel branch's own nested call) — never a shared instance-wide
-	// field, so a concurrently-completing sibling branch can't overwrite the
-	// value this call's own Exclusive step reads.
 	var lastResult string
 	for i := range steps {
 		step := &steps[i]
@@ -45,12 +39,6 @@ func (in *interpreter) runStepList(ctx wf.Context, plan *dsl.CompiledPlan, steps
 		case len(step.Sequential) > 0:
 			for _, deptID := range step.Sequential {
 				node, result, err := in.runDepartment(ctx, plan, deptID)
-				// last only advances on success: a failing department's own
-				// (possibly empty, if its very first stage failed) return
-				// value must never overwrite the real last-completed node
-				// from an EARLIER department in this same Sequential list —
-				// callers (DEGRADED respawn, RecordForceRoute's audit trail)
-				// depend on LastNode surviving a later sibling's failure.
 				if err != nil {
 					return stepOutcome{LastNode: last, LastResult: lastResult}, err
 				}
@@ -112,9 +100,6 @@ func (in *interpreter) runDepartmentFrom(ctx wf.Context, plan *dsl.CompiledPlan,
 		in.checkPaused(ctx, deptID)
 		node, result, err := in.runStage(ctx, plan, deptID, &dept.Stages[i])
 		if err != nil {
-			// last stays the prior stage — stageIndexAfter resumes AFTER
-			// whatever key is returned here; reporting the failed stage
-			// itself would skip retrying it on respawn.
 			return last, lastResult, err
 		}
 		last = node
@@ -134,13 +119,6 @@ func findDepartment(plan *dsl.CompiledPlan, id string) *dsl.DepartmentDef {
 	return nil
 }
 
-// runDepartmentAtKey resolves key to its index within deptID's compiled
-// Stages via dsl.NodeKey and runs from there (execution LLD §2.6):
-// TargetNodeID/TargetStage and their Revert* counterparts give
-// machine-addressable routing for the case a bare department reference
-// can't express — a branch target that shares a department with a stage
-// already run earlier in the same plan, where starting at index 0 would
-// re-run it.
 func (in *interpreter) runDepartmentAtKey(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, key domain.NodeKey) (domain.NodeKey, string, error) {
 	dept := findDepartment(plan, deptID)
 	if dept == nil {
@@ -176,7 +154,6 @@ func deptUUID(iamDeptID string) uuid.UUID {
 	return id
 }
 
-// Assumes one department runs directly per ParallelBranch
 func (in *interpreter) currentPendingNode(deptID string) domain.NodeKey {
 	for key := range in.pending {
 		if deptFromNodeKey(key.Node) == deptID {
@@ -204,22 +181,7 @@ func stageIndexAfter(dept *dsl.DepartmentDef, lastCompletedNode domain.NodeKey) 
 	return 0
 }
 
-// maxRevertCycles bounds how many times one exclusive gateway may send work
-// back before the instance fails closed. A BPMN rework loop (Prepare ->
-// Review -> Approve -> "No" -> Prepare) gates every cycle on a real human
-// completing a real task, so this is not a runaway-loop guard — it exists
-// because each cycle appends to the Temporal event history, which is
-// finite. Generous on purpose: a genuine process that bounces this many
-// times is broken in a way an operator needs to see.
-//
-// A compile-time constant rather than config: a workflow that read mutable
-// configuration mid-execution would replay non-deterministically if the
-// value changed under it.
 const maxRevertCycles = 50
-
-// resultJSON is the calling runSteps call's own accumulated last result,
-// never the shared instance state — a concurrently-completing sibling
-// Parallel branch's own result must never leak into this evaluation.
 
 func (in *interpreter) settleReverts(
 	ctx wf.Context, plan *dsl.CompiledPlan, branches []dsl.ExclusiveBranch, resultJSON string,
@@ -245,10 +207,6 @@ func (in *interpreter) settleReverts(
 				winner.RevertToDept, maxRevertCycles)
 		}
 
-		// Forward Target and condition-triggered RevertTo share the same
-		// transfer mechanism (execution LLD §2.6 point 4); a revert
-		// additionally pops history and resets the message buffer, matching
-		// force-back (§2.7).
 		node, result, rerr := in.runExclusiveRevert(ctx, plan, winner)
 		if rerr != nil {
 			return nil, stepOutcome{LastNode: node, LastResult: result}, true, rerr
@@ -263,8 +221,6 @@ func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, bran
 		return outcome, err
 	}
 
-	// A branch with Steps carries its own work up to the join; Target only
-	// names where that work starts (execution LLD §2.6).
 	if len(winner.Steps) > 0 {
 		out, err := in.runStepList(ctx, plan, winner.Steps, admin)
 		if err != nil || out.Terminated || !winner.Terminates {
@@ -279,18 +235,10 @@ func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, bran
 		return outcome, errPathEnded
 	}
 
-	// A branch with no Target routes nowhere of its own: the path it selects
-	// is already compiled as the steps that follow this one, so matching it
-	// simply advances the plan. Dispatching here as well would run that
-	// department twice. This is the shape definition_service emits for a
-	// gateway with one forward exit and one or more send-back edges.
 	if winner.Target == "" {
 		return outcome, nil
 	}
 
-	// TargetNodeID, then TargetStage, give machine-addressable routing when
-	// a bare department reference would be ambiguous (LLD §2.6's field
-	// table); fall back to Target's department-from-the-top otherwise.
 	identifier := winner.TargetNodeID
 	if identifier == "" {
 		identifier = winner.TargetStage
@@ -303,11 +251,6 @@ func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, bran
 	return stepOutcome{LastNode: node, LastResult: result}, err
 }
 
-// runExclusiveRevert handles a condition-triggered back-edge: pop history
-// down to the revert target, reset the message buffer over the popped span,
-// then dispatch — via RevertToNodeID, then RevertToStage, for precise
-// routing, else RevertToDept's department-from-the-top (same precedence as
-// the forward path, LLD §2.6).
 func (in *interpreter) runExclusiveRevert(ctx wf.Context, plan *dsl.CompiledPlan, winner *dsl.ExclusiveBranch) (domain.NodeKey, string, error) {
 	deptID := winner.RevertToDept
 	identifier := winner.RevertToNodeID

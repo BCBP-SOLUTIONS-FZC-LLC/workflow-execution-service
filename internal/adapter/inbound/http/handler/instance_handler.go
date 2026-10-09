@@ -20,11 +20,6 @@ func signalAccepted(c *gin.Context) {
 	c.JSON(http.StatusAccepted, signalAcceptedResp{Message: "signal accepted"})
 }
 
-// actionCompleted responds for Terminate specifically: unlike the other five
-// lifecycle endpoints, Terminate is a direct DB-write-then-TerminateWorkflow
-// call, not a signal-forward (LLD §3.1) — by the time this handler returns,
-// the action has already fully happened, so "signal accepted" (202, implying
-// async processing still pending) would misdescribe it.
 func actionCompleted(c *gin.Context) {
 	c.JSON(http.StatusOK, signalAcceptedResp{Message: "action completed"})
 }
@@ -155,8 +150,6 @@ type workflowEventsListResp struct {
 	NextCursor string              `json:"next_cursor,omitempty"`
 }
 
-// parseTimeQuery decodes an RFC3339 query parameter, writing 400 BAD_REQUEST
-// on a malformed value. An absent parameter is not an error: (nil, true).
 func parseTimeQuery(c *gin.Context, name string) (*time.Time, bool) {
 	raw := c.Query(name)
 	if raw == "" {
@@ -188,12 +181,6 @@ func (h *Handler) StartInstance(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	// json.RawMessage's own decode only requires context_json be some valid
-	// JSON value (a bare string or number would already pass) — it doesn't
-	// require an object. Reject early rather than letting a malformed shape
-	// reach a live workflow instance's first connector stage days later,
-	// where it would only surface as a ValidationError deep inside
-	// CreateTaskActivity's resolveConnectorInputs.
 	if len(req.ContextJSON) > 0 {
 		var obj map[string]any
 		if err := json.Unmarshal(req.ContextJSON, &obj); err != nil {
@@ -411,8 +398,6 @@ type terminateInstanceReq struct {
 	Reason string `json:"reason" binding:"required,max=500"`
 }
 
-// TerminateInstance carries no record_version: Terminate is a direct
-// TerminateWorkflow call, not signal-validated like the other five (LLD §3.1).
 func (h *Handler) TerminateInstance(c *gin.Context) {
 	tenantID, actorUserID, ok := callerIdentity(c)
 	if !ok {
