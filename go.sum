@@ -50,8 +50,8 @@ github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2 v2.0.0 h1:3hYEwfzcLsnl6xN
 github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2 v2.0.0/go.mod h1:Cg8wnK+VglnJxBTZs2LWaOyZMMzZk83kVwci7KqqQyQ=
 github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors v1.0.0 h1:8trcmQcrHa4c79oEd6ibAMG0bFV9ux0GFe4ZU+Vwg9Y=
 github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors v1.0.0/go.mod h1:Vp81OnWXbKQsiMsrOMZpdUfCAO8c+JXTVmcVOYjHqDA=
-github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2 v2.0.0 h1:r7MIoAtpZqO7MuEpyD9rZGRIWHTUuHAEUkbD2r+Z0wA=
-github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2 v2.0.0/go.mod h1:wDps9Dxf57oO0FooID5vRn8cmcknSv2x7x6AIYDssgQ=
+github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2 v2.0.1 h1:hvzJmggrGM9BMF9oSejdwtwJuO8hJMEl3C+HfP5sghs=
+github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2 v2.0.1/go.mod h1:wDps9Dxf57oO0FooID5vRn8cmcknSv2x7x6AIYDssgQ=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.34.0 h1:yzIYdwuro811Z27D3T80Wkd3rqZzb0K43nner7Eh1yE=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.34.0/go.mod h1:pJTkW8hEUIIi3Pf65lPZOnn4Y81yCllX6IWk2jNXdkM=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.55.0 h1:UnDZ/zFfG1JhH/DqxIZYU/1CUAlTUScoXD/LcM2Ykk8=
