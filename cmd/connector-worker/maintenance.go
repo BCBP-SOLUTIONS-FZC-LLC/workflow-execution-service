@@ -50,6 +50,7 @@ func runMaintenanceLoop(ctx context.Context, d *deps, cfg *config.Config, wlog p
 	prune := time.NewTicker(auditPruneInterval)
 	defer prune.Stop()
 
+	prunePastRetention(ctx, d, cfg, wlog)
 	for {
 		select {
 		case <-ctx.Done():
@@ -57,9 +58,13 @@ func runMaintenanceLoop(ctx context.Context, d *deps, cfg *config.Config, wlog p
 		case <-reset.C:
 			resetProviderClients(d)
 		case <-prune.C:
-			if err := pruneAttempts(ctx, d.pruner, d.clock(), cfg.ConnectorAuditRetention); err != nil {
-				wlog.Warn("connector-worker: audit pruning failed", map[string]any{"error": err.Error()})
-			}
+			prunePastRetention(ctx, d, cfg, wlog)
 		}
+	}
+}
+
+func prunePastRetention(ctx context.Context, d *deps, cfg *config.Config, wlog port.Logger) {
+	if err := pruneAttempts(ctx, d.pruner, d.clock(), cfg.ConnectorAuditRetention); err != nil {
+		wlog.Warn("connector-worker: audit pruning failed", map[string]any{"error": err.Error()})
 	}
 }

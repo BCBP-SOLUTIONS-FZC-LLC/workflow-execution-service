@@ -51,6 +51,7 @@ type deps struct {
 	consumer     streamConsumer
 	dedup        port.CacheStore
 	openbao      *openbao.Reader
+	aliasMu      sync.RWMutex
 	aliases      aliasconfig.Config
 	pools        map[string]*typePool
 	completion   *completionClient
@@ -105,6 +106,8 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
 		MinConns:           cfg.PGMinConns,
 		PGBouncerMode:      cfg.PGBouncerMode,
 		SlowQueryThreshold: time.Duration(cfg.PGSlowQueryThresholdMS) * time.Millisecond,
+		StatementTimeout:   connectorStatementTimeout,
+		LockTimeout:        connectorLockTimeout,
 		GUCProvider:        pgcommon.GUCSetFromContext,
 		Logger:             pglogger.New(wlog),
 		Tracer:             gincommon.NewSpanTracer(cfg.OTELServiceName),
@@ -114,12 +117,14 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
 		return nil, nil, fmt.Errorf("connector postgres pool: %w", err)
 	}
 	prunePool, err := pgcommon.NewPool(context.Background(), pgcommon.Config{
-		DSN:           cfg.OutboxRelayDSN(),
-		MaxConns:      2,
-		MinConns:      0,
-		PGBouncerMode: cfg.PGBouncerMode,
-		Logger:        pglogger.New(wlog),
-		Tracer:        gincommon.NewSpanTracer(cfg.OTELServiceName),
+		DSN:              cfg.OutboxRelayDSN(),
+		MaxConns:         2,
+		MinConns:         0,
+		PGBouncerMode:    cfg.PGBouncerMode,
+		StatementTimeout: connectorStatementTimeout,
+		LockTimeout:      connectorLockTimeout,
+		Logger:           pglogger.New(wlog),
+		Tracer:           gincommon.NewSpanTracer(cfg.OTELServiceName),
 	})
 	if err != nil {
 		_ = valkeyClient.Close()
@@ -201,7 +206,11 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
 	return d, closeAll, nil
 }
 
-const docRefPrefix = "docrefs/"
+const (
+	docRefPrefix              = "docrefs/"
+	connectorStatementTimeout = 5 * time.Second
+	connectorLockTimeout      = 2 * time.Second
+)
 
 func buildDocRefs(ctx context.Context, cfg *config.Config, valkeyClient *redis.Client) (*docref.Service, error) {
 	if cfg.ConnectorDocsBucket == "" {
@@ -228,6 +237,18 @@ type typePool struct {
 
 	mu        sync.RWMutex
 	connector connectors.Connector
+}
+
+func (d *deps) currentAliases() aliasconfig.Config {
+	d.aliasMu.RLock()
+	defer d.aliasMu.RUnlock()
+	return d.aliases
+}
+
+func (d *deps) setAliases(aliases aliasconfig.Config) {
+	d.aliasMu.Lock()
+	defer d.aliasMu.Unlock()
+	d.aliases = aliases
 }
 
 func (d *deps) clock() time.Time {

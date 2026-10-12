@@ -199,7 +199,7 @@ func execute(ctx context.Context, d *deps, pool *typePool, job dispatchJob, wlog
 	execCtx = connectors.WithTenant(execCtx, job.tenantID.String())
 	execCtx = pgcommon.WithGUCSet(execCtx, pgdomain.GUCSet{TenantID: job.tenantID.String()})
 
-	method := aliasMethod(job.connectorType, input, d.aliases)
+	method := aliasMethod(job.connectorType, input, d.currentAliases())
 	output, err := executeWithRetry(execCtx, pool.currentConnector(), method, input, d.retry, observeFailures(wlog, job, input))
 	if err != nil {
 		return dispatchOutcome{Output: output, ErrorClass: classifyError(err)}

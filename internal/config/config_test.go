@@ -293,13 +293,22 @@ func TestRequire(t *testing.T) {
 			c.DefinitionServiceToken = "def-tok"
 			c.OpenBaoToken = "bao-tok"
 			c.ConnectorDocsBucket = "docs"
+			c.OutboxRelayDatabaseURL = "postgres://relay"
 		}, ""},
+		{"connector-worker needs the relay database outside dev", (*Config).RequireConnectorWorker, func(c *Config) {
+			c.AppEnv = "prod"
+			c.InternalAPIToken = "tok"
+			c.DefinitionServiceToken = "def-tok"
+			c.OpenBaoToken = "bao-tok"
+			c.ConnectorDocsBucket = "docs"
+		}, "OUTBOX_RELAY_DATABASE_URL"},
 		{"connector-worker needs a database", (*Config).RequireConnectorWorker, func(c *Config) { c.DatabaseURL = "" }, "DATABASE_URL"},
 		{"connector-worker needs the document bucket outside dev", (*Config).RequireConnectorWorker, func(c *Config) {
 			c.AppEnv = "prod"
 			c.InternalAPIToken = "tok"
 			c.DefinitionServiceToken = "def-tok"
 			c.OpenBaoToken = "bao-tok"
+			c.OutboxRelayDatabaseURL = "postgres://relay"
 		}, "CONNECTOR_DOCS_BUCKET"},
 		{"connector-worker needs a positive attempt limit", (*Config).RequireConnectorWorker, func(c *Config) { c.ConnectorRetryMaxAttempts = 0 }, "CONNECTOR_RETRY_MAX_ATTEMPTS"},
 		{"connector-worker needs the backoff bounds in order", (*Config).RequireConnectorWorker, func(c *Config) {

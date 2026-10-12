@@ -414,5 +414,6 @@ func TestConnectorTaskService_Fail_LogsTheConnectorOutput(t *testing.T) {
 
 	require.Len(t, log.warnFields, 1)
 	assert.Equal(t, "upstream_error", log.warnFields[0]["error_class"])
-	assert.Equal(t, map[string]any{"deliveryOutcome": "unknown"}, log.warnFields[0]["output"])
+	assert.Equal(t, []string{"deliveryOutcome"}, log.warnFields[0]["output_keys"])
+	assert.NotContains(t, log.warnFields[0], "output", "the output can carry response bodies and headers, so only its keys are logged")
 }

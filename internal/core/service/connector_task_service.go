@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -108,7 +109,7 @@ func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.U
 	}
 
 	s.logger().Warn("connector task failed", map[string]any{
-		"task_id": taskID, "tenant_id": tenantID, "connector_type": *task.ConnectorType, "error_class": errorClass, "output": output,
+		"task_id": taskID, "tenant_id": tenantID, "connector_type": *task.ConnectorType, "error_class": errorClass, "output_keys": sortedKeys(output),
 	})
 
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
@@ -217,4 +218,13 @@ func marshalResult(v map[string]any) (json.RawMessage, error) {
 		return nil, fmt.Errorf("marshal connector result: %w", err)
 	}
 	return b, nil
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
 }

@@ -415,6 +415,9 @@ func (c *Config) RequireConnectorWorker() error {
 		if c.ConnectorDocsBucket == "" {
 			return fmt.Errorf("CONNECTOR_DOCS_BUCKET is required outside dev and local")
 		}
+		if c.OutboxRelayDatabaseURL == "" {
+			return fmt.Errorf("OUTBOX_RELAY_DATABASE_URL is required outside dev and local: the connector audit prune needs the relay role, which bypasses row-level security")
+		}
 	}
 	return nil
 }

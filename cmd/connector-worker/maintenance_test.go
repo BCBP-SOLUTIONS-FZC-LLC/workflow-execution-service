@@ -14,15 +14,26 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability/obstest"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/aliasconfig"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/registry"
 )
 
 type fakePruner struct {
+	mu      sync.Mutex
 	batches []int64
 	cutoffs []time.Time
 	err     error
 }
 
+func (p *fakePruner) pruneCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.cutoffs)
+}
+
 func (p *fakePruner) PruneAttempts(_ context.Context, cutoff time.Time, _ int) (int64, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.cutoffs = append(p.cutoffs, cutoff)
 	if p.err != nil {
 		return 0, p.err
@@ -85,8 +96,8 @@ func TestResetProviderClients_ResetsOnlyConnectorsThatCache(t *testing.T) {
 
 func TestRunMaintenanceLoop_ResetsClientsOnItsPeriodAndStopsWithTheContext(t *testing.T) {
 	caching := &resettableConnector{countingConnector: countingConnector{typ: "caching"}}
-	d := &deps{pools: map[string]*typePool{"caching": {connectorType: "caching", connector: caching}}}
-	cfg := &config.Config{ConnectorAliasRefreshInterval: 5 * time.Millisecond}
+	d := &deps{pruner: &fakePruner{batches: []int64{0}}, pools: map[string]*typePool{"caching": {connectorType: "caching", connector: caching}}}
+	cfg := &config.Config{ConnectorAliasRefreshInterval: 5 * time.Millisecond, ConnectorAuditRetention: time.Hour}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -135,3 +146,27 @@ func (l *recordingLogger) Warn(_ string, fields map[string]any) {
 	l.warns = append(l.warns, fields)
 }
 func (*recordingLogger) Error(string, map[string]any) {}
+
+func TestRunMaintenanceLoop_PrunesOnceAtStartup(t *testing.T) {
+	pruner := &fakePruner{batches: []int64{0}}
+	d := &deps{pruner: pruner, pools: map[string]*typePool{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		runMaintenanceLoop(ctx, d, &config.Config{ConnectorAliasRefreshInterval: time.Hour, ConnectorAuditRetention: time.Hour}, noopLogger{})
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool { return pruner.pruneCount() == 1 }, time.Second, 5*time.Millisecond)
+	cancel()
+	<-done
+}
+
+func TestAliases_AreReplacedOnRefresh(t *testing.T) {
+	d := &deps{aliases: aliasconfig.Config{RestCall: []aliasconfig.Endpoint{{Alias: "a", Method: "GET"}}}}
+	assert.Equal(t, "GET", aliasMethod(registry.TypeRestCall, map[string]any{"endpointAlias": "a"}, d.currentAliases()))
+
+	d.setAliases(aliasconfig.Config{RestCall: []aliasconfig.Endpoint{{Alias: "a", Method: "POST"}}})
+
+	assert.Equal(t, "POST", aliasMethod(registry.TypeRestCall, map[string]any{"endpointAlias": "a"}, d.currentAliases()))
+}

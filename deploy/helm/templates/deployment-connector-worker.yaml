@@ -118,6 +118,8 @@ spec:
                   name: {{ include "workflow-execution-service.secretName" . }}
                   key: OUTBOX_RELAY_DATABASE_URL
                   optional: {{ has .Values.env.appEnv (list "dev" "local") }}
+            - name: AWS_REGION
+              value: {{ .Values.env.awsRegion | quote }}
             - name: CONNECTOR_DOCS_BUCKET
               value: {{ .Values.connectorWorker.docsBucket | quote }}
             - name: CONNECTOR_RETRY_MAX_ATTEMPTS

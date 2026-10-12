@@ -40,6 +40,7 @@ func runAliasRefreshLoop(ctx context.Context, d *deps, cfg *config.Config, log p
 				continue
 			}
 			pool.setConnector(restcall.New(fresh, nil, cfg.InternalAPIToken))
+			d.setAliases(fresh)
 			log.Info("connector alias registry refreshed", map[string]any{"rest_call_aliases": len(fresh.RestCall)})
 		}
 	}
