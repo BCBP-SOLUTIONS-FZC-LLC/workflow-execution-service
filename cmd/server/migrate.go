@@ -7,6 +7,8 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/outbox"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/migrate"
+	documentsql "github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/documents/sqlstore"
+	intentsql "github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/sendintent/sqlstore"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/db/migrations"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pglogger"
@@ -22,6 +24,13 @@ func runMigrations(ctx context.Context, dsn string, pgLog port.Logger) error {
 
 	if err := outbox.ApplySchema(ctx, &migrate.Runner{DSN: dsn, Logger: adapted}); err != nil {
 		return fmt.Errorf("outbox schema: %w", err)
+	}
+
+	if err := documentsql.ApplySchema(ctx, &migrate.Runner{DSN: dsn, Logger: adapted}); err != nil {
+		return fmt.Errorf("connector documents schema: %w", err)
+	}
+	if err := intentsql.ApplySchema(ctx, &migrate.Runner{DSN: dsn, Logger: adapted}); err != nil {
+		return fmt.Errorf("connector send intents schema: %w", err)
 	}
 
 	domain := &migrate.Runner{

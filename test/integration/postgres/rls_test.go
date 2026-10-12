@@ -23,6 +23,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
+	intentsql "github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/sendintent/sqlstore"
 )
 
 // appRolePassword is a throwaway credential for the per-test Postgres
@@ -151,7 +152,7 @@ func TestRLSForceEnabledOnTenantTables(t *testing.T) {
 
 	policyBearing := []string{
 		"workflow_instance", "workflow_task", "workflow_task_assignment",
-		"assignee_overrides",
+		"assignee_overrides", "connector_documents", "connector_document_attempts", "connector_send_intents",
 	}
 	for _, table := range policyBearing {
 		enabled, forced := rlsFlags(t, superPool, ctx, table)
@@ -244,6 +245,7 @@ func TestRLSPoliciesUseCheckTenantFunction(t *testing.T) {
 	swapped := []string{
 		"workflow_instance", "workflow_task", "workflow_task_assignment",
 		"assignee_overrides", "outbox_events", "outbox_dead_letters",
+		"connector_documents", "connector_document_attempts", "connector_send_intents",
 	}
 	for _, table := range swapped {
 		t.Run(table, func(t *testing.T) {
@@ -287,4 +289,49 @@ func TestRLSViolationAuditLogging(t *testing.T) {
 	require.NoError(t, err)
 	assert.Greaterf(t, count, 0,
 		"expected at least one sampled rls_violation_log row across %d cross-tenant attempts (~1%% sampling)", attempts)
+}
+
+func TestRLSIsolatesConnectorSendIntents(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	ctx := context.Background()
+	tenantA, tenantB := uuid.New(), uuid.New()
+
+	for _, tenant := range []uuid.UUID{tenantA, tenantB} {
+		require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+			_, err := conn.Exec(ctx, "INSERT INTO connector_send_intents (tenant_id, message_key, status) VALUES ($1, 'k', 'accepted')", tenant.String())
+			return err
+		}))
+	}
+
+	count := func(ctx context.Context) (n int) {
+		require.NoError(t, appPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+			return conn.QueryRow(ctx, "SELECT count(*) FROM connector_send_intents").Scan(&n)
+		}))
+		return n
+	}
+	assert.Equal(t, 1, count(withGUC(ctx, tenantA)))
+	assert.Equal(t, 1, count(withGUC(ctx, tenantB)))
+	assert.Equal(t, 0, count(ctx), "a connection with no tenant sees nothing")
+}
+
+func TestSendIntentStoreWorksUnderTheWorkersTenantScope(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	store := intentsql.New(appPool)
+	ctx := context.Background()
+	tenant := uuid.New()
+
+	intent, reserved, err := store.Reserve(withGUC(ctx, tenant), tenant.String(), "mail-1", 0, "token-1")
+	require.NoError(t, err)
+	assert.True(t, reserved)
+	assert.Equal(t, "pending", string(intent.Status))
+
+	again, reserved, err := store.Reserve(withGUC(ctx, tenant), tenant.String(), "mail-1", 0, "token-2")
+	require.NoError(t, err)
+	assert.False(t, reserved, "a redelivered job finds the existing intent")
+	assert.Equal(t, intent.ID, again.ID)
+
+	_, _, err = store.Reserve(ctx, tenant.String(), "mail-2", 0, "token-3")
+	assert.Error(t, err, "without the tenant scope the policy refuses the write")
 }

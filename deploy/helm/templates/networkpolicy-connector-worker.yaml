@@ -45,4 +45,12 @@ spec:
     - ports:
         - port: 8200
           protocol: TCP
+    - ports:
+        - port: 5432
+          protocol: TCP
+        - port: 6432
+          protocol: TCP
+    - ports:
+        - port: 443
+          protocol: TCP
 {{- end }}

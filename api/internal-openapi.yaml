@@ -890,6 +890,14 @@ paths:
                   type: string
                   description: Connector-defined error classification, carried onto the stage-fail signal.
                   example: "upstream_timeout"
+                output:
+                  type: object
+                  additionalProperties: true
+                  description: >
+                    The connector's output map, returned with the failure when the connector
+                    produced one (a send-email call always carries deliveryOutcome, a rest-call
+                    status of 300 or more carries status, headers and body). Written to the
+                    failure log; not part of the stage-fail signal.
       responses:
         "204":
           description: Task resolved as failed; the stage-fail signal has been sent.

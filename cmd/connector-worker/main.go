@@ -48,7 +48,7 @@ func main() {
 	}
 	defer tracingShutdown()
 
-	deps, cleanup, err := buildDeps(cfg)
+	deps, cleanup, err := buildDeps(cfg, wlog)
 	if err != nil {
 		log.Fatalf("cmd/connector-worker: %v", err)
 	}
@@ -65,6 +65,7 @@ func main() {
 		close(loopsDone)
 	}()
 	go runAliasRefreshLoop(ctx, deps, cfg, wlog)
+	go runMaintenanceLoop(ctx, deps, cfg, wlog)
 
 	healthSrv := newHealthServer(fmt.Sprintf(":%d", cfg.WorkerHealthPort), deps)
 	go func() {

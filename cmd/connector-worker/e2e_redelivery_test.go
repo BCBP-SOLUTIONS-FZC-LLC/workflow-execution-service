@@ -22,7 +22,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkey"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkeystream"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/registry"
 )
 
 const (
@@ -71,7 +70,7 @@ func startRedeliveryWorker(t *testing.T, client *redis.Client, name string, conn
 		dedup:        valkey.NewCache(client),
 		pools: map[string]*typePool{conn.Type(): {
 			connectorType: conn.Type(), sem: make(chan struct{}, 2), timeout: timeout,
-			retry: registry.RetryPolicyUnsafe, connector: conn,
+			connector: conn,
 		}},
 		completion:    newCompletionClient(callbackURL, "token", 2*time.Second),
 		streamKey:     redeliveryStream,

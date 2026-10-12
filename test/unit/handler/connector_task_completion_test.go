@@ -16,7 +16,7 @@ import (
 // own func-field-per-method convention.
 type fakeConnectorTaskService struct {
 	complete     func(context.Context, uuid.UUID, uuid.UUID, map[string]any) error
-	fail         func(context.Context, uuid.UUID, uuid.UUID, string) error
+	fail         func(context.Context, uuid.UUID, uuid.UUID, string, map[string]any) error
 	completeCall struct {
 		called   bool
 		tenantID uuid.UUID
@@ -28,6 +28,7 @@ type fakeConnectorTaskService struct {
 		tenantID   uuid.UUID
 		taskID     uuid.UUID
 		errorClass string
+		output     map[string]any
 	}
 }
 
@@ -42,13 +43,14 @@ func (f *fakeConnectorTaskService) Complete(ctx context.Context, tenantID, taskI
 	return nil
 }
 
-func (f *fakeConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.UUID, errorClass string) error {
+func (f *fakeConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.UUID, errorClass string, output map[string]any) error {
 	f.failCall.called = true
 	f.failCall.tenantID = tenantID
 	f.failCall.taskID = taskID
 	f.failCall.errorClass = errorClass
+	f.failCall.output = output
 	if f.fail != nil {
-		return f.fail(ctx, tenantID, taskID, errorClass)
+		return f.fail(ctx, tenantID, taskID, errorClass, output)
 	}
 	return nil
 }
@@ -118,11 +120,13 @@ func TestFailConnectorTask_Success(t *testing.T) {
 	w := do(router, internalReq(http.MethodPost, "/api/v1/internal/connector-tasks/"+testTaskID.String()+"/fail", map[string]any{
 		"tenant_id":   testTenantID.String(),
 		"error_class": "upstream_error",
+		"output":      map[string]any{"deliveryOutcome": "unknown"},
 	}))
 
 	require.Equal(t, http.StatusNoContent, w.Code)
 	assert.True(t, fake.failCall.called)
 	assert.Equal(t, "upstream_error", fake.failCall.errorClass)
+	assert.Equal(t, map[string]any{"deliveryOutcome": "unknown"}, fake.failCall.output)
 }
 
 func TestFailConnectorTask_MissingErrorClass_Returns400(t *testing.T) {
@@ -152,7 +156,7 @@ func TestFailConnectorTask_InvalidTaskIDParam_Returns400(t *testing.T) {
 
 func TestFailConnectorTask_ServiceError_Returns404(t *testing.T) {
 	fake := &fakeConnectorTaskService{
-		fail: func(context.Context, uuid.UUID, uuid.UUID, string) error {
+		fail: func(context.Context, uuid.UUID, uuid.UUID, string, map[string]any) error {
 			return port.ErrTaskNotFound
 		},
 	}

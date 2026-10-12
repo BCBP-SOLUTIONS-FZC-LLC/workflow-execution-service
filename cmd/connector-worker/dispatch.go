@@ -10,18 +10,15 @@ import (
 
 	"github.com/google/uuid"
 
+	pgdomain "github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
+
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/openbao"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkeystream"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/connectors"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/connectors/aliasconfig"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/registry"
-)
-
-const (
-	initialBackoff = 500 * time.Millisecond
-	maxBackoff     = 10 * time.Second
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/registry"
 )
 
 func runDispatchLoop(ctx context.Context, d *deps, wg *sync.WaitGroup, wlog port.Logger) {
@@ -184,12 +181,12 @@ func runJob(ctx context.Context, d *deps, pool *typePool, job dispatchJob, entry
 		return
 	}
 
-	outcome := execute(ctx, d, pool, job)
+	outcome := execute(ctx, d, pool, job, wlog)
 	recordOutcome(ctx, d, job.taskID, outcome, wlog)
 	report(ctx, d, job, outcome, entryID, wlog)
 }
 
-func execute(ctx context.Context, d *deps, pool *typePool, job dispatchJob) dispatchOutcome {
+func execute(ctx context.Context, d *deps, pool *typePool, job dispatchJob, wlog port.Logger) dispatchOutcome {
 	execCtx, cancel := context.WithTimeout(ctx, pool.timeout)
 	defer cancel()
 
@@ -199,11 +196,13 @@ func execute(ctx context.Context, d *deps, pool *typePool, job dispatchJob) disp
 	}
 
 	execCtx = connectors.WithDepartments(execCtx, []string{job.departmentID.String()})
-	retryable := isRetryable(pool.retry, job.connectorType, input, d.aliases)
+	execCtx = connectors.WithTenant(execCtx, job.tenantID.String())
+	execCtx = pgcommon.WithGUCSet(execCtx, pgdomain.GUCSet{TenantID: job.tenantID.String()})
 
-	output, err := runWithRetry(execCtx, pool.currentConnector(), retryable, input)
+	method := aliasMethod(job.connectorType, input, d.aliases)
+	output, err := executeWithRetry(execCtx, pool.currentConnector(), method, input, d.retry, observeFailures(wlog, job, input))
 	if err != nil {
-		return dispatchOutcome{ErrorClass: classifyError(err)}
+		return dispatchOutcome{Output: output, ErrorClass: classifyError(err)}
 	}
 	return dispatchOutcome{Output: output}
 }
@@ -257,53 +256,6 @@ func ownSecretPath(job dispatchJob, fieldName string) string {
 	return fmt.Sprintf("connectors/%s/%s/%s", job.tenantID, job.connectorType, fieldName)
 }
 
-func isRetryable(policy registry.RetryPolicy, connectorType string, input map[string]any, aliases aliasconfig.Config) bool {
-	switch policy {
-	case registry.RetryPolicySafe:
-		return true
-	case registry.RetryPolicyUnsafe:
-		return false
-	case registry.RetryPolicyConditional:
-		if connectorType != registry.TypeRestCall {
-			return false
-		}
-		alias, _ := input["endpointAlias"].(string)
-		ep, err := aliasconfig.ResolveEndpoint(aliases, alias)
-		if err != nil {
-			return false
-		}
-		return registry.IsIdempotentMethod(ep.Method)
-	default:
-		return false
-	}
-}
-
-func runWithRetry(ctx context.Context, c connectors.Connector, retryable bool, input map[string]any) (map[string]any, error) {
-	if !retryable {
-		out, err := c.Execute(ctx, input)
-		if err != nil {
-			return nil, fmt.Errorf("connector execute: %w", err)
-		}
-		return out, nil
-	}
-	backoff := initialBackoff
-	for {
-		out, err := c.Execute(ctx, input)
-		if err == nil {
-			return out, nil
-		}
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("connector execute: %w", ctx.Err())
-		case <-time.After(backoff):
-		}
-		backoff *= 2
-		if backoff > maxBackoff {
-			backoff = maxBackoff
-		}
-	}
-}
-
 func classifyError(err error) string {
 	switch {
 	case errors.Is(err, openbao.ErrSecretNotFound):
@@ -314,6 +266,8 @@ func classifyError(err error) string {
 		return "secret_ref_invalid"
 	case errors.Is(err, connectors.ErrMissingInternalAuth):
 		return "missing_internal_auth"
+	case errors.Is(err, connectors.ErrMissingTenant):
+		return "missing_tenant"
 	case errors.Is(err, connectors.ErrValidation):
 		return "validation_error"
 	case errors.Is(err, connectors.ErrUpstream):

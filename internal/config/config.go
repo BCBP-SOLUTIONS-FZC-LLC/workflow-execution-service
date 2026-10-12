@@ -109,6 +109,12 @@ type Config struct {
 
 	ExecutionServiceInternalAddr string
 	ConnectorCompletionTimeout   time.Duration
+
+	ConnectorDocsBucket          string
+	ConnectorRetryMaxAttempts    int
+	ConnectorRetryInitialBackoff time.Duration
+	ConnectorRetryMaxBackoff     time.Duration
+	ConnectorAuditRetention      time.Duration
 }
 
 func Load() (*Config, error) {
@@ -239,6 +245,12 @@ func Load() (*Config, error) {
 
 		ExecutionServiceInternalAddr: getEnvOrDefault("EXECUTION_SERVICE_INTERNAL_ADDR", ""),
 		ConnectorCompletionTimeout:   envDuration("CONNECTOR_COMPLETION_TIMEOUT", 5*time.Second),
+
+		ConnectorDocsBucket:          getEnvOrDefault("CONNECTOR_DOCS_BUCKET", ""),
+		ConnectorRetryMaxAttempts:    envInt("CONNECTOR_RETRY_MAX_ATTEMPTS", 5),
+		ConnectorRetryInitialBackoff: envDuration("CONNECTOR_RETRY_INITIAL_BACKOFF", 500*time.Millisecond),
+		ConnectorRetryMaxBackoff:     envDuration("CONNECTOR_RETRY_MAX_BACKOFF", 10*time.Second),
+		ConnectorAuditRetention:      envDuration("CONNECTOR_AUDIT_RETENTION", 90*24*time.Hour),
 	}
 
 	if len(parseErrs) > 0 {
@@ -381,6 +393,15 @@ func (c *Config) RequireConnectorWorker() error {
 	if c.DefinitionServiceURL == "" {
 		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
 	}
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required")
+	}
+	if c.ConnectorRetryMaxAttempts < 1 {
+		return fmt.Errorf("CONNECTOR_RETRY_MAX_ATTEMPTS must be at least 1")
+	}
+	if c.ConnectorRetryInitialBackoff <= 0 || c.ConnectorRetryMaxBackoff < c.ConnectorRetryInitialBackoff {
+		return fmt.Errorf("CONNECTOR_RETRY_MAX_BACKOFF must not be below CONNECTOR_RETRY_INITIAL_BACKOFF, which must be positive")
+	}
 	if !c.IsDev() {
 		if c.DefinitionServiceToken == "" {
 			return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required outside dev and local")
@@ -390,6 +411,9 @@ func (c *Config) RequireConnectorWorker() error {
 		}
 		if c.OpenBaoToken == "" {
 			return fmt.Errorf("OPENBAO_TOKEN is required outside dev and local")
+		}
+		if c.ConnectorDocsBucket == "" {
+			return fmt.Errorf("CONNECTOR_DOCS_BUCKET is required outside dev and local")
 		}
 	}
 	return nil

@@ -33,8 +33,9 @@ type completeRequest struct {
 }
 
 type failRequest struct {
-	TenantID   uuid.UUID `json:"tenant_id"`
-	ErrorClass string    `json:"error_class"`
+	TenantID   uuid.UUID      `json:"tenant_id"`
+	ErrorClass string         `json:"error_class"`
+	Output     map[string]any `json:"output,omitempty"`
 }
 
 func (c *completionClient) Complete(ctx context.Context, tenantID, taskID uuid.UUID, output map[string]any) error {
@@ -45,8 +46,8 @@ func (c *completionClient) Complete(ctx context.Context, tenantID, taskID uuid.U
 	return c.post(ctx, fmt.Sprintf("/api/v1/internal/connector-tasks/%s/complete", taskID), body)
 }
 
-func (c *completionClient) Fail(ctx context.Context, tenantID, taskID uuid.UUID, errorClass string) error {
-	body, err := json.Marshal(failRequest{TenantID: tenantID, ErrorClass: errorClass})
+func (c *completionClient) Fail(ctx context.Context, tenantID, taskID uuid.UUID, errorClass string, output map[string]any) error {
+	body, err := json.Marshal(failRequest{TenantID: tenantID, ErrorClass: errorClass, Output: output})
 	if err != nil {
 		return fmt.Errorf("encode fail request: %w", err)
 	}

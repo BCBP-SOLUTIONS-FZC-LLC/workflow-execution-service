@@ -41,6 +41,7 @@ var (
 	SLABreachesTotal                    prometheus.Counter
 	DelegationScopeUnhandledTotal       *prometheus.CounterVec
 	ConnectorDispatchDeadLetteredTotal  *prometheus.CounterVec
+	ConnectorTaskFailuresTotal          *prometheus.CounterVec
 	OldestReadyTaskAgeSeconds           prometheus.Gauge
 	UpstreamDependencyErrorsTotal       *prometheus.CounterVec
 
@@ -74,6 +75,9 @@ func registerServiceMetrics() {
 	ConnectorDispatchDeadLetteredTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_connector_dispatch_dead_lettered_total",
 		"Connector stream entries moved to the dead-letter stream after exceeding their delivery cap, by connector_type.", "connector_type"))
+	ConnectorTaskFailuresTotal = must(gincommon.NewCounterVec(nil,
+		"workflow_execution_service_connector_task_failures_total",
+		"Failed connector calls, by connector_type, provider, error class (transient, permanent or unknown) and whether the call was retried.", "connector_type", "provider", "class", "retried"))
 	DelegationRerouteDurationSeconds = must(gincommon.NewHistogramVec(nil,
 		"workflow_execution_service_delegation_reroute_duration_seconds",
 		"Envelope-time to reroute-commit latency for DelegationStarted handling (LLD §6.7 SLO, p99 <= 4s).", delegationRerouteBuckets)).WithLabelValues()

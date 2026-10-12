@@ -31,7 +31,7 @@ func TestCompletionClient_NamesNoActor(t *testing.T) {
 	c := newCompletionClient(srv.URL, "token", 5*time.Second)
 
 	require.NoError(t, c.Complete(context.Background(), tenant, uuid.New(), map[string]any{"k": "v"}))
-	require.NoError(t, c.Fail(context.Background(), tenant, uuid.New(), "upstream_error"))
+	require.NoError(t, c.Fail(context.Background(), tenant, uuid.New(), "upstream_error", nil))
 
 	require.Len(t, bodies, 2)
 	for _, body := range bodies {
@@ -39,4 +39,25 @@ func TestCompletionClient_NamesNoActor(t *testing.T) {
 		assert.NotContains(t, body, "actor_user_id")
 	}
 	assert.Equal(t, "upstream_error", bodies[1]["error_class"])
+}
+
+func TestCompletionClient_FailForwardsTheConnectorOutput(t *testing.T) {
+	t.Parallel()
+
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		bodies = append(bodies, body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newCompletionClient(srv.URL, "token", 5*time.Second)
+	require.NoError(t, c.Fail(context.Background(), uuid.New(), uuid.New(), "upstream_error", map[string]any{"deliveryOutcome": "unknown"}))
+	require.NoError(t, c.Fail(context.Background(), uuid.New(), uuid.New(), "upstream_error", nil))
+
+	require.Len(t, bodies, 2)
+	assert.Equal(t, map[string]any{"deliveryOutcome": "unknown"}, bodies[0]["output"])
+	assert.NotContains(t, bodies[1], "output")
 }

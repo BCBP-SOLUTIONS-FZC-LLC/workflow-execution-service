@@ -1,4 +1,7 @@
 {{- if .Values.connectorWorker.enabled }}
+{{- if and (not (has .Values.env.appEnv (list "dev" "local"))) (not .Values.connectorWorker.docsBucket) }}
+{{- fail "connectorWorker.docsBucket is required when connectorWorker.enabled outside dev and local" }}
+{{- end }}
 {{- if not .Values.secret.existingSecretName }}
 {{- range list "OPENBAO_TOKEN" "INTERNAL_API_TOKEN" "DEFINITION_SERVICE_TOKEN" }}
 {{- if not (index $.Values.secret.secretValues .) }}
@@ -104,6 +107,27 @@ spec:
                 secretKeyRef:
                   name: {{ include "workflow-execution-service.secretName" . }}
                   key: INTERNAL_API_TOKEN
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: DATABASE_URL
+            - name: OUTBOX_RELAY_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: OUTBOX_RELAY_DATABASE_URL
+                  optional: {{ has .Values.env.appEnv (list "dev" "local") }}
+            - name: CONNECTOR_DOCS_BUCKET
+              value: {{ .Values.connectorWorker.docsBucket | quote }}
+            - name: CONNECTOR_RETRY_MAX_ATTEMPTS
+              value: {{ .Values.connectorWorker.retry.maxAttempts | quote }}
+            - name: CONNECTOR_RETRY_INITIAL_BACKOFF
+              value: {{ .Values.connectorWorker.retry.initialBackoff | quote }}
+            - name: CONNECTOR_RETRY_MAX_BACKOFF
+              value: {{ .Values.connectorWorker.retry.maxBackoff | quote }}
+            - name: CONNECTOR_AUDIT_RETENTION
+              value: {{ .Values.connectorWorker.auditRetention | quote }}
           livenessProbe:
             httpGet:
               path: /healthz

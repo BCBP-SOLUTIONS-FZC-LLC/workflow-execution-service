@@ -13,8 +13,9 @@ type completeConnectorTaskReq struct {
 }
 
 type failConnectorTaskReq struct {
-	TenantID   uuid.UUID `json:"tenant_id" binding:"required"`
-	ErrorClass string    `json:"error_class" binding:"required"`
+	TenantID   uuid.UUID      `json:"tenant_id" binding:"required"`
+	ErrorClass string         `json:"error_class" binding:"required"`
+	Output     map[string]any `json:"output"`
 }
 
 func (h *Handler) CompleteConnectorTask(c *gin.Context) {
@@ -44,7 +45,7 @@ func (h *Handler) FailConnectorTask(c *gin.Context) {
 		return
 	}
 
-	if err := h.connectorTasks.Fail(c.Request.Context(), req.TenantID, taskID, req.ErrorClass); err != nil {
+	if err := h.connectorTasks.Fail(c.Request.Context(), req.TenantID, taskID, req.ErrorClass, req.Output); err != nil {
 		errResponse(c, err)
 		return
 	}

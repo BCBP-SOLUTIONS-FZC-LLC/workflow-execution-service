@@ -92,7 +92,7 @@ func TestConnectorTaskService_Fail_AssignsTheActingPrincipal(t *testing.T) {
 	assignments := newFakeAssignmentRepo()
 	svc := newConnectorTaskServiceWith(task, inst, &fakeTemporalClient{}, newFakeCacheStore(), assignments)
 
-	require.NoError(t, svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error"))
+	require.NoError(t, svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error", nil))
 
 	active, err := assignments.ListActiveByTask(context.Background(), task.TenantID, task.ID)
 	require.NoError(t, err)
@@ -143,7 +143,7 @@ func TestConnectorTaskService_Complete_AssignmentFailureReleasesReservation(t *t
 	failCache := newFakeCacheStore()
 	failTemporal := &fakeTemporalClient{}
 	failSvc := newConnectorTaskServiceWith(task, inst, failTemporal, failCache, assignments)
-	require.Error(t, failSvc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error"))
+	require.Error(t, failSvc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error", nil))
 	assert.Empty(t, failTemporal.signals, "an unattributable failure must not be signalled either")
 	assert.Empty(t, failCache.values)
 }
@@ -309,12 +309,12 @@ func TestConnectorTaskService_Fail_SignalFails_ReleasesReservation(t *testing.T)
 	cache := newFakeCacheStore()
 	svc := newConnectorTaskService(task, inst, temporal, cache)
 
-	err := svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error")
+	err := svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error", nil)
 	require.Error(t, err)
 	assert.Empty(t, cache.values, "the dedup key must be released after a failed signal, not left standing for the full TTL")
 
 	temporal.signalFunc = nil
-	require.NoError(t, svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error"))
+	require.NoError(t, svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error", nil))
 	assert.Len(t, temporal.signals, 2, "the retry must re-attempt the signal, not be swallowed by a stale dedup claim")
 }
 
@@ -326,7 +326,7 @@ func TestConnectorTaskService_Fail_HappyPath(t *testing.T) {
 	temporal := &fakeTemporalClient{}
 	svc := newConnectorTaskService(task, inst, temporal, newFakeCacheStore())
 
-	err := svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error")
+	err := svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error", nil)
 	require.NoError(t, err)
 
 	require.Len(t, temporal.signals, 1)
@@ -350,7 +350,7 @@ func TestConnectorTaskService_Fail_AlreadyTerminal_IsNoOp(t *testing.T) {
 	temporal := &fakeTemporalClient{}
 	svc := newConnectorTaskService(task, &domain.Instance{ID: task.WorkflowInstanceID}, temporal, newFakeCacheStore())
 
-	err := svc.Fail(context.Background(), task.TenantID, task.ID, "timeout")
+	err := svc.Fail(context.Background(), task.TenantID, task.ID, "timeout", nil)
 	require.NoError(t, err)
 	assert.Empty(t, temporal.signals)
 }
@@ -366,7 +366,7 @@ func TestConnectorTaskService_NoAutomationPrincipal_ResolvesNothing(t *testing.T
 	svc.Principals = fakePrincipals{err: port.ErrNoAutomationPrincipal}
 
 	require.ErrorIs(t, svc.Complete(context.Background(), task.TenantID, task.ID, map[string]any{}), port.ErrNoAutomationPrincipal)
-	require.ErrorIs(t, svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error"), port.ErrNoAutomationPrincipal)
+	require.ErrorIs(t, svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error", nil), port.ErrNoAutomationPrincipal)
 
 	active, err := assignments.ListActiveByTask(context.Background(), task.TenantID, task.ID)
 	require.NoError(t, err)
@@ -399,4 +399,20 @@ func TestConnectorTaskService_NoResolverWired_FailsClosed(t *testing.T) {
 
 	require.ErrorIs(t, svc.Complete(context.Background(), task.TenantID, task.ID, map[string]any{}), port.ErrNoAutomationPrincipal)
 	assert.Empty(t, temporal.signals)
+}
+
+func TestConnectorTaskService_Fail_LogsTheConnectorOutput(t *testing.T) {
+	t.Parallel()
+
+	task := connectorTask("send-email", domain.TaskStatusReady, `{}`)
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz"}
+	svc := newConnectorTaskServiceWith(task, inst, &fakeTemporalClient{}, newFakeCacheStore(), newFakeAssignmentRepo())
+	log := &fakeLogger{}
+	svc.Log = log
+
+	require.NoError(t, svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error", map[string]any{"deliveryOutcome": "unknown"}))
+
+	require.Len(t, log.warnFields, 1)
+	assert.Equal(t, "upstream_error", log.warnFields[0]["error_class"])
+	assert.Equal(t, map[string]any{"deliveryOutcome": "unknown"}, log.warnFields[0]["output"])
 }

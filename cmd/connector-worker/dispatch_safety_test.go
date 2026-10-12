@@ -17,7 +17,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/openbao"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkeystream"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/registry"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/registry"
 )
 
 // clockCacheStore honours SetNX TTLs against a clock the test advances.
@@ -64,7 +64,6 @@ func poolFor(conn *countingConnector) map[string]*typePool {
 		connectorType: conn.typ,
 		sem:           make(chan struct{}, 1),
 		timeout:       time.Second,
-		retry:         registry.RetryPolicyUnsafe,
 		connector:     conn,
 	}}
 }
@@ -158,7 +157,7 @@ func newCredentialFixture(t *testing.T, stored map[string]string, storeStatus in
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(callbackSrv.Close)
-	pool := &typePool{connectorType: f.conn.typ, sem: make(chan struct{}, 1), timeout: time.Second, retry: registry.RetryPolicyUnsafe, connector: f.conn}
+	pool := &typePool{connectorType: f.conn.typ, sem: make(chan struct{}, 1), timeout: time.Second, connector: f.conn}
 	f.d = &deps{
 		dedup:      newFakeCacheStore(),
 		openbao:    openbao.NewReader(openbaoSrv.URL, "token", "secret", time.Second),
@@ -358,7 +357,7 @@ func TestDispatch_RedeliveredToAnotherConsumerWhileRunning_NeitherRunsNorAcks(t 
 			dedup:    cache,
 			pools: map[string]*typePool{conn.typ: {
 				connectorType: conn.typ, sem: make(chan struct{}, 1), timeout: 5 * time.Second,
-				retry: registry.RetryPolicyUnsafe, connector: conn,
+				connector: conn,
 			}},
 			completion: newCompletionClient(callbackURL, "token", time.Second),
 		}
@@ -472,7 +471,7 @@ func TestDispatch_ShutdownMidRun_StillReportsTheOutcome(t *testing.T) {
 		dedup:    newFakeCacheStore(),
 		pools: map[string]*typePool{conn.typ: {
 			connectorType: conn.typ, sem: make(chan struct{}, 1), timeout: 5 * time.Second,
-			retry: registry.RetryPolicyUnsafe, connector: conn,
+			connector: conn,
 		}},
 		completion: newCompletionClient(callbackSrv.URL, "token", time.Second),
 	}
@@ -507,7 +506,7 @@ func TestHeartbeat_TouchesOnlyEntriesStillBeingHandled(t *testing.T) {
 		dedup:    newFakeCacheStore(),
 		pools: map[string]*typePool{conn.typ: {
 			connectorType: conn.typ, sem: make(chan struct{}, 1), timeout: 5 * time.Second,
-			retry: registry.RetryPolicyUnsafe, connector: conn,
+			connector: conn,
 		}},
 		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", time.Second),
 	}
@@ -537,7 +536,7 @@ func TestDispatchBatch_EntriesQueuedForAPoolSlotAreTouched(t *testing.T) {
 		dedup:    newFakeCacheStore(),
 		pools: map[string]*typePool{conn.typ: {
 			connectorType: conn.typ, sem: make(chan struct{}, 1), timeout: 5 * time.Second,
-			retry: registry.RetryPolicyUnsafe, connector: conn,
+			connector: conn,
 		}},
 		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", time.Second),
 	}
@@ -596,7 +595,7 @@ func TestDispatch_DuplicateOfARunningEntry_StaysTouched(t *testing.T) {
 		dedup:    newFakeCacheStore(),
 		pools: map[string]*typePool{conn.typ: {
 			connectorType: conn.typ, sem: make(chan struct{}, 2), timeout: 5 * time.Second,
-			retry: registry.RetryPolicyUnsafe, connector: conn,
+			connector: conn,
 		}},
 		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", time.Second),
 	}
@@ -628,7 +627,7 @@ func TestHeartbeat_StopsTouchingARunPastItsLease(t *testing.T) {
 		dedup:    newFakeCacheStore(),
 		pools: map[string]*typePool{conn.typ: {
 			connectorType: conn.typ, sem: make(chan struct{}, 1), timeout: 5 * time.Second,
-			retry: registry.RetryPolicyUnsafe, connector: conn,
+			connector: conn,
 		}},
 		completion: newCompletionClient(statusServer(t, http.StatusNoContent).URL, "token", time.Second),
 		now: func() time.Time {

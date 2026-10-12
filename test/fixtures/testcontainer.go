@@ -13,6 +13,8 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/outbox"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/migrate"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
+	documentsql "github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/documents/sqlstore"
+	intentsql "github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/sendintent/sqlstore"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/db/migrations"
 )
@@ -83,6 +85,12 @@ func applyMigrations(t *testing.T, dsn string) {
 	ctx := context.Background()
 	if err := outbox.ApplySchema(ctx, &migrate.Runner{DSN: dsn}); err != nil {
 		t.Fatalf("fixtures: outbox ApplySchema: %v", err)
+	}
+	if err := documentsql.ApplySchema(ctx, &migrate.Runner{DSN: dsn}); err != nil {
+		t.Fatalf("fixtures: connector documents ApplySchema: %v", err)
+	}
+	if err := intentsql.ApplySchema(ctx, &migrate.Runner{DSN: dsn}); err != nil {
+		t.Fatalf("fixtures: connector send intents ApplySchema: %v", err)
 	}
 	domainRunner := &migrate.Runner{
 		FS:              migrations.FS,

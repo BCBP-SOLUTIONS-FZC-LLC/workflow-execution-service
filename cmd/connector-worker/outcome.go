@@ -64,7 +64,7 @@ func takeLease(ctx context.Context, d *deps, taskID uuid.UUID, ttl time.Duration
 func report(ctx context.Context, d *deps, job dispatchJob, outcome dispatchOutcome, entryID string, wlog port.Logger) {
 	var err error
 	if outcome.ErrorClass != "" {
-		err = d.completion.Fail(ctx, job.tenantID, job.taskID, outcome.ErrorClass)
+		err = d.completion.Fail(ctx, job.tenantID, job.taskID, outcome.ErrorClass, outcome.Output)
 	} else {
 		err = d.completion.Complete(ctx, job.tenantID, job.taskID, outcome.Output)
 	}

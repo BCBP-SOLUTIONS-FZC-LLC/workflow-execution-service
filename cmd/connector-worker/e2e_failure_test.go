@@ -66,7 +66,7 @@ func e2eStartInstance(t *testing.T, httpClient *http.Client, execSrvURL string, 
 // once, and fail the instance (a sequential single-department plan has no
 // Parallel gateway to degrade into).
 func TestE2E_ConnectorWorker_DispatchFailsInstanceFails(t *testing.T) {
-	pool := fixtures.NewTestPool(t)
+	pool, dsn := fixtures.NewTestPoolAndDSN(t)
 	sdk := fixtures.NewTestTemporalServer(t)
 	valkeyAddr := fixtures.NewTestValkey(t)
 
@@ -114,6 +114,7 @@ func TestE2E_ConnectorWorker_DispatchFailsInstanceFails(t *testing.T) {
 	t.Cleanup(execSrv.Close)
 
 	cfg := &config.Config{
+		DatabaseURL: dsn, ConnectorRetryMaxAttempts: 5, ConnectorRetryInitialBackoff: 10 * time.Millisecond, ConnectorRetryMaxBackoff: 50 * time.Millisecond,
 		ValkeyAddr: valkeyAddr, ValkeyDialTimeout: 5 * time.Second, ValkeyReadTimeout: 5 * time.Second, ValkeyWriteTimeout: 5 * time.Second,
 		ConnectorStreamKey: streamKey, ConnectorStreamGroup: "connector-worker-e2e", ConnectorStreamBlockTimeout: time.Second,
 		ConnectorStreamClaimMinIdle: 30 * time.Second, ConnectorStreamBatchSize: 10,
@@ -122,7 +123,7 @@ func TestE2E_ConnectorWorker_DispatchFailsInstanceFails(t *testing.T) {
 		ExecutionServiceInternalAddr: execSrv.URL, ConnectorCompletionTimeout: 5 * time.Second,
 		ConnectorPoolSizeRestCall: 2, ConnectorTimeoutRestCall: 10 * time.Second,
 	}
-	deps, cleanup, err := buildDeps(cfg)
+	deps, cleanup, err := buildDeps(cfg, noopLogger{})
 	if err != nil {
 		t.Fatalf("buildDeps: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestE2E_ConnectorWorker_DispatchFailsInstanceFails(t *testing.T) {
 // makes this retryable — the target fails twice then succeeds, and the
 // instance must still complete normally via runWithRetry's own backoff loop.
 func TestE2E_ConnectorWorker_RestCallRetriesIdempotentMethod(t *testing.T) {
-	pool := fixtures.NewTestPool(t)
+	pool, dsn := fixtures.NewTestPoolAndDSN(t)
 	sdk := fixtures.NewTestTemporalServer(t)
 	valkeyAddr := fixtures.NewTestValkey(t)
 
@@ -217,6 +218,7 @@ func TestE2E_ConnectorWorker_RestCallRetriesIdempotentMethod(t *testing.T) {
 	t.Cleanup(execSrv.Close)
 
 	cfg := &config.Config{
+		DatabaseURL: dsn, ConnectorRetryMaxAttempts: 5, ConnectorRetryInitialBackoff: 10 * time.Millisecond, ConnectorRetryMaxBackoff: 50 * time.Millisecond,
 		ValkeyAddr: valkeyAddr, ValkeyDialTimeout: 5 * time.Second, ValkeyReadTimeout: 5 * time.Second, ValkeyWriteTimeout: 5 * time.Second,
 		ConnectorStreamKey: streamKey, ConnectorStreamGroup: "connector-worker-e2e", ConnectorStreamBlockTimeout: time.Second,
 		ConnectorStreamClaimMinIdle: 30 * time.Second, ConnectorStreamBatchSize: 10,
@@ -225,7 +227,7 @@ func TestE2E_ConnectorWorker_RestCallRetriesIdempotentMethod(t *testing.T) {
 		ExecutionServiceInternalAddr: execSrv.URL, ConnectorCompletionTimeout: 5 * time.Second,
 		ConnectorPoolSizeRestCall: 2, ConnectorTimeoutRestCall: 10 * time.Second,
 	}
-	deps, cleanup, err := buildDeps(cfg)
+	deps, cleanup, err := buildDeps(cfg, noopLogger{})
 	if err != nil {
 		t.Fatalf("buildDeps: %v", err)
 	}

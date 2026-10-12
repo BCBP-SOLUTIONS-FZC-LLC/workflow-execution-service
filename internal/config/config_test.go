@@ -255,6 +255,10 @@ func TestRequire(t *testing.T) {
 			DefinitionServiceURL: "http://definition:8080",
 			EligibilityBaseURL:   "http://eligibility",
 			AWSUseStub:           true,
+
+			ConnectorRetryMaxAttempts:    5,
+			ConnectorRetryInitialBackoff: 500 * time.Millisecond,
+			ConnectorRetryMaxBackoff:     10 * time.Second,
 		}
 	}
 	tests := []struct {
@@ -283,13 +287,25 @@ func TestRequire(t *testing.T) {
 		{"worker needs the definition service", (*Config).RequireWorker, func(c *Config) { c.DefinitionServiceURL = "" }, "DEFINITION_SERVICE_URL"},
 		{"worker needs the definition token outside dev", (*Config).RequireWorker, func(c *Config) { c.AppEnv = "prod" }, "DEFINITION_SERVICE_TOKEN"},
 
-		{"connector-worker valid in production without a database", (*Config).RequireConnectorWorker, func(c *Config) {
+		{"connector-worker valid in production", (*Config).RequireConnectorWorker, func(c *Config) {
 			c.AppEnv = "prod"
-			c.DatabaseURL = ""
 			c.InternalAPIToken = "tok"
 			c.DefinitionServiceToken = "def-tok"
 			c.OpenBaoToken = "bao-tok"
+			c.ConnectorDocsBucket = "docs"
 		}, ""},
+		{"connector-worker needs a database", (*Config).RequireConnectorWorker, func(c *Config) { c.DatabaseURL = "" }, "DATABASE_URL"},
+		{"connector-worker needs the document bucket outside dev", (*Config).RequireConnectorWorker, func(c *Config) {
+			c.AppEnv = "prod"
+			c.InternalAPIToken = "tok"
+			c.DefinitionServiceToken = "def-tok"
+			c.OpenBaoToken = "bao-tok"
+		}, "CONNECTOR_DOCS_BUCKET"},
+		{"connector-worker needs a positive attempt limit", (*Config).RequireConnectorWorker, func(c *Config) { c.ConnectorRetryMaxAttempts = 0 }, "CONNECTOR_RETRY_MAX_ATTEMPTS"},
+		{"connector-worker needs the backoff bounds in order", (*Config).RequireConnectorWorker, func(c *Config) {
+			c.ConnectorRetryInitialBackoff = 10 * time.Second
+			c.ConnectorRetryMaxBackoff = time.Second
+		}, "CONNECTOR_RETRY_MAX_BACKOFF"},
 		{"connector-worker needs the definition service", (*Config).RequireConnectorWorker, func(c *Config) { c.DefinitionServiceURL = "" }, "DEFINITION_SERVICE_URL"},
 		{"connector-worker needs the definition token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "prod"; c.InternalAPIToken = "tok"; c.OpenBaoToken = "bao-tok" }, "DEFINITION_SERVICE_TOKEN"},
 		{"connector-worker needs the internal token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "prod"; c.DefinitionServiceToken = "def-tok"; c.OpenBaoToken = "bao-tok" }, "INTERNAL_API_TOKEN"},

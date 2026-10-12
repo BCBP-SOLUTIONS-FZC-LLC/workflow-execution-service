@@ -311,7 +311,7 @@ func e2ePostWorkflowTaskCreated(t *testing.T, httpClient *http.Client, baseURL s
 // HTTP server, chosen because it needs no cloud SDK/credentials, unlike
 // storage/send-email's real providers.
 func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
-	pool := fixtures.NewTestPool(t)
+	pool, dsn := fixtures.NewTestPoolAndDSN(t)
 	sdk := fixtures.NewTestTemporalServer(t)
 	valkeyAddr := fixtures.NewTestValkey(t)
 
@@ -366,6 +366,8 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 	// infra: real Valkey, the fake alias registry, and the real execution
 	// router's completion endpoints.
 	cfg := &config.Config{
+		DatabaseURL:                  dsn,
+		ConnectorRetryMaxAttempts:    1,
 		ValkeyAddr:                   valkeyAddr,
 		ValkeyDialTimeout:            5 * time.Second,
 		ValkeyReadTimeout:            5 * time.Second,
@@ -386,7 +388,7 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 		ConnectorPoolSizeRestCall:    2,
 		ConnectorTimeoutRestCall:     10 * time.Second,
 	}
-	deps, cleanup, err := buildDeps(cfg)
+	deps, cleanup, err := buildDeps(cfg, noopLogger{})
 	if err != nil {
 		t.Fatalf("buildDeps: %v", err)
 	}

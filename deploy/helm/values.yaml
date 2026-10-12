@@ -83,6 +83,12 @@ connectorWorker:
   executionServiceInternalAddr: http://workflow-execution-service-api:8080
   openBaoAddr: ""
   openBaoMount: secret
+  docsBucket: ""
+  retry:
+    maxAttempts: 5
+    initialBackoff: 500ms
+    maxBackoff: 10s
+  auditRetention: 2160h
   resources:
     requests:
       cpu: 100m

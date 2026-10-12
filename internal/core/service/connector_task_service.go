@@ -84,7 +84,7 @@ func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID uu
 	return nil
 }
 
-func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.UUID, errorClass string) error {
+func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.UUID, errorClass string, output map[string]any) error {
 	task, done, err := s.loadConnectorTask(ctx, tenantID, taskID)
 	if err != nil || done {
 		return err
@@ -106,6 +106,10 @@ func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.U
 		s.releaseSignalReservation(ctx, taskID)
 		return err
 	}
+
+	s.logger().Warn("connector task failed", map[string]any{
+		"task_id": taskID, "tenant_id": tenantID, "connector_type": *task.ConnectorType, "error_class": errorClass, "output": output,
+	})
 
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-fail", stageFailWire{

@@ -7,18 +7,35 @@ import (
 	"sync"
 	"time"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
+
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/openbao"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pglogger"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkey"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkeystream"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/connectors"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/connectors/aliasconfig"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/connectors/sendemail"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/connectors/storage"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/pkg/registry"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/aliasconfig"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/docref"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/docref/s3content"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/docref/valkeystore"
+	documentsql "github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/documents/sqlstore"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/sendemail"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/sendemail/gmail"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/sendemail/msgraph"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/sendemail/sendgrid"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/sendemail/ses"
+	intentsql "github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/sendintent/sqlstore"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/storage"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/storage/gocloud"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/storage/googledrive"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/registry"
 )
 
 type streamConsumer interface {
@@ -37,6 +54,10 @@ type deps struct {
 	aliases      aliasconfig.Config
 	pools        map[string]*typePool
 	completion   *completionClient
+	pgPool       *pgcommon.Pool
+	documents    *documentsql.Store
+	pruner       attemptPruner
+	retry        retryBounds
 
 	streamKey    string
 	streamGroup  string
@@ -51,7 +72,7 @@ type deps struct {
 	now           func() time.Time
 }
 
-func buildDeps(cfg *config.Config) (*deps, func(), error) {
+func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
 	aliases, err := fetchAliases(context.Background(), cfg.DefinitionServiceURL, cfg.DefinitionServiceToken, cfg.ConnectorAliasFetchTimeout)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetch alias registry: %w", err)
@@ -78,24 +99,66 @@ func buildDeps(cfg *config.Config) (*deps, func(), error) {
 		return nil, nil, fmt.Errorf("ensure consumer group: %w", err)
 	}
 
+	pgPool, err := pgcommon.NewPool(context.Background(), pgcommon.Config{
+		DSN:                cfg.DatabaseURL,
+		MaxConns:           cfg.PGMaxConns,
+		MinConns:           cfg.PGMinConns,
+		PGBouncerMode:      cfg.PGBouncerMode,
+		SlowQueryThreshold: time.Duration(cfg.PGSlowQueryThresholdMS) * time.Millisecond,
+		GUCProvider:        pgcommon.GUCSetFromContext,
+		Logger:             pglogger.New(wlog),
+		Tracer:             gincommon.NewSpanTracer(cfg.OTELServiceName),
+	})
+	if err != nil {
+		_ = valkeyClient.Close()
+		return nil, nil, fmt.Errorf("connector postgres pool: %w", err)
+	}
+	prunePool, err := pgcommon.NewPool(context.Background(), pgcommon.Config{
+		DSN:           cfg.OutboxRelayDSN(),
+		MaxConns:      2,
+		MinConns:      0,
+		PGBouncerMode: cfg.PGBouncerMode,
+		Logger:        pglogger.New(wlog),
+		Tracer:        gincommon.NewSpanTracer(cfg.OTELServiceName),
+	})
+	if err != nil {
+		_ = valkeyClient.Close()
+		pgPool.Close()
+		return nil, nil, fmt.Errorf("connector prune pool: %w", err)
+	}
+	closeAll := func() {
+		_ = valkeyClient.Close()
+		pgPool.Close()
+		prunePool.Close()
+	}
+
+	docRefs, err := buildDocRefs(context.Background(), cfg, valkeyClient)
+	if err != nil {
+		closeAll()
+		return nil, nil, err
+	}
+	documents := documentsql.New(pgPool)
+
 	connectorSet, err := connectors.New(connectors.Config{
 		Aliases:       aliases,
 		InternalToken: cfg.InternalAPIToken,
 		StorageProviders: map[string]storage.ProviderConstructor{
-			"aws-s3":       storage.NewGocloudStorageProvider,
-			"azure-blob":   storage.NewGocloudStorageProvider,
-			"gcp-gcs":      storage.NewGocloudStorageProvider,
-			"google-drive": storage.NewDriveStorageProvider,
+			"aws-s3":       gocloud.NewProvider,
+			"azure-blob":   gocloud.NewProvider,
+			"gcp-gcs":      gocloud.NewProvider,
+			"google-drive": googledrive.NewProvider(documents),
 		},
 		SendEmailProviders: map[string]sendemail.ProviderConstructor{
-			"sendgrid":         sendemail.NewSendGridProvider,
-			"aws-ses":          sendemail.NewSESProvider,
-			"microsoft-365":    sendemail.NewGraphSendMailProvider,
-			"google-workspace": sendemail.NewGmailProvider,
+			"sendgrid":         sendgrid.NewProvider,
+			"aws-ses":          ses.NewProvider,
+			"microsoft-365":    msgraph.NewProvider,
+			"google-workspace": gmail.NewProvider,
 		},
+		DocRefs:     docRefs,
+		SendIntents: intentsql.New(pgPool),
 	})
 	if err != nil {
-		_ = valkeyClient.Close()
+		closeAll()
 		return nil, nil, fmt.Errorf("build connectors: %w", err)
 	}
 
@@ -116,6 +179,14 @@ func buildDeps(cfg *config.Config) (*deps, func(), error) {
 		aliases:      aliases,
 		pools:        buildPools(cfg, connectorSet),
 		completion:   newCompletionClient(cfg.ExecutionServiceInternalAddr, cfg.InternalAPIToken, cfg.ConnectorCompletionTimeout),
+		pgPool:       pgPool,
+		documents:    documents,
+		pruner:       documentsql.New(prunePool),
+		retry: retryBounds{
+			MaxAttempts:    cfg.ConnectorRetryMaxAttempts,
+			InitialBackoff: cfg.ConnectorRetryInitialBackoff,
+			MaxBackoff:     cfg.ConnectorRetryMaxBackoff,
+		},
 		streamKey:    cfg.ConnectorStreamKey,
 		streamGroup:  cfg.ConnectorStreamGroup,
 		consumerName: consumerName,
@@ -127,15 +198,33 @@ func buildDeps(cfg *config.Config) (*deps, func(), error) {
 		deadLetterKey: cfg.ConnectorStreamDeadLetterKey,
 	}
 
-	cleanup := func() { _ = valkeyClient.Close() }
-	return d, cleanup, nil
+	return d, closeAll, nil
+}
+
+const docRefPrefix = "docrefs/"
+
+func buildDocRefs(ctx context.Context, cfg *config.Config, valkeyClient *redis.Client) (*docref.Service, error) {
+	if cfg.ConnectorDocsBucket == "" {
+		return nil, nil
+	}
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load aws config: %w", err)
+	}
+	content := s3content.New(s3.NewFromConfig(awsCfg), cfg.ConnectorDocsBucket)
+	if err := valkeystore.CheckDurability(ctx, valkeyClient); err != nil {
+		return nil, fmt.Errorf("document refs: %w", err)
+	}
+	if err := content.Check(ctx, docRefPrefix); err != nil {
+		return nil, fmt.Errorf("document refs: %w", err)
+	}
+	return docref.NewService(valkeystore.New(valkeyClient, valkeystore.Options{}), content, docref.WithKeyPrefix(docRefPrefix)), nil
 }
 
 type typePool struct {
 	connectorType string
 	sem           chan struct{}
 	timeout       time.Duration
-	retry         registry.RetryPolicy
 
 	mu        sync.RWMutex
 	connector connectors.Connector
@@ -177,8 +266,6 @@ func buildPools(cfg *config.Config, connectorSet map[string]connectors.Connector
 		registry.TypeSQLQuery:        cfg.ConnectorTimeoutSQLQuery,
 		registry.TypeChatNotify:      cfg.ConnectorTimeoutChatNotify,
 	}
-	defs := registry.All()
-
 	pools := make(map[string]*typePool, len(connectorSet))
 	for typ, conn := range connectorSet {
 		size := sizes[typ]
@@ -190,7 +277,6 @@ func buildPools(cfg *config.Config, connectorSet map[string]connectors.Connector
 			sem:           make(chan struct{}, size),
 			timeout:       timeouts[typ],
 			connector:     conn,
-			retry:         defs[typ].Retry,
 		}
 	}
 	return pools
