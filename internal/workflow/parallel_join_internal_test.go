@@ -7,7 +7,7 @@ import (
 	"go.temporal.io/sdk/testsuite"
 	wf "go.temporal.io/sdk/workflow"
 
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
 // TestBranchKeys pins that branches are keyed by place, and, in a history

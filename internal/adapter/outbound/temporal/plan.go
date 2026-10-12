@@ -8,8 +8,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
 func (d *Deps) GetCompiledPlan(ctx context.Context, in port.GetCompiledPlanInput) (port.GetCompiledPlanOutput, error) {
@@ -37,7 +38,7 @@ func (d *Deps) GetCompiledPlan(ctx context.Context, in port.GetCompiledPlanInput
 	if collab.SchemaVersion != dsl.CurrentSchemaVersion {
 		return port.GetCompiledPlanOutput{Collaboration: collab}, nil
 	}
-	expanded, err := dsl.ExpandCalls(&collab, 0)
+	expanded, err := dsl.ExpandCalls(&collab, domain.MaxPlanStages)
 	if err != nil {
 		return port.GetCompiledPlanOutput{}, nonRetryable("DefinitionServiceClientError", fmt.Errorf("expand compiled plan: %w", err))
 	}

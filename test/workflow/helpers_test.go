@@ -13,7 +13,7 @@ import (
 	"go.temporal.io/sdk/testsuite"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
 // singleStageCollaboration is the smallest valid fixture: one pool, one

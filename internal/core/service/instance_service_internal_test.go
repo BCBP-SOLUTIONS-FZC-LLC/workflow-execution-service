@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -11,8 +13,8 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability/obstest"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl/dsltest"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl/dsltest"
 )
 
 func TestDeptUUID_PrefersIAMDepartmentID(t *testing.T) {
@@ -85,4 +87,34 @@ func TestCompiledPlanCache_ExpandsLibraryCalls(t *testing.T) {
 	level, ok := requiredLevelForTask(plan, task)
 	assert.True(t, ok, "no stage for the module task")
 	assert.Equal(t, "checker", level)
+}
+
+type sizedDefinitions struct{ stages int }
+
+func (d sizedDefinitions) GetCompiledWorkflow(context.Context, uuid.UUID, uuid.UUID) (*port.CompiledWorkflow, error) {
+	stages := make([]dsl.StageDef, d.stages)
+	for i := range stages {
+		stages[i] = dsl.StageDef{Type: "approve", NodeID: fmt.Sprintf("T%d", i)}
+	}
+	collab := dsl.CompiledCollaboration{
+		MainPlan:      "main",
+		SchemaVersion: dsl.CurrentSchemaVersion,
+		Plans:         []*dsl.CompiledPlan{{Name: "main", Departments: []dsl.DepartmentDef{{ID: "Ops", Stages: stages}}}},
+	}
+	raw, err := json.Marshal(collab)
+	if err != nil {
+		return nil, fmt.Errorf("marshal sized plan: %w", err)
+	}
+	return &port.CompiledWorkflow{Status: "PUBLISHED", IsValid: true, CompiledPlanJSON: string(raw)}, nil
+}
+
+func TestCompiledPlanCache_PlanAtTheStageBudgetLoads(t *testing.T) {
+	_, err := newCompiledPlanCache(sizedDefinitions{stages: domain.MaxPlanStages}, noopLogger{}).mainPlan(context.Background(), uuid.New(), uuid.New())
+	require.NoError(t, err)
+}
+
+func TestCompiledPlanCache_PlanOverTheStageBudgetIsAnInvalidVersion(t *testing.T) {
+	_, err := newCompiledPlanCache(sizedDefinitions{stages: domain.MaxPlanStages + 1}, noopLogger{}).mainPlan(context.Background(), uuid.New(), uuid.New())
+	require.ErrorIs(t, err, port.ErrVersionInvalid)
+	assert.ErrorIs(t, err, dsl.ErrPlanTooLarge)
 }

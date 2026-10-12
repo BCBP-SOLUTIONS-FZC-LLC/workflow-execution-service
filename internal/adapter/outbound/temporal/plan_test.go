@@ -2,7 +2,9 @@ package temporal_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,9 +17,10 @@ import (
 
 	outboundhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	outboundtemporal "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl/dsltest"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl/dsltest"
 )
 
 // planServer answers every compiled-plan read with status and body, as the
@@ -130,4 +133,28 @@ func TestGetCompiledPlan_OtherSchemaVersionIsNotExpanded(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 99, out.Collaboration.SchemaVersion)
 	assert.NotNil(t, out.Collaboration.Plans[0].Execution.Steps[0].CallPlan)
+}
+
+func sizedPlan(stages int) string {
+	defs := make([]dsl.StageDef, stages)
+	for i := range defs {
+		defs[i] = dsl.StageDef{Type: "approve", NodeID: fmt.Sprintf("T%d", i)}
+	}
+	raw, _ := json.Marshal(dsl.CompiledCollaboration{
+		MainPlan:      "main",
+		SchemaVersion: dsl.CurrentSchemaVersion,
+		Plans:         []*dsl.CompiledPlan{{Name: "main", Departments: []dsl.DepartmentDef{{ID: "Ops", Stages: defs}}}},
+	})
+	return string(raw)
+}
+
+func TestGetCompiledPlan_PlanAtTheStageBudgetLoads(t *testing.T) {
+	_, err := readPlan(planDeps(t, sizedPlan(domain.MaxPlanStages)))
+	require.NoError(t, err)
+}
+
+func TestGetCompiledPlan_PlanOverTheStageBudget_IsNonRetryable(t *testing.T) {
+	_, err := readPlan(planDeps(t, sizedPlan(domain.MaxPlanStages+1)))
+	requireNonRetryable(t, err)
+	assert.ErrorIs(t, err, dsl.ErrPlanTooLarge)
 }

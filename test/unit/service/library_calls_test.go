@@ -7,8 +7,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl/dsltest"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl/dsltest"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,7 +43,7 @@ func goldenHumanNodeKeys(t *testing.T) []string {
 	t.Helper()
 	var collab dsl.CompiledCollaboration
 	require.NoError(t, json.Unmarshal(dsltest.LibraryCalls(), &collab))
-	expanded, err := dsl.ExpandCalls(&collab, 0)
+	expanded, err := dsl.ExpandCalls(&collab, domain.MaxPlanStages)
 	require.NoError(t, err)
 	var keys []string
 	for _, d := range expanded.Plans[0].Departments {

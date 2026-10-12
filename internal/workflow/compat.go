@@ -1,6 +1,6 @@
 package workflow
 
-import "github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
+import "github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 
 type schemaStrategy interface {
 	normalize(collab *dsl.CompiledCollaboration) *dsl.CompiledCollaboration

@@ -10,7 +10,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
 const scopeTender = "tender"
@@ -112,7 +112,7 @@ func decodeCollaboration(planJSON string) (*dsl.CompiledCollaboration, error) {
 	if collab.SchemaVersion != dsl.CurrentSchemaVersion {
 		return &collab, nil
 	}
-	expanded, err := dsl.ExpandCalls(&collab, 0)
+	expanded, err := dsl.ExpandCalls(&collab, domain.MaxPlanStages)
 	if err != nil {
 		return nil, fmt.Errorf("%w: expand compiled plan: %w", port.ErrVersionInvalid, err)
 	}
