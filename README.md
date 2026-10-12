@@ -22,7 +22,7 @@ Definition Service ◄── compiled plan, connector aliases
 | --- | --- | --- |
 | **API server** (`cmd/server`) | The public and internal HTTP API, the Temporal client, the outbox relay, the compiled-plan cache, the RLS-violation exporter and the operational gauges | Interpreting a plan: the worker does |
 | **Worker** (`cmd/worker`) | The Temporal workflow function and its Activities, one worker per active tenant task queue | Any business HTTP surface; it serves health and metrics only |
-| **Connector worker** (`cmd/connector-worker`) | Consuming connector-typed tasks from a Valkey Stream and running them through `workflow-connectors` | The Temporal SDK and the database: it reports outcomes over the API server's internal HTTP endpoints |
+| **Connector worker** (`cmd/connector-worker`) | Consuming connector-typed tasks from a Valkey Stream and running them through `workflow-connectors` | The Temporal SDK: it reports outcomes over the API server's internal HTTP endpoints. It keeps the Drive document registry and send-email intents in PostgreSQL and document references in S3 and Valkey |
 
 | Concern | Owner |
 | --- | --- |
@@ -116,8 +116,8 @@ Platform libraries and what each owns:
 | `platform-gincommon` | Logging, tracing, HTTP middleware, every metric constructor, the metrics identity |
 | `platform-pgcommon/v2` | The pgx pool, RLS GUC injection, transactions, migrations, `platform_db_*` metrics |
 | `platform-events/v2` | The event envelope, the outbox and its relay, the SNS publisher, `platform_library_info` |
-| `workflow-models` | The compiled-plan DSL (`pkg/dsl`) and stage enums |
-| `workflow-connectors` | The connector implementations the connector worker runs |
+| `workflow-models/v2` | The compiled-plan DSL (`pkg/dsl`) and stage enums |
+| `workflow-connectors/v2` | The connector implementations the connector worker runs, with the retry decision, document references and send-intent store |
 
 ---
 
@@ -142,7 +142,7 @@ Tests fail when a router operation is missing from its spec or the reverse, and 
 | --- | --- |
 | API server | `DATABASE_URL`, `OUTBOX_RELAY_DATABASE_URL`, `VALKEY_ADDR`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL` and `_TOKEN`, `INTERNAL_API_TOKEN`, `ELIGIBILITY_BASE_URL`, `TOKEN_SERVICE_BASE_URL`, `SNS_TOPIC_ARN`, `GLUE_REGISTRY_NAME`, `AWS_USE_STUB=false` |
 | Worker | `DATABASE_URL`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL` and `_TOKEN` |
-| Connector worker | `VALKEY_ADDR`, `DEFINITION_SERVICE_URL` and `_TOKEN`, `INTERNAL_API_TOKEN`, `EXECUTION_SERVICE_INTERNAL_ADDR`, `OPENBAO_ADDR`, `OPENBAO_TOKEN` |
+| Connector worker | `DATABASE_URL`, `VALKEY_ADDR`, `DEFINITION_SERVICE_URL` and `_TOKEN`, `INTERNAL_API_TOKEN`, `EXECUTION_SERVICE_INTERNAL_ADDR`, `OPENBAO_ADDR`, `OPENBAO_TOKEN`, `CONNECTOR_DOCS_BUCKET` (outside dev) |
 
 ---
 
