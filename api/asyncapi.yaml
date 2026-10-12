@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: workflow-execution-service events
-  version: 1.0.0
+  version: 1.1.0
   description: >
     Event contract for the Workflow Execution Service. Outbound: 18 workflow-
     lifecycle events published to the SNS topic wf-workflow-events (SNS → SQS
@@ -75,9 +75,8 @@ channels:
             deadLetterQueue: { name: membership-workflow-dlq }
             maxReceiveCount: 5
     messages:
-      DelegationStarted:  { $ref: '#/components/messages/DelegationStartedInbound' }
-      DelegationEnded:    { $ref: '#/components/messages/DelegationEndedInbound' }
       TenantStateChanged: { $ref: '#/components/messages/TenantStateChangedInbound' }
+      MembershipRevoked:  { $ref: '#/components/messages/MembershipRevokedInbound' }
       TenantMembershipsPurged: { $ref: '#/components/messages/TenantMembershipsPurgedInbound' }
   iam/user/events:
     address: iam-user-events
@@ -93,7 +92,23 @@ channels:
     messages:
       UserDeleted:              { $ref: '#/components/messages/UserDeletedInbound' }
       UserAvailabilityChanged:  { $ref: '#/components/messages/UserAvailabilityChangedInbound' }
-      MembershipRevoked:        { $ref: '#/components/messages/MembershipRevokedInbound' }
+  iam/delegation/events:
+    address: iam.delegation.events
+    description: >
+      Consumed off delegation-workflow-q. The producer encodes the payload through
+      its schema registry, so the envelope carries a dataschema and a string payload
+      that Execution decodes.
+    bindings:
+      sqs:
+        queue:
+          name: delegation-workflow-q
+          fifoQueue: false
+          redrivePolicy:
+            deadLetterQueue: { name: delegation-workflow-q-dlq }
+            maxReceiveCount: 5
+    messages:
+      DelegationStarted:  { $ref: '#/components/messages/DelegationStartedInbound' }
+      DelegationEnded:    { $ref: '#/components/messages/DelegationEndedInbound' }
 
   self/task-dispatch:
     address: /api/v1/internal/events/workflow-task
@@ -131,9 +146,15 @@ operations:
     action: receive
     channel: { $ref: '#/channels/iam~1membership~1events' }
     description: >
-      Delegation reroute (≤4s p99 SLO for DelegationStarted, LLD §6.7) and the
-      TenantStateChanged tenant-lifecycle relay. Dedup after side effects
-      (processed_event, consumer `membership-execution`).
+      The TenantStateChanged tenant-lifecycle relay, MembershipRevoked and
+      TenantMembershipsPurged. Dedup after side effects (processed_event,
+      consumer `membership-execution`).
+  receiveDelegationEvents:
+    action: receive
+    channel: { $ref: '#/channels/iam~1delegation~1events' }
+    description: >
+      Delegation reroute (≤4s p99 SLO for DelegationStarted, LLD §6.7) and its
+      reversal on DelegationEnded.
   receiveUserEvents:
     action: receive
     channel: { $ref: '#/channels/iam~1user~1events' }
@@ -387,23 +408,23 @@ components:
     DelegationStartedInbound:
       name: DelegationStarted
       x-lifecycle: { status: active }
-      title: Delegation started (owned by IAM Org & Membership)
+      title: Delegation started (owned by IAM Delegation)
       description: >
         Consumed to reroute the delegator's active assignments to the delegate,
         scope-filtered and eligibility-rechecked. The one SLO-bearing inbound event
         (≤4s p99, LLD §6.7).
-      x-schema-owner: iam-org-membership
+      x-schema-owner: iam-delegation
       payload: { $ref: '#/components/schemas/DelegationStartedInbound' }
     DelegationEndedInbound:
       name: DelegationEnded
       x-lifecycle: { status: active }
-      title: Delegation ended (owned by IAM Org & Membership)
+      title: Delegation ended (owned by IAM Delegation)
       description: >
         Consumed to restore the original assignee on every assignment row tagged with
         this delegation_id, after the same batched eligibility re-check the forward
         DelegationStarted reroute uses — a restored assignee who became ineligible during
         the delegation window stays with the delegate instead, flagged for admin review.
-      x-schema-owner: iam-org-membership
+      x-schema-owner: iam-delegation
       payload: { $ref: '#/components/schemas/DelegationEndedInbound' }
     TenantStateChangedInbound:
       name: TenantStateChanged

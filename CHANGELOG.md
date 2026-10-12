@@ -21,6 +21,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The inbound queue set follows IAM's AsyncAPI: `DelegationStarted` and `DelegationEnded` come from `iam.delegation.events` through their own queue, `MembershipRevoked` and `TenantMembershipsPurged` are on the membership topic, and each queue's subscription carries the producer's filter policy. LLD rev 1.76 and the AsyncAPI (1.1.0) carry the correction; no code changes.
 - `workflow-models/v2` v2.0.0 (import path `…/workflow-models/v2/pkg/…`): every plan expansion passes a stage budget of 1000, the limit Definition enforces at publish, because the library refuses a zero budget. A stored plan that expands past it is an invalid version and fails the compiled-plan activity without retry.
 - **Platform libraries** `platform-events/v2` v2.1.0, `platform-pgcommon/v2` v2.0.0, `platform-gincommon` v1.6.0, `workflow-models/v2` v2.0.0, `workflow-connectors` v1.0.0; Go 1.26.9. The service name is `workflow-execution-service` for all three binaries and every service metric is prefixed `workflow_execution_service_`. Alerts use the platform metric names; `tenant_id` is no longer a metric label.
 - `APP_ENV` must be one of `local`, `dev`, `test`, `staging`, `prod`; `AWS_USE_STUB` must be `false` outside dev and local; the connector worker requires `OPENBAO_TOKEN` outside dev; the chart sets `appEnv: prod` and the OTLP settings, and the lint values cover every required secret.
