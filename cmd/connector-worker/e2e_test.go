@@ -43,7 +43,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/pkg/dsl"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
 const e2eInternalToken = "e2e-connector-worker-test-token"
