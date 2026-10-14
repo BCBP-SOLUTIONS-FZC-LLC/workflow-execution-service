@@ -79,6 +79,10 @@ func TestValidate(t *testing.T) {
 		{"rls violation export interval zero", func(c *Config) { c.RLSViolationExportInterval = 0 }, true},
 		{"rls violation retention zero", func(c *Config) { c.RLSViolationRetention = 0 }, true},
 		{"operational stats interval zero", func(c *Config) { c.OperationalStatsInterval = 0 }, true},
+		{"outbox retention zero", func(c *Config) { c.OutboxRetention = 0 }, true},
+		{"processed event retention zero", func(c *Config) { c.ProcessedEventRetention = 0 }, true},
+		{"retention sweep interval zero", func(c *Config) { c.RetentionSweepInterval = 0 }, true},
+		{"retention sweep batch zero", func(c *Config) { c.RetentionSweepBatch = 0 }, true},
 		{"queue topology poll interval zero", func(c *Config) { c.QueueTopologyPollInterval = 0 }, true},
 	}
 
@@ -104,6 +108,10 @@ func TestValidate(t *testing.T) {
 				RLSViolationExportInterval: 30 * time.Second,
 				RLSViolationRetention:      time.Hour,
 				OperationalStatsInterval:   30 * time.Second,
+				OutboxRetention:            time.Hour,
+				ProcessedEventRetention:    time.Hour,
+				RetentionSweepInterval:     time.Hour,
+				RetentionSweepBatch:        100,
 			}
 			tt.mutate(cfg)
 
@@ -336,5 +344,23 @@ func TestRequire(t *testing.T) {
 				t.Errorf("error = %v, want one naming %s", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestLoad_RetentionDefaultsFollowTheLLD(t *testing.T) {
+	setValidEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+	if want := 7 * 365 * 24 * time.Hour; cfg.OutboxRetention != want {
+		t.Errorf("OutboxRetention = %v, want the %v audit floor: outbox_events is the audit trail", cfg.OutboxRetention, want)
+	}
+	if want := 7 * 24 * time.Hour; cfg.ProcessedEventRetention != want {
+		t.Errorf("ProcessedEventRetention = %v, want %v", cfg.ProcessedEventRetention, want)
+	}
+	if cfg.RetentionSweepInterval != 24*time.Hour || cfg.RetentionSweepBatch != 1000 {
+		t.Errorf("sweep = %v every, batch %d; want daily, 1000", cfg.RetentionSweepInterval, cfg.RetentionSweepBatch)
 	}
 }

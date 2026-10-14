@@ -24,6 +24,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Added
 
+- A retention sweep in the API process, once a day and at start: published `outbox_events` older than the 7-year audit floor are pruned in batches through the outbox runner, and `processed_event` rows older than 7 days are pruned (the table has no row-level security). Settings `OUTBOX_RETENTION`, `PROCESSED_EVENT_RETENTION`, `RETENTION_SWEEP_INTERVAL` and `RETENTION_SWEEP_BATCH`; the counter `workflow_execution_service_retention_rows_deleted_total` counts rows by table.
+
 - Contract tests send the event category routes and the connector-task complete and fail callbacks through the real router against `api/internal-openapi.yaml`.
 
 ### Added

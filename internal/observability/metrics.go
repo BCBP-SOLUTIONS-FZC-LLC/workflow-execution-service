@@ -40,6 +40,7 @@ var (
 	WorkerQueueLastPollTimestamp        *prometheus.GaugeVec
 	SLABreachesTotal                    prometheus.Counter
 	DelegationScopeUnhandledTotal       *prometheus.CounterVec
+	RetentionRowsDeletedTotal           *prometheus.CounterVec
 	ConnectorDispatchDeadLetteredTotal  *prometheus.CounterVec
 	ConnectorTaskFailuresTotal          *prometheus.CounterVec
 	OldestReadyTaskAgeSeconds           prometheus.Gauge
@@ -72,6 +73,9 @@ func registerServiceMetrics() {
 	DelegationScopeUnhandledTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_delegation_scope_unhandled_total",
 		"Delegations arriving with a scope this service has no case for, by scope. Still matched against subject_id.", "scope"))
+	RetentionRowsDeletedTotal = must(gincommon.NewCounterVec(nil,
+		"workflow_execution_service_retention_rows_deleted_total",
+		"Rows the retention sweep deleted, by table (outbox_events or processed_event).", "table"))
 	ConnectorDispatchDeadLetteredTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_connector_dispatch_dead_lettered_total",
 		"Connector stream entries moved to the dead-letter stream after exceeding their delivery cap, by connector_type.", "connector_type"))
@@ -178,6 +182,12 @@ func SetGauge(g prometheus.Gauge, v float64) {
 func AddRLSViolations(violationType string, n float64) {
 	if RLSViolationsTotal != nil {
 		RLSViolationsTotal.WithLabelValues(violationType).Add(n)
+	}
+}
+
+func AddRetentionRowsDeleted(table string, n int64) {
+	if RetentionRowsDeletedTotal != nil {
+		RetentionRowsDeletedTotal.WithLabelValues(table).Add(float64(n))
 	}
 }
 

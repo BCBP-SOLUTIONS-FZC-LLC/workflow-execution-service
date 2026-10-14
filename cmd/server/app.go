@@ -31,9 +31,10 @@ type app struct {
 	metricsServer *http.Server
 	outboxRelay   *outbox.Runner
 
-	rlsExporter     *service.RLSViolationExporter
-	statsSampler    *service.OperationalGaugeSampler
-	cancelExporters context.CancelFunc
+	rlsExporter      *service.RLSViolationExporter
+	statsSampler     *service.OperationalGaugeSampler
+	retentionSweeper *service.RetentionSweeper
+	cancelExporters  context.CancelFunc
 
 	sdkClient client.Client
 
@@ -60,6 +61,7 @@ func (a *app) startServers() {
 	a.cancelExporters = cancelExporters
 	go a.rlsExporter.Run(exportCtx)
 	go a.statsSampler.Run(exportCtx)
+	go a.retentionSweeper.Run(exportCtx)
 
 	go func() {
 		a.log.Info("HTTP server starting", map[string]any{"addr": a.httpServer.Addr})

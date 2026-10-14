@@ -115,6 +115,17 @@ func newApp(cfg *config.Config) (*app, error) {
 		Logger:   log,
 	})
 
+	retentionSweeper := service.NewRetentionSweeper(service.RetentionSweeperDeps{
+		Outbox:                  relay,
+		ProcessedEvents:         postgres.NewProcessedEventRepo(appPool),
+		OutboxRetention:         cfg.OutboxRetention,
+		ProcessedEventRetention: cfg.ProcessedEventRetention,
+		Batch:                   cfg.RetentionSweepBatch,
+		Interval:                cfg.RetentionSweepInterval,
+		Record:                  func(table string, deleted int64) { observability.AddRetentionRowsDeleted(table, deleted) },
+		Logger:                  log,
+	})
+
 	var interceptors []interceptor.ClientInterceptor
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
 		tracingInterceptor, err := observability.NewTemporalTracingInterceptor(opentelemetry.TracerOptions{})
@@ -235,17 +246,18 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 
 	return &app{
-		cfg:             cfg,
-		log:             log,
-		appPool:         appPool,
-		relayPool:       relayPool,
-		cache:           cacheClient,
-		httpServer:      httpServer,
-		metricsServer:   metricsServer,
-		outboxRelay:     relay,
-		rlsExporter:     rlsExporter,
-		statsSampler:    statsSampler,
-		sdkClient:       sdkClient,
-		tracingShutdown: tracingShutdown,
+		cfg:              cfg,
+		log:              log,
+		appPool:          appPool,
+		relayPool:        relayPool,
+		cache:            cacheClient,
+		httpServer:       httpServer,
+		metricsServer:    metricsServer,
+		outboxRelay:      relay,
+		rlsExporter:      rlsExporter,
+		statsSampler:     statsSampler,
+		retentionSweeper: retentionSweeper,
+		sdkClient:        sdkClient,
+		tracingShutdown:  tracingShutdown,
 	}, nil
 }

@@ -89,3 +89,29 @@ func TestProcessedEventRepo_PruneOlderThan(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, processed, "pruned rows must no longer be considered processed")
 }
+
+func TestProcessedEventRepo_PruneOlderThan_OnTheAppRoleWithNoTenant(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	ctx := context.Background()
+
+	old := time.Now().UTC().Add(-9 * 24 * time.Hour)
+	ids := []uuid.UUID{uuid.New(), uuid.New(), uuid.New()}
+	for i, id := range ids {
+		processedAt := old
+		if i == 2 {
+			processedAt = time.Now().UTC()
+		}
+		require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+			_, err := conn.Exec(ctx,
+				`INSERT INTO processed_event (event_id, consumer, event_type, processed_at) VALUES ($1, $2, 'x', $3)`,
+				id, []string{"membership-execution", "user-execution", "membership-execution"}[i], processedAt)
+			return err
+		}))
+	}
+
+	deleted, err := postgres.NewProcessedEventRepo(appPool).PruneOlderThan(ctx, 8*24*time.Hour)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), deleted, "the table has no row-level security, so the app role prunes every consumer's old rows with no tenant set")
+}

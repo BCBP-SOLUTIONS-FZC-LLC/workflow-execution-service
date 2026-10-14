@@ -102,6 +102,7 @@ func exerciseEveryCollector() {
 	observability.IncCounterVec(observability.RecordVersionConflictTotal, "workflow_instance")
 	observability.IncCounterVec(observability.InternalEventsIngestTotal, "DelegationStarted", "ok")
 	observability.IncCounterVec(observability.DelegationScopeUnhandledTotal, "some-new-scope")
+	observability.AddRetentionRowsDeleted("outbox_events", 1)
 	observability.IncCounterVec(observability.ConnectorDispatchDeadLetteredTotal, "send-email")
 	observability.ObserveHistogram(observability.DelegationRerouteDurationSeconds, 1)
 	observability.ObserveHistogramVec(observability.TaskSignalDurationSeconds, 0.1, "claim")
