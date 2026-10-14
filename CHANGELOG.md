@@ -8,6 +8,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## [Unreleased]
 
+### Fixed
+
+- A connector callback for a paused instance returns 409 `INVALID_INSTANCE_STATE` instead of success; the workflow dropped the signal, so the task never completed after resume. The connector worker redelivers until the instance runs. A callback for an instance that is over is acknowledged with no signal.
+- A task failed through `UpdateTaskStatus` vacates its active assignments, as a cascade-failed task does, so the automation principal no longer holds a failed task.
+
+### Changed
+
+- `WorkflowTaskFailed` carries an optional `error_class` when a stage fails (the connector's error class); a cascade failure carries none. The payload schema, the AsyncAPI document and the LLD describe it, and the message no longer claims a task only fails through a cascade.
+- Branch conditions are parsed and matched by `workflow-models` `dsl.ParseCondition`: `= decision = "bid"` evaluates as documented, a literal that contains `==` is no longer mis-split, numbers compare as numbers, and an unsupported form fails the gateway.
+- The internal spec declares 502 `EVENT_DECODE_FAILED` on the four event category routes. The copy of the Definition Service's internal spec is refreshed and `SOURCES` names `feat/service`.
+
+### Added
+
+- Contract tests send the event category routes and the connector-task complete and fail callbacks through the real router against `api/internal-openapi.yaml`.
+
 ### Added
 
 - `workflow_execution_service_*` collectors built through `platform-gincommon`, with the `platform_*` series from the platform libraries in every scrape; `make metrics-lint`, a generated `docs/observability/metric-registry.md`, a scrape test, and a test that every metric an alert rule names is exported.
