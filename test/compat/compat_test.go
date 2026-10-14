@@ -182,6 +182,10 @@ func (e *env) archiveGuard(t *testing.T) {
 	if a := e.archive(t, tn, e.definitionURL, p.workflowID); a.status != http.StatusOK {
 		t.Fatalf("archive after cancel = %d %s, want 200", a.status, a.body)
 	}
+
+	if a := e.startInstance(t, tn, p.versionID); a.status != http.StatusConflict || a.code(t) != "VERSION_NOT_PUBLISHED" {
+		t.Fatalf("start on a version archived after an earlier start = %d %s, want 409 VERSION_NOT_PUBLISHED", a.status, a.body)
+	}
 }
 
 func (e *env) revoke(t *testing.T, tn tenant, eventType string, user, department uuid.UUID) {
@@ -225,27 +229,10 @@ func (e *env) revocation(t *testing.T) {
 	}
 	e.waitInstance(t, tn, id, "PAUSED", func(d instanceDetail) bool { return d.Status == "PAUSED" })
 
-	t.Run("a new start on the invalidated version does not run", func(t *testing.T) {
+	t.Run("a new start on the invalidated version is refused", func(t *testing.T) {
 		a := e.startInstance(t, tn, p.versionID)
-		switch a.status {
-		case http.StatusConflict:
-			if a.code(t) != "VERSION_INVALID" {
-				t.Fatalf("start on an invalid version = 409 %s, want VERSION_INVALID", a.body)
-			}
-		case http.StatusCreated:
-			var started struct {
-				ID uuid.UUID `json:"id"`
-			}
-			a.decode(t, &started)
-			d := e.waitInstance(t, tn, started.ID, "a READY task or FAILED", func(d instanceDetail) bool {
-				_, ok := readyTask(d)
-				return ok || d.Status == "FAILED"
-			})
-			if d.Status != "FAILED" {
-				t.Fatalf("an instance of a version Definition marked invalid runs: status %s, tasks %+v", d.Status, d.Tasks)
-			}
-		default:
-			t.Fatalf("start on an invalid version = %d %s", a.status, a.body)
+		if a.status != http.StatusConflict || a.code(t) != "VERSION_INVALID" {
+			t.Fatalf("start on a version Definition invalidated = %d %s, want 409 VERSION_INVALID", a.status, a.body)
 		}
 	})
 }

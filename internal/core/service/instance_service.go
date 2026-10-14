@@ -54,7 +54,10 @@ func (s *InstanceService) fetchCompiledWorkflow(ctx context.Context, tenantID, v
 			s.logger().Warn("compiled-plan cache hit failed to unmarshal, falling back to Definitions", nil)
 		}
 	}
+	return s.readCompiledWorkflow(ctx, tenantID, versionID)
+}
 
+func (s *InstanceService) readCompiledWorkflow(ctx context.Context, tenantID, versionID uuid.UUID) (*port.CompiledWorkflow, error) {
 	compiled, err := s.Definitions.GetCompiledWorkflow(ctx, tenantID, versionID)
 	if err != nil {
 		s.logger().Warn("compiled-plan read from Definitions failed", map[string]any{"error": err.Error()})
@@ -71,7 +74,7 @@ func (s *InstanceService) fetchCompiledWorkflow(ctx context.Context, tenantID, v
 }
 
 func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput) (*port.Instance, error) {
-	compiled, err := s.fetchCompiledWorkflow(ctx, in.TenantID, in.WorkflowVersionID)
+	compiled, err := s.readCompiledWorkflow(ctx, in.TenantID, in.WorkflowVersionID)
 	if err != nil {
 		return nil, err
 	}

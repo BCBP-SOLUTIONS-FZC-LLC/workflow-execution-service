@@ -873,25 +873,41 @@ func TestInstanceService_Terminate(t *testing.T) {
 }
 
 func TestInstanceService_Start_CompiledPlanCache(t *testing.T) {
-	t.Run("a cache hit skips the Definitions call entirely", func(t *testing.T) {
-		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
-		cache := newFakeCacheStore()
-		svc.Cache = cache
-		tenantID, versionID := uuid.New(), uuid.New()
+	// Start reads the Definition Service every time: Definition evicts its
+	// own copy when a version is invalidated or archived, while this cache
+	// would keep answering valid for up to an hour (execution LLD §1).
+	t.Run("start reads Definitions even when the version is cached", func(t *testing.T) {
+		for name, tc := range map[string]struct {
+			mutate func(*port.CompiledWorkflow)
+			want   error
+		}{
+			"invalidated": {func(cw *port.CompiledWorkflow) { cw.IsValid = false }, port.ErrVersionInvalid},
+			"archived":    {func(cw *port.CompiledWorkflow) { cw.Status = "ARCHIVED" }, port.ErrVersionNotPublished},
+		} {
+			t.Run(name, func(t *testing.T) {
+				svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
+				cache := newFakeCacheStore()
+				svc.Cache = cache
+				tenantID, versionID := uuid.New(), uuid.New()
 
-		cached := publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
-		raw, err := json.Marshal(cached)
-		require.NoError(t, err)
-		cache.values["compiled_plan:"+tenantID.String()+":"+versionID.String()] = string(raw)
-		definitions.err = errors.New("Definitions must not be called on a cache hit")
+				cached := publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
+				raw, err := json.Marshal(cached)
+				require.NoError(t, err)
+				cache.values["compiled_plan:"+tenantID.String()+":"+versionID.String()] = string(raw)
 
-		_, err = svc.Start(context.Background(), port.StartInstanceInput{
-			TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "TND-CACHE-1", StartedByUserID: uuid.New(),
-		})
-		require.NoError(t, err)
+				current := publishedCompiledWorkflow(cached.WorkflowID, versionID, cached.CompiledPlanJSON)
+				tc.mutate(current)
+				definitions.resp = current
+
+				_, err = svc.Start(context.Background(), port.StartInstanceInput{
+					TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "TND-CACHE-1", StartedByUserID: uuid.New(),
+				})
+				require.ErrorIs(t, err, tc.want)
+			})
+		}
 	})
 
-	t.Run("a cache miss falls through to Definitions", func(t *testing.T) {
+	t.Run("a start writes the fetched plan through for running instances", func(t *testing.T) {
 		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
 		cache := newFakeCacheStore()
 		svc.Cache = cache
@@ -902,33 +918,7 @@ func TestInstanceService_Start_CompiledPlanCache(t *testing.T) {
 			TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "TND-CACHE-2", StartedByUserID: uuid.New(),
 		})
 		require.NoError(t, err)
-	})
-
-	// Regression guard for the removal of TemplateCachePrewarmer (the only
-	// other populator of this cache key): fetchCompiledWorkflow must write
-	// the fetched plan back on a miss, or the cache would never come warm
-	// again — a fresh Start call for the SAME (tenant, version), right after
-	// a cold-cache first call, must now hit the cache instead of calling
-	// Definitions a second time.
-	t.Run("a cache miss is written back so a later Start for the same version hits the cache", func(t *testing.T) {
-		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
-		cache := newFakeCacheStore()
-		svc.Cache = cache
-		tenantID, versionID := uuid.New(), uuid.New()
-		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
-
-		_, err := svc.Start(context.Background(), port.StartInstanceInput{
-			TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "TND-CACHE-4", StartedByUserID: uuid.New(),
-		})
-		require.NoError(t, err)
-		require.Contains(t, cache.values, "compiled_plan:"+tenantID.String()+":"+versionID.String(),
-			"the first (cold-cache) Start must populate the cache, not just read from it")
-
-		definitions.err = errors.New("Definitions must not be called again — the previous miss should have warmed the cache")
-		_, err = svc.Start(context.Background(), port.StartInstanceInput{
-			TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "TND-CACHE-5", StartedByUserID: uuid.New(),
-		})
-		require.NoError(t, err, "a second Start for the same (tenant, version) must hit the now-warm cache, not re-fetch")
+		require.Contains(t, cache.values, "compiled_plan:"+tenantID.String()+":"+versionID.String())
 	})
 
 	t.Run("a cache write-through failure after a miss still returns the fetched plan", func(t *testing.T) {
@@ -948,13 +938,11 @@ func TestInstanceService_Start_CompiledPlanCache(t *testing.T) {
 		assert.NotEmpty(t, log.warnCalls)
 	})
 
-	t.Run("a cache read error falls through to Definitions instead of failing Start", func(t *testing.T) {
+	t.Run("an unreadable cache does not affect Start", func(t *testing.T) {
 		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
 		cache := newFakeCacheStore()
 		cache.getErr = errors.New("valkey unavailable")
 		svc.Cache = cache
-		log := &fakeLogger{}
-		svc.Log = log
 		tenantID, versionID := uuid.New(), uuid.New()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
 
@@ -962,7 +950,6 @@ func TestInstanceService_Start_CompiledPlanCache(t *testing.T) {
 			TenantID: tenantID, WorkflowVersionID: versionID, BusinessKey: "TND-CACHE-3", StartedByUserID: uuid.New(),
 		})
 		require.NoError(t, err)
-		assert.NotEmpty(t, log.warnCalls)
 	})
 
 	// The 503 the handler answers with carries a fixed detail, so the cause

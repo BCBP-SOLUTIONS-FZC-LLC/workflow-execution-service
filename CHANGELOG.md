@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- Instance start read a version's status and validity from this service's one-hour plan cache, so after the Definition Service invalidated the version (a membership revocation) or archived it, a start within the hour answered `201` and the instance then failed. Start now always reads the Definition Service, which evicts its own copy on both events, and answers `409 VERSION_INVALID` or `409 VERSION_NOT_PUBLISHED`. The cache is still written by each start and serves outside answers for running instances.
 - A force-forward that cancelled a task stage while it was still creating its task or recording its node failed the stage with the cancelled activity's error, so a parallel join counted the branch as failed; CI caught it as an intermittent `TestRunTaskStage_AbandonedOnCancel` failure. The stage is abandoned, and a task it created is superseded (change ID `abandoned-mid-activity`).
 - CI's first full run on this branch (earlier runs skipped every job on a draft) failed in three places: the tidy check ran without the gitignored mocks and dropped `go.uber.org/mock`, and the Trivy and smoke jobs rebuilt the images without the sqlc output. The quality job generates the mocks first, and both image jobs generate the sqlc code.
 - An instance started on a version the Definition Service had already marked invalid (after a membership revocation) ran: the API's start reads a plan cached for up to an hour, and `GetCompiledPlanActivity` did not check the status or validity it fetched. The activity now refuses, without retry, a version that is not `PUBLISHED` or not valid, so the instance fails and runs no step.
@@ -21,6 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The image build and the Trivy scan are single jobs named `Build image (cache)` and `Trivy CVE scan`, as the branch ruleset requires; as matrices they reported per image and the required checks never appeared. The GHCR push and release image jobs generate the sqlc code before building.
 - A delegation scope this service has no case for (anything but `all`, `department` and `tender`) matches nothing and is logged and counted; it was compared with the instance's `subject_id`, which could reroute the wrong tasks when IAM adds a scope.
 - The LLD residual-risk row says the connector callbacks answer `204`, as built.
 - The public spec follows the handlers: a task's assignment record has no `task_id`, the active-assignment item is the seven fields the handler sends, and the outside-answer routes declare `413` and `415`. Contract tests send the instance and task routes through the router and fail on any response field the spec omits.

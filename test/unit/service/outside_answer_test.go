@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -125,4 +126,43 @@ func TestAnswerOutsideWait_AnAssigneeOfTheInstancesTasksMayAnswer(t *testing.T) 
 	err = svc.AnswerOutsideWait(context.Background(), inst.TenantID, inst.ID, other, outsideKey, nil)
 	assert.ErrorIs(t, err, port.ErrNotAuthorizedForRead)
 	assert.Len(t, temporal.signals, 1, "an unauthorised answer must not be signalled")
+}
+
+// An answer reads the instance's plan through the compiled-plan cache: the
+// body of a version never changes, so a running instance does not need the
+// Definition Service's live answer that a start needs.
+func TestAnswerOutsideWait_ReadsThePlanThroughTheCache(t *testing.T) {
+	cachedHarness := func(t *testing.T, entry func(raw string) string, getErr error) (*service.InstanceService, *domain.Instance, *fakeCacheStore) {
+		t.Helper()
+		svc, inst, _ := outsideAnswerHarness(t, domain.InstanceStatusRunning, outsideKey)
+		plan, err := svc.Definitions.GetCompiledWorkflow(context.Background(), inst.TenantID, inst.WorkflowVersionID)
+		require.NoError(t, err)
+		raw, err := json.Marshal(plan)
+		require.NoError(t, err)
+		cache := newFakeCacheStore()
+		cache.values["compiled_plan:"+inst.TenantID.String()+":"+inst.WorkflowVersionID.String()] = entry(string(raw))
+		cache.getErr = getErr
+		svc.Cache = cache
+		return svc, inst, cache
+	}
+
+	t.Run("a cached plan answers without the Definition Service", func(t *testing.T) {
+		svc, inst, _ := cachedHarness(t, func(raw string) string { return raw }, nil)
+		svc.Definitions = &fakeDefinitionClient{err: errors.New("the Definition Service must not be read on a cache hit")}
+		require.NoError(t, svc.AnswerOutsideWait(context.Background(), inst.TenantID, inst.ID, adminScope(), outsideKey, nil))
+	})
+	t.Run("an unreadable cache falls back to the Definition Service", func(t *testing.T) {
+		svc, inst, _ := cachedHarness(t, func(raw string) string { return raw }, errors.New("valkey unavailable"))
+		log := &fakeLogger{}
+		svc.Log = log
+		require.NoError(t, svc.AnswerOutsideWait(context.Background(), inst.TenantID, inst.ID, adminScope(), outsideKey, nil))
+		assert.NotEmpty(t, log.warnCalls)
+	})
+	t.Run("a corrupt cache entry falls back to the Definition Service", func(t *testing.T) {
+		svc, inst, _ := cachedHarness(t, func(string) string { return "{not json" }, nil)
+		log := &fakeLogger{}
+		svc.Log = log
+		require.NoError(t, svc.AnswerOutsideWait(context.Background(), inst.TenantID, inst.ID, adminScope(), outsideKey, nil))
+		assert.NotEmpty(t, log.warnCalls)
+	})
 }
