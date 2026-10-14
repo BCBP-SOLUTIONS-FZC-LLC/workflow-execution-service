@@ -186,11 +186,45 @@ func (e *env) mustPublish(t *testing.T, tn tenant, bpmn string) published {
 
 func (e *env) startInstance(t *testing.T, tn tenant, versionID uuid.UUID) answer {
 	t.Helper()
-	return e.executionAs(t, tn, tn.admin, "tenant_admin").do(http.MethodPost, "/api/v1/instances", map[string]any{
+	return e.startInstanceWith(t, tn, versionID, nil)
+}
+
+func (e *env) startInstanceWith(t *testing.T, tn tenant, versionID uuid.UUID, variables map[string]any) answer {
+	t.Helper()
+	body := map[string]any{
 		"subject_id":          "compat-subject-" + uuid.NewString(),
 		"business_key":        "compat-" + uuid.NewString(),
 		"workflow_version_id": versionID,
-	})
+	}
+	if variables != nil {
+		body["context_json"] = variables
+	}
+	return e.executionAs(t, tn, tn.admin, "tenant_admin").do(http.MethodPost, "/api/v1/instances", body)
+}
+
+// forwardRelayed waits for the relay to publish an envelope of eventType that
+// match accepts, and posts it to Execution's category route with the
+// internal token, as the Workflow-Events Consumer does.
+func (e *env) forwardRelayed(t *testing.T, eventType, route string, match func(data map[string]any) bool) {
+	t.Helper()
+	deadline := time.Now().Add(pollTimeout)
+	for {
+		for _, env := range e.relayed.Published() {
+			if env.Type != eventType {
+				continue
+			}
+			var data map[string]any
+			if err := json.Unmarshal(env.Payload, &data); err != nil || !match(data) {
+				continue
+			}
+			caller{t: t, baseURL: e.executionURL, token: executionToken}.must(http.MethodPost, route, env, http.StatusOK)
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the relay never published a matching %s", eventType)
+		}
+		time.Sleep(pollInterval)
+	}
 }
 
 func (e *env) mustStart(t *testing.T, tn tenant, versionID uuid.UUID) uuid.UUID {

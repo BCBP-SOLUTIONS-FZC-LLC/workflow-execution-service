@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -29,6 +30,8 @@ import (
 	"go.temporal.io/sdk/worker"
 	sdkworkflow "go.temporal.io/sdk/workflow"
 
+	eventsmock "github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events/mock"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/outbox"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 
@@ -40,6 +43,7 @@ import (
 	temporaladapter "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporalclient"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkey"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkeystream"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
@@ -56,6 +60,8 @@ const (
 
 	aliasHost = "partner.example.com"
 
+	connectorStreamKey = "connector-tasks"
+
 	pollTimeout  = 90 * time.Second
 	pollInterval = 250 * time.Millisecond
 )
@@ -68,6 +74,8 @@ type env struct {
 	executionURL  string
 
 	temporal      client.Client
+	executionDSN  string
+	relayed       *eventsmock.Publisher
 	definitionDB  definitionDB
 	valkeyAddr    string
 	membershipURL string
@@ -89,6 +97,16 @@ func (eligibleForAll) CheckEligibilityBatch(_ context.Context, reqs []port.Eligi
 		out[i] = port.EligibilityResult{Eligible: true}
 	}
 	return out, nil
+}
+
+// automationPrincipal stands in for the Token Service: every tenant's
+// connector tasks run as one principal.
+var automationPrincipal = uuid.MustParse("99999999-9999-4999-8999-999999999999")
+
+type onePrincipal struct{}
+
+func (onePrincipal) AutomationPrincipal(context.Context, uuid.UUID) (uuid.UUID, error) {
+	return automationPrincipal, nil
 }
 
 type alwaysHealthy struct{}
@@ -190,7 +208,7 @@ func (e *env) definitionEnv(t *testing.T, httpPort int, executionToken string) [
 		"ORG_MEMBERSHIP_BASE_URL=" + e.membershipURL,
 		"EXECUTION_SERVICE_URL=" + e.executionURL,
 		"EXECUTION_SERVICE_TOKEN=" + executionToken,
-		"CONNECTOR_ALIAS_ALLOWED_HOSTS=" + aliasHost,
+		"CONNECTOR_ALIAS_ALLOWED_HOSTS=" + aliasHost + ",127.0.0.1",
 		"SHUTDOWN_DRAIN_DELAY=0s",
 		"OTEL_SDK_DISABLED=true",
 	}
@@ -310,7 +328,8 @@ func startWorker(t *testing.T, sdk client.Client, deps *temporaladapter.Deps) {
 // buildExecution wires the API the way cmd/server/wire.go does, with the
 // real Definition client and Valkey cache; only eligibility is faked, since
 // the IAM route it calls is not built yet.
-func buildExecution(t *testing.T, pool *pgcommon.Pool, sdk client.Client, cache port.CacheStore, definitions port.DefinitionServiceClient) http.Handler {
+func buildExecution(t *testing.T, pool *pgcommon.Pool, sdk client.Client, rdb *redis.Client, definitions port.DefinitionServiceClient) http.Handler {
+	cache := valkey.NewCache(rdb)
 	instances := postgres.NewInstanceRepo(pool)
 	tasks := postgres.NewTaskRepo(pool)
 	assignments := postgres.NewTaskAssignmentRepo(pool)
@@ -349,8 +368,14 @@ func buildExecution(t *testing.T, pool *pgcommon.Pool, sdk client.Client, cache 
 		},
 		UserSafetyNet:   &service.UserSafetyNetReconciler{Assignments: assignments},
 		OOOAvailability: &service.OOOAvailabilityReconciler{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal},
-		ArchiveGuard:    &service.ArchiveGuard{Instances: instances},
-		UserTaskPauser:  &service.UserTaskPauser{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal},
+		ConnectorTasks: &service.ConnectorTaskService{
+			Instances: instances, Tasks: tasks, Assignments: assignments,
+			Temporal: temporal, Cache: cache, Principals: onePrincipal{},
+		},
+		ConnectorEvents:      valkeystream.NewEventPublisher(valkeystream.NewProducer(rdb), connectorStreamKey),
+		AutomationPrincipals: onePrincipal{},
+		ArchiveGuard:         &service.ArchiveGuard{Instances: instances},
+		UserTaskPauser:       &service.UserTaskPauser{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal},
 	})
 	return httpadapter.NewRouter(httpadapter.RouterConfig{
 		GinConfig:        gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "compat", Domain: "workflow", Environment: "test"},
@@ -372,7 +397,8 @@ func setup(t *testing.T) *env {
 	e.definitionBin = filepath.Join(t.TempDir(), "definition-server")
 	goBuild(t, e.definitionDir, "./cmd/server", e.definitionBin)
 
-	pool := fixtures.NewTestPool(t)
+	pool, dsn := fixtures.NewTestPoolAndDSN(t)
+	e.executionDSN = dsn
 	sdk := fixtures.NewTestTemporalServer(t)
 	e.temporal = sdk
 	e.valkeyAddr = fixtures.NewTestValkey(t)
@@ -383,7 +409,7 @@ func setup(t *testing.T) *env {
 
 	rdb := redis.NewClient(&redis.Options{Addr: e.valkeyAddr})
 	t.Cleanup(func() { _ = rdb.Close() })
-	cache := valkey.NewCache(rdb)
+	e.startRelay(t, pool)
 
 	e.definitionURL = "http://127.0.0.1:" + strconv.Itoa(definitionPort)
 	definitions := outboundhttp.NewDefinitionClient(e.definitionURL, definitionToken, 5*time.Second)
@@ -397,10 +423,97 @@ func setup(t *testing.T) *env {
 		Outbox: postgres.NewOutboxRepo(pool), Transactor: postgres.NewTransactor(pool), Validator: validator, Definitions: definitions,
 	})
 
-	srv := httptest.NewServer(buildExecution(t, pool, sdk, cache, definitions))
+	srv := httptest.NewServer(buildExecution(t, pool, sdk, rdb, definitions))
 	t.Cleanup(srv.Close)
 	e.executionURL = srv.URL
 
 	e.startDefinition(t, definitionPort, executionToken)
 	return e
+}
+
+// startRelay runs the platform-events outbox runner over this service's
+// database, as the API process does, publishing into a capture instead of SNS:
+// what a test forwards is exactly the envelope the relay would publish.
+func (e *env) startRelay(t *testing.T, pool *pgcommon.Pool) {
+	t.Helper()
+	e.relayed = &eventsmock.Publisher{}
+	runner, err := outbox.NewRunner(outbox.Config{
+		Pool: pool, Publisher: e.relayed, PollInterval: 100 * time.Millisecond, BatchSize: 50,
+	})
+	if err != nil {
+		t.Fatalf("outbox runner: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = runner.Start(ctx)
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+}
+
+// startConnectorWorker builds and runs this repository's connector worker
+// against the shared Valkey stream, Execution's internal callbacks and the
+// Definition Service's alias registry. The worker reads the aliases at start,
+// so a test writes its aliases first.
+func (e *env) startConnectorWorker(t *testing.T) {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("module root: %v", err)
+	}
+	bin := filepath.Join(t.TempDir(), "connector-worker")
+	goBuild(t, root, "./cmd/connector-worker", bin)
+	health := freePort(t)
+	var logs bytes.Buffer
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir()
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		"APP_ENV=dev",
+		"DATABASE_URL=" + e.executionDSN,
+		"VALKEY_ADDR=" + e.valkeyAddr,
+		"CONNECTOR_STREAM_KEY=" + connectorStreamKey,
+		"DEFINITION_SERVICE_URL=" + e.definitionURL,
+		"DEFINITION_SERVICE_TOKEN=" + definitionToken,
+		"INTERNAL_API_TOKEN=" + executionToken,
+		"EXECUTION_SERVICE_INTERNAL_ADDR=" + e.executionURL,
+		"OPENBAO_ADDR=http://127.0.0.1:1",
+		"WORKER_HEALTH_PORT=" + strconv.Itoa(health),
+		"WORKER_METRICS_PORT=" + strconv.Itoa(freePort(t)),
+		"OTEL_SDK_DISABLED=true",
+	}
+	cmd.Stdout = &logs
+	cmd.Stderr = &logs
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start connector worker: %v", err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-exited
+		if t.Failed() {
+			t.Logf("connector worker output:\n%s", logs.String())
+		}
+	})
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		if resp, err := http.Get("http://127.0.0.1:" + strconv.Itoa(health) + "/readyz"); err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("connector worker never became ready:\n%s", logs.String())
+		}
+		select {
+		case err := <-exited:
+			exited <- err
+			t.Fatalf("connector worker exited before it was ready (%v):\n%s", err, logs.String())
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -45,6 +46,7 @@ func TestCompat(t *testing.T) {
 	t.Run("every Definition fixture publishes and runs", func(t *testing.T) { e.everyFixtureRuns(t) })
 	t.Run("a two-stage template runs to completion", func(t *testing.T) { e.roundTrip(t) })
 	t.Run("a template calling a published library module runs through the module", func(t *testing.T) { e.libraryCall(t) })
+	t.Run("a connector stage runs through the connector worker with Definition's alias", func(t *testing.T) { e.connectorRoundTrip(t) })
 	t.Run("archive waits for live instances", func(t *testing.T) { e.archiveGuard(t) })
 	t.Run("a revoked membership invalidates the version and pauses the user's work", func(t *testing.T) { e.revocation(t) })
 	t.Run("a revoked tenant membership invalidates the version and pauses the user's work", func(t *testing.T) { e.tenantRevocation(t) })
@@ -374,4 +376,75 @@ func (e *env) tenantRevocation(t *testing.T) {
 		t.Fatal("version still valid after its default assignee left the tenant")
 	}
 	e.waitInstance(t, tn, id, "PAUSED", func(d instanceDetail) bool { return d.Status == "PAUSED" })
+}
+
+type partnerCall struct {
+	method, path, token, departments string
+	body                             map[string]any
+}
+
+func (e *env) connectorRoundTrip(t *testing.T) {
+	tn := newTenant()
+	assignee, department := newUser(), uuid.New()
+
+	calls := make(chan partnerCall, 4)
+	partner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c := partnerCall{method: r.Method, path: r.URL.Path, token: r.Header.Get("x-internal-token"), departments: r.Header.Get("x-departments")}
+		_ = json.NewDecoder(r.Body).Decode(&c.body)
+		calls <- c
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"accepted":true}`))
+	}))
+	t.Cleanup(partner.Close)
+
+	alias := "compat-partner-" + uuid.NewString()[:8]
+	caller{t: t, baseURL: e.definitionURL, token: definitionToken}.must(http.MethodPost, "/api/v1/internal/connector-aliases/rest", map[string]any{
+		"alias": alias, "method": "POST", "baseURL": partner.URL, "pathTemplate": "/orders", "timeoutMs": 5000,
+	}, http.StatusNoContent)
+	e.startConnectorWorker(t)
+
+	p := e.mustPublish(t, tn, fill(t, "calls-partner.bpmn", map[string]string{"ASSIGNEE": assignee.String(), "DEPARTMENT": department.String()}))
+	a := e.startInstanceWith(t, tn, p.versionID, map[string]any{"partnerAlias": alias, "order": map[string]any{"id": "42"}})
+	if a.status != http.StatusCreated {
+		t.Fatalf("POST /instances = %d %s", a.status, a.body)
+	}
+	var started struct {
+		ID uuid.UUID `json:"id"`
+	}
+	a.decode(t, &started)
+
+	d := e.waitInstance(t, tn, started.ID, "the connector task", func(d instanceDetail) bool {
+		tk, ok := readyTask(d)
+		return ok && strings.HasSuffix(tk.NodeKey, "/Call_Partner")
+	})
+	task, _ := readyTask(d)
+	e.forwardRelayed(t, "WorkflowTaskCreated", "/api/v1/internal/events/workflow-task", func(data map[string]any) bool {
+		return data["task_id"] == task.ID.String()
+	})
+
+	select {
+	case c := <-calls:
+		if c.method != http.MethodPost || c.path != "/orders" {
+			t.Errorf("partner call = %s %s, want POST /orders", c.method, c.path)
+		}
+		if c.token != executionToken {
+			t.Errorf("partner call x-internal-token = %q, want the worker's internal token", c.token)
+		}
+		if !strings.Contains(c.departments, department.String()) {
+			t.Errorf("partner call x-departments = %q, want it to name the stage's department %s", c.departments, department)
+		}
+		if c.body["id"] != "42" {
+			t.Errorf("partner call body = %v, want the order variable", c.body)
+		}
+	case <-time.After(pollTimeout):
+		t.Fatal("the connector worker never called the partner")
+	}
+
+	d = e.waitInstance(t, tn, started.ID, "Review READY after the connector", func(d instanceDetail) bool {
+		tk, ok := readyTask(d)
+		return ok && strings.HasSuffix(tk.NodeKey, "/Review")
+	})
+	review, _ := readyTask(d)
+	e.completeTask(t, tn, assignee, review)
+	e.waitInstance(t, tn, started.ID, "COMPLETED", func(d instanceDetail) bool { return d.Status == "COMPLETED" })
 }
