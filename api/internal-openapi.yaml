@@ -289,6 +289,17 @@ components:
             instance: "/api/v1/instances"
             code: "INTERNAL_ERROR"
 
+    EventDecodeFailed:
+      description: >
+        EVENT_DECODE_FAILED. The envelope carries a dataschema (schema-registry payload) that
+        could not be decoded: a missing decoder or a schema-registry failure. A retryable
+        infrastructure problem, never a malformed client payload, so the consumer retries it
+        and does not route it to its DLQ.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+
     PayloadTooLarge:
       description: Request body exceeds the 10 MB limit (§5.10, §9.3 — same cap Definition Service applies).
       content:
@@ -444,6 +455,8 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "502":
+          $ref: "#/components/responses/EventDecodeFailed"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
@@ -482,6 +495,8 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "502":
+          $ref: "#/components/responses/EventDecodeFailed"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
@@ -520,6 +535,8 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "502":
+          $ref: "#/components/responses/EventDecodeFailed"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
@@ -558,6 +575,8 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "502":
+          $ref: "#/components/responses/EventDecodeFailed"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
