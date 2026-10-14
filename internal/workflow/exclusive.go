@@ -3,23 +3,15 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
 func evaluateCondition(expr, resultJSON string) (bool, error) {
-	op := "=="
-	parts := strings.SplitN(expr, "==", 2)
-	if len(parts) != 2 {
-		op = "!="
-		parts = strings.SplitN(expr, "!=", 2)
-		if len(parts) != 2 {
-			return false, fmt.Errorf("workflow: condition expression %q is not a supported binary equality/inequality check", expr)
-		}
+	condition, err := dsl.ParseCondition(expr)
+	if err != nil {
+		return false, fmt.Errorf("workflow: %w", err)
 	}
-	field := strings.TrimSpace(parts[0])
-	literal := strings.Trim(strings.TrimSpace(parts[1]), `"`)
 
 	var result map[string]any
 	if resultJSON != "" {
@@ -27,14 +19,7 @@ func evaluateCondition(expr, resultJSON string) (bool, error) {
 			return false, fmt.Errorf("workflow: parsing result_json for condition %q: %w", expr, err)
 		}
 	}
-	actual := fmt.Sprintf("%v", result[field])
-
-	switch op {
-	case "==":
-		return actual == literal, nil
-	default:
-		return actual != literal, nil
-	}
+	return condition.Matches(result), nil
 }
 
 func selectBranch(branches []dsl.ExclusiveBranch, resultJSON string) (*dsl.ExclusiveBranch, error) {

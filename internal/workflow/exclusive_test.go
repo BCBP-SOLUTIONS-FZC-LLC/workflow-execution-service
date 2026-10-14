@@ -20,6 +20,12 @@ func TestEvaluateCondition(t *testing.T) {
 		{name: "inequality mismatch", expr: `decision != "approved"`, resultJSON: `{"decision":"approved"}`, want: false},
 		{name: "missing field compares as nil", expr: `decision == "approved"`, resultJSON: `{}`, want: false},
 		{name: "empty result_json", expr: `decision == "approved"`, resultJSON: ``, want: false},
+		{name: "FEEL equality as the designer guide writes it", expr: `= decision = "approved"`, resultJSON: `{"decision":"approved"}`, want: true},
+		{name: "an operator inside the literal", expr: `decision != "x==y"`, resultJSON: `{"decision":"x"}`, want: true},
+		{name: "a number compares as a number", expr: `amount == 5.0`, resultJSON: `{"amount":5}`, want: true},
+		{name: "a boolean", expr: `approved == true`, resultJSON: `{"approved":true}`, want: true},
+		{name: "single quotes are not a string", expr: `decision == 'approved'`, resultJSON: `{"decision":"approved"}`, wantErr: true},
+		{name: "whitespace only", expr: `   `, resultJSON: `{}`, wantErr: true},
 		{name: "unsupported operator", expr: `decision > "approved"`, resultJSON: `{"decision":"approved"}`, wantErr: true},
 		{name: "invalid result_json", expr: `decision == "approved"`, resultJSON: `not json`, wantErr: true},
 	}
