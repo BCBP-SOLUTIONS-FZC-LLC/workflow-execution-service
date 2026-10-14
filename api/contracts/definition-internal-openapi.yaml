@@ -87,7 +87,12 @@ components:
         type:      { type: string, example: DepartmentMembershipRevoked, description: "Event type used for dispatch. Unknown types are accepted and ignored." }
         tenant_id: { type: string, format: uuid, description: "Tenant the event applies to; used to set the RLS GUC." }
         time:      { type: string, format: date-time, description: "When the event was produced. A revocation leaves alone every default assignee added after this time, so a redelivered or reordered event cannot invalidate a version published after the user was added back. Absent means no such filter." }
-        data:      { type: object, additionalProperties: true, description: "Type-specific payload (e.g. user_id, department_id, role). CloudEvents data field." }
+        dataschema: { type: string, nullable: true, description: "Schema registry version identifier for the encoded payload (platform-events Envelope SchemaID). Present when the producer encodes through a schema registry; then data is a base64 string of the registry-framed JSON payload. Absent for plain JSON." }
+        data:
+          description: "Type-specific payload (e.g. user_id, department_id, role). CloudEvents data field. An object for plain JSON, or a base64 string of a schema-registry frame when dataschema is present."
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: string }
       example:
         id: "f0a11222-3844-42bc-938b-665cd42c9999"
         type: "DepartmentMembershipRevoked"
@@ -218,7 +223,7 @@ paths:
         Service-to-service ingest endpoint called by the shared workflow-events consumer (which
         consumes the SQS queues, e.g. membership-workflow-q). Accepts a single event envelope, sets the
         RLS GUC from the envelope tenant_id, and dispatches by type — currently
-        DepartmentMembershipRevoked → template invalidation (see LLD §7.4). Idempotent: a repeated
+        DepartmentMembershipRevoked and MembershipRevoked → template invalidation (see LLD §7.4). An envelope with a dataschema has its schema-registry framed payload decoded first. Idempotent: a repeated
         envelope id returns 2xx with no side effects. This route is internal-only — it is not
         exposed on the public Envoy gateway and carries no gateway identity headers.
       tags: [Internal]
@@ -245,6 +250,15 @@ paths:
         "413": { $ref: '#/components/responses/PayloadTooLarge' }
         "500":
           description: Transient processing failure (DB/transaction). The consumer retries and eventually DLQs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+        "502":
+          description: >
+            EVENT_DECODE_FAILED. The envelope carries a dataschema whose payload could not be
+            decoded: not a base64 string, an unreadable registry frame, a compressed or non-JSON
+            frame. Retryable, so the consumer retries it and does not route it to its DLQ as a
+            malformed event.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ProblemDetails' }
