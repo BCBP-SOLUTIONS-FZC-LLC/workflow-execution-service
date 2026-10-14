@@ -294,7 +294,7 @@ paths:
               type: object
               required: [alias, method, baseURL, pathTemplate]
               properties:
-                alias:        { type: string }
+                alias:        { type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9_-]+$' }
                 method:       { type: string, description: HTTP method. }
                 baseURL:
                   type: string
@@ -305,19 +305,27 @@ paths:
                     so an unlisted one is rejected rather than trusted. The
                     check is fail-closed: with no allowlist configured, every
                     baseURL is rejected. Credentials embedded in the URL
-                    (user:password@) are rejected outright.
-                pathTemplate: { type: string }
+                    (user:password@) are rejected outright. An allowlist entry
+                    that names a port (`host:8443`) matches that port only; an
+                    entry without a port matches any port.
+                pathTemplate:
+                  type: string
+                  maxLength: 2048
+                  description: >
+                    Must start with `/`, and must not start with `//` or contain
+                    `..`, `@`, a backslash, whitespace or control characters.
                 timeoutMs:
                   type: integer
                   format: int64
-                  description: Request timeout in milliseconds. Non-positive or omitted defaults to 5000ms.
+                  maximum: 60000
+                  description: Request timeout in milliseconds, at most 60000. Non-positive or omitted defaults to 5000ms.
       responses:
         "204": { description: Alias written. No response body. }
         "400":
           description: >
             Missing required field, or a domain validation failure — an invalid
-            method, or a baseURL whose scheme, credentials, or host the
-            allowlist rejects.
+            alias, method or pathTemplate, a timeoutMs over the limit, or a
+            baseURL whose scheme, credentials, host or port the allowlist rejects.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ProblemDetails' }
