@@ -2,6 +2,7 @@ package contract_test
 
 import (
 	"os"
+	"os/exec"
 	"regexp"
 	"testing"
 
@@ -42,4 +43,21 @@ func TestHelmDeployments_SetEveryEnvTheirBinaryRequires(t *testing.T) {
 			assert.True(t, set[name], "%s must set %s", file, name)
 		}
 	}
+}
+
+func TestHelmSecret_RefusesARenderWithoutTheValkeyAddress(t *testing.T) {
+	helm, err := exec.LookPath("helm")
+	if err != nil {
+		t.Skip("helm is not installed")
+	}
+	args := []string{"template", "x", "../../deploy/helm"}
+	for _, key := range []string{"DATABASE_URL", "TEMPORAL_HOST_PORT", "INTERNAL_API_TOKEN", "DEFINITION_SERVICE_TOKEN", "OUTBOX_RELAY_DATABASE_URL", "SNS_TOPIC_ARN", "OPENBAO_TOKEN"} {
+		args = append(args, "--set-string", "secret.secretValues."+key+"=placeholder")
+	}
+	args = append(args, "--set-string", "env.eligibilityBaseURL=http://eligibility.invalid", "--set-string", "env.tokenServiceBaseURL=http://token-service.invalid")
+
+	out, err := exec.Command(helm, args...).CombinedOutput()
+
+	require.Error(t, err, "a Secret without VALKEY_ADDR renders a pod that cannot start")
+	assert.Contains(t, string(out), "VALKEY_ADDR")
 }

@@ -101,7 +101,7 @@ tools:
 	        echo "hadolint: brew not found on macOS — install manually: brew install hadolint"; exit 1; \
 	    fi; \
 	else \
-	    curl -sLo $(TOOLS_DIR)/hadolint \
+	    curl -sSfLo $(TOOLS_DIR)/hadolint \
 	      "https://github.com/hadolint/hadolint/releases/download/$(HADOLINT_VERSION)/hadolint-$$OS-$$ARCH" && \
 	    chmod +x $(TOOLS_DIR)/hadolint; \
 	fi
@@ -110,13 +110,13 @@ tools:
 	elif [ "$$OS" = "Darwin" ]; then TRIVY_OS_ARCH="macOS-64bit"; \
 	elif [ "$$ARCH" = "aarch64" ] || [ "$$ARCH" = "arm64" ]; then TRIVY_OS_ARCH="Linux-ARM64"; \
 	else TRIVY_OS_ARCH="Linux-64bit"; fi; \
-	curl -sLo /tmp/trivy.tar.gz \
+	curl -sSfLo /tmp/trivy.tar.gz \
 	  "https://github.com/aquasecurity/trivy/releases/download/v$(TRIVY_VERSION)/trivy_$(TRIVY_VERSION)_$$TRIVY_OS_ARCH.tar.gz" && \
 	tar -xzf /tmp/trivy.tar.gz -C $(TOOLS_DIR) trivy && rm /tmp/trivy.tar.gz
 	@OS=$$(uname -s | tr '[:upper:]' '[:lower:]'); ARCH=$$(uname -m); \
 	if [ "$$ARCH" = "aarch64" ]; then ARCH="arm64"; fi; \
 	if [ "$$ARCH" = "x86_64" ]; then ARCH="amd64"; fi; \
-	curl -sLo /tmp/kubeconform.tar.gz \
+	curl -sSfLo /tmp/kubeconform.tar.gz \
 	  "https://github.com/yannh/kubeconform/releases/download/v$(KUBECONFORM_VERSION)/kubeconform-$$OS-$$ARCH.tar.gz" && \
 	tar -xzf /tmp/kubeconform.tar.gz -C $(TOOLS_DIR) kubeconform && rm /tmp/kubeconform.tar.gz
 	@echo "✓ tools installed to $(TOOLS_DIR)/"
