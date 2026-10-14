@@ -185,7 +185,9 @@ Logs, metrics and traces go through `platform-gincommon`; every binary calls the
 | `internal/**/*_test.go`, `test/unit/` | Unit tests | `make test` |
 | `test/workflow/` | Temporal workflow tests on the test environment | `make test` |
 | `test/contract/` | Internal API and Definition client contract tests, chart environment check | `make test` |
-| `test/integration/`, `test/e2e/` | Postgres, Valkey, Temporal via testcontainers | `make test-integration` |
+| `test/integration/` | Postgres, Valkey, Temporal via testcontainers | `make test-integration` |
+| `test/e2e/` | The API and worker against real Temporal, Postgres and Valkey, driven over HTTP | `make test-e2e` |
+| `test/compat/` | The Definition Service's real binary, built from a checkout (`DEFINITION_SERVICE_DIR`, default `../definition_service`), against this service's real API, worker and stores | `make test-compat` |
 
 `make check` runs formatting, lint, vet, arch-lint, metrics-lint, the contract gate and the merged-coverage gate.
 
@@ -195,6 +197,7 @@ Logs, metrics and traces go through `platform-gincommon`; every binary calls the
 | `make docker-up` / `make docker-down` | Local infrastructure |
 | `make migrate` / `make generate` / `make mock` | Schema, sqlc, mocks |
 | `make test` / `make test-integration` / `make test-ci` | Unit, integration, both with merged coverage |
+| `make test-e2e` / `make test-compat` | End to end, and compatibility with the Definition Service |
 | `make lint` / `make fix` | golangci-lint read-only or fixing |
 | `make arch-lint` / `make metrics-lint` / `make metrics-inventory` | Import graph, observability standard, regenerate the inventory |
 | `make contract-check` / `make contract-breaking` | Copied Definition contract, internal spec breaking-change gate |
@@ -205,7 +208,7 @@ Logs, metrics and traces go through `platform-gincommon`; every binary calls the
 
 ## CI
 
-Pull requests and pushes run `ci.yml`: a `ci-gate` job skips draft pull requests and those labelled `skip-ci`, then code generation, `validate-quality`, `validate-test`, image builds, a Trivy scan and a smoke test. Pull requests that change only Markdown or `docs/` skip CI. `changelog-check.yml` requires a CHANGELOG entry on every pull request that touches code or contracts.
+Pull requests and pushes run `ci.yml`: a `ci-gate` job skips draft pull requests and those labelled `skip-ci`, then code generation, `validate-quality`, `validate-test`, image builds, a Trivy scan and a smoke test. `validate-test` also runs the end-to-end tier in an `e2e` job, and in a `compat` job the compatibility suite against the Definition Service's `feat/service` branch, which that repository's CI runs against this one too. Pull requests that change only Markdown or `docs/` skip CI. `changelog-check.yml` requires a CHANGELOG entry on every pull request that touches code or contracts.
 
 ## Versioning and releases
 

@@ -69,7 +69,7 @@ COVER_THRESHOLD    := 95
 COVER_PKG_FLOORS   := internal/workflow:88 cmd/connector-worker:55 internal/observability:90
 
 .PHONY: metrics-lint metrics-inventory all tools tools-integration generate generate-sqlc mock contract-check contract-breaking \
-        build migrate dev test test-integration test-e2e test-ci merge-coverage \
+        build migrate dev test test-integration test-e2e test-compat test-ci merge-coverage \
         cover cover-func cover-gaps cover-html cover-check cover-check-pkg \
         arch-lint lint lint-fix vuln \
         tidy fmt-check fix check \
@@ -199,6 +199,13 @@ test-e2e:
 	AWS_EC2_METADATA_DISABLED=true \
 	TESTCONTAINERS_RYUK_DISABLED=true \
 	go test -race -count=1 -tags e2e -timeout 5m ./test/e2e/... ./cmd/connector-worker/...
+
+## test-compat: Run the Definition Service's real binary, built from DEFINITION_SERVICE_DIR (default ../definition_service), against this service's real API, worker and stores
+test-compat:
+	AWS_EC2_METADATA_DISABLED=true \
+	TESTCONTAINERS_RYUK_DISABLED=true \
+	DEFINITION_SERVICE_DIR="$(DEFINITION_SERVICE_DIR)" \
+	go test -count=1 -tags compat -timeout 15m ./test/compat/...
 
 ## merge-coverage: Merge unit + integration profiles into coverage.out (max-count-per-block strategy)
 merge-coverage:

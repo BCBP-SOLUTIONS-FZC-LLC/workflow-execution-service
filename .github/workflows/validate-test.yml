@@ -2,6 +2,12 @@ name: Validate / Test
 
 "on":
   workflow_call:
+    inputs:
+      compat_peer_ref:
+        description: 'Branch or tag of the Definition Service the compat job runs against'
+        type: string
+        required: false
+        default: feat/service
 
 permissions:
   contents: read
@@ -69,3 +75,97 @@ jobs:
 
       - name: Architecture lint
         run: make arch-lint
+
+  compat:
+    name: compat
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPAT_PEER_REF: ${{ inputs.compat_peer_ref }}
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_EC2_METADATA_DISABLED: 'true'
+      TESTCONTAINERS_RYUK_DISABLED: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - name: Checkout the Definition Service
+        uses: actions/checkout@v7
+        with:
+          repository: BCBP-SOLUTIONS-FZC-LLC/workflow-definition-service
+          ref: ${{ env.COMPAT_PEER_REF }}
+          path: peer/definition_service
+          persist-credentials: false
+          token: ${{ secrets.CI_REPO_READ_TOKEN || secrets.GO_PRIVATE_TOKEN }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            go.mod
+            peer/definition_service/go.sum
+
+      - name: Configure private module access
+        env:
+          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
+        run: |
+          git config --global credential.helper store
+          echo "https://x-access-token:${GO_PRIVATE_TOKEN}@github.com" > ~/.git-credentials
+          chmod 600 ~/.git-credentials
+
+      - name: Generate (sqlc) for both services
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
+          make -C peer/definition_service generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
+
+      - name: Compatibility with the Definition Service
+        run: make test-compat DEFINITION_SERVICE_DIR="$GITHUB_WORKSPACE/peer/definition_service"
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_EC2_METADATA_DISABLED: 'true'
+      TESTCONTAINERS_RYUK_DISABLED: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            go.mod
+
+      - name: Configure private module access
+        env:
+          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
+        run: |
+          git config --global credential.helper store
+          echo "https://x-access-token:${GO_PRIVATE_TOKEN}@github.com" > ~/.git-credentials
+          chmod 600 ~/.git-credentials
+
+      - name: Generate (sqlc)
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
+
+      - name: End-to-end (Temporal, Postgres, Valkey, HTTP)
+        run: make test-e2e
