@@ -107,6 +107,7 @@ jobs:
           THRESHOLD="${VERSION_THRESHOLD_INPUT:-${SCHEMA_VERSIONS_ALERT_THRESHOLD:-10}}"
           RUN_DATE=$(date -u +%Y-%m-%d)
 
+          # shellcheck disable=SC2016 # Markdown backticks are literal text here
           {
             printf '# Schema Registry Quarterly Health Review — %s\n\n' "${RUN_DATE}"
             printf '> Registry: `%s` · Region: `%s`\n\n' "${REGISTRY_NAME}" "${AWS_REGION}"

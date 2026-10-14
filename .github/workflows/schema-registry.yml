@@ -109,9 +109,9 @@ jobs:
           PROMETHEUS_URL: ${{ vars.PROMETHEUS_URL }}
         run: |
           if [ -n "${PROMETHEUS_URL}" ]; then
-            SOURCE_FLAGS="--source prometheus --prometheus-url ${PROMETHEUS_URL}"
+            SOURCE_FLAGS=(--source prometheus --prometheus-url "${PROMETHEUS_URL}")
           else
-            SOURCE_FLAGS="--source disabled"
+            SOURCE_FLAGS=(--source disabled)
           fi
           docker run --rm \
             -v "${{ github.workspace }}":/workspace \
@@ -121,7 +121,7 @@ jobs:
             -e GITHUB_ACTIONS \
             "${{ env.SCHEMA_GOV_IMAGE }}" usage-check \
             --schema-dir  internal/eventschema \
-            ${SOURCE_FLAGS} \
+            "${SOURCE_FLAGS[@]}" \
             --metric-name "${{ vars.USAGE_METRIC_NAME || 'EventsPublished' }}" \
             --dimension   "${{ vars.USAGE_METRIC_DIMENSION || 'EventType' }}" \
             --lookback    "${{ vars.USAGE_LOOKBACK_DAYS || '30' }}" \
@@ -363,9 +363,9 @@ jobs:
           PROMETHEUS_URL: ${{ vars.PROMETHEUS_URL }}
         run: |
           if [ -n "${PROMETHEUS_URL}" ]; then
-            SOURCE_FLAGS="--source prometheus --prometheus-url ${PROMETHEUS_URL}"
+            SOURCE_FLAGS=(--source prometheus --prometheus-url "${PROMETHEUS_URL}")
           else
-            SOURCE_FLAGS="--source disabled"
+            SOURCE_FLAGS=(--source disabled)
           fi
           docker run --rm \
             -v "${{ github.workspace }}":/workspace \
@@ -375,7 +375,7 @@ jobs:
             -e GITHUB_ACTIONS \
             "${{ env.SCHEMA_GOV_IMAGE }}" usage-check \
             --schema-dir  internal/eventschema \
-            ${SOURCE_FLAGS} \
+            "${SOURCE_FLAGS[@]}" \
             --metric-name "${{ vars.USAGE_METRIC_NAME || 'EventsPublished' }}" \
             --dimension   "${{ vars.USAGE_METRIC_DIMENSION || 'EventType' }}" \
             --lookback    "${{ vars.USAGE_LOOKBACK_DAYS || '30' }}" \
