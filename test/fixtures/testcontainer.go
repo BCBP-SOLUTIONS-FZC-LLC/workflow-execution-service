@@ -1,5 +1,3 @@
-// Package fixtures provides shared helpers for integration tests: a
-// containerised Postgres instance with migrations applied.
 package fixtures
 
 import (
@@ -12,31 +10,22 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/pkg/outbox"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/migrate"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/outbox"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/migrate"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
+	documentsql "github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/documents/sqlstore"
+	intentsql "github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/sendintent/sqlstore"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/db/migrations"
 )
 
-// serviceMigrationsTable mirrors cmd/server's tracking table so the test schema
-// matches production: outbox migrations and domain migrations are tracked apart.
 const serviceMigrationsTable = "wf_execution_migrations"
 
-// NewTestPool starts a throwaway Postgres 18 container, applies the outbox and
-// domain migrations, and returns a *pgcommon.Pool connected to it as superuser.
-//
-// The test is skipped when testing.Short() is true so that unit tests can
-// run without Docker. Cleanup (container termination) is registered via
-// t.Cleanup.
 func NewTestPool(t *testing.T) *pgcommon.Pool {
 	pool, _ := NewTestPoolAndDSN(t)
 	return pool
 }
 
-// NewTestPoolAndDSN is like NewTestPool but also returns the raw superuser
-// connection DSN. Use this when you need to create additional pools against
-// the same container (e.g. tenant-scoped app-role pools for RLS tests).
 func NewTestPoolAndDSN(t *testing.T) (*pgcommon.Pool, string) {
 	t.Helper()
 
@@ -90,15 +79,18 @@ func NewTestPoolAndDSN(t *testing.T) (*pgcommon.Pool, string) {
 	return pool, dsn
 }
 
-// applyMigrations runs the outbox schema first (its tables are referenced by the
-// service's outbox RLS migration) then the embedded domain migrations, matching
-// the production startup path in cmd/server/migrate.go.
 func applyMigrations(t *testing.T, dsn string) {
 	t.Helper()
 
 	ctx := context.Background()
 	if err := outbox.ApplySchema(ctx, &migrate.Runner{DSN: dsn}); err != nil {
 		t.Fatalf("fixtures: outbox ApplySchema: %v", err)
+	}
+	if err := documentsql.ApplySchema(ctx, &migrate.Runner{DSN: dsn}); err != nil {
+		t.Fatalf("fixtures: connector documents ApplySchema: %v", err)
+	}
+	if err := intentsql.ApplySchema(ctx, &migrate.Runner{DSN: dsn}); err != nil {
+		t.Fatalf("fixtures: connector send intents ApplySchema: %v", err)
 	}
 	domainRunner := &migrate.Runner{
 		FS:              migrations.FS,

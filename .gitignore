@@ -31,8 +31,7 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# Generated code — produced by `make generate` (buf + sqlc), never committed.
-/gen/
+# Generated code — produced by `make generate` (sqlc) and `make mock`, never committed.
 /internal/adapter/outbound/postgres/db/
 /internal/core/port/mocks/
 
@@ -51,9 +50,12 @@ vendor/
 .AppleDouble
 
 # Claude Code project config: everything in .claude/ is ignored except the
-# committed markdown docs — and CLAUDE.local.md, which is deliberately local-only
-# (references to this developer's machine-specific paths) despite matching *.md.
+# committed markdown docs — and CLAUDE.local.md/NEXT_STEPS.md, which are
+# deliberately local-only (this developer's machine-specific paths, and
+# ephemeral in-flight status) despite matching *.md.
 !.claude/
 .claude/*
 !.claude/*.md
 .claude/CLAUDE.local.md
+.claude/NEXT_STEPS.md
+/connector-worker

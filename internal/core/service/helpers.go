@@ -1,0 +1,102 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	pgdomain "github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
+	"github.com/google/uuid"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
+)
+
+func withTenantGUC(ctx context.Context, tenantID uuid.UUID) context.Context {
+	return pgcommon.WithGUCSet(ctx, pgdomain.GUCSet{TenantID: tenantID.String()})
+}
+
+func BuildEnvelope[T any](
+	ctx context.Context,
+	validator port.EventValidator,
+	eventType, tenantID, subject, actor string,
+	payload T,
+) (events.Envelope[json.RawMessage], error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return events.Envelope[json.RawMessage]{}, fmt.Errorf("marshal event payload: %w", err)
+	}
+	if err := validator.Validate(ctx, eventType, raw); err != nil {
+		return events.Envelope[json.RawMessage]{}, fmt.Errorf("validate event payload: %w", err)
+	}
+	opts := []events.EnvelopeOpt{
+		events.WithTenantID(tenantID),
+		events.WithSchemaVersion("1"),
+	}
+	if subject != "" {
+		opts = append(opts, events.WithSubject(subject))
+	}
+	if actor != "" {
+		opts = append(opts, events.WithActor(actor))
+	}
+	if traceID := observability.TraceID(ctx); traceID != "" {
+		opts = append(opts, events.WithTraceID(traceID))
+	}
+	return events.NewEnvelope[json.RawMessage](eventType, domain.EventSource, raw, opts...), nil
+}
+
+type noopValidator struct{}
+
+func (noopValidator) Validate(_ context.Context, _ string, _ json.RawMessage) error {
+	return nil
+}
+
+func readScopeFilter(scope port.ReadScope) *port.ScopeFilter {
+	deptIDs := make([]uuid.UUID, len(scope.Departments))
+	for i, d := range scope.Departments {
+		deptIDs[i] = d.DepartmentID
+	}
+	return &port.ScopeFilter{DepartmentIDs: deptIDs, CallerUserID: scope.CallerUserID}
+}
+
+func pageAfter(page port.Page) *port.Cursor {
+	if page.Cursor == nil {
+		return nil
+	}
+	return &port.Cursor{CreatedAt: page.Cursor.CreatedAt, ID: page.Cursor.ID}
+}
+
+func encodeNextCursor(c *port.Cursor) string {
+	if c == nil {
+		return ""
+	}
+	return port.EncodeCursor(port.CursorPosition{CreatedAt: c.CreatedAt, ID: c.ID})
+}
+
+type noopLogger struct{}
+
+func (noopLogger) Debug(string, map[string]any) {}
+func (noopLogger) Info(string, map[string]any)  {}
+func (noopLogger) Warn(string, map[string]any)  {}
+func (noopLogger) Error(string, map[string]any) {}
+
+func instanceCore(inst *domain.Instance) domain.CommonCore {
+	return domain.CommonCore{WorkflowInstanceID: inst.ID, SubjectID: inst.SubjectID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}
+}
+
+type instanceEventSink struct {
+	Outbox    port.OutboxRepository
+	Validator port.EventValidator
+}
+
+func (s instanceEventSink) enqueueInstanceEvent(ctx context.Context, tenantID, eventType, instanceID, actor string, payload any) error {
+	envelope, err := BuildEnvelope(ctx, s.Validator, eventType, tenantID, "instances/"+instanceID, actor, payload)
+	if err != nil {
+		return err
+	}
+	return s.Outbox.Enqueue(ctx, envelope)
+}

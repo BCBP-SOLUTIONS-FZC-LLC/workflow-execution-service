@@ -19,10 +19,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/domain"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/pkg/pgcommon"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
+	intentsql "github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/sendintent/sqlstore"
 )
 
 // appRolePassword is a throwaway credential for the per-test Postgres
@@ -85,10 +86,10 @@ func seedWorkflowInstance(t *testing.T, superPool *pgcommon.Pool, ctx context.Co
 	err := superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
 		_, err := conn.Exec(ctx, `
 			INSERT INTO workflow_instance (
-				id, tenant_id, workflow_id, workflow_version_id, business_key,
+				id, tenant_id, workflow_id, workflow_version_id, subject_id, business_key,
 				temporal_workflow_id, status, current_node_keys, task_queue, started_by_user_id
-			) VALUES ($1, $2, $3, $4, $5, $6, 'RUNNING', '{}', 'execution-default', $7)`,
-			id, tenantID, uuid.New(), uuid.New(), "rls-test-"+id.String(),
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'RUNNING', '{}', 'execution-default', $8)`,
+			id, tenantID, uuid.New(), uuid.New(), "rls-subj-"+id.String(), "rls-test-"+id.String(),
 			"wf-"+id.String(), uuid.New(),
 		)
 		return err
@@ -151,7 +152,7 @@ func TestRLSForceEnabledOnTenantTables(t *testing.T) {
 
 	policyBearing := []string{
 		"workflow_instance", "workflow_task", "workflow_task_assignment",
-		"workflow_data_keys", "assignee_overrides",
+		"assignee_overrides", "connector_documents", "connector_document_attempts", "connector_send_intents",
 	}
 	for _, table := range policyBearing {
 		enabled, forced := rlsFlags(t, superPool, ctx, table)
@@ -159,7 +160,7 @@ func TestRLSForceEnabledOnTenantTables(t *testing.T) {
 		assert.Truef(t, forced, "%s: relforcerowsecurity should be true", table)
 	}
 
-	exceptions := []string{"active_task_queues", "processed_event"}
+	exceptions := []string{"active_task_queues", "processed_event", "event_recency_guard"}
 	for _, table := range exceptions {
 		enabled, _ := rlsFlags(t, superPool, ctx, table)
 		assert.Falsef(t, enabled, "%s: relrowsecurity should be false (named RLS exception)", table)
@@ -180,4 +181,157 @@ func TestAppRoleLacksBypassRLS(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, bypassRLS, "execution_app must not have BYPASSRLS")
 	assert.False(t, isSuper, "execution_app must not be a superuser")
+}
+
+// outboxRelayRolePassword is a throwaway credential for the per-test outbox
+// relay role — not a real secret.
+const outboxRelayRolePassword = "relaypassword123"
+
+// newOutboxRelayRolePool creates the dedicated BYPASSRLS role the outbox
+// relay connects as (LLD §9.2/§9.7).
+func newOutboxRelayRolePool(t *testing.T, superPool *pgcommon.Pool, superDSN string) *pgcommon.Pool {
+	t.Helper()
+	ctx := context.Background()
+
+	stmts := []string{
+		"DROP ROLE IF EXISTS execution_outbox_relay",
+		fmt.Sprintf("CREATE ROLE execution_outbox_relay LOGIN PASSWORD '%s' BYPASSRLS", outboxRelayRolePassword),
+		"GRANT CONNECT ON DATABASE testdb TO execution_outbox_relay",
+		"GRANT USAGE ON SCHEMA public TO execution_outbox_relay",
+		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO execution_outbox_relay",
+	}
+	for _, stmt := range stmts {
+		stmt := stmt
+		require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+			_, err := conn.Exec(ctx, stmt)
+			return err
+		}))
+	}
+
+	relayDSN := fmt.Sprintf("postgres://execution_outbox_relay:%s@%s", outboxRelayRolePassword, hostAndDB(superDSN))
+	relayPool, err := pgcommon.NewPool(ctx, pgcommon.Config{DSN: relayDSN})
+	require.NoError(t, err)
+	t.Cleanup(relayPool.Close)
+
+	return relayPool
+}
+
+// TestOutboxRelayRoleHasBypassRLS is the positive control to
+// TestAppRoleLacksBypassRLS — without it, that test passing could just mean
+// rolbypassrls always reads false.
+func TestOutboxRelayRoleHasBypassRLS(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	_ = newOutboxRelayRolePool(t, superPool, superDSN) // ensures the role exists
+	ctx := context.Background()
+
+	var bypassRLS, isSuper bool
+	err := superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+		return conn.QueryRow(ctx,
+			"SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = 'execution_outbox_relay'",
+		).Scan(&bypassRLS, &isSuper)
+	})
+	require.NoError(t, err)
+	assert.True(t, bypassRLS, "execution_outbox_relay must have BYPASSRLS")
+	assert.False(t, isSuper, "execution_outbox_relay must not be a superuser")
+}
+
+// TestRLSPoliciesUseCheckTenantFunction is a definition-level check distinct
+// from TestRLSPolicyEnforcement's behavioral one, which would pass unchanged
+// whether 000006's policy swap actually landed or not.
+func TestRLSPoliciesUseCheckTenantFunction(t *testing.T) {
+	superPool, _ := fixtures.NewTestPoolAndDSN(t)
+	ctx := context.Background()
+
+	swapped := []string{
+		"workflow_instance", "workflow_task", "workflow_task_assignment",
+		"assignee_overrides", "outbox_events", "outbox_dead_letters",
+		"connector_documents", "connector_document_attempts", "connector_send_intents",
+	}
+	for _, table := range swapped {
+		t.Run(table, func(t *testing.T) {
+			var qual string
+			err := superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+				return conn.QueryRow(ctx,
+					"SELECT qual FROM pg_policies WHERE schemaname = 'public' AND tablename = $1 AND policyname = 'tenant_isolation_policy'",
+					table,
+				).Scan(&qual)
+			})
+			require.NoError(t, err)
+			assert.Contains(t, qual, "rls_check_tenant", "%s: policy should use rls_check_tenant after 000006", table)
+		})
+	}
+}
+
+// TestRLSViolationAuditLogging is a best-effort test for log_rls_violation's
+// 1%-sampled INSERT path — a large attempt count makes a hit a near-certainty
+// rather than asserting exactly one per attempt.
+func TestRLSViolationAuditLogging(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	tenantB := uuid.New()
+	instanceID := uuid.New()
+	seedWorkflowInstance(t, superPool, ctx, instanceID, tenantA)
+
+	const attempts = 500
+	for i := 0; i < attempts; i++ {
+		_ = countWorkflowInstance(t, appPool, withGUC(ctx, tenantB), instanceID)
+	}
+
+	var count int
+	err := superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+		return conn.QueryRow(ctx,
+			"SELECT count(*) FROM rls_violation_log WHERE violation_type = 'cross_tenant_access' AND table_name = 'workflow_instance'",
+		).Scan(&count)
+	})
+	require.NoError(t, err)
+	assert.Greaterf(t, count, 0,
+		"expected at least one sampled rls_violation_log row across %d cross-tenant attempts (~1%% sampling)", attempts)
+}
+
+func TestRLSIsolatesConnectorSendIntents(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	ctx := context.Background()
+	tenantA, tenantB := uuid.New(), uuid.New()
+
+	for _, tenant := range []uuid.UUID{tenantA, tenantB} {
+		require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+			_, err := conn.Exec(ctx, "INSERT INTO connector_send_intents (tenant_id, message_key, status) VALUES ($1, 'k', 'accepted')", tenant.String())
+			return err
+		}))
+	}
+
+	count := func(ctx context.Context) (n int) {
+		require.NoError(t, appPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+			return conn.QueryRow(ctx, "SELECT count(*) FROM connector_send_intents").Scan(&n)
+		}))
+		return n
+	}
+	assert.Equal(t, 1, count(withGUC(ctx, tenantA)))
+	assert.Equal(t, 1, count(withGUC(ctx, tenantB)))
+	assert.Equal(t, 0, count(ctx), "a connection with no tenant sees nothing")
+}
+
+func TestSendIntentStoreWorksUnderTheWorkersTenantScope(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	store := intentsql.New(appPool)
+	ctx := context.Background()
+	tenant := uuid.New()
+
+	intent, reserved, err := store.Reserve(withGUC(ctx, tenant), tenant.String(), "mail-1", 0, "token-1")
+	require.NoError(t, err)
+	assert.True(t, reserved)
+	assert.Equal(t, "pending", string(intent.Status))
+
+	again, reserved, err := store.Reserve(withGUC(ctx, tenant), tenant.String(), "mail-1", 0, "token-2")
+	require.NoError(t, err)
+	assert.False(t, reserved, "a redelivered job finds the existing intent")
+	assert.Equal(t, intent.ID, again.ID)
+
+	_, _, err = store.Reserve(ctx, tenant.String(), "mail-2", 0, "token-3")
+	assert.Error(t, err, "without the tenant scope the policy refuses the write")
 }

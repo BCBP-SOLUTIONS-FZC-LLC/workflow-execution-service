@@ -1,0 +1,118 @@
+package main
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"go.temporal.io/sdk/client"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/outbox"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
+)
+
+type app struct {
+	cfg *config.Config
+	log port.Logger
+
+	appPool   *pgcommon.Pool
+	relayPool *pgcommon.Pool
+	cache     io.Closer
+
+	httpServer    *http.Server
+	metricsServer *http.Server
+	outboxRelay   *outbox.Runner
+
+	rlsExporter      *service.RLSViolationExporter
+	statsSampler     *service.OperationalGaugeSampler
+	retentionSweeper *service.RetentionSweeper
+	cancelExporters  context.CancelFunc
+
+	sdkClient client.Client
+
+	tracingShutdown func()
+}
+
+func (a *app) run() {
+	a.startServers()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-quit
+	a.log.Info("shutting down", map[string]any{"signal": sig.String()})
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+	a.stopServers(shutdownCtx)
+
+	a.log.Info("server stopped", nil)
+}
+
+func (a *app) startServers() {
+	exportCtx, cancelExporters := context.WithCancel(context.Background())
+	a.cancelExporters = cancelExporters
+	go a.rlsExporter.Run(exportCtx)
+	go a.statsSampler.Run(exportCtx)
+	go a.retentionSweeper.Run(exportCtx)
+
+	go func() {
+		a.log.Info("HTTP server starting", map[string]any{"addr": a.httpServer.Addr})
+		if err := a.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			a.log.Error("HTTP server error", map[string]any{"error": err.Error()})
+			os.Exit(1)
+		}
+	}()
+
+	go func() {
+		a.log.Info("metrics server starting", map[string]any{"addr": a.metricsServer.Addr})
+		if err := a.metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			a.log.Error("metrics server error", map[string]any{"error": err.Error()})
+			os.Exit(1)
+		}
+	}()
+
+	go func() {
+		a.log.Info("outbox relay starting", map[string]any{
+			"poll_interval": a.cfg.OutboxPollInterval.String(),
+			"batch_size":    a.cfg.OutboxBatchSize,
+		})
+		if err := a.outboxRelay.Start(context.Background()); err != nil {
+			a.log.Error("outbox relay exited", map[string]any{"error": err.Error()})
+		}
+	}()
+}
+
+func (a *app) stopServers(ctx context.Context) {
+	a.cancelExporters()
+	if err := a.httpServer.Shutdown(ctx); err != nil {
+		a.log.Error("HTTP server shutdown error", map[string]any{"error": err.Error()})
+	}
+	if err := a.metricsServer.Shutdown(ctx); err != nil {
+		a.log.Error("metrics server shutdown error", map[string]any{"error": err.Error()})
+	}
+
+	if err := a.outboxRelay.Stop(); err != nil {
+		a.log.Error("outbox relay stop error", map[string]any{"error": err.Error()})
+	}
+
+	if err := a.appPool.DrainAndClose(ctx); err != nil {
+		a.log.Warn("app db pool drain timed out", map[string]any{"error": err.Error()})
+	}
+	if err := a.relayPool.DrainAndClose(ctx); err != nil {
+		a.log.Warn("relay db pool drain timed out", map[string]any{"error": err.Error()})
+	}
+	if err := a.cache.Close(); err != nil {
+		a.log.Error("valkey close error", map[string]any{"error": err.Error()})
+	}
+	a.sdkClient.Close()
+
+	a.tracingShutdown()
+}

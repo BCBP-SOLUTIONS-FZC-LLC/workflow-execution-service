@@ -27,13 +27,6 @@ CREATE POLICY tenant_isolation_policy ON workflow_task_assignment
     USING      (tenant_id = app_tenant_id())
     WITH CHECK (tenant_id = app_tenant_id());
 
-REVOKE ALL ON workflow_data_keys FROM PUBLIC;
-ALTER TABLE workflow_data_keys ENABLE ROW LEVEL SECURITY;
-ALTER TABLE workflow_data_keys FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation_policy ON workflow_data_keys
-    USING      (tenant_id = app_tenant_id())
-    WITH CHECK (tenant_id = app_tenant_id());
-
 REVOKE ALL ON assignee_overrides FROM PUBLIC;
 ALTER TABLE assignee_overrides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assignee_overrides FORCE ROW LEVEL SECURITY;
@@ -49,4 +42,4 @@ CREATE POLICY tenant_isolation_policy ON assignee_overrides
 
 -- NO RLS on processed_event, and no tenant_id column at all (LLD §4.7, §4.8):
 -- infrastructure dedup state keyed by a globally-unique envelope ID, not tenant
--- business data. Matches Definition Service's own processed_event table exactly.
+-- business data.

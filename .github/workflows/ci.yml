@@ -1,11 +1,5 @@
-# CI for https://github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service
-#
-# Tier-0 shape, modeled on iam-user-profile's CI (no dedicated "generate" job —
-# buf/sqlc codegen runs as an inline step duplicated in each job that needs it,
-# same as iam duplicates its private-module-auth step). Docker image
-# build/lint/trivy scan, smoke tests, and GHCR push are deferred to Tier-1's
-# T1.12 — the Dockerfile is a placeholder with nothing real to smoke-test yet.
-#
+# CI for https://github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-execution-service
+
 name: CI
 
 "on":
@@ -26,59 +20,347 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  IMAGE_BASE: ghcr.io/bcbp-solutions-fzc-llc/workflow-execution-service
 
 jobs:
+  ci-gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - id: decide
+        run: >
+          echo "run=${{
+            github.event_name != 'pull_request' ||
+            (github.event.pull_request.draft == false &&
+             !contains(github.event.pull_request.labels.*.name, 'skip-ci'))
+          }}" >> "$GITHUB_OUTPUT"
+
   validate-quality:
     name: Validate / Quality
+    needs: [ci-gate]
+    if: needs.ci-gate.outputs.run == 'true'
     uses: ./.github/workflows/validate-quality.yml
     secrets: inherit
 
   validate-test:
     name: Validate / Test
+    needs: [ci-gate]
+    if: needs.ci-gate.outputs.run == 'true'
     uses: ./.github/workflows/validate-test.yml
     secrets: inherit
 
-  # skipped (if: false)
-  # Kept in the DAG (rather than omitted) so the shape matches definition_service
-  # and can be filled in incrementally without restructuring the graph later.
-
   build-image-cache:
     name: Build image (cache)
-    if: false
+    needs: [ci-gate]
+    if: needs.ci-gate.outputs.run == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - run: echo "skipped — Docker build lands in Tier-1's T1.12"
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            go.mod
+
+      - name: Generate (sqlc)
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          config: .hadolint.yaml
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: server
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_BASE }}-server:${{ github.sha }}
+          build-args: BUILD_VERSION=${{ github.sha }}
+          secrets: go_private_token=${{ secrets.GO_PRIVATE_TOKEN }}
+          cache-from: type=gha,scope=server
+          cache-to: type=gha,mode=max,scope=server
+
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: worker
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_BASE }}-worker:${{ github.sha }}
+          build-args: BUILD_VERSION=${{ github.sha }}
+          secrets: go_private_token=${{ secrets.GO_PRIVATE_TOKEN }}
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
+
+      - name: Build connector-worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: connector-worker
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_BASE }}-connector-worker:${{ github.sha }}
+          build-args: BUILD_VERSION=${{ github.sha }}
+          secrets: go_private_token=${{ secrets.GO_PRIVATE_TOKEN }}
+          cache-from: type=gha,scope=connector-worker
+          cache-to: type=gha,mode=max,scope=connector-worker
 
   trivy-cve-scan:
     name: Trivy CVE scan
-    if: false
     needs: [build-image-cache]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - run: echo "skipped — Docker build lands in Tier-1's T1.12"
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            go.mod
+
+      - name: Generate (sqlc)
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: server
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_BASE }}-server:${{ github.sha }}
+          build-args: BUILD_VERSION=${{ github.sha }}
+          secrets: go_private_token=${{ secrets.GO_PRIVATE_TOKEN }}
+          cache-from: type=gha,scope=server
+
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: worker
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_BASE }}-worker:${{ github.sha }}
+          build-args: BUILD_VERSION=${{ github.sha }}
+          secrets: go_private_token=${{ secrets.GO_PRIVATE_TOKEN }}
+          cache-from: type=gha,scope=worker
+
+      - name: Build connector-worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: connector-worker
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_BASE }}-connector-worker:${{ github.sha }}
+          build-args: BUILD_VERSION=${{ github.sha }}
+          secrets: go_private_token=${{ secrets.GO_PRIVATE_TOKEN }}
+          cache-from: type=gha,scope=connector-worker
+
+      - name: Scan server image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_BASE }}-server:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          cache-dir: .trivy-cache
+
+      - name: Scan worker image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_BASE }}-worker:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          cache-dir: .trivy-cache
+
+      - name: Scan connector-worker image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_BASE }}-connector-worker:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          cache-dir: .trivy-cache
 
   smoke-tests:
     name: Smoke tests
-    if: false
     needs: [validate-test, build-image-cache]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
-      - run: echo "skipped — no real server/worker behavior to smoke-test yet"
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            go.mod
+
+      - name: Generate (sqlc)
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Rebuild all images from cache
+        env:
+          GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
+        run: |
+          for t in server worker connector-worker; do
+            docker buildx build --target "$t" --load \
+              --build-arg BUILD_VERSION=${{ github.sha }} \
+              --secret id=go_private_token,env=GO_PRIVATE_TOKEN \
+              --cache-from type=gha,scope="$t" \
+              -t "${{ env.IMAGE_BASE }}-$t:${{ github.sha }}" .
+          done
+
+      - name: migrate subcommand applies the schema
+        run: |
+          docker run --rm --network host \
+            -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable \
+            "${{ env.IMAGE_BASE }}-server:${{ github.sha }}" migrate
+
+      # `version` is handled before any configuration is read, so this needs
+      # no environment: it checks the one thing this step is for — the
+      # entrypoint resolves and the binary loads in its runtime stage. Every
+      # other entrypoint legitimately requires DATABASE_URL and friends and
+      # would exit 1 here regardless of image health.
+      - name: Each image's entrypoint runs
+        run: |
+          for t in server worker connector-worker; do
+            docker run --rm "${{ env.IMAGE_BASE }}-$t:${{ github.sha }}" version
+          done
 
   push-image-ghcr:
     name: Push image → GHCR
-    if: false
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [validate-test, validate-quality, trivy-cve-scan, smoke-tests]
+    strategy:
+      matrix:
+        target: [server, worker, connector-worker]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # Cosign keyless signing (Sigstore OIDC)
     steps:
-      - run: echo "skipped — image publish lands in Tier-1's T1.12"
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            go.mod
+
+      - name: Generate (sqlc)
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.target }} image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-${{ matrix.target }}:${{ github.sha }}
+            ${{ env.IMAGE_BASE }}-${{ matrix.target }}:latest
+          build-args: BUILD_VERSION=${{ github.sha }}
+          secrets: go_private_token=${{ secrets.GO_PRIVATE_TOKEN }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Sign and verify image (Cosign keyless)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          ref="${{ env.IMAGE_BASE }}-${{ matrix.target }}@${DIGEST}"
+          cosign sign --yes "$ref"
+          cosign verify "$ref" \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/ci\.yml@refs/heads/main$" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 
   pr-summary:
     name: PR summary
     if: always() && github.event_name == 'pull_request'
-    needs: [validate-quality, validate-test, build-image-cache, trivy-cve-scan, smoke-tests]
+    needs: [ci-gate, validate-quality, validate-test, build-image-cache, trivy-cve-scan, smoke-tests]
     runs-on: ubuntu-latest
     steps:
-      - run: >
-          echo "Tier-0 status: validate-quality/validate-test are the real gates;
-          the rest are stubbed until Tier-1 T1.12."
+      - run: echo "All CI gates are real as of T1.12 — build, scan, and smoke-test all images (ci-gate run=${{ needs.ci-gate.outputs.run }})"

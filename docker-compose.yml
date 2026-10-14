@@ -1,8 +1,8 @@
 # Host ports are deliberately offset from definition_service's docker-compose.yml
 # (which uses the canonical 5432/6379/4566/6432) so both stacks can run
 # simultaneously on one machine — required for any local cross-service testing
-# (e.g. execution_service calling DefinitionService.GetCompiledWorkflow, or
-# vice versa for CheckActiveInstances/PauseUserTasks). Container-internal ports
+# (e.g. execution_service reading a compiled plan from definition_service, or
+# definition_service's archive guard and pause calls). Container-internal ports
 # are unchanged; only the host-side mapping shifts, so DB_HOST/etc. below (which
 # resolve via the compose network, not localhost) are unaffected.
 services:

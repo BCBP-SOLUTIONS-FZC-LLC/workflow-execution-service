@@ -1,0 +1,148 @@
+package http
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
+
+	"github.com/google/uuid"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+)
+
+var ErrUpstreamUnavailable = errors.New("upstream service unavailable")
+
+const maxEligibilityAttempts = 3
+
+const maxEligibilityBatchConcurrency = 20
+
+var _ port.EligibilityChecker = (*EligibilityClient)(nil)
+
+type EligibilityClient struct {
+	baseURL string
+	client  *http.Client
+}
+
+func NewEligibilityClient(baseURL string, timeout time.Duration) *EligibilityClient {
+	return &EligibilityClient{
+		baseURL: baseURL,
+		client:  &http.Client{Timeout: timeout},
+	}
+}
+
+type eligibilityReq struct {
+	NewUserID     uuid.UUID `json:"new_user_id"`
+	DepartmentID  uuid.UUID `json:"department_id"`
+	RequiredLevel string    `json:"required_level"`
+	ActorID       uuid.UUID `json:"actor_id"`
+}
+
+func (c *EligibilityClient) CheckEligibilityBatch(
+	ctx context.Context,
+	requests []port.EligibilityCheckRequest,
+	actorID uuid.UUID,
+) ([]port.EligibilityResult, error) {
+	results := make([]port.EligibilityResult, len(requests))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxEligibilityBatchConcurrency)
+	for i, req := range requests {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, req port.EligibilityCheckRequest) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			eligible, err := c.CheckEligibility(ctx, req.NewUserID, req.DepartmentID, req.RequiredLevel, actorID)
+			results[i] = port.EligibilityResult{Eligible: eligible, Err: err}
+		}(i, req)
+	}
+	wg.Wait()
+	return results, nil
+}
+
+func (c *EligibilityClient) CheckEligibility(
+	ctx context.Context,
+	newUserID, departmentID uuid.UUID,
+	requiredLevel string,
+	actorID uuid.UUID,
+) (bool, error) {
+	body, err := json.Marshal(eligibilityReq{
+		NewUserID:     newUserID,
+		DepartmentID:  departmentID,
+		RequiredLevel: requiredLevel,
+		ActorID:       actorID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("marshal eligibility request: %w", err)
+	}
+	rawURL := c.baseURL + "/eligibility"
+
+	var lastErr error
+	for attempt := 1; attempt <= maxEligibilityAttempts; attempt++ {
+		eligible, retryable, err := c.tryCheckEligibility(ctx, rawURL, body)
+		if err == nil {
+			return eligible, nil
+		}
+		lastErr = err
+		if attempt == maxEligibilityAttempts || !retryable {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return false, fmt.Errorf("%w: eligibility check: %w", ErrUpstreamUnavailable, ctx.Err())
+		case <-time.After(retryBackoff(attempt)):
+		}
+	}
+	return false, lastErr
+}
+
+func (c *EligibilityClient) tryCheckEligibility(
+	ctx context.Context,
+	rawURL string,
+	body []byte,
+) (eligible, retryable bool, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
+	if err != nil {
+		return false, false, fmt.Errorf("build eligibility request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	gincommon.InjectTraceContext(req.Context(), req.Header)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false, true, fmt.Errorf("%w: eligibility check: %w", ErrUpstreamUnavailable, err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	switch {
+	case resp.StatusCode >= 500:
+		return false, true, fmt.Errorf("%w: eligibility endpoint returned %d", ErrUpstreamUnavailable, resp.StatusCode)
+	case resp.StatusCode != http.StatusOK:
+		return false, false, fmt.Errorf("%w: eligibility endpoint returned %d", ErrUpstreamUnavailable, resp.StatusCode)
+	}
+
+	var out struct {
+		Eligible *bool `json:"eligible"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return false, false, fmt.Errorf("%w: decode eligibility response: %w", ErrUpstreamUnavailable, err)
+	}
+	if out.Eligible == nil {
+		return false, false, fmt.Errorf("%w: eligibility response missing \"eligible\" field", ErrUpstreamUnavailable)
+	}
+	return *out.Eligible, false, nil
+}
+
+func retryBackoff(attempt int) time.Duration {
+	d := 50 * time.Millisecond << (attempt - 1)
+	if d > 500*time.Millisecond {
+		d = 500 * time.Millisecond
+	}
+	return d
+}

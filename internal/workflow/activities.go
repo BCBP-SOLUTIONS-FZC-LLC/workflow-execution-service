@@ -1,0 +1,122 @@
+package workflow
+
+import (
+	"fmt"
+	"time"
+
+	"go.temporal.io/sdk/temporal"
+	wf "go.temporal.io/sdk/workflow"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+)
+
+var (
+	dbWriteActivityOptions = wf.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+		RetryPolicy: &temporal.RetryPolicy{
+			InitialInterval:        time.Second,
+			BackoffCoefficient:     2.0,
+			MaximumInterval:        60 * time.Second,
+			MaximumAttempts:        0,
+			NonRetryableErrorTypes: []string{"ValidationError", "NotFoundError", "VersionConflict"},
+		},
+	}
+
+	externalCallActivityOptions = wf.ActivityOptions{
+		StartToCloseTimeout: 10 * time.Second,
+		RetryPolicy: &temporal.RetryPolicy{
+			InitialInterval:        500 * time.Millisecond,
+			BackoffCoefficient:     2.0,
+			MaximumAttempts:        5,
+			NonRetryableErrorTypes: []string{"DefinitionServiceClientError"},
+		},
+	}
+)
+
+func withDBWriteOptions(ctx wf.Context) wf.Context {
+	return wf.WithActivityOptions(ctx, dbWriteActivityOptions)
+}
+
+func withExternalCallOptions(ctx wf.Context) wf.Context {
+	return wf.WithActivityOptions(ctx, externalCallActivityOptions)
+}
+
+func wrapActivityErr(activityName string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("workflow: %s: %w", activityName, err)
+}
+
+func getCompiledPlan(ctx wf.Context, in port.GetCompiledPlanInput) (port.GetCompiledPlanOutput, error) {
+	var out port.GetCompiledPlanOutput
+	err := wf.ExecuteActivity(withExternalCallOptions(ctx), port.ActivityGetCompiledPlan, in).Get(ctx, &out)
+	return out, wrapActivityErr(port.ActivityGetCompiledPlan, err)
+}
+
+func createTask(ctx wf.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+	var out port.CreateTaskOutput
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityCreateTask, in).Get(ctx, &out)
+	return out, wrapActivityErr(port.ActivityCreateTask, err)
+}
+
+func updateInstanceNodes(ctx wf.Context, in port.UpdateInstanceNodesInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityUpdateInstanceNodes, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityUpdateInstanceNodes, err)
+}
+
+func completeAssignment(ctx wf.Context, in port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
+	var out port.CompleteAssignmentOutput
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityCompleteAssignment, in).Get(ctx, &out)
+	return out, wrapActivityErr(port.ActivityCompleteAssignment, err)
+}
+
+func updateInstanceStatus(ctx wf.Context, in port.UpdateInstanceStatusInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityUpdateInstanceStatus, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityUpdateInstanceStatus, err)
+}
+
+func deferTask(ctx wf.Context, in port.DeferTaskInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityDeferTask, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityDeferTask, err)
+}
+
+func recordForceRoute(ctx wf.Context, in port.RecordForceRouteInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityRecordForceRoute, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityRecordForceRoute, err)
+}
+
+func recordSLAWarning(ctx wf.Context, in port.RecordSLAWarningInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityRecordSLAWarning, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityRecordSLAWarning, err)
+}
+
+func recordSLABreach(ctx wf.Context, in port.RecordSLABreachInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityRecordSLABreach, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityRecordSLABreach, err)
+}
+
+func pauseInstance(ctx wf.Context, in port.PauseInstanceInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityPauseInstance, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityPauseInstance, err)
+}
+
+func resumeInstance(ctx wf.Context, in port.ResumeInstanceInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityResumeInstance, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityResumeInstance, err)
+}
+
+func cancelInstance(ctx wf.Context, in port.CancelInstanceInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityCancelInstance, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityCancelInstance, err)
+}
+
+func reassignAssignment(ctx wf.Context, in port.ReassignAssignmentInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityReassignAssignment, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityReassignAssignment, err)
+}
+
+func updateTaskStatus(ctx wf.Context, in port.UpdateTaskStatusInput) error {
+	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityUpdateTaskStatus, in).Get(ctx, nil)
+	return wrapActivityErr(port.ActivityUpdateTaskStatus, err)
+}

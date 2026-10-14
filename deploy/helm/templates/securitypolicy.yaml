@@ -1,0 +1,36 @@
+{{- $httpRouteEnabled := and .Values.ingress.enabled (eq (.Values.ingress.type | default "HTTPRoute") "HTTPRoute") }}
+{{- if and $httpRouteEnabled .Values.ingress.securityPolicy.enabled .Values.ingress.securityPolicy.cors.enabled }}
+# NOTE: CORS allowHeaders deliberately excludes X-Tenant-ID / X-User-ID — those are
+# injected by the Envoy Gateway's ext_authz filter after JWT validation, never sent
+# by the browser client itself. Allow-listing them here would
+# incorrectly imply a client is expected to set them, which the mesh's trust
+# model is specifically designed to prevent. x-internal-token is excluded for
+# the same reason: it is a service-to-service credential, never a browser one.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: {{ include "workflow-execution-service.apiFullname" . }}
+  labels:
+    {{- include "workflow-execution-service.apiSelectorLabels" . | nindent 4 }}
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: {{ include "workflow-execution-service.apiFullname" . }}
+  cors:
+    allowOrigins:
+      {{- range .Values.ingress.securityPolicy.cors.allowOrigins }}
+      - type: Exact
+        value: {{ . | quote }}
+      {{- end }}
+    allowMethods:
+      {{- toYaml .Values.ingress.securityPolicy.cors.allowMethods | nindent 6 }}
+    allowHeaders:
+      {{- toYaml .Values.ingress.securityPolicy.cors.allowHeaders | nindent 6 }}
+    maxAge: {{ .Values.ingress.securityPolicy.cors.maxAge | quote }}
+{{- end }}
+{{- /*
+  Envoy Gateway's SecurityPolicy CRD has no spec.rateLimit field — rate limiting
+  is a separate BackendTrafficPolicy CRD. Add a templates/backendtrafficpolicy.yaml
+  if/when rate limiting is actually needed (mirrors definition_service's chart).
+*/}}

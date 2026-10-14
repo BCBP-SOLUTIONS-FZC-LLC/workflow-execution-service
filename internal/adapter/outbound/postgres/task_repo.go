@@ -1,0 +1,226 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres/db"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+)
+
+var _ port.TaskRepository = (*TaskRepo)(nil)
+
+type TaskRepo struct {
+	pool *pgcommon.Pool
+}
+
+func NewTaskRepo(pool *pgcommon.Pool) *TaskRepo {
+	return &TaskRepo{pool: pool}
+}
+
+func (r *TaskRepo) Create(ctx context.Context, task *domain.Task) error {
+	ctx = withTenantGUC(ctx, task.TenantID)
+	return exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		row, err := db.New(dbtx).CreateWorkflowTask(ctx, db.CreateWorkflowTaskParams{
+			ID:                 task.ID,
+			TenantID:           task.TenantID,
+			WorkflowInstanceID: task.WorkflowInstanceID,
+			NodeKey:            task.NodeKey,
+			DepartmentID:       task.DepartmentID,
+			Status:             db.WorkflowTaskStatus(task.Status),
+			AssigneeMode:       task.AssigneeMode,
+			ConnectorType:      toPgtypeTextPtr(task.ConnectorType),
+			ExtrasJson:         task.ExtrasJSON,
+			DeferredFromTaskID: toPgtypeUUID(task.DeferredFromTaskID),
+			DueAt:              toPgtypeTimestamptz(task.DueAt),
+			FollowUpAt:         toPgtypeTimestamptz(task.FollowUpAt),
+			VisitCount:         task.VisitCount,
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		*task = *taskFromDB(row)
+		return nil
+	})
+}
+
+func (r *TaskRepo) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.Task, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var task *domain.Task
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		row, err := db.New(dbtx).GetWorkflowTask(ctx, id)
+		if err != nil {
+			return mapErr(err)
+		}
+		task = taskFromDB(row)
+		return nil
+	})
+	return task, err
+}
+
+func (r *TaskRepo) UpdateStatus(
+	ctx context.Context,
+	tenantID, id uuid.UUID,
+	status domain.TaskStatus,
+	recordVersion int64,
+) (*domain.Task, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var task *domain.Task
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		q := db.New(dbtx)
+		row, err := q.UpdateWorkflowTaskStatus(ctx, db.UpdateWorkflowTaskStatusParams{
+			ID:            id,
+			Status:        db.WorkflowTaskStatus(status),
+			RecordVersion: recordVersion,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			_, probeErr := q.GetWorkflowTask(ctx, id)
+			return notFoundOrVersionConflict(probeErr)
+		}
+		if err != nil {
+			return mapErr(err)
+		}
+		task = taskFromDB(row)
+		return nil
+	})
+	return task, err
+}
+
+func (r *TaskRepo) ListByInstance(
+	ctx context.Context,
+	tenantID, instanceID uuid.UUID,
+	page port.PageRequest,
+) ([]*domain.Task, *port.Cursor, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	limit := clampLimit(page.Limit)
+
+	params := db.ListWorkflowTasksByInstanceParams{
+		WorkflowInstanceID: instanceID,
+		Limit:              int32(limit + 1), //nolint:gosec
+	}
+	if page.After != nil {
+		params.CursorCreatedAt = toPgtypeTimestamptz(&page.After.CreatedAt)
+		params.CursorID = toPgtypeUUID(&page.After.ID)
+	}
+
+	var tasks []*domain.Task
+	var next *port.Cursor
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		rows, err := db.New(dbtx).ListWorkflowTasksByInstance(ctx, params)
+		if err != nil {
+			return mapErr(err)
+		}
+		trimmed, cursor := paginate(rows, limit, func(row db.WorkflowTask) (time.Time, uuid.UUID) {
+			return row.CreatedAt, row.ID
+		})
+		next = cursor
+		tasks = make([]*domain.Task, len(trimmed))
+		for i, row := range trimmed {
+			tasks[i] = taskFromDB(row)
+		}
+		return nil
+	})
+	return tasks, next, err
+}
+
+func (r *TaskRepo) ListByTenant(
+	ctx context.Context,
+	tenantID uuid.UUID,
+	filter port.TaskListFilter,
+	page port.PageRequest,
+) ([]*domain.Task, *port.Cursor, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	limit := clampLimit(page.Limit)
+
+	params := db.ListWorkflowTasksByTenantParams{
+		TenantID: tenantID,
+		Limit:    int32(limit + 1), //nolint:gosec
+	}
+	if filter.Status != nil {
+		params.Status = db.NullWorkflowTaskStatus{WorkflowTaskStatus: db.WorkflowTaskStatus(*filter.Status), Valid: true}
+	}
+	if filter.WorkflowInstanceID != nil {
+		params.WorkflowInstanceID = toPgtypeUUID(filter.WorkflowInstanceID)
+	}
+	if filter.DepartmentID != nil {
+		params.DepartmentID = toPgtypeUUID(filter.DepartmentID)
+	}
+	if filter.AssigneeUserID != nil {
+		params.AssigneeUserID = toPgtypeUUID(filter.AssigneeUserID)
+	}
+	if filter.DueBefore != nil {
+		params.DueBefore = toPgtypeTimestamptz(filter.DueBefore)
+	}
+	if filter.Scope != nil {
+		params.EnforceScope = true
+		params.ScopeDepartmentIds = filter.Scope.DepartmentIDs
+		params.ScopeCallerUserID = filter.Scope.CallerUserID
+	}
+	if page.After != nil {
+		params.CursorCreatedAt = toPgtypeTimestamptz(&page.After.CreatedAt)
+		params.CursorID = toPgtypeUUID(&page.After.ID)
+	}
+
+	var tasks []*domain.Task
+	var next *port.Cursor
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		rows, err := db.New(dbtx).ListWorkflowTasksByTenant(ctx, params)
+		if err != nil {
+			return mapErr(err)
+		}
+		trimmed, cursor := paginate(rows, limit, func(row db.WorkflowTask) (time.Time, uuid.UUID) {
+			return row.CreatedAt, row.ID
+		})
+		next = cursor
+		tasks = make([]*domain.Task, len(trimmed))
+		for i, row := range trimmed {
+			tasks[i] = taskFromDB(row)
+		}
+		return nil
+	})
+	return tasks, next, err
+}
+
+func (r *TaskRepo) BumpRecordVersion(ctx context.Context, tenantID, id uuid.UUID, recordVersion int64) (*domain.Task, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var task *domain.Task
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		q := db.New(dbtx)
+		row, err := q.BumpWorkflowTaskRecordVersion(ctx, db.BumpWorkflowTaskRecordVersionParams{
+			ID:            id,
+			RecordVersion: recordVersion,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			_, probeErr := q.GetWorkflowTask(ctx, id)
+			return notFoundOrVersionConflict(probeErr)
+		}
+		if err != nil {
+			return mapErr(err)
+		}
+		task = taskFromDB(row)
+		return nil
+	})
+	return task, err
+}
+
+func (r *TaskRepo) GetByInstanceAndNode(ctx context.Context, tenantID, instanceID uuid.UUID, nodeKey string) (*domain.Task, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var task *domain.Task
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		row, err := db.New(dbtx).GetWorkflowTaskByInstanceAndNode(ctx, db.GetWorkflowTaskByInstanceAndNodeParams{
+			WorkflowInstanceID: instanceID, NodeKey: nodeKey,
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		task = taskFromDB(row)
+		return nil
+	})
+	return task, err
+}

@@ -16,9 +16,10 @@ CREATE INDEX idx_workflow_instance_task_queue_active
     ON workflow_instance (task_queue)
     WHERE status IN ('RUNNING', 'PAUSED', 'DEGRADED');
 
--- The archive-guard query behind Definition Service's CheckActiveInstances call.
-CREATE INDEX idx_workflow_instance_version_active
-    ON workflow_instance (workflow_version_id)
+-- The archive-guard query behind Definition Service's CheckActiveInstances(tenant_id, workflow_id)
+-- call — keyed on workflow_id, not workflow_version_id, matching the RPC's own contract.
+CREATE INDEX idx_workflow_instance_workflow_active
+    ON workflow_instance (workflow_id)
     WHERE status IN ('RUNNING', 'PAUSED', 'DEGRADED');
 
 -- workflow_task -----------------------------------------------------------
@@ -64,7 +65,19 @@ CREATE INDEX idx_processed_event_processed_at
 -- access, LLD §4.5/§4.9/§4.10) --------------------------------------------
 
 CREATE INDEX idx_outbox_events_instance_created
-    ON outbox_events (tenant_id, (payload->>'workflow_instance_id'), created_at DESC, id DESC);
+    ON outbox_events (tenant_id, (payload -> 'data' ->> 'workflow_instance_id'), created_at DESC, id DESC);
 
 CREATE INDEX idx_outbox_events_task
-    ON outbox_events ((payload->>'task_id')) WHERE payload->>'task_id' IS NOT NULL;
+    ON outbox_events ((payload -> 'data' ->> 'task_id')) WHERE payload -> 'data' ->> 'task_id' IS NOT NULL;
+
+-- recordSLAEvent's own idempotency check (OutboxEventExistsForTask) runs
+-- under RunInTx's plain READ COMMITTED with no serializable retry, so two
+-- overlapping RecordSLAWarning/RecordSLABreach activity attempts (a genuine
+-- at-least-once scenario, not just a sequential retry) can both pass the
+-- existence check before either commits its insert. This partial unique
+-- index is the DB-level backstop: a second concurrent insert for the same
+-- (event_type, task_id) now hits a unique violation instead of succeeding,
+-- classified as already-done the same way workflow_task_pkey already is.
+CREATE UNIQUE INDEX idx_outbox_events_sla_task_unique
+    ON outbox_events (event_type, (payload -> 'data' ->> 'task_id'))
+    WHERE event_type IN ('workflow.task.sla-warning', 'workflow.task.sla-breached');

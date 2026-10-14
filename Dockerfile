@@ -1,22 +1,26 @@
 # syntax=docker/dockerfile:1.7
 # execution-service
 #
-# Multi-stage build with two independent final targets — cmd/server and
-# cmd/worker are separate deployments/pods that scale independently (LLD §1.6),
-# even though they share this one Dockerfile/builder stage.
+# Multi-stage build with three independent final targets — cmd/server,
+# cmd/worker and cmd/connector-worker are separate deployments/pods that scale
+# independently (LLD §1.6), even though they share this one Dockerfile/builder
+# stage.
 #
-#   Stage 1 (builder) — compiles both binaries with private module access via build secret.
-#   Stage 2 (server)  — distroless runtime image for cmd/server.
-#   Stage 3 (worker)  — distroless runtime image for cmd/worker.
+#   Stage 1 (builder)          — compiles all three binaries with private module access via build secret.
+#   Stage 2 (server)           — distroless runtime image for cmd/server.
+#   Stage 3 (worker)           — distroless runtime image for cmd/worker.
+#   Stage 4 (connector-worker) — distroless runtime image for cmd/connector-worker.
 #
 # Build (CI, target selects the binary):
 #   docker build --target server --secret id=go_private_token,env=GO_PRIVATE_TOKEN -t execution-service-server:$TAG .
 #   docker build --target worker --secret id=go_private_token,env=GO_PRIVATE_TOKEN -t execution-service-worker:$TAG .
+#   docker build --target connector-worker --secret id=go_private_token,env=GO_PRIVATE_TOKEN -t execution-service-connector-worker:$TAG .
 #
-# TODO before real deployment: pin base image digests via `make pin-base-images`
-# (deferred — no docker-build/trivy CI job exists yet at this Tier-0 stage).
+# Base images are digest-pinned (see .docker-digests). Re-pin with
+# `make pin-base-images` — it preserves each FROM line's own `AS <stage>`
+# regardless of how many stages share a base image.
 
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26-alpine@sha256:c95332c2af86b6d89b91bd0500f4b9529ccbd090a0d1855c6d1ceaa142ae8615 AS builder
 
 ARG BUILD_VERSION=dev
 ENV CGO_ENABLED=0 \
@@ -51,21 +55,37 @@ RUN go build \
     -trimpath \
     -o /build/bin/worker \
     ./cmd/worker
+RUN go build \
+    -ldflags="-w -s -X main.version=${BUILD_VERSION}" \
+    -trimpath \
+    -o /build/bin/connector-worker \
+    ./cmd/connector-worker
 
 # gcr.io/distroless/static-debian12: no shell, no libc, no package manager.
 # Runs as nonroot (uid 65532) by default.
-FROM gcr.io/distroless/static-debian12:nonroot AS server
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS server
 
 COPY --from=builder /build/bin/server /server
 
-EXPOSE 8080 9090
+EXPOSE 8080
 
 ENTRYPOINT ["/server"]
 
-FROM gcr.io/distroless/static-debian12:nonroot AS worker
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS worker
 
 COPY --from=builder /build/bin/worker /worker
 
 EXPOSE 8081
 
 ENTRYPOINT ["/worker"]
+
+# cmd/connector-worker polls a Valkey Stream and reports outcomes back over
+# HTTP — it serves nothing inbound but its own /healthz + /metrics
+# (WORKER_HEALTH_PORT, default 8081).
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS connector-worker
+
+COPY --from=builder /build/bin/connector-worker /connector-worker
+
+EXPOSE 8081
+
+ENTRYPOINT ["/connector-worker"]

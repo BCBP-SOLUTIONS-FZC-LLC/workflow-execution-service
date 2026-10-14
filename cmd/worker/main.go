@@ -1,7 +1,171 @@
 package main
 
-import "log"
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/logger"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
+	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/contrib/opentelemetry"
+	"go.temporal.io/sdk/interceptor"
+	"go.temporal.io/sdk/worker"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
+	outboundhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pglogger"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
+	outboundtemporal "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
+)
+
+var version = "dev"
 
 func main() {
-	log.Println("cmd/worker: not implemented")
+	if config.VersionRequested() {
+		fmt.Println(version)
+		return
+	}
+
+	cfg, err := config.Load()
+	if err == nil {
+		err = cfg.RequireWorker()
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		os.Exit(1)
+	}
+
+	wlog, err := logger.NewLogger(cfg.AppEnv)
+	if err != nil {
+		log.Fatalf("cmd/worker: new logger: %v", err)
+	}
+	tracingShutdown, err := observability.InitTelemetry(observability.GinConfig(cfg.OTELServiceName, cfg.BuildVersion, cfg.AppEnv, wlog), wlog)
+	if err != nil {
+		log.Fatalf("cmd/worker: telemetry: %v", err)
+	}
+	defer tracingShutdown()
+
+	deps, queueRepo, pool, cleanup, err := buildDeps(cfg, wlog)
+	if err != nil {
+		log.Fatalf("cmd/worker: %v", err)
+	}
+	defer cleanup()
+
+	var clientInterceptors []interceptor.ClientInterceptor
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
+		tracingInterceptor, err := observability.NewTemporalTracingInterceptor(opentelemetry.TracerOptions{})
+		if err != nil {
+			log.Fatalf("cmd/worker: temporal tracing interceptor: %v", err)
+		}
+		clientInterceptors = append(clientInterceptors, tracingInterceptor)
+	}
+	sdk, err := client.Dial(client.Options{HostPort: cfg.TemporalHostPort, Namespace: cfg.TemporalNamespace, Interceptors: clientInterceptors})
+	if err != nil {
+		log.Fatalf("cmd/worker: dial temporal: %v", err)
+	}
+	defer sdk.Close()
+
+	registry := newWorkerRegistry()
+	defaultWorker, err := startWorkerForQueue(sdk, deps, cfg.TemporalTaskQueue, worker.Options{WorkerStopTimeout: 25 * time.Second, Interceptors: []interceptor.WorkerInterceptor{observability.NewTemporalMetricsInterceptor()}})
+	if err != nil {
+		log.Fatalf("cmd/worker: start default worker: %v", err)
+	}
+	registry.add(cfg.TemporalTaskQueue, defaultWorker)
+
+	pollCtx, cancelPoll := context.WithCancel(context.Background())
+	go pollQueueTopology(pollCtx, sdk, deps, queueRepo, cfg.TemporalTaskQueue, cfg.QueueTopologyPollInterval, registry, wlog)
+
+	healthSrv := newHealthServer(fmt.Sprintf(":%d", cfg.WorkerHealthPort), pool, sdk)
+	go func() {
+		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			wlog.Error("health server exited", map[string]any{"error": err.Error()})
+		}
+	}()
+
+	metricsSrv := newMetricsServer(fmt.Sprintf(":%d", cfg.WorkerMetricsPort))
+	go func() {
+		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			wlog.Error("metrics server exited", map[string]any{"error": err.Error()})
+		}
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	cancelPoll()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := healthSrv.Shutdown(shutdownCtx); err != nil {
+		wlog.Warn("health server shutdown error", map[string]any{"error": err.Error()})
+	}
+	if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
+		wlog.Warn("metrics server shutdown error", map[string]any{"error": err.Error()})
+	}
+
+	var wg sync.WaitGroup
+	for _, w := range registry.all() {
+		wg.Add(1)
+		go func(w worker.Worker) {
+			defer wg.Done()
+			w.Stop()
+		}(w)
+	}
+	wg.Wait()
+}
+
+func buildDeps(cfg *config.Config, wlog port.Logger) (*outboundtemporal.Deps, port.ActiveTaskQueueRepository, *pgcommon.Pool, func(), error) {
+	pool, err := pgcommon.NewPool(context.Background(), pgcommon.Config{
+		DSN:                cfg.DatabaseURL,
+		MaxConns:           cfg.PGMaxConns,
+		MinConns:           cfg.PGMinConns,
+		PGBouncerMode:      cfg.PGBouncerMode,
+		SlowQueryThreshold: time.Duration(cfg.PGSlowQueryThresholdMS) * time.Millisecond,
+		GUCProvider:        pgcommon.GUCSetFromContext,
+		Logger:             pglogger.New(wlog),
+		Tracer:             gincommon.NewSpanTracer(cfg.OTELServiceName),
+	})
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("new postgres pool: %w", err)
+	}
+
+	validator, err := eventbus.NewSchemaValidator()
+	if err != nil {
+		pool.Close()
+		return nil, nil, nil, nil, fmt.Errorf("new schema validator: %w", err)
+	}
+
+	definitions := outboundhttp.NewDefinitionClient(cfg.DefinitionServiceURL, cfg.DefinitionServiceToken, cfg.DefinitionClientTimeout)
+
+	deps := &outboundtemporal.Deps{
+		Instances:   postgres.NewInstanceRepo(pool),
+		Tasks:       postgres.NewTaskRepo(pool),
+		Assignments: postgres.NewTaskAssignmentRepo(pool),
+		Outbox:      postgres.NewOutboxRepo(pool),
+		Transactor:  postgres.NewTransactor(pool),
+		Validator:   validator,
+		Definitions: definitions,
+		Log:         wlog,
+	}
+	queueRepo := postgres.NewActiveTaskQueueRepo(pool)
+
+	cleanup := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = pool.DrainAndClose(ctx)
+	}
+	return deps, queueRepo, pool, cleanup, nil
 }
