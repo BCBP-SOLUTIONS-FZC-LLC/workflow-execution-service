@@ -86,6 +86,7 @@ components:
         id:        { type: string, format: uuid, description: "Unique event id; logged for correlation. Redelivery is absorbed by handler idempotency, not by a dedup registry." }
         type:      { type: string, example: DepartmentMembershipRevoked, description: "Event type used for dispatch. Unknown types are accepted and ignored." }
         tenant_id: { type: string, format: uuid, description: "Tenant the event applies to; used to set the RLS GUC." }
+        time:      { type: string, format: date-time, description: "When the event was produced. A revocation leaves alone every default assignee added after this time, so a redelivered or reordered event cannot invalidate a version published after the user was added back. Absent means no such filter." }
         data:      { type: object, additionalProperties: true, description: "Type-specific payload (e.g. user_id, department_id, role). CloudEvents data field." }
       example:
         id: "f0a11222-3844-42bc-938b-665cd42c9999"
