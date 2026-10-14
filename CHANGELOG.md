@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- The AsyncAPI document names two inbound messages, `MembershipRevoked` and `TenantMembershipsPurged`, that had no schema file, so the schema registry workflow failed its AsyncAPI-to-schema coverage pass. Both files are added (open schemas, as the other inbound ones), and a test fails when any message lacks its file.
 - A connector callback for a paused instance returns 409 `INVALID_INSTANCE_STATE` instead of success; the workflow dropped the signal, so the task never completed after resume. The connector worker redelivers until the instance runs. A callback for an instance that is over is acknowledged with no signal.
 - A task failed through `UpdateTaskStatus` vacates its active assignments, as a cascade-failed task does, so the automation principal no longer holds a failed task.
 
