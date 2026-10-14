@@ -10,6 +10,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- An instance started on a version the Definition Service had already marked invalid (after a membership revocation) ran: the API's start reads a plan cached for up to an hour, and `GetCompiledPlanActivity` did not check the status or validity it fetched. The activity now refuses, without retry, a version that is not `PUBLISHED` or not valid, so the instance fails and runs no step.
+- A receive task's wait did not record its node, so an instance waiting on a message or an outside answer showed an empty `current_node_keys`; a Definition plan whose main pool starts at a message wait showed no node at all. The node is recorded when the wait begins (change ID `receive-records-node`).
 - The chart rendered without `VALKEY_ADDR` in its Secret, giving pods that referenced a missing key and could not start. `VALKEY_ADDR` is now required with the other Secret values, and a test renders the chart without it. The Makefile tool downloads (hadolint, Trivy, kubeconform) use `curl -f`.
 - The AsyncAPI document names two inbound messages, `MembershipRevoked` and `TenantMembershipsPurged`, that had no schema file, so the schema registry workflow failed its AsyncAPI-to-schema coverage pass. Both files are added (open schemas, as the other inbound ones), and a test fails when any message lacks its file.
 - A connector callback for a paused instance returns 409 `INVALID_INSTANCE_STATE` instead of success; the workflow dropped the signal, so the task never completed after resume. The connector worker redelivers until the instance runs. A callback for an instance that is over is acknowledged with no signal.
@@ -27,6 +29,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Added
 
+- `make test-compat` (`test/compat`, build tag `compat`) builds the Definition Service from a checkout (`DEFINITION_SERVICE_DIR`, default `../definition_service`) and runs it against this service's real API, worker activities, Postgres, Valkey and Temporal. It publishes every standalone Definition fixture and starts it here, runs a two-stage template and a library-module call to completion, and checks the archive guard, the pause after a department or tenant revocation, both tokens, the refusal codes and the connector-alias decode. CI runs it in a `compat` job against the Definition Service's `feat/service` branch (a `compat_peer_ref` input of `validate-test.yml`), and `make test-e2e`, which ran in no job before, in its own `e2e` job.
 - A retention sweep in the API process, once a day and at start: published `outbox_events` older than the 7-year audit floor are pruned in batches through the outbox runner, and `processed_event` rows older than 7 days are pruned (the table has no row-level security). Settings `OUTBOX_RETENTION`, `PROCESSED_EVENT_RETENTION`, `RETENTION_SWEEP_INTERVAL` and `RETENTION_SWEEP_BATCH`; the counter `workflow_execution_service_retention_rows_deleted_total` counts rows by table.
 
 - Contract tests send the event category routes and the connector-task complete and fail callbacks through the real router against `api/internal-openapi.yaml`.

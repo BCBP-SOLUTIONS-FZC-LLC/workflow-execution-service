@@ -30,6 +30,12 @@ func (d *Deps) GetCompiledPlan(ctx context.Context, in port.GetCompiledPlanInput
 		}
 		return port.GetCompiledPlanOutput{}, fmt.Errorf("get compiled workflow: %w", err)
 	}
+	if cw.Status != "PUBLISHED" {
+		return port.GetCompiledPlanOutput{}, nonRetryable("DefinitionServiceClientError", fmt.Errorf("version %s is %s: %w", versionID, cw.Status, port.ErrVersionNotPublished))
+	}
+	if !cw.IsValid {
+		return port.GetCompiledPlanOutput{}, nonRetryable("DefinitionServiceClientError", fmt.Errorf("version %s: %w", versionID, port.ErrVersionInvalid))
+	}
 
 	var collab dsl.CompiledCollaboration
 	if err := json.Unmarshal([]byte(cw.CompiledPlanJSON), &collab); err != nil {

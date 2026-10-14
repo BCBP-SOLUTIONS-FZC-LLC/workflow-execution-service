@@ -37,3 +37,5 @@ const ioInputRuleChangeID = "io-input-rule"
 const taskResultVariablesChangeID = "task-result-variables"
 
 const externalWaitChangeID = "external-wait-by-key"
+
+const receiveRecordsNodeChangeID = "receive-records-node"

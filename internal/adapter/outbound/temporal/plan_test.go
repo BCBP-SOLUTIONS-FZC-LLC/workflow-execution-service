@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,6 +89,24 @@ func TestGetCompiledPlan_UpstreamUnavailable_IsRetryable(t *testing.T) {
 func TestGetCompiledPlan_VersionWithoutAPlan_IsNonRetryable(t *testing.T) {
 	_, err := readPlan(planDeps(t, `null`))
 	requireNonRetryable(t, err)
+}
+
+// The API's plan cache can hold a version's status for an hour, so the
+// activity's read is the authoritative check (execution LLD §1, §3.1): a
+// version that is no longer PUBLISHED, or that Definition marked invalid
+// after a membership revocation, starts nothing.
+func TestGetCompiledPlan_VersionNotRunnable_IsNonRetryable(t *testing.T) {
+	plan := `{"main_plan":"main","schema_version":1}`
+	for name, body := range map[string]string{
+		"draft":    strings.Replace(planBody(plan), `"status":"PUBLISHED"`, `"status":"DRAFT"`, 1),
+		"archived": strings.Replace(planBody(plan), `"status":"PUBLISHED"`, `"status":"ARCHIVED"`, 1),
+		"invalid":  strings.Replace(planBody(plan), `"is_valid":true`, `"is_valid":false`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := readPlan(planServer(t, http.StatusOK, body))
+			requireNonRetryable(t, err)
+		})
+	}
 }
 
 // The activity result is what the workflow records and replays, so the

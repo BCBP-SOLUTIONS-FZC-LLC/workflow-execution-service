@@ -26,6 +26,13 @@ func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID s
 		return nodeKey, "", nil
 
 	case string(enums.StageTypeReceiveTask):
+		if getVersion(ctx, receiveRecordsNodeChangeID) != wf.DefaultVersion {
+			if err := updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
+				InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{nodeKey},
+			}); err != nil {
+				return nodeKey, "", err
+			}
+		}
 		in.receive(ctx, nodeKey, stage.Extras["message"])
 		in.history.Push(nodeKey)
 		return nodeKey, "", nil

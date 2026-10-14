@@ -53,6 +53,7 @@ type activityHooks struct {
 	cancelInstance       func(port.CancelInstanceInput) error
 	reassignAssignment   func(port.ReassignAssignmentInput) error
 	deferTask            func(port.DeferTaskInput)
+	updateInstanceNodes  func(port.UpdateInstanceNodesInput)
 }
 
 // registerFakeActivities registers minimal, real (not testify-mocked)
@@ -92,7 +93,12 @@ func registerFakeActivities(env *testsuite.TestWorkflowEnvironment, collab *dsl.
 		activity.RegisterOptions{Name: port.ActivityCreateTask},
 	)
 	env.RegisterActivityWithOptions(
-		func(_ context.Context, _ port.UpdateInstanceNodesInput) error { return nil },
+		func(_ context.Context, in port.UpdateInstanceNodesInput) error {
+			if hooks.updateInstanceNodes != nil {
+				hooks.updateInstanceNodes(in)
+			}
+			return nil
+		},
 		activity.RegisterOptions{Name: port.ActivityUpdateInstanceNodes},
 	)
 	registerFakeTaskActivities(env, hooks)

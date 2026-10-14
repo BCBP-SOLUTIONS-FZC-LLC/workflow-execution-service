@@ -192,6 +192,49 @@ func TestExecute_OutsideAnswerCompletesAReceiveTask(t *testing.T) {
 	}
 }
 
+// TestExecute_AReceiveTaskIsTheInstancesCurrentNode pins that an instance
+// waiting on a message or an outside answer reports that wait in
+// current_node_keys (execution LLD §4.1), so a caller can see which node to
+// answer. A Definition plan whose main pool starts at a message wait showed
+// no node at all.
+func TestExecute_AReceiveTaskIsTheInstancesCurrentNode(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	collab := opsCollaboration(
+		dsl.StageDef{Type: "receive_task", NodeID: "Receive_Bid", Extras: map[string]string{"message": "bid-received"}},
+		dsl.StageDef{Type: "prep", NodeID: "Award"},
+	)
+	var mu sync.Mutex
+	var recorded [][]domain.NodeKey
+	hooks := &activityHooks{updateInstanceNodes: func(in port.UpdateInstanceNodesInput) {
+		mu.Lock()
+		defer mu.Unlock()
+		recorded = append(recorded, in.NodeKeys)
+	}}
+	registerFakeActivities(env, collab, hooks)
+
+	var atWait [][]domain.NodeKey
+	env.RegisterDelayedCallback(func() {
+		mu.Lock()
+		atWait = append(atWait, recorded...)
+		mu.Unlock()
+		env.SignalWorkflow(port.SignalInstanceExternalAnswer+":instance-1", externalAnswerWire{Key: "Ops/Receive_Bid"})
+	}, afterStart)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "Ops", NodeID: "Award", ResultJSON: `{}`, RecordVersion: 1, VisitCount: 1,
+		})
+	}, afterAnswer)
+
+	if got := runToCompletion(t, env, collab, ""); got != domain.InstanceStatusCompleted {
+		t.Fatalf("Status = %v, want COMPLETED", got)
+	}
+	want := [][]domain.NodeKey{{"Ops/Receive_Bid"}}
+	if !reflect.DeepEqual(atWait, want) {
+		t.Errorf("current nodes recorded while waiting = %v, want %v", atWait, want)
+	}
+}
+
 // TestExecute_OutsideAnswerBeforeTheWait_IsDropped pins that an answer for a
 // step the instance has not reached is not kept: it must not complete the
 // step later, or leak its variables.
