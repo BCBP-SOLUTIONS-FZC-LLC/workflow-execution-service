@@ -200,11 +200,12 @@ test-e2e:
 	TESTCONTAINERS_RYUK_DISABLED=true \
 	go test -race -count=1 -tags e2e -timeout 5m ./test/e2e/... ./cmd/connector-worker/...
 
-## test-compat: Run the Definition Service's real binary, built from DEFINITION_SERVICE_DIR (default ../definition_service), against this service's real API, worker and stores
+## test-compat: Run the Definition Service (DEFINITION_SERVICE_DIR, default ../definition_service), this repository's connector worker and the Workflow-Events Consumer (EVENT_CONSUMER_DIR, default ../event_consumer) as real binaries against this service's real API, worker and stores
 test-compat:
 	AWS_EC2_METADATA_DISABLED=true \
 	TESTCONTAINERS_RYUK_DISABLED=true \
 	DEFINITION_SERVICE_DIR="$(DEFINITION_SERVICE_DIR)" \
+	EVENT_CONSUMER_DIR="$(EVENT_CONSUMER_DIR)" \
 	go test -count=1 -tags compat -timeout 15m ./test/compat/...
 
 ## merge-coverage: Merge unit + integration profiles into coverage.out (max-count-per-block strategy)

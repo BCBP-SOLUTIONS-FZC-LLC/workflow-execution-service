@@ -50,6 +50,7 @@ func TestCompat(t *testing.T) {
 	t.Run("archive waits for live instances", func(t *testing.T) { e.archiveGuard(t) })
 	t.Run("a revoked membership invalidates the version and pauses the user's work", func(t *testing.T) { e.revocation(t) })
 	t.Run("a revoked tenant membership invalidates the version and pauses the user's work", func(t *testing.T) { e.tenantRevocation(t) })
+	t.Run("IAM events reach both services through the event consumer", func(t *testing.T) { e.eventsThroughConsumer(t) })
 	t.Run("each service accepts only the other's configured token", func(t *testing.T) { e.tokens(t) })
 	t.Run("a version that cannot start is refused with the documented code", func(t *testing.T) { e.unstartable(t) })
 	t.Run("a connector alias written in Definition reaches the connector worker", func(t *testing.T) { e.aliases(t) })
@@ -447,4 +448,89 @@ func (e *env) connectorRoundTrip(t *testing.T) {
 	review, _ := readyTask(d)
 	e.completeTask(t, tn, assignee, review)
 	e.waitInstance(t, tn, started.ID, "COMPLETED", func(d instanceDetail) bool { return d.Status == "COMPLETED" })
+}
+
+// running publishes a two-stage template for assignee in department, starts
+// it, and waits for its first task.
+func (e *env) running(t *testing.T, tn tenant, assignee, department uuid.UUID) (published, uuid.UUID, taskSummary) {
+	t.Helper()
+	p := e.mustPublish(t, tn, twoStage(t, assignee, department))
+	id := e.mustStart(t, tn, p.versionID)
+	d := e.waitInstance(t, tn, id, "a READY task", func(d instanceDetail) bool { _, ok := readyTask(d); return ok })
+	tk, _ := readyTask(d)
+	return p, id, tk
+}
+
+func (e *env) waitInvalid(t *testing.T, tn tenant, p published) {
+	t.Helper()
+	deadline := time.Now().Add(pollTimeout)
+	for {
+		if _, valid := e.version(t, tn, p); !valid {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the Definition Service never invalidated the version")
+		}
+		time.Sleep(pollInterval)
+	}
+}
+
+func (e *env) eventsThroughConsumer(t *testing.T) {
+	b := e.startBus(t)
+
+	t.Run("a department membership revocation reaches the Definition Service", func(t *testing.T) {
+		tn := newTenant()
+		assignee, department := newUser(), uuid.New()
+		p, id, _ := e.running(t, tn, assignee, department)
+
+		b.publish(t, "iam-membership-events", "DepartmentMembershipRevoked", tn, map[string]string{
+			"user_id": assignee.String(), "department_id": department.String(), "role": "member",
+		})
+
+		e.waitInvalid(t, tn, p)
+		e.waitInstance(t, tn, id, "PAUSED", func(d instanceDetail) bool { return d.Status == "PAUSED" })
+	})
+
+	t.Run("a tenant membership revocation reaches both services", func(t *testing.T) {
+		tn := newTenant()
+		assignee := newUser()
+		p, _, task := e.running(t, tn, assignee, uuid.New())
+
+		b.publish(t, "iam-membership-events", "MembershipRevoked", tn, map[string]string{"user_id": assignee.String()})
+
+		e.waitInvalid(t, tn, p)
+		deadline := time.Now().Add(pollTimeout)
+		for {
+			var detail struct {
+				Assignments []struct {
+					UserID   uuid.UUID `json:"user_id"`
+					IsActive bool      `json:"is_active"`
+				} `json:"assignments"`
+			}
+			e.executionAs(t, tn, tn.admin, "tenant_admin").must(http.MethodGet, "/api/v1/tasks/"+task.ID.String(), nil, http.StatusOK).decode(t, &detail)
+			active := false
+			for _, a := range detail.Assignments {
+				active = active || (a.UserID == assignee && a.IsActive)
+			}
+			if !active {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("Execution never vacated the revoked user's assignment: %+v", detail.Assignments)
+			}
+			time.Sleep(pollInterval)
+		}
+	})
+
+	t.Run("a tenant suspension reaches the Execution Service", func(t *testing.T) {
+		tn := newTenant()
+		_, id, _ := e.running(t, tn, newUser(), uuid.New())
+
+		b.publish(t, "iam-tenant-events", "TenantStateChanged", tn, map[string]string{
+			"tenant_id": tn.id.String(), "status": "suspended", "previous_status": "active",
+			"plan": "pro", "previous_plan": "pro", "changed_at": time.Now().UTC().Format(time.RFC3339), "cause": "billing",
+		})
+
+		e.waitInstance(t, tn, id, "PAUSED", func(d instanceDetail) bool { return d.Status == "PAUSED" })
+	})
 }
