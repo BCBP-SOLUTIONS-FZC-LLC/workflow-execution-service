@@ -17,6 +17,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- A delegation scope this service has no case for (anything but `all`, `department` and `tender`) matches nothing and is logged and counted; it was compared with the instance's `subject_id`, which could reroute the wrong tasks when IAM adds a scope.
 - The LLD residual-risk row says the connector callbacks answer `204`, as built.
 - The public spec follows the handlers: a task's assignment record has no `task_id`, the active-assignment item is the seven fields the handler sends, and the outside-answer routes declare `413` and `415`. Contract tests send the instance and task routes through the router and fail on any response field the spec omits.
 - `workflow-connectors/v2` is v2.1.0. The connector worker's Valkey ACL user needs `+asking`, the startup document-reference check puts and deletes a probe object (the worker needs `s3:PutObject` and `s3:DeleteObject` on the prefix), and an unknown key in the alias file fails startup.

@@ -36,16 +36,16 @@ func scopeMatches(ctx context.Context, log port.Logger, plans *compiledPlanCache
 			return dept.IAMDepartmentID == *scopeID && deptUUID(&dept) == c.task.DepartmentID
 		}
 		return false
-	default:
-		if scope != scopeTender {
-			if observability.DelegationScopeUnhandledTotal != nil {
-				observability.DelegationScopeUnhandledTotal.WithLabelValues(scope).Inc()
-			}
-			log.Warn("scope match: delegation scope is unknown to this service, matching on subject", map[string]any{
-				"scope": scope, "task_id": c.task.ID,
-			})
-		}
+	case scopeTender:
 		return scopeID != nil && c.instance.SubjectID == *scopeID
+	default:
+		if observability.DelegationScopeUnhandledTotal != nil {
+			observability.DelegationScopeUnhandledTotal.WithLabelValues(scope).Inc()
+		}
+		log.Warn("scope match: delegation scope is unknown to this service, matching nothing", map[string]any{
+			"scope": scope, "task_id": c.task.ID,
+		})
+		return false
 	}
 }
 

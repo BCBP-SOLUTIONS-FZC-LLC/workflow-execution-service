@@ -195,10 +195,7 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		assert.Empty(t, outbox.enqueued)
 	})
 
-	// A scope value added to the identity subsystem's enum that this service has
-	// no case for is matched on the subject, the same way a tender-scoped one is,
-	// so the delegation still takes effect while the addition stays visible.
-	t.Run("a scope this service has no case for still matches on subject", func(t *testing.T) {
+	t.Run("a scope this service has no case for matches nothing and is counted", func(t *testing.T) {
 		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "tender-42", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
@@ -208,9 +205,9 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID,
 			Scope: "contract", ScopeID: &subjectID,
 		})
-		require.NoError(t, err, "dropping it would strand the delegator's work")
-		assert.False(t, assignments.byID[a.ID].IsActive)
-		require.Len(t, outbox.enqueued, 1)
+		require.NoError(t, err)
+		assert.True(t, assignments.byID[a.ID].IsActive, "a scope with no case here must not move the delegator's work")
+		assert.Empty(t, outbox.enqueued)
 	})
 
 	t.Run("adopting the delegate's existing row surfaces a read failure", func(t *testing.T) {

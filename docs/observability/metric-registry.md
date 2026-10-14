@@ -45,7 +45,7 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 |---|---|---|---|
 | `workflow_execution_service_connector_dispatch_dead_lettered_total` | counter | `connector_type` | Connector stream entries moved to the dead-letter stream after exceeding their delivery cap, by connector_type. |
 | `workflow_execution_service_delegation_reroute_duration_seconds` | histogram | - | Envelope-time to reroute-commit latency for DelegationStarted handling (LLD §6.7 SLO, p99 <= 4s). |
-| `workflow_execution_service_delegation_scope_unhandled_total` | counter | `scope` | Delegations arriving with a scope this service has no case for, by scope. Still matched against subject_id. |
+| `workflow_execution_service_delegation_scope_unhandled_total` | counter | `scope` | Delegations arriving with a scope this service has no case for, by scope. They match no assignment. |
 | `workflow_execution_service_instance_degraded_current` | gauge | - | Live count of instances currently DEGRADED. |
 | `workflow_execution_service_instance_degraded_oldest_age_seconds` | gauge | - | Age in seconds of the longest-parked DEGRADED instance. |
 | `workflow_execution_service_instance_degraded_total` | counter | - | Total instances that entered DEGRADED. |

@@ -72,7 +72,7 @@ func registerServiceMetrics() {
 		"Total internal event ingest calls, by event_type and result.", "event_type", "result"))
 	DelegationScopeUnhandledTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_delegation_scope_unhandled_total",
-		"Delegations arriving with a scope this service has no case for, by scope. Still matched against subject_id.", "scope"))
+		"Delegations arriving with a scope this service has no case for, by scope. They match no assignment.", "scope"))
 	RetentionRowsDeletedTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_retention_rows_deleted_total",
 		"Rows the retention sweep deleted, by table (outbox_events or processed_event).", "table"))
