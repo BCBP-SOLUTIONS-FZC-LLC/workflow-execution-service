@@ -1,2 +1,2 @@
 # <copy> <owner/repo> <path in that repo> <branch> <commit the copy was taken at>
-definition-internal-openapi.yaml BCBP-SOLUTIONS-FZC-LLC/workflow-definition-service api/internal-openapi.yaml feat/service 92411fabb4c07d8d6a6e893a72b94aae75d979f4
+definition-internal-openapi.yaml BCBP-SOLUTIONS-FZC-LLC/workflow-definition-service api/internal-openapi.yaml feat/service d08c435a9640de5917e87f49112bcf0c85182e7c
