@@ -68,11 +68,18 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 		IAMDepartmentID: iamDeptID,
 	})
 	if err != nil {
+		if abandonedMidActivity(ctx) {
+			return nodeKey, "", errStageAbandoned
+		}
 		return nodeKey, "", err
 	}
 	if err := updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{nodeKey},
 	}); err != nil {
+		if abandonedMidActivity(ctx) {
+			in.supersedeAbandoned(ctx, out.TaskID)
+			return nodeKey, "", errStageAbandoned
+		}
 		return nodeKey, "", err
 	}
 
@@ -138,6 +145,10 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	}
 
 	return in.resolveTaskStage(ctx, nodeKey, out, sig)
+}
+
+func abandonedMidActivity(ctx wf.Context) bool {
+	return ctx.Err() != nil && getVersion(ctx, abandonedMidActivityChangeID) != wf.DefaultVersion
 }
 
 func (in *interpreter) supersedeAbandoned(ctx wf.Context, taskID string) {

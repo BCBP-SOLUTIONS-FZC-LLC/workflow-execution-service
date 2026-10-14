@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- A force-forward that cancelled a task stage while it was still creating its task or recording its node failed the stage with the cancelled activity's error, so a parallel join counted the branch as failed; CI caught it as an intermittent `TestRunTaskStage_AbandonedOnCancel` failure. The stage is abandoned, and a task it created is superseded (change ID `abandoned-mid-activity`).
 - CI's first full run on this branch (earlier runs skipped every job on a draft) failed in three places: the tidy check ran without the gitignored mocks and dropped `go.uber.org/mock`, and the Trivy and smoke jobs rebuilt the images without the sqlc output. The quality job generates the mocks first, and both image jobs generate the sqlc code.
 - An instance started on a version the Definition Service had already marked invalid (after a membership revocation) ran: the API's start reads a plan cached for up to an hour, and `GetCompiledPlanActivity` did not check the status or validity it fetched. The activity now refuses, without retry, a version that is not `PUBLISHED` or not valid, so the instance fails and runs no step.
 - A receive task's wait did not record its node, so an instance waiting on a message or an outside answer showed an empty `current_node_keys`; a Definition plan whose main pool starts at a message wait showed no node at all. The node is recorded when the wait begins (change ID `receive-records-node`).

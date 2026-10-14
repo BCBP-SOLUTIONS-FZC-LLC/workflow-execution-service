@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
 	wf "go.temporal.io/sdk/workflow"
@@ -112,6 +113,44 @@ func TestRunTaskStage_AbandonedOnCancel(t *testing.T) {
 	}
 	if !errors.Is(stageErr, errStageAbandoned) {
 		t.Errorf("runTaskStage error = %v, want errStageAbandoned", stageErr)
+	}
+}
+
+// TestRunTaskStage_AbandonedWhileItsActivitiesRun pins the case behind the
+// flake in TestRunTaskStage_AbandonedOnCancel: a force-forward that cancels
+// the stage while it is still creating its task or recording its node is an
+// abandonment too, not an activity failure a parallel join would count as a
+// failed branch.
+func TestRunTaskStage_AbandonedWhileItsActivitiesRun(t *testing.T) {
+	for _, slow := range []string{port.ActivityCreateTask, port.ActivityUpdateInstanceNodes} {
+		t.Run(slow, func(t *testing.T) {
+			env := newTestEnv()
+			switch slow {
+			case port.ActivityCreateTask:
+				env.OnActivity(slow, mock.Anything, mock.Anything).After(time.Hour).Return(port.CreateTaskOutput{TaskID: "sales/n1"}, nil)
+			default:
+				env.OnActivity(slow, mock.Anything, mock.Anything).After(time.Hour).Return(nil)
+			}
+
+			var stageErr error
+			env.ExecuteWorkflow(func(ctx wf.Context) error {
+				in := newInterpreter("tenant", "instance", "", nil, nil)
+				plan := &dsl.CompiledPlan{Name: "main"}
+				cctx, cancel := wf.WithCancel(ctx)
+				wf.Go(ctx, func(gctx wf.Context) {
+					_ = wf.Sleep(gctx, time.Minute)
+					cancel()
+				})
+				_, _, stageErr = in.runTaskStage(cctx, plan, "sales", &dsl.StageDef{Type: "approve", NodeID: "n1"}, "sales/n1")
+				return nil
+			})
+			if err := env.GetWorkflowError(); err != nil {
+				t.Fatalf("workflow returned error: %v", err)
+			}
+			if !errors.Is(stageErr, errStageAbandoned) {
+				t.Errorf("runTaskStage error = %v, want errStageAbandoned", stageErr)
+			}
+		})
 	}
 }
 
