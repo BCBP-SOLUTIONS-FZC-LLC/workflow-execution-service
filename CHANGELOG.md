@@ -15,6 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- `workflow-connectors/v2` is v2.1.0. The connector worker's Valkey ACL user needs `+asking`, the startup document-reference check puts and deletes a probe object (the worker needs `s3:PutObject` and `s3:DeleteObject` on the prefix), and an unknown key in the alias file fails startup.
 - `WorkflowTaskFailed` carries an optional `error_class` when a stage fails (the connector's error class); a cascade failure carries none. The payload schema, the AsyncAPI document and the LLD describe it, and the message no longer claims a task only fails through a cascade.
 - Branch conditions are parsed and matched by `workflow-models` `dsl.ParseCondition`: `= decision = "bid"` evaluates as documented, a literal that contains `==` is no longer mis-split, numbers compare as numbers, and an unsupported form fails the gateway.
 - The internal spec declares 502 `EVENT_DECODE_FAILED` on the four event category routes. The copy of the Definition Service's internal spec is refreshed and `SOURCES` names `feat/service`.
