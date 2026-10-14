@@ -53,8 +53,10 @@ jobs:
       - name: Install dev tools
         run: make tools
 
-      - name: Generate (sqlc)
-        run: make generate
+      - name: Generate (sqlc and mocks)
+        run: |
+          make generate
+          make mock
 
       - name: Format check
         run: make fmt-check
