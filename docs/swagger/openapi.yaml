@@ -489,16 +489,12 @@ components:
       type: object
       required:
         - id
-        - task_id
         - user_id
         - is_lead
         - assigned_at
         - is_active
       properties:
         id:
-          type: string
-          format: uuid
-        task_id:
           type: string
           format: uuid
         user_id:
@@ -582,53 +578,35 @@ components:
     ActiveUserTask:
       type: object
       required:
-        - workflow_instance_id
         - task_id
-        - assignment_id
+        - workflow_instance_id
         - node_key
-        - task_type
-        - business_key
+        - user_id
+        - department_id
         - status
-        - version
-        - created_at
+        - record_version
       properties:
-        workflow_instance_id:
-          type: string
-          format: uuid
         task_id:
           type: string
           format: uuid
-        assignment_id:
+        workflow_instance_id:
           type: string
           format: uuid
         node_key:
           type: string
-          example: "review_stage_1"
-        task_type:
+          example: "eng/Review_Task"
+        user_id:
           type: string
-          example: "userTask"
+          format: uuid
+          description: The user whose active assignment this is.
         department_id:
           type: string
           format: uuid
-          nullable: true
-        business_key:
-          type: string
-          example: "tender-abc-001"
         status:
           $ref: "#/components/schemas/TaskStatus"
         record_version:
           type: integer
-        due_at:
-          type: string
-          format: date-time
-          nullable: true
-        created_at:
-          type: string
-          format: date-time
-        claimed_at:
-          type: string
-          format: date-time
-          nullable: true
+          format: int64
 
     OutsideAnswer:
       type: object
@@ -1610,6 +1588,10 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ProblemDetails"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
         "500":
           $ref: "#/components/responses/InternalError"
         "503":
@@ -1688,6 +1670,10 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ProblemDetails"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
         "500":
           $ref: "#/components/responses/InternalError"
         "503":

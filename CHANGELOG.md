@@ -15,6 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The public spec follows the handlers: a task's assignment record has no `task_id`, the active-assignment item is the seven fields the handler sends, and the outside-answer routes declare `413` and `415`. Contract tests send the instance and task routes through the router and fail on any response field the spec omits.
 - `workflow-connectors/v2` is v2.1.0. The connector worker's Valkey ACL user needs `+asking`, the startup document-reference check puts and deletes a probe object (the worker needs `s3:PutObject` and `s3:DeleteObject` on the prefix), and an unknown key in the alias file fails startup.
 - `WorkflowTaskFailed` carries an optional `error_class` when a stage fails (the connector's error class); a cascade failure carries none. The payload schema, the AsyncAPI document and the LLD describe it, and the message no longer claims a task only fails through a cascade.
 - Branch conditions are parsed and matched by `workflow-models` `dsl.ParseCondition`: `= decision = "bid"` evaluates as documented, a literal that contains `==` is no longer mis-split, numbers compare as numbers, and an unsupported form fails the gateway.
