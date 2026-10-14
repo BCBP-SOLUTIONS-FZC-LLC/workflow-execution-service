@@ -37,7 +37,7 @@ func TestExecute_StageFailSignalFailsTaskNotAssignment(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-fail:instance-1", stageFailWire{
-			DeptID: "sales", NodeID: "connector", ErrorClass: "provider timeout", RecordVersion: 1, VisitCount: 1,
+			DeptID: "sales", NodeID: "connector", ErrorClass: "provider_timeout", RecordVersion: 1, VisitCount: 1,
 		})
 	}, time.Millisecond)
 
@@ -59,5 +59,8 @@ func TestExecute_StageFailSignalFailsTaskNotAssignment(t *testing.T) {
 	}
 	if gotStatus.RecordVersion != 1 {
 		t.Errorf("updateTaskStatus RecordVersion = %d, want 1", gotStatus.RecordVersion)
+	}
+	if gotStatus.ErrorClass != "provider_timeout" {
+		t.Errorf("updateTaskStatus ErrorClass = %q, want the class the connector failed with", gotStatus.ErrorClass)
 	}
 }

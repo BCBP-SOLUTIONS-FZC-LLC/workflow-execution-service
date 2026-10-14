@@ -155,4 +155,5 @@ type UpdateTaskStatusInput struct {
 	TenantID      string
 	Status        domain.TaskStatus
 	RecordVersion int64
+	ErrorClass    string
 }

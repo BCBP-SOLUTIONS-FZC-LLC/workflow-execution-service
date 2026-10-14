@@ -261,10 +261,11 @@ type WorkflowTaskFailedPayload struct {
 	CommonCore
 	TaskScopedCore
 	CascadeSource string `json:"cascade_source"`
+	ErrorClass    string `json:"error_class,omitempty"`
 }
 
-func NewWorkflowTaskFailedPayload(core CommonCore, task TaskScopedCore, cascadeSource string) WorkflowTaskFailedPayload {
-	return WorkflowTaskFailedPayload{CommonCore: core, TaskScopedCore: task, CascadeSource: cascadeSource}
+func NewWorkflowTaskFailedPayload(core CommonCore, task TaskScopedCore, cascadeSource, errorClass string) WorkflowTaskFailedPayload {
+	return WorkflowTaskFailedPayload{CommonCore: core, TaskScopedCore: task, CascadeSource: cascadeSource, ErrorClass: errorClass}
 }
 
 type WorkflowTaskSLAWarningPayload struct {

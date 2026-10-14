@@ -61,7 +61,7 @@ func TestConnectorTaskService_Complete_AssignsTheActingPrincipal(t *testing.T) {
 
 	extras := `{"resolved_inputs":{},"output_mapping":[]}`
 	task := connectorTask("storage", domain.TaskStatusReady, extras)
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz"}
+	inst := instanceWithStatus(task, domain.InstanceStatusRunning)
 	temporal := &fakeTemporalClient{}
 	assignments := newFakeAssignmentRepo()
 	svc := newConnectorTaskServiceWith(task, inst, temporal, newFakeCacheStore(), assignments)
@@ -88,7 +88,7 @@ func TestConnectorTaskService_Fail_AssignsTheActingPrincipal(t *testing.T) {
 	t.Parallel()
 
 	task := connectorTask("storage", domain.TaskStatusReady, `{}`)
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz"}
+	inst := instanceWithStatus(task, domain.InstanceStatusRunning)
 	assignments := newFakeAssignmentRepo()
 	svc := newConnectorTaskServiceWith(task, inst, &fakeTemporalClient{}, newFakeCacheStore(), assignments)
 
@@ -108,7 +108,7 @@ func TestConnectorTaskService_Complete_RetriedCallbackReusesTheSameRow(t *testin
 
 	extras := `{"resolved_inputs":{},"output_mapping":[]}`
 	task := connectorTask("storage", domain.TaskStatusReady, extras)
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz"}
+	inst := instanceWithStatus(task, domain.InstanceStatusRunning)
 	assignments := newFakeAssignmentRepo()
 
 	for range 2 {
@@ -128,7 +128,7 @@ func TestConnectorTaskService_Complete_AssignmentFailureReleasesReservation(t *t
 
 	extras := `{"resolved_inputs":{},"output_mapping":[]}`
 	task := connectorTask("storage", domain.TaskStatusReady, extras)
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz"}
+	inst := instanceWithStatus(task, domain.InstanceStatusRunning)
 	assignments := newFakeAssignmentRepo()
 	assignments.createErr = errors.New("transient database error")
 	temporal := &fakeTemporalClient{}
@@ -153,7 +153,7 @@ func TestConnectorTaskService_Complete_HappyPath(t *testing.T) {
 
 	extras := `{"resolved_inputs":{},"output_mapping":[{"source":"resultUrl","target":"docUrl"}]}`
 	task := connectorTask("storage", domain.TaskStatusReady, extras)
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz"}
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 	temporal := &fakeTemporalClient{}
 	svc := newConnectorTaskService(task, inst, temporal, newFakeCacheStore())
 
@@ -189,7 +189,7 @@ func TestConnectorTaskService_Complete_OutputSourceMayCarryTheEqualsSign(t *test
 
 	extras := `{"resolved_inputs":{},"output_mapping":[{"source":"=contentRef","target":"packet_ref"}]}`
 	task := connectorTask("storage", domain.TaskStatusReady, extras)
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz"}
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 	temporal := &fakeTemporalClient{}
 	svc := newConnectorTaskService(task, inst, temporal, newFakeCacheStore())
 
@@ -209,7 +209,7 @@ func TestConnectorTaskService_Complete_NoOutputMapping_PassesThrough(t *testing.
 	t.Parallel()
 
 	task := connectorTask("rest-call", domain.TaskStatusReady, "")
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz"}
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 	temporal := &fakeTemporalClient{}
 	svc := newConnectorTaskService(task, inst, temporal, newFakeCacheStore())
 
@@ -261,7 +261,7 @@ func TestConnectorTaskService_Complete_DedupPreventsSecondSignal(t *testing.T) {
 	t.Parallel()
 
 	task := connectorTask("storage", domain.TaskStatusReady, "")
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz"}
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 	temporal := &fakeTemporalClient{}
 	cache := newFakeCacheStore()
 	svc := newConnectorTaskService(task, inst, temporal, cache)
@@ -280,7 +280,7 @@ func TestConnectorTaskService_Complete_SignalFails_ReleasesReservation(t *testin
 	t.Parallel()
 
 	task := connectorTask("storage", domain.TaskStatusReady, "")
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz"}
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 	temporal := &fakeTemporalClient{signalFunc: func(context.Context, string, uuid.UUID, string, any) error {
 		return errors.New("transient temporal error")
 	}}
@@ -302,7 +302,7 @@ func TestConnectorTaskService_Fail_SignalFails_ReleasesReservation(t *testing.T)
 	t.Parallel()
 
 	task := connectorTask("send-email", domain.TaskStatusReady, "")
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz"}
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 	temporal := &fakeTemporalClient{signalFunc: func(context.Context, string, uuid.UUID, string, any) error {
 		return errors.New("transient temporal error")
 	}}
@@ -322,7 +322,7 @@ func TestConnectorTaskService_Fail_HappyPath(t *testing.T) {
 	t.Parallel()
 
 	task := connectorTask("send-email", domain.TaskStatusReady, "")
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz"}
+	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 	temporal := &fakeTemporalClient{}
 	svc := newConnectorTaskService(task, inst, temporal, newFakeCacheStore())
 
@@ -359,7 +359,7 @@ func TestConnectorTaskService_NoAutomationPrincipal_ResolvesNothing(t *testing.T
 	t.Parallel()
 
 	task := connectorTask("storage", domain.TaskStatusReady, `{"resolved_inputs":{},"output_mapping":[]}`)
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz"}
+	inst := instanceWithStatus(task, domain.InstanceStatusRunning)
 	temporal := &fakeTemporalClient{}
 	assignments := newFakeAssignmentRepo()
 	svc := newConnectorTaskServiceWith(task, inst, temporal, newFakeCacheStore(), assignments)
@@ -378,7 +378,7 @@ func TestConnectorTaskService_PrincipalLookupFailure_IsReturned(t *testing.T) {
 	t.Parallel()
 
 	task := connectorTask("storage", domain.TaskStatusReady, `{"resolved_inputs":{},"output_mapping":[]}`)
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz"}
+	inst := instanceWithStatus(task, domain.InstanceStatusRunning)
 	temporal := &fakeTemporalClient{}
 	svc := newConnectorTaskServiceWith(task, inst, temporal, newFakeCacheStore(), newFakeAssignmentRepo())
 	boom := errors.New("token service down")
@@ -392,7 +392,7 @@ func TestConnectorTaskService_NoResolverWired_FailsClosed(t *testing.T) {
 	t.Parallel()
 
 	task := connectorTask("storage", domain.TaskStatusReady, `{"resolved_inputs":{},"output_mapping":[]}`)
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz"}
+	inst := instanceWithStatus(task, domain.InstanceStatusRunning)
 	temporal := &fakeTemporalClient{}
 	svc := newConnectorTaskServiceWith(task, inst, temporal, newFakeCacheStore(), newFakeAssignmentRepo())
 	svc.Principals = nil
@@ -405,7 +405,7 @@ func TestConnectorTaskService_Fail_LogsTheConnectorOutput(t *testing.T) {
 	t.Parallel()
 
 	task := connectorTask("send-email", domain.TaskStatusReady, `{}`)
-	inst := &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz"}
+	inst := instanceWithStatus(task, domain.InstanceStatusRunning)
 	svc := newConnectorTaskServiceWith(task, inst, &fakeTemporalClient{}, newFakeCacheStore(), newFakeAssignmentRepo())
 	log := &fakeLogger{}
 	svc.Log = log
@@ -416,4 +416,73 @@ func TestConnectorTaskService_Fail_LogsTheConnectorOutput(t *testing.T) {
 	assert.Equal(t, "upstream_error", log.warnFields[0]["error_class"])
 	assert.Equal(t, []string{"deliveryOutcome"}, log.warnFields[0]["output_keys"])
 	assert.NotContains(t, log.warnFields[0], "output", "the output can carry response bodies and headers, so only its keys are logged")
+}
+
+func instanceWithStatus(task *domain.Task, status domain.InstanceStatus) *domain.Instance {
+	return &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz", Status: status}
+}
+
+func TestConnectorTaskService_PausedInstance_RefusesTheCallbackUntilResumed(t *testing.T) {
+	t.Parallel()
+
+	extras := `{"resolved_inputs":{},"output_mapping":[]}`
+	for _, tc := range []struct {
+		name string
+		call func(*service.ConnectorTaskService, *domain.Task) error
+	}{
+		{"complete", func(s *service.ConnectorTaskService, task *domain.Task) error {
+			return s.Complete(context.Background(), task.TenantID, task.ID, map[string]any{})
+		}},
+		{"fail", func(s *service.ConnectorTaskService, task *domain.Task) error {
+			return s.Fail(context.Background(), task.TenantID, task.ID, "upstream_error", nil)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := connectorTask("storage", domain.TaskStatusReady, extras)
+			inst := instanceWithStatus(task, domain.InstanceStatusPaused)
+			temporal := &fakeTemporalClient{}
+			assignments := newFakeAssignmentRepo()
+			svc := newConnectorTaskServiceWith(task, inst, temporal, newFakeCacheStore(), assignments)
+
+			err := tc.call(svc, task)
+			require.ErrorIs(t, err, port.ErrInvalidInstanceState, "the worker must be told to redeliver, not that the callback succeeded")
+			assert.Empty(t, temporal.signals, "a paused instance would drop the signal")
+			active, listErr := assignments.ListActiveByTask(context.Background(), task.TenantID, task.ID)
+			require.NoError(t, listErr)
+			assert.Empty(t, active, "a refused callback leaves no assignment")
+
+			inst.Status = domain.InstanceStatusRunning
+			require.NoError(t, tc.call(svc, task), "after resume the redelivered callback goes through")
+			assert.Len(t, temporal.signals, 1)
+		})
+	}
+}
+
+func TestConnectorTaskService_TerminalInstance_AcknowledgesTheCallbackWithoutSignalling(t *testing.T) {
+	t.Parallel()
+
+	for _, status := range []domain.InstanceStatus{
+		domain.InstanceStatusCompleted, domain.InstanceStatusTerminated, domain.InstanceStatusFailed,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			task := connectorTask("storage", domain.TaskStatusReady, `{}`)
+			temporal := &fakeTemporalClient{}
+			svc := newConnectorTaskService(task, instanceWithStatus(task, status), temporal, newFakeCacheStore())
+
+			require.NoError(t, svc.Complete(context.Background(), task.TenantID, task.ID, map[string]any{}))
+			require.NoError(t, svc.Fail(context.Background(), task.TenantID, task.ID, "upstream_error", nil))
+			assert.Empty(t, temporal.signals, "an instance that is over has no workflow to signal")
+		})
+	}
+}
+
+func TestConnectorTaskService_DegradedInstance_StillAcceptsTheCallback(t *testing.T) {
+	t.Parallel()
+
+	task := connectorTask("storage", domain.TaskStatusReady, `{}`)
+	temporal := &fakeTemporalClient{}
+	svc := newConnectorTaskService(task, instanceWithStatus(task, domain.InstanceStatusDegraded), temporal, newFakeCacheStore())
+
+	require.NoError(t, svc.Complete(context.Background(), task.TenantID, task.ID, map[string]any{}))
+	assert.Len(t, temporal.signals, 1)
 }

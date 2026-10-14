@@ -371,11 +371,12 @@ components:
       payload: { $ref: '#/components/schemas/WorkflowTaskSupersededEnvelope' }
     WorkflowTaskFailed:
       name: WorkflowTaskFailed
-      title: Task failed via a cancel/terminate/instance-fail cascade (WorkflowTaskFailed)
+      title: Task failed (WorkflowTaskFailed)
       description: >
-        Fires when a task is swept into FAILED as a side effect of an instance-cancel,
-        instance-terminate, or instance-FAILED cascade — never an independent per-task
-        failure of its own. Consumed by Audit, Notification, and the Dashboard Stream
+        Fires when a task becomes FAILED: swept up by an instance-cancel, instance-terminate
+        or instance-FAILED cascade, or failed by its own stage (a connector task whose
+        connector reported a failure). A stage failure names the connector's error_class; a
+        cascade carries none. Consumed by Audit, Notification, and the Dashboard Stream
         Gateway.
       x-lifecycle: { status: active }
       x-owner: { team: platform-engineers, slack: "#workflow-engine" }
@@ -747,7 +748,8 @@ components:
         node_key:             { type: string }
         department_id:        { type: string, format: uuid }
         assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
-        cascade_source:       { type: string, description: what cascade failed the task (cancel/terminate/instance-fail) }
+        cascade_source:       { type: string, description: what failed the task (cancel, terminate, instance-fail, or stage_fail for a task failed by its own stage) }
+        error_class:          { type: string, description: the error class the connector failed the task with; present only when cascade_source is stage_fail }
     WorkflowTaskSlaWarningPayload:
       type: object
       additionalProperties: true

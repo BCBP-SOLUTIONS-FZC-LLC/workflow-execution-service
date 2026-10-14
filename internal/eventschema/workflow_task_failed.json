@@ -13,6 +13,7 @@
     "node_key": { "type": "string" },
     "department_id": { "type": "string", "format": "uuid" },
     "assignee_user_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } },
-    "cascade_source": { "type": "string" }
+    "cascade_source": { "type": "string" },
+    "error_class": { "type": "string" }
   }
 }

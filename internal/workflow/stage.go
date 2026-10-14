@@ -158,6 +158,7 @@ func (in *interpreter) resolveTaskStage(
 	if getVersion(ctx, stageFailChangeID) != wf.DefaultVersion && sig.Failed {
 		if err := updateTaskStatus(ctx, port.UpdateTaskStatusInput{
 			TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusFailed, RecordVersion: sig.RecordVersion,
+			ErrorClass: sig.Reason,
 		}); err != nil {
 			return nodeKey, "", err
 		}

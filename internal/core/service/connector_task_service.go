@@ -50,6 +50,10 @@ func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID uu
 	if err != nil || done {
 		return err
 	}
+	inst, accepted, err := s.instanceAcceptingCallback(ctx, tenantID, task)
+	if err != nil || !accepted {
+		return err
+	}
 	actorUserID, err := s.automationPrincipal(ctx, tenantID)
 	if err != nil {
 		return err
@@ -60,10 +64,6 @@ func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID uu
 		return fmt.Errorf("apply output mapping: %w", err)
 	}
 
-	inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
-	if err != nil {
-		return wrapInstanceErr(err)
-	}
 	if !s.reserveSignal(ctx, taskID) {
 		return nil
 	}
@@ -90,15 +90,15 @@ func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.U
 	if err != nil || done {
 		return err
 	}
+	inst, accepted, err := s.instanceAcceptingCallback(ctx, tenantID, task)
+	if err != nil || !accepted {
+		return err
+	}
 	actorUserID, err := s.automationPrincipal(ctx, tenantID)
 	if err != nil {
 		return err
 	}
 
-	inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
-	if err != nil {
-		return wrapInstanceErr(err)
-	}
 	if !s.reserveSignal(ctx, taskID) {
 		return nil
 	}
@@ -121,6 +121,23 @@ func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.U
 		return fmt.Errorf("signal stage-fail: %w", err)
 	}
 	return nil
+}
+
+func (s *ConnectorTaskService) instanceAcceptingCallback(ctx context.Context, tenantID uuid.UUID, task *domain.Task) (*domain.Instance, bool, error) {
+	inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
+	if err != nil {
+		return nil, false, wrapInstanceErr(err)
+	}
+	switch inst.Status {
+	case domain.InstanceStatusRunning, domain.InstanceStatusDegraded:
+		return inst, true, nil
+	case domain.InstanceStatusPaused:
+		return nil, false, fmt.Errorf("instance %s is paused: %w", inst.ID, port.ErrInvalidInstanceState)
+	case domain.InstanceStatusCompleted, domain.InstanceStatusTerminated, domain.InstanceStatusFailed:
+		return nil, false, nil
+	default:
+		return nil, false, fmt.Errorf("instance %s has status %q: %w", inst.ID, inst.Status, port.ErrInvalidInstanceState)
+	}
 }
 
 func (s *ConnectorTaskService) automationPrincipal(ctx context.Context, tenantID uuid.UUID) (uuid.UUID, error) {

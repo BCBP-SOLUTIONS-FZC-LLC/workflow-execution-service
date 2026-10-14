@@ -298,6 +298,9 @@ func (d *Deps) UpdateTaskStatus(ctx context.Context, in port.UpdateTaskStatusInp
 		}
 		assigneeUserIDs := []uuid.UUID{}
 		for _, a := range active {
+			if _, err := d.Assignments.Vacate(ctx, tenantID, a.ID); err != nil {
+				return fmt.Errorf("vacate assignment %s: %w", a.ID, err)
+			}
 			assigneeUserIDs = append(assigneeUserIDs, a.UserID)
 		}
 		core, err := d.instanceCore(ctx, tenantID, task.WorkflowInstanceID)
@@ -305,7 +308,7 @@ func (d *Deps) UpdateTaskStatus(ctx context.Context, in port.UpdateTaskStatusInp
 			return err
 		}
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
-		payload := domain.NewWorkflowTaskFailedPayload(core, taskCore, "stage_fail")
+		payload := domain.NewWorkflowTaskFailedPayload(core, taskCore, "stage_fail", in.ErrorClass)
 		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskFailed, payload)
 	})
 }

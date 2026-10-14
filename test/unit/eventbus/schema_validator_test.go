@@ -159,7 +159,7 @@ var allEvents = []eventCase{
 		name:      "WorkflowTaskFailed",
 		eventType: domain.EventWorkflowTaskFailed,
 		payload: func() any {
-			return domain.NewWorkflowTaskFailedPayload(testCore(), testTaskCore(), "instance_terminated")
+			return domain.NewWorkflowTaskFailedPayload(testCore(), testTaskCore(), "instance_terminated", "")
 		},
 		dropField: "cascade_source",
 	},
@@ -237,4 +237,29 @@ func TestSchemaValidator_InvalidJSON_Rejected(t *testing.T) {
 
 	err = validator.Validate(context.Background(), domain.EventWorkflowInstanceStarted, []byte(`{not valid json`))
 	require.Error(t, err)
+}
+
+func TestSchemaValidator_WorkflowTaskFailed_ErrorClass(t *testing.T) {
+	validator, err := eventbus.NewSchemaValidator()
+	require.NoError(t, err)
+	failed := func(errorClass string) []byte {
+		raw, err := json.Marshal(domain.NewWorkflowTaskFailedPayload(testCore(), testTaskCore(), "stage_fail", errorClass))
+		require.NoError(t, err)
+		return raw
+	}
+
+	withClass := failed("upstream_timeout")
+	require.NoError(t, validator.Validate(context.Background(), domain.EventWorkflowTaskFailed, withClass))
+	assert.Contains(t, string(withClass), `"error_class":"upstream_timeout"`)
+
+	withoutClass := failed("")
+	require.NoError(t, validator.Validate(context.Background(), domain.EventWorkflowTaskFailed, withoutClass))
+	assert.NotContains(t, string(withoutClass), "error_class", "a cascade failure names no class")
+
+	var wrongType map[string]any
+	require.NoError(t, json.Unmarshal(withClass, &wrongType))
+	wrongType["error_class"] = 7
+	broken, err := json.Marshal(wrongType)
+	require.NoError(t, err)
+	require.Error(t, validator.Validate(context.Background(), domain.EventWorkflowTaskFailed, broken), "the class is text")
 }

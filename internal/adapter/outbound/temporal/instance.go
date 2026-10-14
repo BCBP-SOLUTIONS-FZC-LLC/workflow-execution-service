@@ -202,7 +202,7 @@ func (d *Deps) failTask(ctx context.Context, tenantID, instanceID uuid.UUID, tas
 		return err
 	}
 	taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
-	payload := domain.NewWorkflowTaskFailedPayload(core, taskCore, cascadeSource)
+	payload := domain.NewWorkflowTaskFailedPayload(core, taskCore, cascadeSource, "")
 	return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowTaskFailed, payload)
 }
 

@@ -342,6 +342,42 @@ func TestUpdateTaskStatus_Failed_EnqueuesTaskFailed(t *testing.T) {
 	assert.Equal(t, []uuid.UUID{assignee.UserID}, payload.AssigneeUserIDs, "assignee_user_ids must not be omitted — the schema requires it non-null")
 }
 
+func TestUpdateTaskStatus_Failed_VacatesTheAssignmentsAndStillNamesThem(t *testing.T) {
+	taskID := uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
+	assignee := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New(), IsActive: true}
+	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(assignee))
+
+	err := deps.UpdateTaskStatus(context.Background(), port.UpdateTaskStatusInput{
+		TaskID: taskID.String(), TenantID: uuid.New().String(), Status: domain.TaskStatusFailed, RecordVersion: 1,
+	})
+	require.NoError(t, err)
+	assert.False(t, assignee.IsActive, "a failed task keeps no active assignment, as one failed by a cascade keeps none")
+
+	require.Len(t, outbox.enqueued, 1)
+	var payload domain.WorkflowTaskFailedPayload
+	require.NoError(t, json.Unmarshal(outbox.enqueued[0].Payload, &payload))
+	assert.Equal(t, []uuid.UUID{assignee.UserID}, payload.AssigneeUserIDs, "the failed event still names who held the task")
+}
+
+func TestUpdateTaskStatus_Failed_CarriesTheErrorClass(t *testing.T) {
+	taskID := uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
+	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo())
+
+	err := deps.UpdateTaskStatus(context.Background(), port.UpdateTaskStatusInput{
+		TaskID: taskID.String(), TenantID: uuid.New().String(), Status: domain.TaskStatusFailed, RecordVersion: 1,
+		ErrorClass: "upstream_timeout",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, outbox.enqueued, 1)
+	var payload domain.WorkflowTaskFailedPayload
+	require.NoError(t, json.Unmarshal(outbox.enqueued[0].Payload, &payload))
+	assert.Equal(t, "upstream_timeout", payload.ErrorClass)
+	assert.Equal(t, "stage_fail", payload.CascadeSource)
+}
+
 func TestUpdateTaskStatus_NonFailed_NoEvent(t *testing.T) {
 	taskID := uuid.New()
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
