@@ -189,30 +189,50 @@ func TestTenantLifecycleReconciler_Apply_PlanChange(t *testing.T) {
 		assert.True(t, ok)
 	})
 
-	t.Run("downgrade deregisters the isolated queue when no active instances remain", func(t *testing.T) {
+	t.Run("downgrade stops routing to the isolated queue and keeps its row", func(t *testing.T) {
 		svc, _, _, _, queues, _, _ := newTenantLifecycleHarness()
 		tenantID := uuid.New()
 		queueName := "wf-queue-" + tenantID.String()
-		queues.byName[queueName] = &domain.ActiveTaskQueue{TenantID: tenantID, QueueName: queueName}
+		queues.byName[queueName] = &domain.ActiveTaskQueue{TenantID: tenantID, QueueName: queueName, Routable: true}
 
 		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "active", Plan: "standard", PreviousPlan: "enterprise"})
 		require.NoError(t, err)
-		_, ok := queues.byName[queueName]
-		assert.False(t, ok)
+		queue, ok := queues.byName[queueName]
+		require.True(t, ok, "the row stays so the worker keeps polling the instances still on it")
+		assert.False(t, queue.Routable)
 	})
 
-	t.Run("downgrade with active instances on the queue is deferred", func(t *testing.T) {
+	t.Run("downgrade does not wait for running instances and never strands them", func(t *testing.T) {
 		svc, instances, _, _, queues, _, _ := newTenantLifecycleHarness()
 		tenantID := uuid.New()
 		queueName := "wf-queue-" + tenantID.String()
-		queues.byName[queueName] = &domain.ActiveTaskQueue{TenantID: tenantID, QueueName: queueName}
+		queues.byName[queueName] = &domain.ActiveTaskQueue{TenantID: tenantID, QueueName: queueName, Routable: true}
 		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TaskQueue: queueName}
 		instances.byID[running.ID] = running
 
 		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "active", Plan: "standard", PreviousPlan: "enterprise"})
 		require.NoError(t, err)
-		_, ok := queues.byName[queueName]
-		assert.True(t, ok, "the isolated queue must stay registered while an instance is still running on it")
+		queue, ok := queues.byName[queueName]
+		require.True(t, ok)
+		assert.False(t, queue.Routable, "new instances stop starting on it at once")
+	})
+
+	t.Run("upgrading again makes the queue routable", func(t *testing.T) {
+		svc, _, _, _, queues, _, _ := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		queueName := "wf-queue-" + tenantID.String()
+		queues.byName[queueName] = &domain.ActiveTaskQueue{TenantID: tenantID, QueueName: queueName, Routable: false}
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "active", Plan: "enterprise", PreviousPlan: "standard"})
+		require.NoError(t, err)
+		assert.True(t, queues.byName[queueName].Routable)
+	})
+
+	t.Run("a downgrade for a tenant that never had a queue is a no-op", func(t *testing.T) {
+		svc, _, _, _, queues, _, _ := newTenantLifecycleHarness()
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "active", PreviousStatus: "active", Plan: "standard", PreviousPlan: "enterprise"})
+		require.NoError(t, err)
+		assert.Empty(t, queues.byName)
 	})
 
 	t.Run("plan unchanged is a no-op", func(t *testing.T) {
@@ -231,16 +251,9 @@ func TestTenantLifecycleReconciler_Apply_PlanChange(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("a CountActiveByTaskQueue failure propagates from Apply", func(t *testing.T) {
-		svc, instances, _, _, _, _, _ := newTenantLifecycleHarness()
-		instances.countErr = assert.AnError
-		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "active", PreviousStatus: "active", Plan: "standard", PreviousPlan: "enterprise"})
-		assert.Error(t, err)
-	})
-
-	t.Run("a Deregister failure propagates from Apply", func(t *testing.T) {
+	t.Run("a StopRouting failure propagates from Apply", func(t *testing.T) {
 		svc, _, _, _, queues, _, _ := newTenantLifecycleHarness()
-		queues.deregisterErr = assert.AnError
+		queues.stopRoutingErr = assert.AnError
 		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "active", PreviousStatus: "active", Plan: "standard", PreviousPlan: "enterprise"})
 		assert.Error(t, err)
 	})

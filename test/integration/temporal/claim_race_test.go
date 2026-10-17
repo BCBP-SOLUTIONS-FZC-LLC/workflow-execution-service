@@ -85,7 +85,7 @@ func TestClaim_SecondLeadAttemptRejectedAgainstLiveWorkflow(t *testing.T) {
 	instanceService := &service.InstanceService{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: fakeEligibilityChecker{},
-		Validator: validator,
+		Queues: postgres.NewActiveTaskQueueRepo(pool), Validator: validator,
 	}
 	taskService := &service.TaskService{
 		Instances: instances, Tasks: tasks, Assignments: assignments,

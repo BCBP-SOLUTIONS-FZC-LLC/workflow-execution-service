@@ -55,6 +55,7 @@ func newInstanceServiceHarness() (*service.InstanceService, *fakeInstanceRepo, *
 	definitions := &fakeDefinitionClient{}
 	eligibility := &fakeEligibilityChecker{}
 	instances.linkScope(tasks, assignments)
+	queues := newFakeActiveTaskQueueRepo()
 
 	svc := &service.InstanceService{
 		Instances:   instances,
@@ -65,6 +66,7 @@ func newInstanceServiceHarness() (*service.InstanceService, *fakeInstanceRepo, *
 		Temporal:    temporal,
 		Definitions: definitions,
 		Eligibility: eligibility,
+		Queues:      queues,
 		Validator:   realValidator(),
 	}
 	return svc, instances, tasks, assignments, outbox, temporal, definitions, eligibility
@@ -163,6 +165,98 @@ func TestInstanceService_Start(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, port.InstanceStatusRunning, got.Status)
 		assert.NotEmpty(t, log.warnCalls)
+	})
+
+	t.Run("an instance starts on the tenant's registered queue", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, definitions, _ := newInstanceServiceHarness()
+		queues := newFakeActiveTaskQueueRepo()
+		svc.Queues = queues
+		tenantID, versionID := uuid.New(), uuid.New()
+		queueName := "wf-queue-" + tenantID.String()
+		_, err := queues.Register(context.Background(), tenantID, queueName)
+		require.NoError(t, err)
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
+		var startedOn string
+		temporal.startFunc = func(_ context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
+			startedOn = in.TaskQueue
+			return port.StartWorkflowOutput{TemporalWorkflowID: in.TemporalWorkflowID, TemporalRunID: "run-1"}, nil
+		}
+
+		got, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: tenantID, WorkflowVersionID: versionID, SubjectID: "SUBJ-1", BusinessKey: "TND-001",
+			ContextJSON: json.RawMessage(`{}`), StartedByUserID: uuid.New(),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, queueName, startedOn)
+		assert.Equal(t, queueName, instances.byID[got.ID].TaskQueue, "the queue is snapshotted on the row")
+	})
+
+	t.Run("a tenant with no registered queue starts on the plan's queue", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, definitions, _ := newInstanceServiceHarness()
+		svc.Queues = newFakeActiveTaskQueueRepo()
+		tenantID, versionID := uuid.New(), uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
+		var startedOn string
+		temporal.startFunc = func(_ context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
+			startedOn = in.TaskQueue
+			return port.StartWorkflowOutput{TemporalWorkflowID: in.TemporalWorkflowID, TemporalRunID: "run-1"}, nil
+		}
+
+		got, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: tenantID, WorkflowVersionID: versionID, SubjectID: "SUBJ-1", BusinessKey: "TND-001",
+			ContextJSON: json.RawMessage(`{}`), StartedByUserID: uuid.New(),
+		})
+		require.NoError(t, err)
+		assert.NotEmpty(t, startedOn)
+		assert.NotContains(t, startedOn, tenantID.String())
+		assert.Equal(t, startedOn, instances.byID[got.ID].TaskQueue)
+	})
+
+	t.Run("a queue that stopped routing is not used for a new instance", func(t *testing.T) {
+		svc, instances, _, _, _, _, definitions, _ := newInstanceServiceHarness()
+		queues := newFakeActiveTaskQueueRepo()
+		svc.Queues = queues
+		tenantID, versionID := uuid.New(), uuid.New()
+		queueName := "wf-queue-" + tenantID.String()
+		queues.byName[queueName] = &domain.ActiveTaskQueue{TenantID: tenantID, QueueName: queueName, Routable: false}
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
+
+		got, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: tenantID, WorkflowVersionID: versionID, SubjectID: "SUBJ-1", BusinessKey: "TND-001",
+			ContextJSON: json.RawMessage(`{}`), StartedByUserID: uuid.New(),
+		})
+		require.NoError(t, err)
+		assert.NotEqual(t, queueName, instances.byID[got.ID].TaskQueue)
+	})
+
+	t.Run("a missing queue registry fails the start instead of silently using the shared queue", func(t *testing.T) {
+		svc, instances, _, _, _, _, definitions, _ := newInstanceServiceHarness()
+		svc.Queues = nil
+		versionID := uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
+
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: uuid.New(), WorkflowVersionID: versionID, SubjectID: "SUBJ-1", BusinessKey: "TND-001",
+			ContextJSON: json.RawMessage(`{}`), StartedByUserID: uuid.New(),
+		})
+		require.Error(t, err)
+		assert.Empty(t, instances.byID)
+	})
+
+	t.Run("a failed registry read fails the start and persists nothing", func(t *testing.T) {
+		svc, instances, _, _, outbox, temporal, definitions, _ := newInstanceServiceHarness()
+		svc.Queues = failingQueueLookup{err: errors.New("registry unavailable")}
+		versionID := uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
+
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: uuid.New(), WorkflowVersionID: versionID, SubjectID: "SUBJ-1", BusinessKey: "TND-001",
+			ContextJSON: json.RawMessage(`{}`), StartedByUserID: uuid.New(),
+		})
+		require.ErrorContains(t, err, "registry unavailable")
+		assert.Empty(t, instances.byID)
+		assert.Empty(t, outbox.enqueued)
+		assert.Empty(t, temporal.terminateCalls())
 	})
 
 	t.Run("eligible default assignee passes", func(t *testing.T) {
@@ -429,7 +523,7 @@ func TestInstanceService_Start(t *testing.T) {
 		svc := &service.InstanceService{
 			Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outbox,
 			Transactor: fakeTransactor{}, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
-			Validator: failingValidator{},
+			Queues: newFakeActiveTaskQueueRepo(), Validator: failingValidator{},
 		}
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t))
 
@@ -1108,4 +1202,13 @@ func TestInstanceService_Start_CompiledPlanCache(t *testing.T) {
 		require.Len(t, log.warnFields, 1)
 		assert.Equal(t, definitions.err.Error(), log.warnFields[0]["error"])
 	})
+}
+
+type failingQueueLookup struct {
+	port.ActiveTaskQueueRepository
+	err error
+}
+
+func (f failingQueueLookup) GetByQueueName(context.Context, string) (*domain.ActiveTaskQueue, error) {
+	return nil, f.err
 }

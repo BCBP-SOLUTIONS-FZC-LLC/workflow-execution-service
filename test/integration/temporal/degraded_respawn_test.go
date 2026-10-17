@@ -143,7 +143,7 @@ func setupDegradedInstance(t *testing.T) *degradedFixture {
 	instanceService := &service.InstanceService{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
 		Transactor: transactor, Temporal: temporalClient, Definitions: definitions, Eligibility: fakeEligibilityChecker{},
-		Validator: validator,
+		Queues: postgres.NewActiveTaskQueueRepo(pool), Validator: validator,
 	}
 	taskService := &service.TaskService{
 		Instances: instances, Tasks: tasks, Assignments: assignments,

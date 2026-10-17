@@ -65,9 +65,9 @@ func (r *ActiveTaskQueueRepo) Register(ctx context.Context, tenantID uuid.UUID, 
 	return queue, err
 }
 
-func (r *ActiveTaskQueueRepo) Deregister(ctx context.Context, queueName string) error {
+func (r *ActiveTaskQueueRepo) StopRouting(ctx context.Context, queueName string) error {
 	return exec(ctx, r.pool, func(dbtx db.DBTX) error {
-		if err := db.New(dbtx).DeregisterActiveTaskQueue(ctx, queueName); err != nil {
+		if err := db.New(dbtx).StopActiveTaskQueueRouting(ctx, queueName); err != nil {
 			return mapErr(err)
 		}
 		return nil

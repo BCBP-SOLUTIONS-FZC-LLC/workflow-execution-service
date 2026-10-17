@@ -362,7 +362,7 @@ func buildExecution(t *testing.T, pool *pgcommon.Pool, sdk client.Client, rdb *r
 		Instances: &service.InstanceService{
 			Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
 			Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
-			Validator: validator, Cache: cache,
+			Queues: queues, Validator: validator, Cache: cache,
 		},
 		Tasks: &service.TaskService{
 			Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides,

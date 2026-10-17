@@ -157,7 +157,7 @@ func TestQueueTopology_DynamicRegistrationPicksUpIsolatedQueue(t *testing.T) {
 		versionID: versionID,
 		workflow: &port.CompiledWorkflow{
 			WorkflowID: uuid.New(), VersionID: versionID, Status: "PUBLISHED", IsValid: true,
-			CompiledPlanJSON: mustMarshalPlan(t, singleTaskPlan(assigneeUserID, isolatedQueue)),
+			CompiledPlanJSON: mustMarshalPlan(t, singleTaskPlan(assigneeUserID, "wf-default-test-queue")),
 		},
 	}
 
@@ -182,10 +182,13 @@ func TestQueueTopology_DynamicRegistrationPicksUpIsolatedQueue(t *testing.T) {
 	// topology poll below should ever start one there.
 	registerRealWorker(t, sdk, deps, "wf-default-test-queue")
 
+	if _, err := queues.Register(context.Background(), tenantID, isolatedQueue); err != nil {
+		t.Fatalf("Register isolated queue: %v", err)
+	}
 	instanceService := &service.InstanceService{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: fakeEligibilityChecker{},
-		Validator: validator,
+		Queues: queues, Validator: validator,
 	}
 
 	inst, err := instanceService.Start(context.Background(), port.StartInstanceInput{
@@ -206,10 +209,7 @@ func TestQueueTopology_DynamicRegistrationPicksUpIsolatedQueue(t *testing.T) {
 		t.Fatalf("tasks = %+v, want none yet — no worker is listening on the isolated queue", rows)
 	}
 
-	// Seed active_task_queues and run one topology-poll cycle.
-	if _, err := queues.Register(context.Background(), tenantID, isolatedQueue); err != nil {
-		t.Fatalf("Register isolated queue: %v", err)
-	}
+	// Run one topology-poll cycle over the registered queue.
 	started := pollAndStartOnce(t, sdk, deps, queues, "wf-default-test-queue", map[string]bool{"wf-default-test-queue": true})
 	if !started[isolatedQueue] {
 		t.Fatalf("topology poll did not start a worker for %q", isolatedQueue)
@@ -230,15 +230,48 @@ func TestQueueTopology_DynamicRegistrationPicksUpIsolatedQueue(t *testing.T) {
 		time.Sleep(250 * time.Millisecond)
 	}
 
-	// Deregister the queue and poll again — additive-only design
-	// (known_issues.md): the already-started worker keeps running, and no
-	// second worker gets started for the same queue name.
-	if err := queues.Deregister(context.Background(), isolatedQueue); err != nil {
-		t.Fatalf("Deregister: %v", err)
+	// A downgrade stops routing to the queue but keeps its row: the worker
+	// keeps polling the instance already bound to it, no second worker is
+	// started for the same queue name, and an instance started afterwards
+	// runs on the plan's queue and is served by the default worker.
+	if err := queues.StopRouting(context.Background(), isolatedQueue); err != nil {
+		t.Fatalf("StopRouting: %v", err)
 	}
 	startedAgain := pollAndStartOnce(t, sdk, deps, queues, "wf-default-test-queue", map[string]bool{"wf-default-test-queue": true, isolatedQueue: true})
 	if len(startedAgain) != 0 {
-		t.Errorf("second poll cycle started %v, want none (additive-only, and the row is gone)", startedAgain)
+		t.Errorf("second poll cycle started %v, want none", startedAgain)
+	}
+	afterRestart := pollAndStartOnce(t, sdk, deps, queues, "wf-default-test-queue", map[string]bool{"wf-default-test-queue": true})
+	if !afterRestart[isolatedQueue] {
+		t.Errorf("a restarted worker did not pick up the queue that stopped routing: started %v", afterRestart)
+	}
+	later, err := instanceService.Start(context.Background(), port.StartInstanceInput{
+		TenantID: tenantID, WorkflowVersionID: versionID, SubjectID: "subj-" + uuid.NewString(), BusinessKey: "after-downgrade-" + uuid.NewString(),
+		StartedByUserID: assigneeUserID,
+	})
+	if err != nil {
+		t.Fatalf("Start after the downgrade: %v", err)
+	}
+	deadline = time.Now().Add(30 * time.Second)
+	for {
+		rows, _, err := tasks.ListByInstance(context.Background(), tenantID, later.ID, port.PageRequest{Limit: 10})
+		if err != nil {
+			t.Fatalf("ListByInstance: %v", err)
+		}
+		if len(rows) > 0 && string(rows[0].Status) == "READY" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for the default worker to serve an instance started after the downgrade; rows=%+v", rows)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	row, err := instances.GetByID(context.Background(), tenantID, later.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if row.TaskQueue != "wf-default-test-queue" {
+		t.Errorf("task queue after the downgrade = %q, want the plan's queue", row.TaskQueue)
 	}
 }
 

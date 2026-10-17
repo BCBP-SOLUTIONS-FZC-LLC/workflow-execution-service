@@ -58,7 +58,6 @@ type InstanceRepository interface {
 		recordVersion int64,
 	) (*domain.Instance, error)
 	CountActiveByWorkflow(ctx context.Context, tenantID, workflowID uuid.UUID) (int64, error)
-	CountActiveByTaskQueue(ctx context.Context, tenantID uuid.UUID, taskQueue string) (int64, error)
 }
 
 type TaskListFilter struct {
@@ -130,5 +129,5 @@ type ActiveTaskQueueRepository interface {
 	ListActive(ctx context.Context) ([]*domain.ActiveTaskQueue, error)
 	GetByQueueName(ctx context.Context, queueName string) (*domain.ActiveTaskQueue, error)
 	Register(ctx context.Context, tenantID uuid.UUID, queueName string) (*domain.ActiveTaskQueue, error)
-	Deregister(ctx context.Context, queueName string) error
+	StopRouting(ctx context.Context, queueName string) error
 }

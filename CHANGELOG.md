@@ -16,6 +16,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - The task-creation activity could insert a READY task under a terminated instance. It refuses a terminated, failed or completed instance without retry.
 - A `trial` or `past_due` tenant had its instances paused, as every status other than `active` did. `trial`, `active` and `past_due` run; `cancelled`, `suspended` and `trial_expired` pause; every move into a running status resumes, so a skipped or reordered event cannot strand a paused instance.
 
+- No instance ever started on a tenant's dedicated task queue: the registry was filled on an upgrade to enterprise and polled by the workers, but every instance used the compiled plan's shared queue. Instance start uses the tenant's registered queue when it is routable and the plan's queue otherwise, and a failed registry read fails the start. A downgrade marks the queue no longer routable and never deletes it, so a start racing a downgrade, or a downgrade that running instances once deferred forever, cannot strand an instance. `active_task_queues` gains `routable`, and the instance index and count that backed the old deletion are gone.
+
 ### Removed
 
 - The `TENANT_NOT_ACTIVE` error code and its documentation. The start pre-check it belonged to was never built, and Execution holds no tenant status; the platform stops a cancelled tenant's writes and a suspended tenant's tokens.

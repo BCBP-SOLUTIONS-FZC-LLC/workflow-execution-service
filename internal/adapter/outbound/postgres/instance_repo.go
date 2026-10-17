@@ -171,22 +171,6 @@ func (r *InstanceRepo) CountActiveByWorkflow(ctx context.Context, tenantID, work
 	return count, err
 }
 
-func (r *InstanceRepo) CountActiveByTaskQueue(ctx context.Context, tenantID uuid.UUID, taskQueue string) (int64, error) {
-	ctx = withTenantGUC(ctx, tenantID)
-	var count int64
-	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
-		var err error
-		count, err = db.New(dbtx).CountActiveInstancesByTaskQueue(ctx, db.CountActiveInstancesByTaskQueueParams{
-			TenantID: tenantID, TaskQueue: taskQueue,
-		})
-		if err != nil {
-			return mapErr(err)
-		}
-		return nil
-	})
-	return count, err
-}
-
 func (r *InstanceRepo) UpdateCurrentNodeKeys(
 	ctx context.Context,
 	tenantID, id uuid.UUID,

@@ -172,7 +172,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	instanceService := &service.InstanceService{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
-		Validator: validator, Cache: cache, Log: log,
+		Queues: queues, Validator: validator, Cache: cache, Log: log,
 	}
 	taskService := &service.TaskService{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides,

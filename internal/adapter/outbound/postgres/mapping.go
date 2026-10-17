@@ -134,6 +134,7 @@ func activeTaskQueueFromDB(row db.ActiveTaskQueue) *domain.ActiveTaskQueue {
 		ID:           row.ID,
 		TenantID:     row.TenantID,
 		QueueName:    row.QueueName,
+		Routable:     row.Routable,
 		RegisteredAt: row.RegisteredAt,
 		UpdatedAt:    row.UpdatedAt,
 	}

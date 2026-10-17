@@ -15,7 +15,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
 )
 
-func TestActiveTaskQueueRepo_RegisterGetListDeregister(t *testing.T) {
+func TestActiveTaskQueueRepo_RegisterGetListStopRouting(t *testing.T) {
 	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
 	appPool := newAppRolePool(t, superPool, superDSN)
 	repo := postgres.NewActiveTaskQueueRepo(appPool)
@@ -28,6 +28,7 @@ func TestActiveTaskQueueRepo_RegisterGetListDeregister(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, queueName, registered.QueueName)
 	assert.Equal(t, tenantA, registered.TenantID)
+	assert.True(t, registered.Routable, "a registered queue receives new instances")
 
 	t.Run("get by name", func(t *testing.T) {
 		got, err := repo.GetByQueueName(ctx, queueName)
@@ -58,10 +59,31 @@ func TestActiveTaskQueueRepo_RegisterGetListDeregister(t *testing.T) {
 		assert.True(t, found)
 	})
 
-	require.NoError(t, repo.Deregister(ctx, queueName))
+	require.NoError(t, repo.StopRouting(ctx, queueName))
 
-	t.Run("deregistered queue is gone", func(t *testing.T) {
-		_, err := repo.GetByQueueName(ctx, queueName)
+	t.Run("a queue that stopped routing keeps its row so its worker keeps polling", func(t *testing.T) {
+		got, err := repo.GetByQueueName(ctx, queueName)
+		require.NoError(t, err)
+		assert.False(t, got.Routable)
+		queues, err := repo.ListActive(ctx)
+		require.NoError(t, err)
+		var listed bool
+		for _, q := range queues {
+			listed = listed || q.QueueName == queueName
+		}
+		assert.True(t, listed)
+	})
+
+	t.Run("registering again makes it routable", func(t *testing.T) {
+		again, err := repo.Register(ctx, tenantA, queueName)
+		require.NoError(t, err)
+		assert.True(t, again.Routable)
+		assert.Equal(t, registered.ID, again.ID)
+	})
+
+	t.Run("stopping routing for a queue that was never registered changes nothing", func(t *testing.T) {
+		require.NoError(t, repo.StopRouting(ctx, "wf-queue-never-registered"))
+		_, err := repo.GetByQueueName(ctx, "wf-queue-never-registered")
 		assert.ErrorIs(t, err, domain.ErrNotFound)
 	})
 }

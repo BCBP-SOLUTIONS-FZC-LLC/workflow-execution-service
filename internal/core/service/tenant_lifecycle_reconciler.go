@@ -152,21 +152,11 @@ func (s *TenantLifecycleReconciler) terminateOne(ctx context.Context, tenantID u
 }
 
 func (s *TenantLifecycleReconciler) applyPlanChange(ctx context.Context, in port.TenantLifecycleInput) error {
-	queueName := "wf-queue-" + in.TenantID.String()
+	queueName := domain.TenantTaskQueueName(in.TenantID)
 	if in.Plan == domain.PlanEnterprise {
 		_, err := s.Queues.Register(ctx, in.TenantID, queueName)
 		return err
 	}
 
-	count, err := s.Instances.CountActiveByTaskQueue(ctx, in.TenantID, queueName)
-	if err != nil {
-		return err
-	}
-	if count > 0 {
-		s.logger().Warn("tenant lifecycle: plan downgrade deferred, isolated queue still has active instances", map[string]any{
-			"tenant_id": in.TenantID, "queue_name": queueName, "active_count": count,
-		})
-		return nil
-	}
-	return s.Queues.Deregister(ctx, queueName)
+	return s.Queues.StopRouting(ctx, queueName)
 }

@@ -157,7 +157,7 @@ func buildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, definitio
 	instanceService := &service.InstanceService{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
-		Validator: validator,
+		Queues: queues, Validator: validator,
 	}
 	taskService := &service.TaskService{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides,

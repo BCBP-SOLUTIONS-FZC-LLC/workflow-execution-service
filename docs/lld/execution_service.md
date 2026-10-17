@@ -162,7 +162,7 @@ The service follows the same clean architecture Definition Service established: 
   - **`cmd/server/`**
     - `main.go` — API process bootstrap: starts the Gin HTTP server (the internal routes included) and the outbox relay; wires the Temporal client adapter and the Definition Service HTTP client adapter.
   - **`cmd/worker/`**
-    - `main.go` — Temporal Worker process bootstrap: connects to the Temporal frontend, registers the workflow function and every Activity against the default task queue plus every currently-active tenant-isolated queue (`active_task_queues`, §4.6), runs the dynamic queue-registration loop. No outbox relay, no gateway-header middleware, no `INTERNAL_API_TOKEN` validation (§7.6).
+    - `main.go` — Temporal Worker process bootstrap: connects to the Temporal frontend, registers the workflow function and every Activity against the default task queue plus every tenant-isolated queue in the registry (`active_task_queues`, §4.6), runs the dynamic queue-registration loop. No outbox relay, no gateway-header middleware, no `INTERNAL_API_TOKEN` validation (§7.6).
   - **`internal/`**
     - **`core/`** — fully decoupled from external libraries and from `internal/workflow/`.
       - `domain/` — entities (`WorkflowInstance`, `WorkflowTask`, `WorkflowTaskAssignment`, `WorkflowEvent`, the `CompiledCollaboration` DSL types consumed from Definition Service, §2.1), sentinel errors.
@@ -409,11 +409,11 @@ Two consequences of that rule are deliberate. Ending a delegation returns the cl
 
 Temporal Workers run in a **separate deployment/repository** from the HTTP API — the two are one logical domain (both connect to the same `workflow_execution` database, a documented exception to database-per-service) but never call each other directly; all coordination is mediated by the Temporal cluster and the shared database. `InstanceService.Start`'s flow is: validate → re-validate node defaults → write `workflow_instance` (transaction, enqueues `WorkflowStarted`) → `StartWorkflow` (`WorkflowIDReusePolicy: AllowDuplicate`) → return. `GetCompiledPlanActivity` is the workflow function's first activity, run after all of this.
 
-**Task-queue registration is dynamic, not static.** `CompiledPlan.TaskQueue` is meant to be tenant-tier-resolved at Definition Service publish time (`wf-queue-default`, or `wf-queue-<tenant_uuid>` for enterprise). A static, redeploy-to-add queue list is operationally wrong — a tenant upgrading tier shouldn't require a Workers redeploy.
+**Task-queue registration is dynamic, not static.** The compiled plan names the shared default queue (`wf-queue-default`) and no tenant; the Execution Service chooses the queue at instance start: the tenant's own queue (`wf-queue-<tenant_uuid>`) when the registry below holds one for the tenant, the plan's queue otherwise. A static, redeploy-to-add queue list is operationally wrong — a tenant upgrading tier shouldn't require a Workers redeploy.
 
-1. Workers maintain an `active_task_queues` registry, populated by Execution's tenant-lifecycle handler when a `plan` delta arrives: upsert the tenant's isolated queue on upgrade, remove it on downgrade only once no active instances remain.
+1. Workers maintain an `active_task_queues` registry, populated by Execution's tenant-lifecycle handler when a `plan` delta arrives: upsert the tenant's isolated queue and mark it routable on upgrade, and mark it no longer routable on downgrade. A row is never deleted.
 2. Each Worker process polls this registry on a fixed interval (proposed: 60s) and, for every queue not yet being polled, starts an additional `worker.Worker` instance against it — the Go SDK supports multiple `Worker` instances per process, started at runtime, without a restart. `wf-queue-default`'s worker is always started unconditionally at process boot.
-3. A tenant's isolated queue is never removed from the registry while any instance is still running on it — a running workflow execution is permanently bound to the task queue it started on. A tier change therefore only affects instances started after the change.
+3. A tenant's isolated queue stays in the registry, and its worker keeps polling it, for as long as the row exists, and a row is never deleted: a running workflow execution is permanently bound to the task queue it started on, and a Worker that restarts must still find that queue. A downgrade only stops new instances from starting on it, at once and without waiting for running ones, so a tier change affects instances started after the change and a start racing a downgrade cannot strand an instance.
 4. **Per-queue concurrency, not just per-queue registration.** Registering a separate `worker.Worker` per queue is necessary but not sufficient for the priority-isolation goal: each `worker.Worker` instance is constructed with its own `WorkerOptions{MaxConcurrentActivityExecutionSize, MaxConcurrentWorkflowTaskExecutionSize}`, not a shared process-wide default — otherwise a busy default-queue tenant can starve an enterprise tenant's nominally dedicated queue.
 5. **Volume-gated isolation for noisy standard-tier tenants.** Temporal has no native per-tenant fairness inside a single task queue — that's exactly why the enterprise tier gets its own queue in the first place. Rather than build a second mechanism, the same isolation trigger is generalized: alongside "enterprise plan → dedicated queue," the tenant-lifecycle handler also upserts an isolated queue for **any tenant whose `wf-queue-default` task-creation volume exceeds a rolling-window threshold**, checked on the same cadence as the plan-tier upsert. No new infrastructure — the existing `active_task_queues` registry and Worker poll-and-register loop (steps 1-2 above) handle it identically to a plan-tier upgrade. The threshold itself is a provisional number pending real traffic data (the same treatment already given `MAX_CLIENT_CONN` elsewhere in this document) — start near ~2x the median standard-tier tenant's volume and tune from observed load. A tenant promoted this way is never auto-demoted back to the shared queue; isolation is strictly better for that tenant, so there's no correctness reason to revert it.
 6. **Cap on dynamically-registered queues per Worker process.** Unbounded queue registration means hundreds of enterprise/volume-promoted tenants could require hundreds of concurrently-polling `worker.Worker` instances in one process. A new config, `MAX_TENANT_QUEUES_PER_WORKER` (provisional default 200), bounds how many isolated queues a single Worker process will register from a given registry poll. Once the registry exceeds what one replica can hold, the isolated-queue set is sharded across Worker replicas by consistent hashing on `tenant_id` (mod replica count) — each replica registers only its shard, not the full registry, using the same replica identity/count the rest of the fleet already sources from its deployment (`WORKER_REPLICA_INDEX`/`WORKER_REPLICA_COUNT`, or the StatefulSet ordinal if that's the deployment shape). An alert fires when total active registry rows exceed `MAX_TENANT_QUEUES_PER_WORKER × replica_count`, signaling ops to scale out before a tenant's queue silently goes unpolled. Both the cap number and the sharding mechanism are provisional, revisit once real enterprise-tenant growth data exists.
@@ -563,13 +563,13 @@ This section specifies what the workflow function itself receives as `StartWorkf
 | `workflowVersionID` | Request — which published template version to instantiate; the identifier `GetCompiledPlanActivity` uses, not the plan itself |
 | `overrideMap`, `contextJSON` | Request, validated at `Start` time (§5.5) |
 
-`TaskQueue` on the same `StartWorkflowOptions` is `workflow_instance.task_queue` — read back from the row just written in the same request, snapshotted once from `CompiledPlan.TaskQueue` at instantiation (§4.2). This is what connects §3.2's dynamic queue registration to a specific instance's `StartWorkflow` call: the queue an instance runs on is fixed at instantiation, from the same registry Workers poll to decide which queues to serve.
+`TaskQueue` on the same `StartWorkflowOptions` is `workflow_instance.task_queue` — read back from the row just written in the same request, snapshotted once at instantiation (§4.2): the tenant's registered queue when the tenant has one, `CompiledPlan.TaskQueue` otherwise. A failed registry read fails the start; it never falls back to the plan's queue. This is what connects §3.2's dynamic queue registration to a specific instance's `StartWorkflow` call: the queue an instance runs on is fixed at instantiation, from the same registry Workers poll to decide which queues to serve.
 
 **One owner at a time; replay on takeover.** Exactly one Worker replica actively executes a given run at any moment. If that replica dies mid-execution, Temporal does not hand off in-memory state — it replays the recorded event history (every signal, activity result, timer fire so far) against the workflow function's code on whichever replica next picks up the task queue, deterministically reconstructing the same in-memory state before continuing. This is why `workflow.GetVersion` patching (Decision 14) matters for any workflow-function code change: a replay must reproduce the same decisions a past execution made even after the code has moved on, and an un-gated change would replay differently — Temporal detects the resulting non-determinism as a fatal workflow error, never a soft warning.
 
 `SignalWithStartWorkflow` (the SDK's atomic start-or-signal call) is not used anywhere in this flow (Decision 26): instantiation and every signal are always issued from a code path that already knows which situation it's in — the atomic combined call solves a problem this design doesn't have.
 
-**Edge case: a `StartWorkflow` call targets a task queue with zero polling Worker replicas.** Temporal persists the scheduled workflow task on that queue indefinitely — no cluster-level timeout fires, and the caller's `202` succeeds regardless, since scheduling and execution are separate Temporal-side steps. A misconfigured or not-yet-scaled-up tenant-isolated queue strands an instantiated instance with no caller-visible error until some Worker replica starts polling it. §3.2's registry-removal guarantee (a queue is never removed while any instance depends on it) protects an instance already running on a queue; it does not guarantee a queue is polled by at least one replica at the moment a new instance's `StartWorkflow` call targets it. Alerting on this condition is an open item (Appendix B).
+**Edge case: a `StartWorkflow` call targets a task queue with zero polling Worker replicas.** Temporal persists the scheduled workflow task on that queue indefinitely — no cluster-level timeout fires, and the caller's `202` succeeds regardless, since scheduling and execution are separate Temporal-side steps. A misconfigured or not-yet-scaled-up tenant-isolated queue strands an instantiated instance with no caller-visible error until some Worker replica starts polling it. §3.2's guarantee that a queue row is never deleted protects an instance already running on a queue; it does not guarantee a queue is polled by at least one replica at the moment a new instance's `StartWorkflow` call targets it. Alerting on this condition is an open item (Appendix B).
 
 ---
 
@@ -584,7 +584,7 @@ Execution Service owns its own Postgres schema (`workflow_execution`), physicall
 | `workflow_instance` | One row per running/completed workflow instance — the dashboard-facing projection of Temporal's authoritative execution state | Domain (service-authored) |
 | `workflow_task` | One row per dispatched stage/task (`prep`/`review`/`approve`, unrecognized-`Type` passthrough, connector-typed automatic tasks) | Domain (service-authored) |
 | `workflow_task_assignment` | One row per assignee on a task; carries claim/completion/reassignment state | Domain (service-authored) |
-| `active_task_queues` | Registry of currently-active tenant-isolated Temporal task queues | Domain (service-authored) |
+| `active_task_queues` | Registry of tenant-isolated Temporal task queues | Domain (service-authored) |
 | `assignee_overrides` | One row per admin node-override action — the API process's own synchronous audit record, written before the Temporal signal (§4.12, §5.4) | Domain (service-authored) |
 | `outbox_events` / `outbox_dead_letters` | Transactional outbox envelope and dead-letter tables | `platform-events` (library-owned migration, no local `CREATE TABLE`) |
 | `processed_event` | Consumer-idempotency dedup table for inbound events (§6) | Domain (service-authored, following the platform-wide convention) |
@@ -621,7 +621,7 @@ Two carried-forward entities from the legacy LLD — `workflow_comment` and `wor
 | `saved_node_keys` | `text[]` NOT NULL DEFAULT `'{}'` | Force-back's paused-but-not-restarted sibling branches — distinct from `current_node_keys` so a status read can tell "actively running" apart from "parked, awaiting resume." |
 | `context_json` | `jsonb` | The instance's variable/context store that `IOMapping` reads and writes against at runtime. The workflow function applies an `IOMapping` on entry to the step that carries it, a call's (§2.1). |
 | `override_map` | `jsonb` | The instantiation-time non-default-assignee map, captured once at `InstanceService.Start` and never mutated afterward. |
-| `task_queue` | `text` NOT NULL | `wf-queue-default` or `wf-queue-<tenant_uuid>`, snapshotted once at instantiation from `CompiledPlan.TaskQueue`. Required to make the tenant task-queue downgrade rule queryable (§4.9). |
+| `task_queue` | `text` NOT NULL | `wf-queue-default` or `wf-queue-<tenant_uuid>`, snapshotted once at instantiation: the tenant's routable registered queue, else `CompiledPlan.TaskQueue`. |
 | `started_by_user_id` | `uuid` NOT NULL | Domain-specific actor column; no generic `created_by` exists anywhere in this schema (§4.9). |
 | `started_at` | `timestamptz` | |
 | `completed_at` | `timestamptz` | Set by the system-driven `COMPLETED` status write, the instant the workflow function returns cleanly at a BPMN end node — not gated on any downstream service's own business-completion action on its own data. |
@@ -700,12 +700,13 @@ This table is insert-only in effect for audit purposes — no row's `payload` is
 | `id` | `uuid` NOT NULL PRIMARY KEY | Application-generated, matching every other table's PK convention (§4.11). |
 | `tenant_id` | `uuid` NOT NULL | Recorded for the consumer's own upsert/lookup and operational debugging — not an RLS boundary (this table has none, see below). |
 | `queue_name` | `text` NOT NULL UNIQUE | `wf-queue-<tenant_uuid>`. |
+| `routable` | `boolean` NOT NULL | Whether new instances of the tenant start on this queue. True on registration and re-registration; false after a downgrade. Workers poll every row regardless. |
 | `registered_at` | `timestamptz` NOT NULL | |
 | `updated_at` | `timestamptz` NOT NULL | Single-writer-per-tenant upsert, no real concurrent-edit race, but the column is still carried for consistency. |
 
-**No RLS on this table**, despite the `tenant_id` column, and it is the one entity in this schema with a genuine hard-delete path: Workers need to read every currently-active queue across every tenant in one query to compute their own registration set, which would be backwards to force through a per-tenant GUC context switch for what is fundamentally an operational/infra table, not tenant business data. No tenant-facing code path ever queries this table directly — only the tenant-events consumer writes it, only Workers read it, roughly every 60 seconds. A row is hard-deleted once the zero-active-instances downgrade check passes (§4.9); no soft-delete column is needed since nothing is left worth retaining at that point.
+**No RLS on this table**, despite the `tenant_id` column, and its rows are never deleted: Workers need to read every queue across every tenant in one query to compute their own registration set, which would be backwards to force through a per-tenant GUC context switch for what is fundamentally an operational/infra table, not tenant business data. No tenant-facing code path ever queries this table directly — only the tenant-events consumer writes it, only Workers read it, roughly every 60 seconds. A row is hard-deleted once the zero-active-instances downgrade check passes (§4.9); no soft-delete column is needed since nothing is left worth retaining at that point.
 
-Index: `(queue_name)` unique — the registry's own upsert key. No other index is needed; the table stays small (bounded by enterprise-tenant count) and is read in full by every Worker regardless.
+Index: `(queue_name)` unique — the registry's own upsert key. No other index is needed; the table stays small (bounded by the number of tenants that were ever on the enterprise plan, since a row is never deleted) and is read in full by every Worker regardless. A worker polls a queue for as long as its row exists, so the poller count of a Worker replica only grows; removing the rows of offboarded tenants belongs to the offboarding purge (Appendix B).
 
 ### 4.7 Platform Tables
 
@@ -747,7 +748,6 @@ Every index below is derived from a stated access pattern, not added speculative
 | `(task_id) WHERE is_active` | `workflow_task_assignment` | Claim/complete/reassign's "current live assignment(s) for this task" lookup |
 | `(task_id, user_id) WHERE is_active` UNIQUE | `workflow_task_assignment` | Same lookup shape, doubling as the correctness constraint (§4.4) |
 | `(tenant_id, user_id) WHERE is_active` | `workflow_task_assignment` | **"Show me my active tasks"** — the single most common query a dashboard runs |
-| `(task_queue) WHERE status IN ('RUNNING','PAUSED','DEGRADED')` | `workflow_instance` | The tenant task-queue downgrade check — never remove a tenant's isolated queue from the registry while any instance is still running on it |
 | `(tenant_id, subject_id, business_key)` UNIQUE | `workflow_instance` | The idempotent-instantiation upsert key, partial over non-terminal instances |
 | `(tenant_id, status)` | `workflow_instance` | Instance-level (not task-level) dashboard views filtering by tenant + status |
 | `(workflow_version_id) WHERE status IN ('RUNNING','PAUSED','DEGRADED')` | `workflow_instance` | The archive-guard query behind the active-instances endpoint — the Definition Service calls this before archiving a version; a partial index keeps the count from scanning terminal history. A race between this count and a concurrently-completing instance is an inherent TOCTOU gap in any check-then-act archive guard, not something this index resolves — the archive operation itself would need to re-verify at archive time for a stronger guarantee. |
@@ -783,7 +783,7 @@ Every index below is derived from a stated access pattern, not added speculative
 **Schema-wide conventions carried without re-litigation per table:**
 
 - Every PK is application-generated, never DB-side-defaulted — load-bearing for `ON CONFLICT DO NOTHING` retry-safety under Temporal's at-least-once activity execution.
-- No hard deletes among audit-bearing entities; every relevant FK is `ON DELETE RESTRICT`, not `CASCADE` (the sole exception being `active_task_queues`, a no-FK-children operational registry).
+- No hard deletes among audit-bearing entities; every relevant FK is `ON DELETE RESTRICT`, not `CASCADE` (no table is hard-deleted from).
 - `READ COMMITTED` isolation is sufficient throughout — the one race this schema needs to guard (concurrent claim/complete) is handled by the `record_version`-checked `UPDATE` pattern itself, not by a stronger isolation level.
 - Timestamps are `timestamptz`, UTC throughout — a deliberate deviation from older, timezone-less precedent elsewhere in the platform.
 - `text` columns compare case-sensitively at cluster-default collation; nullable `text` columns use `NULL` for "not applicable," never empty string.
@@ -797,7 +797,7 @@ Every index below is derived from a stated access pattern, not added speculative
 | `workflow_instance` | Yes | Yes | Skipped — `COMPLETED`/`TERMINATED`/`FAILED` are the domain's own terminal markers |
 | `workflow_task` | Yes | Yes | Skipped — same reasoning |
 | `workflow_task_assignment` | Skipped — the contested resource is the task, not any one assignment | Yes | Skipped — `vacated_at`/`is_active` is this table's own, more precise equivalent |
-| `active_task_queues` | Skipped | Yes | Skipped — a genuine hard delete on cleanup, by design |
+| `active_task_queues` | Skipped | Yes | Skipped — rows are never deleted |
 | `assignee_overrides` | Skipped | Skipped | Skipped — insert-only, immutable audit record; same reasoning `outbox_events` itself has always followed for its audit-bearing rows |
 
 `record_version`/`updated_at` are bumped per-statement in application SQL, not via a database trigger — every version-checked `UPDATE` does `SET status = $2, updated_at = now(), record_version = record_version + 1 WHERE id = $1 AND record_version = $3` in one statement (e.g. `internal/adapter/outbound/postgres/db/workflow_instance.sql.go`, `workflow_task.sql.go`), so the bump and the optimistic-lock check are the same conditional `UPDATE`, not two separate mechanisms. System-driven transitions with no external caller (`DEGRADED`/`FAILED`/`COMPLETED`) still bump via their own equivalent unconditional `UPDATE` — there's no trigger backstopping either path.
@@ -1298,7 +1298,7 @@ IAM's `org_membership_lld_v12.md` documents `ip_address`/`user_agent` fields on 
 | `DelegationEnded` | `iam.delegation.events` | `delegation_id, delegator_id, delegate_id, ended_reason` | Reverses every assignment tagged `delegation:<delegation_id>`, batched eligibility re-check on the restored assignee before reinstating (mirrors the forward direction; ineligible rows stay held and flagged), restoring the original assignee. Unknown `ended_reason` values are logged and treated as a generic end | `membership-execution` | Acted on |
 | `UserDeleted` | `iam.user.events` | `user_id, deleted_at` | Vacates every active assignment for the user, tenant-wide, no scope filter — the safety net for lifecycle changes that bypass synchronous reconciliation. Scoped per-assignment, not instance-wide: a multi-assignee task's instance keeps running if a co-assignee remains active on it. | `user-execution` | Acted on (safety net; `UserLifecycleBypass` pages SEV-2) |
 | `UserAvailabilityChanged` | `iam.user.events` | `user_id, status` (+`ooo_from?`, `ooo_until?`, `delegate_user_id?`) | `status=ooo` with no active delegation → pauses the user's instances (`initiator=ooo`); `status=available` → resumes with `initiator=ooo`, lifting only OOO pauses; a later `DelegationStarted` reroutes and resumes them. Never a reroute driver itself — `delegate_user_id` is informational only. `changed_at`-recency-guarded (`<=` skip), the same protection `TenantStateChanged` already has | `user-execution` | Acted on |
-| `TenantStateChanged` | `iam.membership.events` | `tenant_id, status, previous_status, plan, previous_plan, changed_at, cause` | Dispatch on the resolved transition: `offboarded` → terminate every non-terminal instance; `trial`, `active` and `past_due` run instances and `cancelled`, `suspended` and `trial_expired` pause them: every move into a running status resumes with `initiator=tenant_state`, which lifts only the pauses this handler itself applied and changes nothing on an instance that is running, so a skipped or reordered intermediate event cannot strand a paused instance; a move to a pausing status pauses every `RUNNING` instance (`initiator=tenant_state`); `plan != previous_plan` → `active_task_queues` upsert/cleanup. `changed_at`-recency-guarded (`<=` skip, offboard exempt) | `membership-execution` | Acted on |
+| `TenantStateChanged` | `iam.membership.events` | `tenant_id, status, previous_status, plan, previous_plan, changed_at, cause` | Dispatch on the resolved transition: `offboarded` → terminate every non-terminal instance; `trial`, `active` and `past_due` run instances and `cancelled`, `suspended` and `trial_expired` pause them: every move into a running status resumes with `initiator=tenant_state`, which lifts only the pauses this handler itself applied and changes nothing on an instance that is running, so a skipped or reordered intermediate event cannot strand a paused instance; a move to a pausing status pauses every `RUNNING` instance (`initiator=tenant_state`); `plan != previous_plan` → `active_task_queues` upsert on an upgrade and stop-routing on a downgrade. `changed_at`-recency-guarded (`<=` skip, offboard exempt) | `membership-execution` | Acted on |
 | `MembershipRevoked` | `iam.membership.events` | `user_id` | A user removed from a tenant can no longer act in it, so every active assignment they hold is vacated — the same effect `UserDeleted` has, through the same safety-net reconciler | `membership-execution` | Acted on |
 | `TenantMembershipsPurged` | `iam.membership.events` | `tenant_id` | IAM Core's tenant-offboarding cascade signal. Drives `TenantStateChanged`'s own `offboarded` branch — terminate every non-terminal instance — rather than a second cascade of its own | `membership-execution` | Acted on |
 | `TenderAssigneeOverridden` | `iam.membership.events` | — | **Not consumed.** Per IAM's authoritative topology, this event's only consumers are Audit and Notification — the Temporal reassignment is signalled synchronously by the node-override endpoint (§3), never via the bus | — | Routed to no target |
@@ -2011,7 +2011,7 @@ This appendix consolidates every design decision made across the document, group
 | 21 | The API handler returns `202` only after its own `SignalWorkflow`/`StartWorkflow` call succeeds | Narrows the signal-vs-DB-write race to the smallest possible window. |
 | 22 | Instantiation is idempotent end-to-end: an `ON CONFLICT`-safe upsert keyed by `(tenant_id, subject_id, business_key)`, plus treating `WorkflowExecutionAlreadyStartedError` as success on retry | Without this, a client retry on a `StartWorkflow` timeout could duplicate the instance if the first attempt actually landed. |
 | 23 | `StartWorkflow`'s input argument is `{instanceID, tenantID, workflowVersionID, businessKey, overrideMap, contextJSON}` — the compiled plan itself never crosses this wire | Matches exactly what `workflow_instance` already carries at write time; the workflow function fetches the plan itself via `GetCompiledPlanActivity`, its first activity (§3.7). |
-| 24 | `StartWorkflow`'s `TaskQueue` is `workflow_instance.task_queue`, snapshotted once at instantiation from `CompiledPlan.TaskQueue` | Connects the dynamic queue registration mechanism (§3.2) to which queue a given instance actually runs on (§3.7). |
+| 24 | `StartWorkflow`'s `TaskQueue` is `workflow_instance.task_queue`, snapshotted once at instantiation: the tenant's routable registered queue, else `CompiledPlan.TaskQueue` | Connects the dynamic queue registration mechanism (§3.2) to which queue a given instance actually runs on (§3.7). |
 | 25 | `ScheduleToCloseTimeout` deliberately unset on every activity class | It bounds the sum of all retry attempts; setting one would silently cap the unlimited-retry-with-backoff intent `MaximumAttempts: 0` already commits to for infra-transient failures (§3.7). |
 | 26 | `SignalWithStartWorkflow` not adopted; `StartWorkflow` and every signal stay separate calls | Instantiation happens exactly once via an already-idempotent DB-write-then-`StartWorkflow` sequence (Decision 22); every signal always targets a known-existing execution by deterministic `workflowID` — the atomic start-or-signal case this SDK call solves never occurs in this design (§3.7). |
 | 27 | No activity uses `RecordHeartbeat` today; a concrete revisit criterion governs when one should | Every activity is a fast, bounded DB write or HTTP call; a future activity whose duration can legitimately exceed its `StartToCloseTimeout` needs `RecordHeartbeat` and a matching `HeartbeatTimeout` (§3.7). |
@@ -2226,12 +2226,6 @@ CREATE UNIQUE INDEX uq_workflow_instance_business_key
 CREATE INDEX idx_workflow_instance_tenant_status
     ON workflow_instance (tenant_id, status);
 
--- The tenant task-queue downgrade guard: never remove a tenant's isolated queue
--- from the registry while any instance is still running/paused/degraded on it.
-CREATE INDEX idx_workflow_instance_task_queue_active
-    ON workflow_instance (task_queue)
-    WHERE status IN ('RUNNING', 'PAUSED', 'DEGRADED');
-
 -- The archive-guard query behind the Definition Service's active-instances call.
 CREATE INDEX idx_workflow_instance_version_active
     ON workflow_instance (workflow_version_id)
@@ -2314,11 +2308,13 @@ CREATE INDEX idx_workflow_task_assignment_user_active
 -- where this service's own two audit/dashboard query indexes on that table are
 -- also defined, §4.5, §4.9, §4.10).
 
--- Registry of currently-active tenant-isolated Temporal task queues (§4.6).
+-- Registry of tenant-isolated Temporal task queues (§4.6). A row is never
+-- deleted; routable says whether new instances start on the queue.
 CREATE TABLE active_task_queues (
     id             UUID         PRIMARY KEY,
     tenant_id      UUID         NOT NULL,
     queue_name     TEXT         NOT NULL UNIQUE,
+    routable       BOOLEAN      NOT NULL DEFAULT true,
     registered_at  TIMESTAMPTZ  NOT NULL,
     updated_at     TIMESTAMPTZ  NOT NULL
 );
@@ -2398,7 +2394,7 @@ CREATE POLICY tenant_isolation_policy ON assignee_overrides
     WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
 
 -- NO RLS on active_task_queues, despite the tenant_id column (§4.6, §4.8).
--- Workers need to read every currently-active queue across every tenant in one
+-- Workers need to read every queue across every tenant in one
 -- query to compute their own registration set — forcing that through a
 -- per-tenant GUC context switch would be backwards for what is fundamentally an
 -- operational/infra table, not tenant business data.
@@ -2464,7 +2460,7 @@ CREATE UNIQUE INDEX idx_outbox_events_sla_task_unique
 | **`completedNodes`** | The workflow function's internal record of nodes it has already executed past, used to compute correct forward/back-edge behavior on force-routing signals. |
 | **`task_queue`/`active_task_queues`** | A Temporal task queue name (`wf-queue-default` or `wf-queue-<tenant_uuid>`) that Workers listen on; `active_task_queues` is the registry of which tenant-isolated queues are currently active. |
 | **`DelegationStarted`/`DelegationEnded`** | Inbound event pair marking the start and end of an out-of-office delegation window, driving `workflow_task_assignment` reroutes while the delegation is active. |
-| **`TenantStateChanged`** | The tenant-lifecycle relay event off `iam.membership.events` that can trigger tenant-scoped orchestration effects such as the task-queue downgrade check. |
+| **`TenantStateChanged`** | The tenant-lifecycle relay event off `iam.membership.events` that can trigger tenant-scoped orchestration effects such as stopping routing to a tenant's task queue. |
 
 #### Database & Persistence
 
@@ -2595,3 +2591,4 @@ Coding style, formatting rules, naming conventions, comment/documentation standa
 | 1.90 | 2026-10-17 | **A terminate during instantiation leaves no live execution** (§3). A terminate that landed between the instance row and a successful workflow start, which is retried up to three times, found no execution to close, marked the row TERMINATED, and the late start then ran a workflow under it. The execution is closed again after the terminate's DB write, and instance creation closes the execution it just started if the row is already terminal. |
 | 1.91 | 2026-10-17 | **Task creation refuses an instance that is no longer running** (§3.1). An activity still in flight when its instance was terminated could insert a READY task after the termination had already failed the existing ones, and nothing failed it afterwards. The activity refuses a terminated, failed or completed instance without retry. |
 | 1.92 | 2026-10-17 | **`trial` and `past_due` tenants keep running, and the unbuilt start pre-check is withdrawn** (§5.5, §6.2, §5.10, Appendix A). Every status other than `active` paused instances, so a `trial` or `past_due` tenant stopped working although the Commercial design runs both. `trial`, `active` and `past_due` run; `cancelled`, `suspended` and `trial_expired` pause; every move into a running status resumes, which changes nothing on a running instance. The `409 TENANT_NOT_ACTIVE` pre-check at instance start was documented and never built, and Execution holds no tenant status to build it on, so the code is withdrawn; the platform stops a `cancelled` tenant's writes and a `suspended` tenant's tokens. |
+| 1.93 | 2026-10-17 | **Instances start on the tenant's registered task queue** (§3.2, §5.1). The registry of tenant queues was filled on an upgrade to enterprise and polled by the Workers, but every instance started on the compiled plan's shared queue, so no instance ever used it. Instance start reads the registry: a routable registered queue is used, otherwise the plan's queue, and a failed read fails the start. A downgrade used to delete the queue once no instance ran on it, which raced a concurrent start and was never retried when instances were still running; a queue is now never deleted and a downgrade only stops routing to it. |

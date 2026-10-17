@@ -198,20 +198,6 @@ func (r *fakeInstanceRepo) CountActiveByWorkflow(_ context.Context, _, _ uuid.UU
 	return r.countResult, r.countErr
 }
 
-func (r *fakeInstanceRepo) CountActiveByTaskQueue(_ context.Context, tenantID uuid.UUID, taskQueue string) (int64, error) {
-	if r.countErr != nil {
-		return 0, r.countErr
-	}
-	var count int64
-	for _, inst := range r.byID {
-		if inst.TenantID == tenantID && inst.TaskQueue == taskQueue &&
-			(inst.Status == domain.InstanceStatusRunning || inst.Status == domain.InstanceStatusPaused || inst.Status == domain.InstanceStatusDegraded) {
-			count++
-		}
-	}
-	return count, nil
-}
-
 // --- TaskRepository ---
 
 type fakeTaskRepo struct {
@@ -506,9 +492,9 @@ func (r *fakeAssigneeOverrideRepo) ListByInstance(_ context.Context, _, _ uuid.U
 // --- ActiveTaskQueueRepository ---
 
 type fakeActiveTaskQueueRepo struct {
-	byName        map[string]*domain.ActiveTaskQueue
-	registerErr   error
-	deregisterErr error
+	byName         map[string]*domain.ActiveTaskQueue
+	registerErr    error
+	stopRoutingErr error
 }
 
 func newFakeActiveTaskQueueRepo() *fakeActiveTaskQueueRepo {
@@ -535,16 +521,22 @@ func (r *fakeActiveTaskQueueRepo) Register(_ context.Context, tenantID uuid.UUID
 	if r.registerErr != nil {
 		return nil, r.registerErr
 	}
-	q := &domain.ActiveTaskQueue{ID: uuid.New(), TenantID: tenantID, QueueName: queueName, RegisteredAt: time.Now().UTC()}
+	if existing, ok := r.byName[queueName]; ok {
+		existing.Routable = true
+		return existing, nil
+	}
+	q := &domain.ActiveTaskQueue{ID: uuid.New(), TenantID: tenantID, QueueName: queueName, Routable: true, RegisteredAt: time.Now().UTC()}
 	r.byName[queueName] = q
 	return q, nil
 }
 
-func (r *fakeActiveTaskQueueRepo) Deregister(_ context.Context, queueName string) error {
-	if r.deregisterErr != nil {
-		return r.deregisterErr
+func (r *fakeActiveTaskQueueRepo) StopRouting(_ context.Context, queueName string) error {
+	if r.stopRoutingErr != nil {
+		return r.stopRoutingErr
 	}
-	delete(r.byName, queueName)
+	if q, ok := r.byName[queueName]; ok {
+		q.Routable = false
+	}
 	return nil
 }
 

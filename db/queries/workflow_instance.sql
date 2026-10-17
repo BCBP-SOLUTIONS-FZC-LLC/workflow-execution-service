@@ -78,14 +78,6 @@ SELECT count(*) FROM workflow_instance
 WHERE tenant_id = $1 AND workflow_id = $2
   AND status IN ('RUNNING', 'PAUSED', 'DEGRADED');
 
--- name: CountActiveInstancesByTaskQueue :one
--- Backs TenantLifecycleReconciler's plan-downgrade check (LLD §3.2 item 3):
--- a tenant's isolated queue is never deregistered while any instance
--- started on it is still running.
-SELECT count(*) FROM workflow_instance
-WHERE tenant_id = $1 AND task_queue = $2
-  AND status IN ('RUNNING', 'PAUSED', 'DEGRADED');
-
 -- name: UpdateWorkflowInstanceCurrentNodeKeys :one
 UPDATE workflow_instance
 SET current_node_keys = $2, updated_at = now(), record_version = record_version + 1

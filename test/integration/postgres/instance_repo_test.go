@@ -383,30 +383,3 @@ func TestInstanceRepo_CountActiveByWorkflow(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count, "only the RUNNING instance of this workflow_id counts, not the COMPLETED one or a different workflow_id")
 }
-
-func TestInstanceRepo_CountActiveByTaskQueue(t *testing.T) {
-	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
-	appPool := newAppRolePool(t, superPool, superDSN)
-	repo := postgres.NewInstanceRepo(appPool)
-	ctx := context.Background()
-
-	tenantA := uuid.New()
-	isolatedQueue := "wf-queue-" + tenantA.String()
-
-	active := newInstance(tenantA, time.Now().UTC())
-	active.TaskQueue = isolatedQueue
-	require.NoError(t, repo.Create(ctx, active))
-
-	completed := newInstance(tenantA, time.Now().UTC())
-	completed.TaskQueue = isolatedQueue
-	require.NoError(t, repo.Create(ctx, completed))
-	_, err := repo.UpdateStatus(ctx, tenantA, completed.ID, domain.InstanceStatusCompleted, completed.RecordVersion)
-	require.NoError(t, err)
-
-	onDefaultQueue := newInstance(tenantA, time.Now().UTC())
-	require.NoError(t, repo.Create(ctx, onDefaultQueue))
-
-	count, err := repo.CountActiveByTaskQueue(ctx, tenantA, isolatedQueue)
-	require.NoError(t, err)
-	assert.Equal(t, int64(1), count, "only the RUNNING instance on this task queue counts, not the COMPLETED one or one on a different queue")
-}

@@ -68,10 +68,6 @@ func (r *fakeInstanceRepo) CountActiveByWorkflow(_ context.Context, _, _ uuid.UU
 	return 0, nil
 }
 
-func (r *fakeInstanceRepo) CountActiveByTaskQueue(_ context.Context, _ uuid.UUID, _ string) (int64, error) {
-	return 0, nil
-}
-
 func (r *fakeInstanceRepo) UpdateCurrentNodeKeys(_ context.Context, _, id uuid.UUID, keys []string, recordVersion int64) (*domain.Instance, error) {
 	if r.updateCurrentNodeKeysErr != nil {
 		return nil, r.updateCurrentNodeKeysErr

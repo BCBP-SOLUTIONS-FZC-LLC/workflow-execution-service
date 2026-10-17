@@ -72,13 +72,16 @@ CREATE TABLE workflow_task_assignment (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Registry of currently-active tenant-isolated Temporal task queues (LLD §4.6).
+-- Registry of tenant-isolated Temporal task queues (LLD §4.6). A row is never
+-- deleted: Workers poll every row, and routable says whether new instances
+-- start on the queue.
 -- No RLS (see 000004_enable_rls) — Workers need to read every currently-active
 -- queue across every tenant in one query.
 CREATE TABLE active_task_queues (
     id             UUID         PRIMARY KEY,
     tenant_id      UUID         NOT NULL,
     queue_name     TEXT         NOT NULL UNIQUE,
+    routable       BOOLEAN      NOT NULL DEFAULT true,
     registered_at  TIMESTAMPTZ  NOT NULL,
     updated_at     TIMESTAMPTZ  NOT NULL
 );

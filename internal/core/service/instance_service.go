@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -29,6 +30,7 @@ type InstanceService struct {
 	Temporal    port.TemporalClient
 	Definitions port.DefinitionServiceClient
 	Eligibility port.EligibilityChecker
+	Queues      port.ActiveTaskQueueRepository
 	Validator   port.EventValidator
 	Cache       port.CacheStore
 	Log         port.Logger
@@ -107,6 +109,11 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 		return nil, fmt.Errorf("marshal override_map: %w", err)
 	}
 
+	taskQueue, err := s.resolveTaskQueue(ctx, in.TenantID, mainPlan.TaskQueue)
+	if err != nil {
+		return nil, err
+	}
+
 	instanceID := uuid.New()
 	temporalWorkflowID := in.TenantID.String() + ":" + in.SubjectID + ":" + in.BusinessKey
 	inst := &domain.Instance{
@@ -121,7 +128,7 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 		CurrentNodeKeys:    []string{},
 		ContextJSON:        in.ContextJSON,
 		OverrideMap:        overrideMapJSON,
-		TaskQueue:          mainPlan.TaskQueue,
+		TaskQueue:          taskQueue,
 		StartedByUserID:    in.StartedByUserID,
 	}
 
@@ -139,7 +146,7 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 
 	startErr := s.startWorkflowWithRetry(ctx, port.StartWorkflowInput{
 		TemporalWorkflowID: temporalWorkflowID,
-		TaskQueue:          mainPlan.TaskQueue,
+		TaskQueue:          taskQueue,
 		TenantID:           in.TenantID,
 		InstanceID:         instanceID,
 		WorkflowVersionID:  in.WorkflowVersionID,
@@ -193,4 +200,22 @@ func (s *InstanceService) startWorkflowWithRetry(ctx context.Context, in port.St
 		return nil
 	}
 	return lastErr
+}
+
+func (s *InstanceService) resolveTaskQueue(ctx context.Context, tenantID uuid.UUID, planQueue string) (string, error) {
+	if s.Queues == nil {
+		return "", errors.New("the tenant task queue registry is not configured")
+	}
+	name := domain.TenantTaskQueueName(tenantID)
+	queue, err := s.Queues.GetByQueueName(ctx, name)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return planQueue, nil
+		}
+		return "", fmt.Errorf("look up the tenant task queue: %w", err)
+	}
+	if !queue.Routable {
+		return planQueue, nil
+	}
+	return name, nil
 }
