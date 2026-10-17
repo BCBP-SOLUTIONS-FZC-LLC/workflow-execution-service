@@ -652,7 +652,7 @@ components:
             Machine-readable error code (stable across releases). One of:
             BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_ASSIGNEE, NOT_AUTHORIZED_FOR_RESOURCE,
             TENANT_MISMATCH, INSTANCE_NOT_FOUND, TASK_NOT_FOUND,
-            TARGET_NODE_NOT_FOUND, WAIT_NOT_FOUND, NOT_WAITING, OVERRIDE_NO_OP, DUPLICATE_BUSINESS_KEY, TENANT_NOT_ACTIVE,
+            TARGET_NODE_NOT_FOUND, WAIT_NOT_FOUND, NOT_WAITING, OVERRIDE_NO_OP, DUPLICATE_BUSINESS_KEY,
             VERSION_NOT_PUBLISHED, VERSION_INVALID,
             RECORD_VERSION_CONFLICT, INSTANCE_ALREADY_TERMINAL, INVALID_INSTANCE_STATE,
             TASK_ALREADY_CLAIMED, CLAIM_NOT_APPLICABLE, INVALID_TASK_STATE,
@@ -948,8 +948,7 @@ paths:
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body;
             DUPLICATE_BUSINESS_KEY — an active instance for this subject_id and business_key already exists;
             VERSION_NOT_PUBLISHED — the referenced version is DRAFT or ARCHIVED;
-            VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked);
-            TENANT_NOT_ACTIVE — the tenant's current status is not active or trial.
+            VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked).
           content:
             application/problem+json:
               schema:
@@ -963,14 +962,6 @@ paths:
                     detail: "an active instance for business_key 'tender-abc-001' already exists"
                     instance: "/api/v1/instances"
                     code: "DUPLICATE_BUSINESS_KEY"
-                TenantNotActive:
-                  value:
-                    type: "https://errors.bcbp.io/execution/tenant-not-active"
-                    title: "Tenant Not Active"
-                    status: 409
-                    detail: "tenant status is 'suspended'; instantiation requires active or trial"
-                    instance: "/api/v1/instances"
-                    code: "TENANT_NOT_ACTIVE"
                 VersionNotPublished:
                   value:
                     type: "https://errors.bcbp.io/execution/version-not-published"

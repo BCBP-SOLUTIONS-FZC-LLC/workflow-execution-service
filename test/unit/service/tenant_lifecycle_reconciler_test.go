@@ -371,3 +371,76 @@ func TestTenantLifecycleReconciler_Offboard_Termination(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestTenantLifecycleReconciler_StatusMapping(t *testing.T) {
+	pausedInstance := func(tenantID uuid.UUID, instances *fakeInstanceRepo) {
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusPaused, TemporalWorkflowID: "tenant:paused", RecordVersion: 1}
+		instances.byID[inst.ID] = inst
+	}
+
+	cases := []struct {
+		name       string
+		previous   string
+		status     string
+		wantSignal string
+	}{
+		{"active to past_due never pauses", "active", "past_due", port.SignalInstanceResume},
+		{"trial to active never pauses", "trial", "active", port.SignalInstanceResume},
+		{"active to trial never pauses", "active", "trial", port.SignalInstanceResume},
+		{"past_due to active never pauses", "past_due", "active", port.SignalInstanceResume},
+		{"active to suspended pauses", "active", "suspended", port.SignalInstancePause},
+		{"active to cancelled pauses", "active", "cancelled", port.SignalInstancePause},
+		{"trial to trial_expired pauses", "trial", "trial_expired", port.SignalInstancePause},
+		{"past_due to suspended pauses", "past_due", "suspended", port.SignalInstancePause},
+		{"suspended to past_due resumes", "suspended", "past_due", port.SignalInstanceResume},
+		{"trial_expired to trial resumes", "trial_expired", "trial", port.SignalInstanceResume},
+		{"cancelled to active resumes", "cancelled", "active", port.SignalInstanceResume},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+			tenantID := uuid.New()
+			pausedInstance(tenantID, instances)
+
+			require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: tc.status, PreviousStatus: tc.previous}))
+
+			if tc.wantSignal == "" {
+				assert.Empty(t, temporal.signals)
+				return
+			}
+			require.Len(t, temporal.signals, 1)
+			assert.Equal(t, tc.wantSignal, temporal.signals[0].SignalName)
+		})
+	}
+}
+
+func TestTenantLifecycleReconciler_ASkippedIntermediateStatusCannotStrandAPausedInstance(t *testing.T) {
+	svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+	tenantID := uuid.New()
+	inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:one", RecordVersion: 1}
+	instances.byID[inst.ID] = inst
+
+	require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"}))
+	require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "past_due"}))
+
+	require.Len(t, temporal.signals, 2)
+	assert.Equal(t, port.SignalInstancePause, temporal.signals[0].SignalName)
+	assert.Equal(t, port.SignalInstanceResume, temporal.signals[1].SignalName, "the move to active resumes although the suspended-to-past_due event never arrived")
+}
+
+func TestTenantLifecycleReconciler_AnUnknownOrEmptyPreviousStatusStillAppliesTheNewStatus(t *testing.T) {
+	for _, tc := range []struct{ previous, status, want string }{
+		{"", "active", port.SignalInstanceResume},
+		{"", "suspended", port.SignalInstancePause},
+		{"mystery", "past_due", port.SignalInstanceResume},
+	} {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusPaused, TemporalWorkflowID: "tenant:one", RecordVersion: 1}
+		instances.byID[inst.ID] = inst
+
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: tc.status, PreviousStatus: tc.previous}))
+		require.Len(t, temporal.signals, 1)
+		assert.Equal(t, tc.want, temporal.signals[0].SignalName)
+	}
+}

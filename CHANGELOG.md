@@ -10,6 +10,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- Tenant offboarding failed only the first 100 tasks of an instance, and a failed termination was logged while the event was recorded as processed, so nothing retried it. Every open task is failed, each instance is attempted, and a database failure fails the event so it is redelivered.
+- Admin terminate and the offboarding sweep wrote the instance as terminated and then closed the workflow execution, so a failed close left a TERMINATED row over a running workflow that no retry could reach. The execution is closed first, a close of an already-closed execution succeeds, the database write re-reads the instance, and the execution is closed once more after the write. Instance creation closes the execution it started if the row was terminated meanwhile.
+- The instance detail, its event list and an outside party's answer decided access from the first 100 tasks, and the detail returned only 100. Visibility uses the instance list's own rule through an `instance_id` filter, and the detail returns every task.
+- The task-creation activity could insert a READY task under a terminated instance. It refuses a terminated, failed or completed instance without retry.
+- A `trial` or `past_due` tenant had its instances paused, as every status other than `active` did. `trial`, `active` and `past_due` run; `cancelled`, `suspended` and `trial_expired` pause; every move into a running status resumes, so a skipped or reordered event cannot strand a paused instance.
+
+### Removed
+
+- The `TENANT_NOT_ACTIVE` error code and its documentation. The start pre-check it belonged to was never built, and Execution holds no tenant status; the platform stops a cancelled tenant's writes and a suspended tenant's tokens.
+
 - Instance start read a version's status and validity from this service's one-hour plan cache, so after the Definition Service invalidated the version (a membership revocation) or archived it, a start within the hour answered `201` and the instance then failed. Start now always reads the Definition Service, which evicts its own copy on both events, and answers `409 VERSION_INVALID` or `409 VERSION_NOT_PUBLISHED`. The cache is still written by each start and serves outside answers for running instances.
 - A force-forward that cancelled a task stage while it was still creating its task or recording its node failed the stage with the cancelled activity's error, so a parallel join counted the branch as failed; CI caught it as an intermittent `TestRunTaskStage_AbandonedOnCancel` failure. The stage is abandoned, and a task it created is superseded (change ID `abandoned-mid-activity`).
 - CI's first full run on this branch (earlier runs skipped every job on a draft) failed in three places: the tidy check ran without the gitignored mocks and dropped `go.uber.org/mock`, and the Trivy and smoke jobs rebuilt the images without the sqlc output. The quality job generates the mocks first, and both image jobs generate the sqlc code.

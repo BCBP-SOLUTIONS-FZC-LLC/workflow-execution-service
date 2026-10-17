@@ -46,13 +46,22 @@ func (s *TenantLifecycleReconciler) Apply(ctx context.Context, in port.TenantLif
 }
 
 func (s *TenantLifecycleReconciler) applyStatusTransition(ctx context.Context, in port.TenantLifecycleInput) error {
-	switch in.Status {
-	case "offboarded":
+	switch {
+	case in.Status == "offboarded":
 		return s.terminateAllNonTerminal(ctx, in.TenantID)
-	case "active":
+	case runsInstances(in.Status):
 		return s.signalAllNonTerminal(ctx, in.TenantID, port.SignalInstanceResume)
 	default:
 		return s.signalAllNonTerminal(ctx, in.TenantID, port.SignalInstancePause)
+	}
+}
+
+func runsInstances(status string) bool {
+	switch status {
+	case "trial", "active", "past_due":
+		return true
+	default:
+		return false
 	}
 }
 

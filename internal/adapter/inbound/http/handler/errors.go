@@ -41,7 +41,6 @@ const (
 	CodeWaitNotFound            ErrCode = "WAIT_NOT_FOUND"
 	CodeNotWaiting              ErrCode = "NOT_WAITING"
 	CodeDuplicateBusinessKey    ErrCode = "DUPLICATE_BUSINESS_KEY"
-	CodeTenantNotActive         ErrCode = "TENANT_NOT_ACTIVE"
 	CodeVersionNotPublished     ErrCode = "VERSION_NOT_PUBLISHED"
 	CodeVersionInvalid          ErrCode = "VERSION_INVALID"
 	CodeInstanceAlreadyTerminal ErrCode = "INSTANCE_ALREADY_TERMINAL"
@@ -81,7 +80,6 @@ var codeTitles = map[ErrCode]string{
 	CodeWaitNotFound:            "Wait Not Found",
 	CodeNotWaiting:              "Not Waiting",
 	CodeDuplicateBusinessKey:    "Duplicate Business Key",
-	CodeTenantNotActive:         "Tenant Not Active",
 	CodeVersionNotPublished:     "Version Not Published",
 	CodeVersionInvalid:          "Version Invalid",
 	CodeInstanceAlreadyTerminal: "Instance Already Terminal",
@@ -123,7 +121,6 @@ var problemTypes = map[ErrCode]string{
 	CodeWaitNotFound:            errBase + "wait-not-found",
 	CodeNotWaiting:              errBase + "not-waiting",
 	CodeDuplicateBusinessKey:    errBase + "duplicate-business-key",
-	CodeTenantNotActive:         errBase + "tenant-not-active",
 	CodeVersionNotPublished:     errBase + "version-not-published",
 	CodeVersionInvalid:          errBase + "version-invalid",
 	CodeInstanceAlreadyTerminal: errBase + "instance-already-terminal",
@@ -241,8 +238,6 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusConflict, CodeNotWaiting, err.Error()
 	case errors.Is(err, port.ErrDuplicateBusinessKey):
 		return http.StatusConflict, CodeDuplicateBusinessKey, err.Error()
-	case errors.Is(err, port.ErrTenantNotActive):
-		return http.StatusConflict, CodeTenantNotActive, err.Error()
 	case errors.Is(err, port.ErrVersionNotPublished):
 		return http.StatusConflict, CodeVersionNotPublished, err.Error()
 	case errors.Is(err, port.ErrVersionInvalid):
