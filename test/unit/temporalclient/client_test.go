@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 
@@ -195,13 +196,23 @@ func TestClient_TerminateWorkflow(t *testing.T) {
 	t.Run("sdk error is wrapped", func(t *testing.T) {
 		sdk := &fakeSDKClient{
 			terminateWorkflowFunc: func(context.Context, string, string, string, ...interface{}) error {
-				return errors.New("already closed")
+				return errors.New("unavailable")
 			},
 		}
 		c := temporalclient.New(sdk)
 		err := c.TerminateWorkflow(context.Background(), "tenant:biz-key", "reason")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "already closed")
+		assert.Contains(t, err.Error(), "unavailable")
+	})
+
+	t.Run("an execution that is already closed or missing counts as terminated", func(t *testing.T) {
+		sdk := &fakeSDKClient{
+			terminateWorkflowFunc: func(context.Context, string, string, string, ...interface{}) error {
+				return serviceerror.NewNotFound("workflow execution already completed")
+			},
+		}
+		c := temporalclient.New(sdk)
+		require.NoError(t, c.TerminateWorkflow(context.Background(), "tenant:biz-key", "reason"))
 	})
 }
 

@@ -23,6 +23,7 @@ WHERE wi.tenant_id = $1
     cardinality(sqlc.arg('statuses')::text[]) = 0
     OR wi.status::text = ANY(sqlc.arg('statuses')::text[])
   )
+  AND (sqlc.narg('instance_id')::uuid IS NULL OR wi.id = sqlc.narg('instance_id')::uuid)
   AND (sqlc.narg('workflow_version_id')::uuid IS NULL OR wi.workflow_version_id = sqlc.narg('workflow_version_id')::uuid)
   AND (sqlc.narg('subject_id')::text IS NULL OR wi.subject_id = sqlc.narg('subject_id')::text)
   AND (sqlc.narg('started_after')::timestamptz IS NULL OR wi.started_at > sqlc.narg('started_after')::timestamptz)

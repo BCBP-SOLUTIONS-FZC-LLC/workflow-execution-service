@@ -2,10 +2,12 @@ package temporalclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -56,7 +58,9 @@ func (c *Client) SignalWorkflow(ctx context.Context, temporalWorkflowID string, 
 }
 
 func (c *Client) TerminateWorkflow(ctx context.Context, temporalWorkflowID, reason string) error {
-	if err := c.sdk.TerminateWorkflow(ctx, temporalWorkflowID, "", reason); err != nil {
+	err := c.sdk.TerminateWorkflow(ctx, temporalWorkflowID, "", reason)
+	var notFound *serviceerror.NotFound
+	if err != nil && !errors.As(err, &notFound) {
 		return fmt.Errorf("terminate workflow: %w", err)
 	}
 	return nil

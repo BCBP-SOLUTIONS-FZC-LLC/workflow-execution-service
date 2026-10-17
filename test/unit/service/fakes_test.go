@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ type fakeInstanceRepo struct {
 	createErr         error
 	getErr            error
 	updateErr         error
+	updateErrFor      map[uuid.UUID]error
 	listErr           error
 	countErr          error
 	countResult       int64
@@ -36,6 +38,8 @@ type fakeInstanceRepo struct {
 	lastPageAfter     *port.Cursor
 	listByTenantCalls int
 	lastFilter        port.InstanceListFilter
+	scopeTasks        *fakeTaskRepo
+	scopeAssignments  *fakeAssignmentRepo
 }
 
 func newFakeInstanceRepo(instances ...*domain.Instance) *fakeInstanceRepo {
@@ -84,6 +88,9 @@ func (r *fakeInstanceRepo) UpdateStatus(_ context.Context, _, id uuid.UUID, stat
 	if r.updateErr != nil {
 		return nil, r.updateErr
 	}
+	if err := r.updateErrFor[id]; err != nil {
+		return nil, err
+	}
 	inst, ok := r.byID[id]
 	if !ok {
 		return nil, domain.ErrNotFound
@@ -130,6 +137,12 @@ func (r *fakeInstanceRepo) ListByTenant(_ context.Context, tenantID uuid.UUID, f
 		if filter.WorkflowVersionID != nil && inst.WorkflowVersionID != *filter.WorkflowVersionID {
 			continue
 		}
+		if filter.InstanceID != nil && inst.ID != *filter.InstanceID {
+			continue
+		}
+		if filter.Scope != nil && !r.visibleInScope(inst.ID, *filter.Scope) {
+			continue
+		}
 		out = append(out, inst)
 	}
 	// nextCursor is consumed on its first use — a real second page would
@@ -139,6 +152,33 @@ func (r *fakeInstanceRepo) ListByTenant(_ context.Context, tenantID uuid.UUID, f
 	cursor := r.nextCursor
 	r.nextCursor = nil
 	return out, cursor, nil
+}
+
+func (r *fakeInstanceRepo) linkScope(tasks *fakeTaskRepo, assignments *fakeAssignmentRepo) {
+	r.scopeTasks = tasks
+	r.scopeAssignments = assignments
+}
+
+func (r *fakeInstanceRepo) visibleInScope(instanceID uuid.UUID, scope port.ScopeFilter) bool {
+	if r.scopeTasks == nil || r.scopeAssignments == nil {
+		return false
+	}
+	for _, t := range r.scopeTasks.byID {
+		if t.WorkflowInstanceID != instanceID {
+			continue
+		}
+		for _, d := range scope.DepartmentIDs {
+			if d == t.DepartmentID {
+				return true
+			}
+		}
+		for _, a := range r.scopeAssignments.byID {
+			if a.TaskID == t.ID && a.UserID == scope.CallerUserID && a.IsActive {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *fakeInstanceRepo) UpdateCurrentNodeKeys(_ context.Context, _, id uuid.UUID, keys []string, recordVersion int64) (*domain.Instance, error) {
@@ -223,17 +263,51 @@ func (r *fakeTaskRepo) UpdateStatus(_ context.Context, _, id uuid.UUID, status d
 	return task, nil
 }
 
-func (r *fakeTaskRepo) ListByInstance(_ context.Context, _, instanceID uuid.UUID, _ port.PageRequest) ([]*domain.Task, *port.Cursor, error) {
+func (r *fakeTaskRepo) ListByInstance(_ context.Context, _, instanceID uuid.UUID, page port.PageRequest) ([]*domain.Task, *port.Cursor, error) {
 	if r.listErr != nil {
 		return nil, nil, r.listErr
 	}
-	var out []*domain.Task
+	var all []*domain.Task
 	for _, t := range r.byID {
 		if t.WorkflowInstanceID == instanceID {
-			out = append(out, t)
+			all = append(all, t)
 		}
 	}
-	return out, nil, nil
+	sort.Slice(all, func(i, j int) bool { return taskNewerThan(all[i], all[j]) })
+	limit := page.Limit
+	switch {
+	case limit <= 0:
+		limit = 25
+	case limit > 100:
+		limit = 100
+	}
+	var out []*domain.Task
+	for _, t := range all {
+		if page.After != nil && !taskOlderThanCursor(t, page.After) {
+			continue
+		}
+		out = append(out, t)
+	}
+	if len(out) <= limit {
+		return out, nil, nil
+	}
+	out = out[:limit]
+	last := out[len(out)-1]
+	return out, &port.Cursor{CreatedAt: last.CreatedAt, ID: last.ID}, nil
+}
+
+func taskNewerThan(a, b *domain.Task) bool {
+	if !a.CreatedAt.Equal(b.CreatedAt) {
+		return a.CreatedAt.After(b.CreatedAt)
+	}
+	return a.ID.String() > b.ID.String()
+}
+
+func taskOlderThanCursor(t *domain.Task, c *port.Cursor) bool {
+	if !t.CreatedAt.Equal(c.CreatedAt) {
+		return t.CreatedAt.Before(c.CreatedAt)
+	}
+	return t.ID.String() < c.ID.String()
 }
 
 func (r *fakeTaskRepo) ListByTenant(_ context.Context, tenantID uuid.UUID, filter port.TaskListFilter, _ port.PageRequest) ([]*domain.Task, *port.Cursor, error) {

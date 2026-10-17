@@ -114,6 +114,7 @@ func (r *InstanceRepo) ListByTenant(
 	for i, s := range filter.Statuses {
 		params.Statuses[i] = string(s)
 	}
+	params.InstanceID = toPgtypeUUID(filter.InstanceID)
 	params.SubjectID = toPgtypeTextPtr(filter.SubjectID)
 	if filter.WorkflowVersionID != nil {
 		params.WorkflowVersionID = toPgtypeUUID(filter.WorkflowVersionID)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -246,33 +247,80 @@ func TestTenantLifecycleReconciler_Apply_PlanChange(t *testing.T) {
 }
 
 func TestTenantLifecycleReconciler_Offboard_Termination(t *testing.T) {
-	t.Run("an UpdateStatus failure during termination is logged, not returned", func(t *testing.T) {
+	t.Run("an UpdateStatus failure is returned so the event is redelivered, after every other instance was terminated", func(t *testing.T) {
 		svc, instances, _, _, _, _, _ := newTenantLifecycleHarness()
-		log := &fakeLogger{}
-		svc.Log = log
 		tenantID := uuid.New()
-		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
-		instances.byID[running.ID] = running
-		instances.updateErr = assert.AnError
+		first := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:first", RecordVersion: 1}
+		second := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:second", RecordVersion: 1}
+		instances.byID[first.ID] = first
+		instances.byID[second.ID] = second
+		instances.updateErrFor = map[uuid.UUID]error{first.ID: assert.AnError}
 
 		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"})
-		require.NoError(t, err, "a per-instance termination failure during offboard is logged and skipped, not a batch failure")
-		assert.NotEmpty(t, log.warnCalls)
+		require.ErrorIs(t, err, assert.AnError)
+		assert.Equal(t, domain.InstanceStatusRunning, instances.byID[first.ID].Status, "the failed instance stays non-terminal so the redelivery finds it")
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[second.ID].Status, "one failing instance must not stop the rest")
 	})
 
-	t.Run("a TerminateWorkflow failure is logged, not returned, DB state already committed", func(t *testing.T) {
-		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
-		log := &fakeLogger{}
-		svc.Log = log
-		temporal.terminateFunc = func(context.Context, string, string) error { return assert.AnError }
+	t.Run("an instance with more tasks than one page has every open task failed", func(t *testing.T) {
+		svc, instances, tasks, _, _, _, _ := newTenantLifecycleHarness()
 		tenantID := uuid.New()
 		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
 		instances.byID[running.ID] = running
+		createdAt := time.Now().UTC()
+		for i := 0; i < 150; i++ {
+			task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: running.ID, Status: domain.TaskStatusReady, RecordVersion: 1, CreatedAt: createdAt}
+			tasks.byID[task.ID] = task
+		}
 
 		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"})
 		require.NoError(t, err)
-		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[running.ID].Status)
-		assert.NotEmpty(t, log.warnCalls)
+		open := 0
+		for _, task := range tasks.byID {
+			if task.Status != domain.TaskStatusFailed {
+				open++
+			}
+		}
+		assert.Zero(t, open, "every open task of a terminated instance must be failed")
+	})
+
+	t.Run("a TerminateWorkflow failure is returned, writes nothing for that instance and the rest are terminated", func(t *testing.T) {
+		svc, instances, tasks, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		stuck := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:stuck", RecordVersion: 1}
+		other := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:other", RecordVersion: 1}
+		instances.byID[stuck.ID] = stuck
+		instances.byID[other.ID] = other
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: stuck.ID, Status: domain.TaskStatusReady, RecordVersion: 1}
+		tasks.byID[task.ID] = task
+		temporal.terminateFunc = func(_ context.Context, id, _ string) error {
+			if id == "tenant:stuck" {
+				return assert.AnError
+			}
+			return nil
+		}
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"})
+		require.ErrorIs(t, err, assert.AnError)
+		assert.Equal(t, domain.InstanceStatusRunning, instances.byID[stuck.ID].Status, "the redelivery must still find it")
+		assert.Equal(t, domain.TaskStatusReady, tasks.byID[task.ID].Status)
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[other.ID].Status)
+	})
+
+	t.Run("an instance written to while its execution was being closed is still terminated", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		busy := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:busy", RecordVersion: 1}
+		instances.byID[busy.ID] = busy
+		temporal.terminateFunc = func(context.Context, string, string) error {
+			written := *instances.byID[busy.ID]
+			written.RecordVersion++
+			instances.byID[busy.ID] = &written
+			return nil
+		}
+
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[busy.ID].Status)
 	})
 
 	t.Run("an allInstancesByStatus failure during offboard propagates from Apply", func(t *testing.T) {

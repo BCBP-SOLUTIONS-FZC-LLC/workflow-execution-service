@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 
@@ -99,19 +100,30 @@ func (s *TenantLifecycleReconciler) terminateAllNonTerminal(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, inst := range toTerminate {
 		if err := s.terminateOne(ctx, tenantID, inst); err != nil {
 			s.logger().Warn("tenant lifecycle: failed to terminate instance during offboard", map[string]any{"instance_id": inst.ID, "error": err.Error()})
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func (s *TenantLifecycleReconciler) terminateOne(ctx context.Context, tenantID uuid.UUID, inst *domain.Instance) error {
+	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, "tenant offboarded"); err != nil {
+		return err
+	}
 	var updated *domain.Instance
-	txErr := s.Transactor.RunInTxWithRetry(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
-		var err error
-		updated, err = s.Instances.UpdateStatus(ctx, tenantID, inst.ID, domain.InstanceStatusTerminated, inst.RecordVersion)
+	return s.Transactor.RunInTxWithRetry(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
+		current, err := s.Instances.GetByID(ctx, tenantID, inst.ID)
+		if err != nil {
+			return wrapInstanceErr(err)
+		}
+		if isTerminalInstanceStatus(current.Status) {
+			return nil
+		}
+		updated, err = s.Instances.UpdateStatus(ctx, tenantID, inst.ID, domain.InstanceStatusTerminated, current.RecordVersion)
 		if err != nil {
 			return wrapInstanceErr(err)
 		}
@@ -122,10 +134,6 @@ func (s *TenantLifecycleReconciler) terminateOne(ctx context.Context, tenantID u
 		sink := instanceEventSink{Outbox: s.Outbox, Validator: s.Validator}
 		return sink.enqueueInstanceEvent(ctx, tenantID.String(), domain.EventWorkflowInstanceTerminated, inst.ID.String(), "", payload)
 	})
-	if txErr != nil {
-		return txErr
-	}
-	return s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, "tenant offboarded")
 }
 
 func (s *TenantLifecycleReconciler) applyPlanChange(ctx context.Context, in port.TenantLifecycleInput) error {

@@ -123,12 +123,26 @@ func (s *InstanceService) Terminate(ctx context.Context, tenantID, instanceID, a
 	if err != nil {
 		return wrapInstanceErr(err)
 	}
-	if inst.Status == domain.InstanceStatusCompleted || inst.Status == domain.InstanceStatusTerminated || inst.Status == domain.InstanceStatusFailed {
+	if isTerminalInstanceStatus(inst.Status) {
 		return port.ErrInstanceAlreadyTerminal
 	}
 
+	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, reason); err != nil {
+		s.logger().Error("TerminateWorkflow failed, instance left as it was", map[string]any{
+			"instance_id": instanceID, "tenant_id": tenantID, "error": err.Error(),
+		})
+		return fmt.Errorf("terminate workflow: %w", err)
+	}
+
 	txErr := s.Transactor.RunInTxWithRetry(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
-		updated, err := s.Instances.UpdateStatus(ctx, tenantID, instanceID, domain.InstanceStatusTerminated, inst.RecordVersion)
+		current, err := s.Instances.GetByID(ctx, tenantID, instanceID)
+		if err != nil {
+			return wrapInstanceErr(err)
+		}
+		if isTerminalInstanceStatus(current.Status) {
+			return port.ErrInstanceAlreadyTerminal
+		}
+		updated, err := s.Instances.UpdateStatus(ctx, tenantID, instanceID, domain.InstanceStatusTerminated, current.RecordVersion)
 		if err != nil {
 			return wrapInstanceErr(err)
 		}
@@ -144,36 +158,47 @@ func (s *InstanceService) Terminate(ctx context.Context, tenantID, instanceID, a
 		return txErr
 	}
 
-	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, reason); err != nil {
-		s.logger().Error("TerminateWorkflow failed after DB state already committed TERMINATED", map[string]any{
-			"instance_id": instanceID, "tenant_id": tenantID, "error": err.Error(),
-		})
-		return fmt.Errorf("terminate workflow: %w", err)
-	}
 	return nil
 }
 
 func cascadeFailTasksForInstance(ctx context.Context, tasks port.TaskRepository, assignments port.TaskAssignmentRepository, tenantID, instanceID uuid.UUID) error {
-	rows, _, err := tasks.ListByInstance(ctx, tenantID, instanceID, port.PageRequest{Limit: 100})
-	if err != nil {
-		return wrapTaskErr(err)
-	}
-	for _, t := range rows {
-		if t.Status != domain.TaskStatusReady && t.Status != domain.TaskStatusInProgress {
-			continue
-		}
-		if _, err := tasks.UpdateStatus(ctx, tenantID, t.ID, domain.TaskStatusFailed, t.RecordVersion); err != nil {
+	var after *port.Cursor
+	for {
+		rows, next, err := tasks.ListByInstance(ctx, tenantID, instanceID, port.PageRequest{After: after, Limit: 100})
+		if err != nil {
 			return wrapTaskErr(err)
 		}
-		active, err := assignments.ListActiveByTask(ctx, tenantID, t.ID)
-		if err != nil {
-			return err
-		}
-		for _, a := range active {
-			if _, err := assignments.Vacate(ctx, tenantID, a.ID); err != nil {
+		for _, t := range rows {
+			if err := failOpenTask(ctx, tasks, assignments, tenantID, t); err != nil {
 				return err
 			}
 		}
+		if next == nil {
+			return nil
+		}
+		after = next
+	}
+}
+
+func failOpenTask(ctx context.Context, tasks port.TaskRepository, assignments port.TaskAssignmentRepository, tenantID uuid.UUID, t *domain.Task) error {
+	if t.Status != domain.TaskStatusReady && t.Status != domain.TaskStatusInProgress {
+		return nil
+	}
+	if _, err := tasks.UpdateStatus(ctx, tenantID, t.ID, domain.TaskStatusFailed, t.RecordVersion); err != nil {
+		return wrapTaskErr(err)
+	}
+	active, err := assignments.ListActiveByTask(ctx, tenantID, t.ID)
+	if err != nil {
+		return err
+	}
+	for _, a := range active {
+		if _, err := assignments.Vacate(ctx, tenantID, a.ID); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func isTerminalInstanceStatus(status domain.InstanceStatus) bool {
+	return status == domain.InstanceStatusCompleted || status == domain.InstanceStatusTerminated || status == domain.InstanceStatusFailed
 }

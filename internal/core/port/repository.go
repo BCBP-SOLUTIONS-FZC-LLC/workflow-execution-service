@@ -26,6 +26,7 @@ type ScopeFilter struct {
 }
 
 type InstanceListFilter struct {
+	InstanceID        *uuid.UUID
 	Status            *domain.InstanceStatus
 	Statuses          []domain.InstanceStatus
 	SubjectID         *string

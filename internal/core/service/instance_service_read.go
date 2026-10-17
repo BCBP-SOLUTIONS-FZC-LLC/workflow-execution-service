@@ -40,15 +40,12 @@ func (s *InstanceService) Get(ctx context.Context, tenantID, instanceID uuid.UUI
 	if err != nil {
 		return nil, nil, wrapInstanceErr(err)
 	}
-	tasks, _, err := s.Tasks.ListByInstance(ctx, tenantID, instanceID, port.PageRequest{Limit: 100})
-	if err != nil {
-		return nil, nil, wrapTaskErr(err)
+	if err := s.requireVisible(ctx, tenantID, instanceID, scope); err != nil {
+		return nil, nil, err
 	}
-
-	if !scope.IsAdmin {
-		if !s.callerInScope(ctx, tenantID, scope, tasks) {
-			return nil, nil, port.ErrNotAuthorizedForRead
-		}
+	tasks, err := s.allTasks(ctx, tenantID, instanceID)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	portTasks := make([]*port.Task, len(tasks))
@@ -58,35 +55,39 @@ func (s *InstanceService) Get(ctx context.Context, tenantID, instanceID uuid.UUI
 	return toPortInstance(inst), portTasks, nil
 }
 
-func (s *InstanceService) callerInScope(ctx context.Context, tenantID uuid.UUID, scope port.ReadScope, tasks []*domain.Task) bool {
-	for _, t := range tasks {
-		for _, d := range scope.Departments {
-			if d.DepartmentID == t.DepartmentID {
-				return true
-			}
-		}
-		assignments, err := s.Assignments.ListActiveByTask(ctx, tenantID, t.ID)
+func (s *InstanceService) allTasks(ctx context.Context, tenantID, instanceID uuid.UUID) ([]*domain.Task, error) {
+	var all []*domain.Task
+	var after *port.Cursor
+	for {
+		page, next, err := s.Tasks.ListByInstance(ctx, tenantID, instanceID, port.PageRequest{After: after, Limit: 100})
 		if err != nil {
-			continue
+			return nil, wrapTaskErr(err)
 		}
-		for _, a := range assignments {
-			if a.UserID == scope.CallerUserID {
-				return true
-			}
+		all = append(all, page...)
+		if next == nil {
+			return all, nil
 		}
+		after = next
 	}
-	return false
+}
+
+func (s *InstanceService) requireVisible(ctx context.Context, tenantID, instanceID uuid.UUID, scope port.ReadScope) error {
+	if scope.IsAdmin {
+		return nil
+	}
+	rows, _, err := s.Instances.ListByTenant(ctx, tenantID, port.InstanceListFilter{InstanceID: &instanceID, Scope: readScopeFilter(scope)}, port.PageRequest{Limit: 1})
+	if err != nil {
+		return wrapInstanceErr(err)
+	}
+	if len(rows) == 0 {
+		return port.ErrNotAuthorizedForRead
+	}
+	return nil
 }
 
 func (s *InstanceService) ListEvents(ctx context.Context, tenantID, instanceID uuid.UUID, scope port.ReadScope, page port.Page) (port.PageResult[*port.WorkflowEvent], error) {
-	if !scope.IsAdmin {
-		tasks, _, err := s.Tasks.ListByInstance(ctx, tenantID, instanceID, port.PageRequest{Limit: 100})
-		if err != nil {
-			return port.PageResult[*port.WorkflowEvent]{}, wrapTaskErr(err)
-		}
-		if !s.callerInScope(ctx, tenantID, scope, tasks) {
-			return port.PageResult[*port.WorkflowEvent]{}, port.ErrNotAuthorizedForRead
-		}
+	if err := s.requireVisible(ctx, tenantID, instanceID, scope); err != nil {
+		return port.PageResult[*port.WorkflowEvent]{}, err
 	}
 
 	rows, next, err := s.Outbox.ListByInstance(ctx, tenantID, instanceID, port.PageRequest{After: pageAfter(page), Limit: page.Limit})

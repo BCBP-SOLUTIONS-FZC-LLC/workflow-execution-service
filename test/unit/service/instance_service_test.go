@@ -54,6 +54,7 @@ func newInstanceServiceHarness() (*service.InstanceService, *fakeInstanceRepo, *
 	temporal := &fakeTemporalClient{}
 	definitions := &fakeDefinitionClient{}
 	eligibility := &fakeEligibilityChecker{}
+	instances.linkScope(tasks, assignments)
 
 	svc := &service.InstanceService{
 		Instances:   instances,
@@ -808,16 +809,53 @@ func TestInstanceService_Terminate(t *testing.T) {
 		assert.ErrorIs(t, err, port.ErrInstanceAlreadyTerminal)
 	})
 
-	t.Run("TerminateWorkflow failure is returned even though DB already committed TERMINATED", func(t *testing.T) {
-		svc, instances, _, _, _, temporal, _, _ := newInstanceServiceHarness()
+	t.Run("a TerminateWorkflow failure is returned and nothing is written", func(t *testing.T) {
+		svc, instances, tasks, _, outbox, temporal, _, _ := newInstanceServiceHarness()
 		tenantID := uuid.New()
 		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
 		instances.byID[inst.ID] = inst
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, Status: domain.TaskStatusReady, RecordVersion: 1}
+		tasks.byID[task.ID] = task
 		temporal.terminateFunc = func(context.Context, string, string) error { return errors.New("temporal unavailable") }
 
 		err := svc.Terminate(context.Background(), tenantID, inst.ID, uuid.New(), "reason")
 		require.Error(t, err)
-		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[inst.ID].Status, "DB state is already correct regardless of the RPC outcome")
+		assert.Equal(t, domain.InstanceStatusRunning, instances.byID[inst.ID].Status, "a live execution must never sit under a TERMINATED row")
+		assert.Equal(t, domain.TaskStatusReady, tasks.byID[task.ID].Status)
+		assert.Empty(t, outbox.enqueued)
+	})
+
+	t.Run("a database failure after the execution was closed is returned and a retry completes it", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, _, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[inst.ID] = inst
+		instances.updateErrFor = map[uuid.UUID]error{inst.ID: assert.AnError}
+
+		err := svc.Terminate(context.Background(), tenantID, inst.ID, uuid.New(), "reason")
+		require.ErrorIs(t, err, assert.AnError)
+		assert.Equal(t, domain.InstanceStatusRunning, instances.byID[inst.ID].Status)
+
+		instances.updateErrFor = nil
+		require.NoError(t, svc.Terminate(context.Background(), tenantID, inst.ID, uuid.New(), "reason"))
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[inst.ID].Status)
+		assert.Len(t, temporal.terminateCalls(), 2, "the retry closes the execution again, which must be harmless")
+	})
+
+	t.Run("the version is re-read after the execution is closed, so a concurrent write does not fail the termination", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, _, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[inst.ID] = inst
+		temporal.terminateFunc = func(context.Context, string, string) error {
+			written := *instances.byID[inst.ID]
+			written.RecordVersion++
+			instances.byID[inst.ID] = &written
+			return nil
+		}
+
+		require.NoError(t, svc.Terminate(context.Background(), tenantID, inst.ID, uuid.New(), "reason"))
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[inst.ID].Status)
 	})
 
 	t.Run("Tasks.ListByInstance failure during cascade propagates", func(t *testing.T) {

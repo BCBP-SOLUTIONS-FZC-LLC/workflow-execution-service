@@ -21,13 +21,9 @@ func (s *InstanceService) AnswerOutsideWait(ctx context.Context, tenantID, insta
 		return wrapInstanceErr(err)
 	}
 	if !scope.IsAdmin {
-		tasks, _, err := s.Tasks.ListByInstance(ctx, tenantID, instanceID, port.PageRequest{Limit: 100})
-		if err != nil {
-			return wrapTaskErr(err)
-		}
 		scope.Departments = nil
-		if !s.callerInScope(ctx, tenantID, scope, tasks) {
-			return port.ErrNotAuthorizedForRead
+		if err := s.requireVisible(ctx, tenantID, instanceID, scope); err != nil {
+			return err
 		}
 	}
 	compiled, err := s.fetchCompiledWorkflow(ctx, tenantID, inst.WorkflowVersionID)
