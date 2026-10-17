@@ -68,7 +68,7 @@ func TestTenantOffboarding_FailsEveryOpenTaskOfALargeInstance(t *testing.T) {
 	got, err := instanceRepo.GetByID(ctx, tenantID, inst.ID)
 	require.NoError(t, err)
 	assert.Equal(t, domain.InstanceStatusTerminated, got.Status)
-	assert.Equal(t, []string{inst.TemporalWorkflowID}, temporal.terminated)
+	assert.Contains(t, temporal.terminated, inst.TemporalWorkflowID)
 
 	var cursor *port.Cursor
 	failed := 0
@@ -128,5 +128,5 @@ func TestTenantOffboarding_AFailedExecutionCloseLeavesTheInstanceForRedelivery(t
 	got, err = instanceRepo.GetByID(ctx, tenantID, inst.ID)
 	require.NoError(t, err)
 	assert.Equal(t, domain.InstanceStatusTerminated, got.Status)
-	assert.Equal(t, []string{inst.TemporalWorkflowID}, temporal.terminated)
+	assert.Contains(t, temporal.terminated, inst.TemporalWorkflowID)
 }

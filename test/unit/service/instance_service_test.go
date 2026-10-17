@@ -99,6 +99,72 @@ func TestInstanceService_Start(t *testing.T) {
 		_ = temporal
 	})
 
+	t.Run("a terminate that lands before the workflow start succeeds leaves no live execution and the start reports it terminated", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, definitions, _ := newInstanceServiceHarness()
+		tenantID, versionID := uuid.New(), uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
+		live := map[string]bool{}
+		temporal.terminateFunc = func(_ context.Context, id, _ string) error {
+			delete(live, id)
+			return nil
+		}
+		temporal.startFunc = func(_ context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
+			require.NoError(t, svc.Terminate(context.Background(), tenantID, in.InstanceID, uuid.New(), "admin requested"))
+			live[in.TemporalWorkflowID] = true
+			return port.StartWorkflowOutput{TemporalWorkflowID: in.TemporalWorkflowID, TemporalRunID: "run-1"}, nil
+		}
+
+		got, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: tenantID, WorkflowVersionID: versionID, SubjectID: "SUBJ-1", BusinessKey: "TND-001",
+			ContextJSON: json.RawMessage(`{}`), StartedByUserID: uuid.New(),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[got.ID].Status)
+		assert.Equal(t, port.InstanceStatusTerminated, got.Status)
+		assert.Empty(t, live, "the execution the start created must be closed")
+	})
+
+	t.Run("a failure to close the execution of an instance terminated while starting is logged and the start still reports it", func(t *testing.T) {
+		svc, _, _, _, _, temporal, definitions, _ := newInstanceServiceHarness()
+		log := &fakeLogger{}
+		svc.Log = log
+		tenantID, versionID := uuid.New(), uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
+		temporal.startFunc = func(_ context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
+			require.NoError(t, svc.Terminate(context.Background(), tenantID, in.InstanceID, uuid.New(), "admin requested"))
+			temporal.terminateFunc = func(context.Context, string, string) error { return errors.New("temporal unavailable") }
+			return port.StartWorkflowOutput{TemporalWorkflowID: in.TemporalWorkflowID, TemporalRunID: "run-1"}, nil
+		}
+
+		got, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: tenantID, WorkflowVersionID: versionID, SubjectID: "SUBJ-1", BusinessKey: "TND-001",
+			ContextJSON: json.RawMessage(`{}`), StartedByUserID: uuid.New(),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, port.InstanceStatusTerminated, got.Status)
+		assert.NotEmpty(t, log.errorCalls)
+	})
+
+	t.Run("a failure to re-read the instance after the workflow started does not fail the start", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, definitions, _ := newInstanceServiceHarness()
+		log := &fakeLogger{}
+		svc.Log = log
+		versionID := uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
+		temporal.startFunc = func(_ context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
+			instances.getErr = assert.AnError
+			return port.StartWorkflowOutput{TemporalWorkflowID: in.TemporalWorkflowID, TemporalRunID: "run-1"}, nil
+		}
+
+		got, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: uuid.New(), WorkflowVersionID: versionID, SubjectID: "SUBJ-1", BusinessKey: "TND-001",
+			ContextJSON: json.RawMessage(`{}`), StartedByUserID: uuid.New(),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, port.InstanceStatusRunning, got.Status)
+		assert.NotEmpty(t, log.warnCalls)
+	})
+
 	t.Run("eligible default assignee passes", func(t *testing.T) {
 		svc, _, _, _, _, _, definitions, eligibility := newInstanceServiceHarness()
 		userID := uuid.New()
@@ -778,7 +844,27 @@ func TestInstanceService_Terminate(t *testing.T) {
 		assert.False(t, assignments.byID[assignment.ID].IsActive)
 		require.Len(t, outbox.enqueued, 1)
 		assert.Equal(t, domain.EventWorkflowInstanceTerminated, outbox.enqueued[0].Type)
-		require.Len(t, temporal.terminateCalls(), 1)
+		require.NotEmpty(t, temporal.terminateCalls())
+	})
+
+	t.Run("an execution created after the first close and before the write is closed by the second", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, _, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[inst.ID] = inst
+		live := map[string]bool{}
+		calls := 0
+		temporal.terminateFunc = func(_ context.Context, id, _ string) error {
+			calls++
+			delete(live, id)
+			if calls == 1 {
+				live[id] = true
+			}
+			return nil
+		}
+
+		require.NoError(t, svc.Terminate(context.Background(), tenantID, inst.ID, uuid.New(), "reason"))
+		assert.Empty(t, live)
 	})
 
 	t.Run("not found", func(t *testing.T) {
@@ -826,7 +912,7 @@ func TestInstanceService_Terminate(t *testing.T) {
 	})
 
 	t.Run("a database failure after the execution was closed is returned and a retry completes it", func(t *testing.T) {
-		svc, instances, _, _, _, temporal, _, _ := newInstanceServiceHarness()
+		svc, instances, _, _, _, _, _, _ := newInstanceServiceHarness()
 		tenantID := uuid.New()
 		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
 		instances.byID[inst.ID] = inst
@@ -839,7 +925,6 @@ func TestInstanceService_Terminate(t *testing.T) {
 		instances.updateErrFor = nil
 		require.NoError(t, svc.Terminate(context.Background(), tenantID, inst.ID, uuid.New(), "reason"))
 		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[inst.ID].Status)
-		assert.Len(t, temporal.terminateCalls(), 2, "the retry closes the execution again, which must be harmless")
 	})
 
 	t.Run("the version is re-read after the execution is closed, so a concurrent write does not fail the termination", func(t *testing.T) {
@@ -851,6 +936,24 @@ func TestInstanceService_Terminate(t *testing.T) {
 			written := *instances.byID[inst.ID]
 			written.RecordVersion++
 			instances.byID[inst.ID] = &written
+			return nil
+		}
+
+		require.NoError(t, svc.Terminate(context.Background(), tenantID, inst.ID, uuid.New(), "reason"))
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[inst.ID].Status)
+	})
+
+	t.Run("a failure to close the execution again after the write is logged and the termination stands", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, _, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[inst.ID] = inst
+		calls := 0
+		temporal.terminateFunc = func(context.Context, string, string) error {
+			calls++
+			if calls == 2 {
+				return errors.New("temporal unavailable")
+			}
 			return nil
 		}
 

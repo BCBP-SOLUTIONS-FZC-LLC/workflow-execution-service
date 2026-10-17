@@ -55,7 +55,7 @@ func TestTenantLifecycleReconciler_Apply_StatusTransitions(t *testing.T) {
 		assert.Equal(t, domain.TaskStatusFailed, tasks.byID[activeTask.ID].Status)
 		assert.False(t, assignments.byID[a.ID].IsActive)
 		assert.Len(t, outbox.enqueued, 2)
-		require.Len(t, temporal.terminate, 2)
+		require.NotEmpty(t, temporal.terminate)
 	})
 
 	t.Run("transition to active resumes tenant-state-paused instances", func(t *testing.T) {
@@ -321,6 +321,47 @@ func TestTenantLifecycleReconciler_Offboard_Termination(t *testing.T) {
 
 		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
 		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[busy.ID].Status)
+	})
+
+	t.Run("an execution created after the first close and before the write is closed by the second", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
+		instances.byID[running.ID] = running
+		live := map[string]bool{}
+		calls := 0
+		temporal.terminateFunc = func(_ context.Context, id, _ string) error {
+			calls++
+			delete(live, id)
+			if calls == 1 {
+				live[id] = true
+			}
+			return nil
+		}
+
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
+		assert.Empty(t, live)
+	})
+
+	t.Run("a failure to close the execution again after the write is logged and the termination stands", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		log := &fakeLogger{}
+		svc.Log = log
+		tenantID := uuid.New()
+		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
+		instances.byID[running.ID] = running
+		calls := 0
+		temporal.terminateFunc = func(context.Context, string, string) error {
+			calls++
+			if calls == 2 {
+				return assert.AnError
+			}
+			return nil
+		}
+
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[running.ID].Status)
+		assert.NotEmpty(t, log.warnCalls)
 	})
 
 	t.Run("an allInstancesByStatus failure during offboard propagates from Apply", func(t *testing.T) {

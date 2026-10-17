@@ -158,6 +158,11 @@ func (s *InstanceService) Terminate(ctx context.Context, tenantID, instanceID, a
 		return txErr
 	}
 
+	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, reason); err != nil {
+		s.logger().Error("TerminateWorkflow failed after the instance was marked terminated", map[string]any{
+			"instance_id": instanceID, "tenant_id": tenantID, "error": err.Error(),
+		})
+	}
 	return nil
 }
 

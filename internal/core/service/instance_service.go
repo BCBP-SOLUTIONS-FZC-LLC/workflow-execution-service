@@ -153,7 +153,25 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 		return nil, fmt.Errorf("start workflow: %w", startErr)
 	}
 
-	return toPortInstance(inst), nil
+	return s.afterWorkflowStarted(ctx, in.TenantID, inst), nil
+}
+
+func (s *InstanceService) afterWorkflowStarted(ctx context.Context, tenantID uuid.UUID, inst *domain.Instance) *port.Instance {
+	current, err := s.Instances.GetByID(ctx, tenantID, inst.ID)
+	if err != nil {
+		s.logger().Warn("could not re-read an instance whose workflow just started", map[string]any{
+			"instance_id": inst.ID, "tenant_id": tenantID, "error": err.Error(),
+		})
+		return toPortInstance(inst)
+	}
+	if current.Status == domain.InstanceStatusTerminated {
+		if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, "terminated while starting"); err != nil {
+			s.logger().Error("TerminateWorkflow failed for an instance terminated while its workflow was starting", map[string]any{
+				"instance_id": inst.ID, "tenant_id": tenantID, "error": err.Error(),
+			})
+		}
+	}
+	return toPortInstance(current)
 }
 
 const startWorkflowMaxAttempts = 3

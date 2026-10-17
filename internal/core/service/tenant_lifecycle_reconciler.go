@@ -115,7 +115,7 @@ func (s *TenantLifecycleReconciler) terminateOne(ctx context.Context, tenantID u
 		return err
 	}
 	var updated *domain.Instance
-	return s.Transactor.RunInTxWithRetry(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
+	if err := s.Transactor.RunInTxWithRetry(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
 		current, err := s.Instances.GetByID(ctx, tenantID, inst.ID)
 		if err != nil {
 			return wrapInstanceErr(err)
@@ -133,7 +133,13 @@ func (s *TenantLifecycleReconciler) terminateOne(ctx context.Context, tenantID u
 		payload := domain.NewWorkflowInstanceTerminatedPayload(instanceCore(updated), updated.StartedByUserID, domain.TerminatedInitiatorTenantState, nil)
 		sink := instanceEventSink{Outbox: s.Outbox, Validator: s.Validator}
 		return sink.enqueueInstanceEvent(ctx, tenantID.String(), domain.EventWorkflowInstanceTerminated, inst.ID.String(), "", payload)
-	})
+	}); err != nil {
+		return err
+	}
+	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, "tenant offboarded"); err != nil {
+		s.logger().Warn("tenant lifecycle: failed to close the workflow execution after the instance was marked terminated", map[string]any{"instance_id": inst.ID, "error": err.Error()})
+	}
+	return nil
 }
 
 func (s *TenantLifecycleReconciler) applyPlanChange(ctx context.Context, in port.TenantLifecycleInput) error {
