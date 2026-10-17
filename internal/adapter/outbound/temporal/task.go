@@ -76,6 +76,13 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 
 	ctx = withTenantGUC(ctx, tenantID)
 	err = d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
+		inst, err := d.Instances.GetByID(ctx, tenantID, instanceID)
+		if err != nil {
+			return fmt.Errorf("get instance: %w", err)
+		}
+		if inst.Status == domain.InstanceStatusTerminated || inst.Status == domain.InstanceStatusFailed || inst.Status == domain.InstanceStatusCompleted {
+			return nonRetryable("ValidationError", fmt.Errorf("instance %s is %s", instanceID, inst.Status))
+		}
 		if err := d.Tasks.Create(ctx, task); err != nil {
 			if errors.Is(err, domain.ErrAlreadyExists) {
 				return nil
@@ -89,10 +96,6 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 			}
 		}
 
-		inst, err := d.Instances.GetByID(ctx, tenantID, instanceID)
-		if err != nil {
-			return fmt.Errorf("get instance: %w", err)
-		}
 		core := domain.CommonCore{WorkflowInstanceID: instanceID, SubjectID: inst.SubjectID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}
 		taskCore := domain.TaskScopedCore{
 			TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs,

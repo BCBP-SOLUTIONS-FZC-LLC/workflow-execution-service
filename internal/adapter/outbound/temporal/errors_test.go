@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.temporal.io/sdk/temporal"
 
 	outboundtemporal "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
@@ -282,7 +283,7 @@ func TestRecordSLAWarning_TaskNotFound(t *testing.T) {
 func TestCreateTask_TasksCreateFails(t *testing.T) {
 	tasks := newFakeTaskRepo()
 	tasks.createErr = errBoom
-	deps := &outboundtemporal.Deps{Tasks: tasks, Assignments: newFakeAssignmentRepo(), Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator()}
+	deps := &outboundtemporal.Deps{Instances: newPermissiveInstanceRepo(), Tasks: tasks, Assignments: newFakeAssignmentRepo(), Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator()}
 	compiled, _ := json.Marshal(dsl.StageDef{Type: "review"})
 
 	_, err := deps.CreateTask(context.Background(), port.CreateTaskInput{
@@ -295,7 +296,7 @@ func TestCreateTask_TasksCreateFails(t *testing.T) {
 func TestCreateTask_AssignmentsCreateFails(t *testing.T) {
 	assignments := newFakeAssignmentRepo()
 	assignments.createErr = errBoom
-	deps := &outboundtemporal.Deps{Tasks: newFakeTaskRepo(), Assignments: assignments, Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator()}
+	deps := &outboundtemporal.Deps{Instances: newPermissiveInstanceRepo(), Tasks: newFakeTaskRepo(), Assignments: assignments, Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator()}
 	compiled, _ := json.Marshal(dsl.StageDef{Type: "review", DefaultAssignees: []string{uuid.New().String()}})
 
 	_, err := deps.CreateTask(context.Background(), port.CreateTaskInput{
@@ -570,4 +571,24 @@ func TestEnqueueInstanceEvent_ValidatorRejection_PropagatesFromPauseInstance(t *
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errBoom))
+}
+
+func TestCreateTask_InstanceThatIsNoLongerRunning_IsRefusedWithoutRetry(t *testing.T) {
+	for _, status := range []domain.InstanceStatus{domain.InstanceStatusTerminated, domain.InstanceStatusFailed, domain.InstanceStatusCompleted} {
+		t.Run(string(status), func(t *testing.T) {
+			instanceID := uuid.New()
+			instances := newFakeInstanceRepo(&domain.Instance{ID: instanceID, Status: status, RecordVersion: 1})
+			tasks := newFakeTaskRepo()
+			deps := &outboundtemporal.Deps{Instances: instances, Tasks: tasks, Assignments: newFakeAssignmentRepo(), Outbox: &fakeOutbox{}, Transactor: fakeTransactor{}, Validator: realValidator()}
+			compiled, _ := json.Marshal(dsl.StageDef{Type: "review"})
+
+			_, err := deps.CreateTask(context.Background(), port.CreateTaskInput{
+				InstanceID: instanceID.String(), TenantID: uuid.New().String(), NodeKey: "sales/review", CompiledNode: compiled,
+			})
+			var appErr *temporal.ApplicationError
+			require.ErrorAs(t, err, &appErr)
+			assert.Equal(t, "ValidationError", appErr.Type())
+			assert.Empty(t, tasks.byID)
+		})
+	}
 }
