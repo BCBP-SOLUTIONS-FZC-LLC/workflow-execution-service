@@ -264,7 +264,8 @@ func TestRLSPoliciesUseCheckTenantFunction(t *testing.T) {
 
 // TestRLSViolationAuditLogging is a best-effort test for log_rls_violation's
 // 1%-sampled INSERT path — a large attempt count makes a hit a near-certainty
-// rather than asserting exactly one per attempt.
+// rather than asserting exactly one per attempt (a miss is 0.99^3000, about
+// 1e-13).
 func TestRLSViolationAuditLogging(t *testing.T) {
 	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
 	appPool := newAppRolePool(t, superPool, superDSN)
@@ -275,7 +276,7 @@ func TestRLSViolationAuditLogging(t *testing.T) {
 	instanceID := uuid.New()
 	seedWorkflowInstance(t, superPool, ctx, instanceID, tenantA)
 
-	const attempts = 500
+	const attempts = 3000
 	for i := 0; i < attempts; i++ {
 		_ = countWorkflowInstance(t, appPool, withGUC(ctx, tenantB), instanceID)
 	}
