@@ -79,6 +79,7 @@ type env struct {
 	definitionDB  definitionDB
 	valkeyAddr    string
 	membershipURL string
+	catalogURL    string
 }
 
 type definitionDB struct {
@@ -206,6 +207,7 @@ func (e *env) definitionEnv(t *testing.T, httpPort int, executionToken string) [
 		"VALKEY_ADDR=" + e.valkeyAddr,
 		"INTERNAL_API_TOKEN=" + definitionToken,
 		"ORG_MEMBERSHIP_BASE_URL=" + e.membershipURL,
+		"CATALOG_ADMIN_BASE_URL=" + e.catalogURL,
 		"EXECUTION_SERVICE_URL=" + e.executionURL,
 		"EXECUTION_SERVICE_TOKEN=" + executionToken,
 		"CONNECTOR_ALIAS_ALLOWED_HOSTS=" + aliasHost + ",127.0.0.1",
@@ -271,17 +273,27 @@ func (e *env) startDefinition(t *testing.T, httpPort int, executionToken string)
 
 func (e *env) startMembershipStub(t *testing.T) {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "membership-stub")
-	goBuild(t, e.definitionDir, "./cmd/stub/membership", bin)
+	e.membershipURL = e.startDefinitionStub(t, "membership")
+}
+
+func (e *env) startCatalogStub(t *testing.T) {
+	t.Helper()
+	e.catalogURL = e.startDefinitionStub(t, "catalog")
+}
+
+func (e *env) startDefinitionStub(t *testing.T, name string) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), name+"-stub")
+	goBuild(t, e.definitionDir, "./cmd/stub/"+name, bin)
 	port := freePort(t)
 	cmd := exec.Command(bin)
 	cmd.Env = []string{"STUB_ADDR=127.0.0.1:" + strconv.Itoa(port)}
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("start membership stub: %v", err)
+		t.Fatalf("start %s stub: %v", name, err)
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	e.membershipURL = "http://127.0.0.1:" + strconv.Itoa(port)
 	waitTCP(t, "127.0.0.1:"+strconv.Itoa(port))
+	return "http://127.0.0.1:" + strconv.Itoa(port)
 }
 
 func waitTCP(t *testing.T, addr string) {
@@ -404,6 +416,7 @@ func setup(t *testing.T) *env {
 	e.valkeyAddr = fixtures.NewTestValkey(t)
 	e.definitionDB = startDefinitionPostgres(t, e.definitionDir)
 	e.startMembershipStub(t)
+	e.startCatalogStub(t)
 	e.migrateDefinition(t)
 	definitionPort := freePort(t)
 
