@@ -162,7 +162,7 @@ func (s *TenantLifecycleReconciler) recordOffboarded(ctx context.Context, tenant
 }
 
 func (s *TenantLifecycleReconciler) terminateOne(ctx context.Context, tenantID uuid.UUID, inst *domain.Instance) error {
-	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, "tenant offboarded"); err != nil {
+	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, inst.TemporalRunID, "tenant offboarded"); err != nil {
 		return err
 	}
 	var updated *domain.Instance
@@ -187,7 +187,7 @@ func (s *TenantLifecycleReconciler) terminateOne(ctx context.Context, tenantID u
 	}); err != nil {
 		return err
 	}
-	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, "tenant offboarded"); err != nil {
+	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, inst.TemporalRunID, "tenant offboarded"); err != nil {
 		s.logger().Warn("tenant lifecycle: failed to close the workflow execution after the instance was marked terminated", map[string]any{"instance_id": inst.ID, "error": err.Error()})
 	}
 	return nil

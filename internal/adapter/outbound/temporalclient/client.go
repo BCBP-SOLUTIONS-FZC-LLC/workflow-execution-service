@@ -61,8 +61,8 @@ func (c *Client) SignalWorkflow(ctx context.Context, temporalWorkflowID string, 
 	return nil
 }
 
-func (c *Client) TerminateWorkflow(ctx context.Context, temporalWorkflowID, reason string) error {
-	err := c.sdk.TerminateWorkflow(ctx, temporalWorkflowID, "", reason)
+func (c *Client) TerminateWorkflow(ctx context.Context, temporalWorkflowID, runID, reason string) error {
+	err := c.sdk.TerminateWorkflow(ctx, temporalWorkflowID, runID, reason)
 	var notFound *serviceerror.NotFound
 	if err != nil && !errors.As(err, &notFound) {
 		return fmt.Errorf("terminate workflow: %w", err)

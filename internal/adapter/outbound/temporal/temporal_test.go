@@ -64,6 +64,14 @@ func (r *fakeInstanceRepo) ListByTenant(_ context.Context, _ uuid.UUID, _ port.I
 	return nil, nil, nil
 }
 
+func (r *fakeInstanceRepo) GetLiveByBusinessKey(context.Context, uuid.UUID, string, string) (*domain.Instance, error) {
+	return nil, domain.ErrNotFound
+}
+
+func (r *fakeInstanceRepo) RecordRunID(context.Context, uuid.UUID, uuid.UUID, string) error {
+	return nil
+}
+
 func (r *fakeInstanceRepo) CountActiveByWorkflow(_ context.Context, _, _ uuid.UUID) (int64, error) {
 	return 0, nil
 }

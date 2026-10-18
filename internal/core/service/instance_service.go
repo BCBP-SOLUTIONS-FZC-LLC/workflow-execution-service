@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/google/uuid"
@@ -82,6 +84,11 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 			return nil, err
 		}
 	}
+	if existing, err := s.matchingStart(ctx, in); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return s.resumeStart(ctx, existing)
+	}
 	compiled, err := s.readCompiledWorkflow(ctx, in.TenantID, in.WorkflowVersionID)
 	if err != nil {
 		return nil, err
@@ -147,26 +154,117 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 			in.StartedByUserID.String(), domain.NewWorkflowInstanceStartedPayload(instanceCore(inst), in.StartedByUserID))
 	})
 	if txErr != nil {
+		if errors.Is(txErr, port.ErrDuplicateBusinessKey) {
+			existing, err := s.matchingStart(ctx, in)
+			if err != nil {
+				return nil, err
+			}
+			if existing == nil {
+				return nil, port.ErrDuplicateBusinessKey
+			}
+			return s.resumeStart(ctx, existing)
+		}
 		return nil, txErr
 	}
 
-	startErr := s.startWorkflowWithRetry(ctx, port.StartWorkflowInput{
-		TemporalWorkflowID: temporalWorkflowID,
-		TaskQueue:          taskQueue,
-		TenantID:           in.TenantID,
-		InstanceID:         instanceID,
-		WorkflowVersionID:  in.WorkflowVersionID,
-		ContextJSON:        string(in.ContextJSON),
-		OverrideMap:        overrideMapToStrings(in.OverrideMap),
-	})
-	if startErr != nil {
-		s.logger().Error("StartWorkflow failed after workflow_instance was committed", map[string]any{
-			"instance_id": instanceID, "tenant_id": in.TenantID, "business_key": in.BusinessKey, "error": startErr.Error(),
-		})
-		return nil, fmt.Errorf("start workflow: %w", startErr)
-	}
+	return s.launchWorkflow(ctx, inst)
+}
 
-	return s.afterWorkflowStarted(ctx, in.TenantID, inst), nil
+func (s *InstanceService) matchingStart(ctx context.Context, in port.StartInstanceInput) (*domain.Instance, error) {
+	existing, err := s.Instances.GetLiveByBusinessKey(ctx, in.TenantID, in.SubjectID, in.BusinessKey)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, wrapInstanceErr(err)
+	}
+	if existing.Status != domain.InstanceStatusRunning ||
+		existing.WorkflowVersionID != in.WorkflowVersionID ||
+		existing.StartedByUserID != in.StartedByUserID ||
+		!sameContext(existing.ContextJSON, in.ContextJSON) ||
+		!sameOverrideMap(existing.OverrideMap, in.OverrideMap) {
+		return nil, nil
+	}
+	return existing, nil
+}
+
+func (s *InstanceService) resumeStart(ctx context.Context, existing *domain.Instance) (*port.Instance, error) {
+	if existing.TemporalRunID != "" {
+		return toPortInstance(existing), nil
+	}
+	return s.launchWorkflow(ctx, existing)
+}
+
+func sameContext(stored, requested []byte) bool {
+	a, okA := decodeContext(stored)
+	b, okB := decodeContext(requested)
+	return okA && okB && reflect.DeepEqual(a, b)
+}
+
+func decodeContext(raw []byte) (any, bool) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return map[string]any{}, true
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, false
+	}
+	if v == nil {
+		return map[string]any{}, true
+	}
+	return v, true
+}
+
+func sameOverrideMap(stored []byte, requested map[string]uuid.UUID) bool {
+	var have map[string]string
+	if len(stored) > 0 {
+		if err := json.Unmarshal(stored, &have); err != nil {
+			return false
+		}
+	}
+	want := overrideMapToStrings(requested)
+	if len(have) != len(want) {
+		return false
+	}
+	for k, v := range want {
+		if have[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *InstanceService) launchWorkflow(ctx context.Context, inst *domain.Instance) (*port.Instance, error) {
+	var overrides map[string]string
+	if len(inst.OverrideMap) > 0 {
+		if err := json.Unmarshal(inst.OverrideMap, &overrides); err != nil {
+			return nil, fmt.Errorf("decode override_map: %w", err)
+		}
+	}
+	out, err := s.startWorkflowWithRetry(ctx, port.StartWorkflowInput{
+		TemporalWorkflowID: inst.TemporalWorkflowID,
+		TaskQueue:          inst.TaskQueue,
+		TenantID:           inst.TenantID,
+		InstanceID:         inst.ID,
+		WorkflowVersionID:  inst.WorkflowVersionID,
+		ContextJSON:        string(inst.ContextJSON),
+		OverrideMap:        overrides,
+	})
+	if err != nil {
+		s.logger().Error("StartWorkflow failed after workflow_instance was committed", map[string]any{
+			"instance_id": inst.ID, "tenant_id": inst.TenantID, "business_key": inst.BusinessKey, "error": err.Error(),
+		})
+		return nil, fmt.Errorf("start workflow: %w", err)
+	}
+	if out.TemporalRunID != "" {
+		inst.TemporalRunID = out.TemporalRunID
+		if err := s.Instances.RecordRunID(ctx, inst.TenantID, inst.ID, out.TemporalRunID); err != nil {
+			s.logger().Warn("could not record the run id of a workflow that started", map[string]any{
+				"instance_id": inst.ID, "tenant_id": inst.TenantID, "error": err.Error(),
+			})
+		}
+	}
+	return s.afterWorkflowStarted(ctx, inst.TenantID, inst), nil
 }
 
 func (s *InstanceService) afterWorkflowStarted(ctx context.Context, tenantID uuid.UUID, inst *domain.Instance) *port.Instance {
@@ -178,7 +276,7 @@ func (s *InstanceService) afterWorkflowStarted(ctx context.Context, tenantID uui
 		return toPortInstance(inst)
 	}
 	if current.Status == domain.InstanceStatusTerminated {
-		if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, "terminated while starting"); err != nil {
+		if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, inst.TemporalRunID, "terminated while starting"); err != nil {
 			s.logger().Error("TerminateWorkflow failed for an instance terminated while its workflow was starting", map[string]any{
 				"instance_id": inst.ID, "tenant_id": tenantID, "error": err.Error(),
 			})
@@ -189,23 +287,23 @@ func (s *InstanceService) afterWorkflowStarted(ctx context.Context, tenantID uui
 
 const startWorkflowMaxAttempts = 3
 
-func (s *InstanceService) startWorkflowWithRetry(ctx context.Context, in port.StartWorkflowInput) error {
+func (s *InstanceService) startWorkflowWithRetry(ctx context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
 	var lastErr error
 	for attempt := 1; attempt <= startWorkflowMaxAttempts; attempt++ {
-		if _, err := s.Temporal.StartWorkflow(ctx, in); err != nil {
-			lastErr = err
-			if attempt < startWorkflowMaxAttempts {
-				select {
-				case <-ctx.Done():
-					return fmt.Errorf("start workflow retry: %w", ctx.Err())
-				case <-time.After(time.Duration(attempt) * 100 * time.Millisecond):
-				}
-			}
-			continue
+		out, err := s.Temporal.StartWorkflow(ctx, in)
+		if err == nil {
+			return out, nil
 		}
-		return nil
+		lastErr = err
+		if attempt < startWorkflowMaxAttempts {
+			select {
+			case <-ctx.Done():
+				return port.StartWorkflowOutput{}, fmt.Errorf("start workflow retry: %w", ctx.Err())
+			case <-time.After(time.Duration(attempt) * 100 * time.Millisecond):
+			}
+		}
 	}
-	return lastErr
+	return port.StartWorkflowOutput{}, lastErr
 }
 
 func (s *InstanceService) resolveTaskQueue(ctx context.Context, tenantID uuid.UUID, planQueue string) (string, error) {

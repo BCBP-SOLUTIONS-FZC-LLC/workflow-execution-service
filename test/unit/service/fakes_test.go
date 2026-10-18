@@ -38,6 +38,8 @@ type fakeInstanceRepo struct {
 	lastPageAfter     *port.Cursor
 	listByTenantCalls int
 	lastFilter        port.InstanceListFilter
+	runIDErr          error
+	liveErr           error
 	scopeTasks        *fakeTaskRepo
 	scopeAssignments  *fakeAssignmentRepo
 }
@@ -69,7 +71,8 @@ func (r *fakeInstanceRepo) Create(_ context.Context, inst *domain.Instance) erro
 	inst.RecordVersion = 1
 	inst.CreatedAt = time.Now().UTC()
 	inst.UpdatedAt = inst.CreatedAt
-	r.byID[inst.ID] = inst
+	stored := *inst
+	r.byID[inst.ID] = &stored
 	return nil
 }
 
@@ -82,6 +85,34 @@ func (r *fakeInstanceRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domain.
 		return nil, domain.ErrNotFound
 	}
 	return inst, nil
+}
+
+func (r *fakeInstanceRepo) GetLiveByBusinessKey(_ context.Context, tenantID uuid.UUID, subjectID, businessKey string) (*domain.Instance, error) {
+	if r.liveErr != nil {
+		return nil, r.liveErr
+	}
+	for _, inst := range r.byID {
+		if inst.TenantID == tenantID && inst.SubjectID == subjectID && inst.BusinessKey == businessKey && !isTerminalForTest(inst.Status) {
+			return inst, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (r *fakeInstanceRepo) RecordRunID(_ context.Context, _, id uuid.UUID, runID string) error {
+	if r.runIDErr != nil {
+		return r.runIDErr
+	}
+	inst, ok := r.byID[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	inst.TemporalRunID = runID
+	return nil
+}
+
+func isTerminalForTest(s domain.InstanceStatus) bool {
+	return s == domain.InstanceStatusCompleted || s == domain.InstanceStatusTerminated || s == domain.InstanceStatusFailed
 }
 
 func (r *fakeInstanceRepo) UpdateStatus(_ context.Context, _, id uuid.UUID, status domain.InstanceStatus, recordVersion int64) (*domain.Instance, error) {
@@ -585,7 +616,7 @@ func (fakeTransactor) RunInTxWithRetry(ctx context.Context, fn func(context.Cont
 type fakeTemporalClient struct {
 	startFunc     func(ctx context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error)
 	signalFunc    func(ctx context.Context, temporalWorkflowID string, instanceID uuid.UUID, signalName string, payload any) error
-	terminateFunc func(ctx context.Context, temporalWorkflowID, reason string) error
+	terminateFunc func(ctx context.Context, temporalWorkflowID, runID, reason string) error
 	queryFunc     func(ctx context.Context, temporalWorkflowID, queryType string, out any) error
 
 	signals   []signalCall
@@ -601,6 +632,7 @@ type signalCall struct {
 
 type terminateCall struct {
 	TemporalWorkflowID string
+	RunID              string
 	Reason             string
 }
 
@@ -623,10 +655,10 @@ func (c *fakeTemporalClient) SignalWorkflow(ctx context.Context, temporalWorkflo
 	return nil
 }
 
-func (c *fakeTemporalClient) TerminateWorkflow(ctx context.Context, temporalWorkflowID, reason string) error {
-	c.terminate = append(c.terminate, terminateCall{TemporalWorkflowID: temporalWorkflowID, Reason: reason})
+func (c *fakeTemporalClient) TerminateWorkflow(ctx context.Context, temporalWorkflowID, runID, reason string) error {
+	c.terminate = append(c.terminate, terminateCall{TemporalWorkflowID: temporalWorkflowID, RunID: runID, Reason: reason})
 	if c.terminateFunc != nil {
-		return c.terminateFunc(ctx, temporalWorkflowID, reason)
+		return c.terminateFunc(ctx, temporalWorkflowID, runID, reason)
 	}
 	return nil
 }

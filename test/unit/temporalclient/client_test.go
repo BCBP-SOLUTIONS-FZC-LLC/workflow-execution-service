@@ -187,9 +187,9 @@ func TestClient_TerminateWorkflow(t *testing.T) {
 			},
 		}
 		c := temporalclient.New(sdk)
-		require.NoError(t, c.TerminateWorkflow(context.Background(), "tenant:biz-key", "admin requested"))
+		require.NoError(t, c.TerminateWorkflow(context.Background(), "tenant:biz-key", "run-7", "admin requested"))
 		assert.Equal(t, "tenant:biz-key", gotWorkflowID)
-		assert.Empty(t, gotRunID)
+		assert.Equal(t, "run-7", gotRunID)
 		assert.Equal(t, "admin requested", gotReason)
 	})
 
@@ -200,7 +200,7 @@ func TestClient_TerminateWorkflow(t *testing.T) {
 			},
 		}
 		c := temporalclient.New(sdk)
-		err := c.TerminateWorkflow(context.Background(), "tenant:biz-key", "reason")
+		err := c.TerminateWorkflow(context.Background(), "tenant:biz-key", "", "reason")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unavailable")
 	})
@@ -212,7 +212,7 @@ func TestClient_TerminateWorkflow(t *testing.T) {
 			},
 		}
 		c := temporalclient.New(sdk)
-		require.NoError(t, c.TerminateWorkflow(context.Background(), "tenant:biz-key", "reason"))
+		require.NoError(t, c.TerminateWorkflow(context.Background(), "tenant:biz-key", "", "reason"))
 	})
 }
 

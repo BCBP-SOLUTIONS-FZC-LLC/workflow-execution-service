@@ -383,3 +383,67 @@ func TestInstanceRepo_CountActiveByWorkflow(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count, "only the RUNNING instance of this workflow_id counts, not the COMPLETED one or a different workflow_id")
 }
+
+func TestInstanceRepo_GetLiveByBusinessKey(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA, tenantB := uuid.New(), uuid.New()
+	live := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, repo.Create(ctx, live))
+
+	t.Run("a live instance is found by its subject and business key", func(t *testing.T) {
+		got, err := repo.GetLiveByBusinessKey(ctx, tenantA, live.SubjectID, live.BusinessKey)
+		require.NoError(t, err)
+		assert.Equal(t, live.ID, got.ID)
+	})
+
+	t.Run("another tenant does not see it", func(t *testing.T) {
+		_, err := repo.GetLiveByBusinessKey(ctx, tenantB, live.SubjectID, live.BusinessKey)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+
+	t.Run("the same key under another subject is not it", func(t *testing.T) {
+		_, err := repo.GetLiveByBusinessKey(ctx, tenantA, "another-subject", live.BusinessKey)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+
+	t.Run("a terminal instance holds no key", func(t *testing.T) {
+		_, err := repo.UpdateStatus(ctx, tenantA, live.ID, domain.InstanceStatusTerminated, live.RecordVersion)
+		require.NoError(t, err)
+		_, err = repo.GetLiveByBusinessKey(ctx, tenantA, live.SubjectID, live.BusinessKey)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+}
+
+func TestInstanceRepo_RecordRunID(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA, tenantB := uuid.New(), uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, repo.Create(ctx, inst))
+
+	t.Run("the run id is stored and the record version is left alone", func(t *testing.T) {
+		require.NoError(t, repo.RecordRunID(ctx, tenantA, inst.ID, "run-1"))
+		got, err := repo.GetByID(ctx, tenantA, inst.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "run-1", got.TemporalRunID)
+		assert.Equal(t, inst.RecordVersion, got.RecordVersion)
+	})
+
+	t.Run("an unknown instance is not found", func(t *testing.T) {
+		assert.ErrorIs(t, repo.RecordRunID(ctx, tenantA, uuid.New(), "run-2"), domain.ErrNotFound)
+	})
+
+	t.Run("another tenant cannot write it", func(t *testing.T) {
+		assert.ErrorIs(t, repo.RecordRunID(ctx, tenantB, inst.ID, "run-3"), domain.ErrNotFound)
+		got, err := repo.GetByID(ctx, tenantA, inst.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "run-1", got.TemporalRunID)
+	})
+}

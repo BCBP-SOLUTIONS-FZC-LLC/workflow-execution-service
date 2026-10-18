@@ -127,7 +127,7 @@ func (s *InstanceService) Terminate(ctx context.Context, tenantID, instanceID, a
 		return port.ErrInstanceAlreadyTerminal
 	}
 
-	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, reason); err != nil {
+	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, inst.TemporalRunID, reason); err != nil {
 		s.logger().Error("TerminateWorkflow failed, instance left as it was", map[string]any{
 			"instance_id": instanceID, "tenant_id": tenantID, "error": err.Error(),
 		})
@@ -158,7 +158,7 @@ func (s *InstanceService) Terminate(ctx context.Context, tenantID, instanceID, a
 		return txErr
 	}
 
-	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, reason); err != nil {
+	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, inst.TemporalRunID, reason); err != nil {
 		s.logger().Error("TerminateWorkflow failed after the instance was marked terminated", map[string]any{
 			"instance_id": instanceID, "tenant_id": tenantID, "error": err.Error(),
 		})

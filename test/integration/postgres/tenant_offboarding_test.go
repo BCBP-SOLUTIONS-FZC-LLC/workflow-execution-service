@@ -25,7 +25,7 @@ type recordingTemporal struct {
 	failWith   error
 }
 
-func (r *recordingTemporal) TerminateWorkflow(_ context.Context, id, _ string) error {
+func (r *recordingTemporal) TerminateWorkflow(_ context.Context, id, _, _ string) error {
 	if r.failWith != nil {
 		return r.failWith
 	}

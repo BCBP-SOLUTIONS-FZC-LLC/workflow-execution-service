@@ -299,6 +299,21 @@ func TestTenantLifecycleReconciler_Offboard_Termination(t *testing.T) {
 		assert.Zero(t, open, "every open task of a terminated instance must be failed")
 	})
 
+	t.Run("both closes of an execution name its run", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:subject:key", TemporalRunID: "run-3", RecordVersion: 1}
+		instances.byID[inst.ID] = inst
+
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
+
+		calls := temporal.terminateCalls()
+		require.Len(t, calls, 2)
+		for _, c := range calls {
+			assert.Equal(t, "run-3", c.RunID)
+		}
+	})
+
 	t.Run("a TerminateWorkflow failure is returned, writes nothing for that instance and the rest are terminated", func(t *testing.T) {
 		svc, instances, tasks, _, _, _, temporal := newTenantLifecycleHarness()
 		tenantID := uuid.New()
@@ -308,7 +323,7 @@ func TestTenantLifecycleReconciler_Offboard_Termination(t *testing.T) {
 		instances.byID[other.ID] = other
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: stuck.ID, Status: domain.TaskStatusReady, RecordVersion: 1}
 		tasks.byID[task.ID] = task
-		temporal.terminateFunc = func(_ context.Context, id, _ string) error {
+		temporal.terminateFunc = func(_ context.Context, id, _, _ string) error {
 			if id == "tenant:stuck" {
 				return assert.AnError
 			}
@@ -327,7 +342,7 @@ func TestTenantLifecycleReconciler_Offboard_Termination(t *testing.T) {
 		tenantID := uuid.New()
 		busy := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:busy", RecordVersion: 1}
 		instances.byID[busy.ID] = busy
-		temporal.terminateFunc = func(context.Context, string, string) error {
+		temporal.terminateFunc = func(context.Context, string, string, string) error {
 			written := *instances.byID[busy.ID]
 			written.RecordVersion++
 			instances.byID[busy.ID] = &written
@@ -345,7 +360,7 @@ func TestTenantLifecycleReconciler_Offboard_Termination(t *testing.T) {
 		instances.byID[running.ID] = running
 		live := map[string]bool{}
 		calls := 0
-		temporal.terminateFunc = func(_ context.Context, id, _ string) error {
+		temporal.terminateFunc = func(_ context.Context, id, _, _ string) error {
 			calls++
 			delete(live, id)
 			if calls == 1 {
@@ -366,7 +381,7 @@ func TestTenantLifecycleReconciler_Offboard_Termination(t *testing.T) {
 		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
 		instances.byID[running.ID] = running
 		calls := 0
-		temporal.terminateFunc = func(context.Context, string, string) error {
+		temporal.terminateFunc = func(context.Context, string, string, string) error {
 			calls++
 			if calls == 2 {
 				return assert.AnError
@@ -524,7 +539,7 @@ func TestTenantLifecycleReconciler_OffboardingRecordsTheTenantForThePurge(t *tes
 		tenantID := uuid.New()
 		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:x", RecordVersion: 1}
 		instances.byID[inst.ID] = inst
-		temporal.terminateFunc = func(context.Context, string, string) error { return assert.AnError }
+		temporal.terminateFunc = func(context.Context, string, string, string) error { return assert.AnError }
 
 		require.Error(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
 		assert.Empty(t, ret.recorded)

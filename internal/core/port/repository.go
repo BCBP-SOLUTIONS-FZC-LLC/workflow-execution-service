@@ -39,6 +39,8 @@ type InstanceListFilter struct {
 type InstanceRepository interface {
 	Create(ctx context.Context, inst *domain.Instance) error
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.Instance, error)
+	GetLiveByBusinessKey(ctx context.Context, tenantID uuid.UUID, subjectID, businessKey string) (*domain.Instance, error)
+	RecordRunID(ctx context.Context, tenantID, id uuid.UUID, runID string) error
 	UpdateStatus(
 		ctx context.Context,
 		tenantID, id uuid.UUID,

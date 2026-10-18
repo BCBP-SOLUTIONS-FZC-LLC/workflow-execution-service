@@ -106,7 +106,7 @@ func TestInstanceService_Start(t *testing.T) {
 		tenantID, versionID := uuid.New(), uuid.New()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
 		live := map[string]bool{}
-		temporal.terminateFunc = func(_ context.Context, id, _ string) error {
+		temporal.terminateFunc = func(_ context.Context, id, _, _ string) error {
 			delete(live, id)
 			return nil
 		}
@@ -134,7 +134,7 @@ func TestInstanceService_Start(t *testing.T) {
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
 		temporal.startFunc = func(_ context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
 			require.NoError(t, svc.Terminate(context.Background(), tenantID, in.InstanceID, uuid.New(), "admin requested"))
-			temporal.terminateFunc = func(context.Context, string, string) error { return errors.New("temporal unavailable") }
+			temporal.terminateFunc = func(context.Context, string, string, string) error { return errors.New("temporal unavailable") }
 			return port.StartWorkflowOutput{TemporalWorkflowID: in.TemporalWorkflowID, TemporalRunID: "run-1"}, nil
 		}
 
@@ -948,7 +948,7 @@ func TestInstanceService_Terminate(t *testing.T) {
 		instances.byID[inst.ID] = inst
 		live := map[string]bool{}
 		calls := 0
-		temporal.terminateFunc = func(_ context.Context, id, _ string) error {
+		temporal.terminateFunc = func(_ context.Context, id, _, _ string) error {
 			calls++
 			delete(live, id)
 			if calls == 1 {
@@ -972,7 +972,7 @@ func TestInstanceService_Terminate(t *testing.T) {
 		tenantID := uuid.New()
 		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
 		instances.byID[inst.ID] = inst
-		temporal.terminateFunc = func(context.Context, string, string) error { return errors.New("boom") }
+		temporal.terminateFunc = func(context.Context, string, string, string) error { return errors.New("boom") }
 
 		assert.NotPanics(t, func() {
 			_ = svc.Terminate(context.Background(), tenantID, inst.ID, uuid.New(), "reason")
@@ -996,7 +996,7 @@ func TestInstanceService_Terminate(t *testing.T) {
 		instances.byID[inst.ID] = inst
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, Status: domain.TaskStatusReady, RecordVersion: 1}
 		tasks.byID[task.ID] = task
-		temporal.terminateFunc = func(context.Context, string, string) error { return errors.New("temporal unavailable") }
+		temporal.terminateFunc = func(context.Context, string, string, string) error { return errors.New("temporal unavailable") }
 
 		err := svc.Terminate(context.Background(), tenantID, inst.ID, uuid.New(), "reason")
 		require.Error(t, err)
@@ -1026,7 +1026,7 @@ func TestInstanceService_Terminate(t *testing.T) {
 		tenantID := uuid.New()
 		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
 		instances.byID[inst.ID] = inst
-		temporal.terminateFunc = func(context.Context, string, string) error {
+		temporal.terminateFunc = func(context.Context, string, string, string) error {
 			written := *instances.byID[inst.ID]
 			written.RecordVersion++
 			instances.byID[inst.ID] = &written
@@ -1043,7 +1043,7 @@ func TestInstanceService_Terminate(t *testing.T) {
 		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
 		instances.byID[inst.ID] = inst
 		calls := 0
-		temporal.terminateFunc = func(context.Context, string, string) error {
+		temporal.terminateFunc = func(context.Context, string, string, string) error {
 			calls++
 			if calls == 2 {
 				return errors.New("temporal unavailable")

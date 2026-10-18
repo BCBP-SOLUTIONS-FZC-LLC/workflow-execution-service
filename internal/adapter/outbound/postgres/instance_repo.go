@@ -66,6 +66,38 @@ func (r *InstanceRepo) GetByID(ctx context.Context, tenantID, id uuid.UUID) (*do
 	return inst, err
 }
 
+func (r *InstanceRepo) GetLiveByBusinessKey(ctx context.Context, tenantID uuid.UUID, subjectID, businessKey string) (*domain.Instance, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var inst *domain.Instance
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		row, err := db.New(dbtx).GetLiveWorkflowInstanceByBusinessKey(ctx, db.GetLiveWorkflowInstanceByBusinessKeyParams{
+			TenantID: tenantID, SubjectID: subjectID, BusinessKey: businessKey,
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		inst = instanceFromDB(row)
+		return nil
+	})
+	return inst, err
+}
+
+func (r *InstanceRepo) RecordRunID(ctx context.Context, tenantID, id uuid.UUID, runID string) error {
+	ctx = withTenantGUC(ctx, tenantID)
+	return exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		n, err := db.New(dbtx).SetWorkflowInstanceRunID(ctx, db.SetWorkflowInstanceRunIDParams{
+			ID: id, TemporalRunID: toNullableText(runID),
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		if n == 0 {
+			return domain.ErrNotFound
+		}
+		return nil
+	})
+}
+
 func (r *InstanceRepo) UpdateStatus(
 	ctx context.Context,
 	tenantID, id uuid.UUID,

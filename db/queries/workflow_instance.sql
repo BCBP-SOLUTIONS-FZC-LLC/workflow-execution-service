@@ -59,6 +59,16 @@ INSERT INTO workflow_instance (
 )
 RETURNING *;
 
+-- name: GetLiveWorkflowInstanceByBusinessKey :one
+SELECT * FROM workflow_instance
+WHERE tenant_id = $1 AND subject_id = $2 AND business_key = $3
+  AND status NOT IN ('COMPLETED', 'TERMINATED', 'FAILED');
+
+-- name: SetWorkflowInstanceRunID :execrows
+UPDATE workflow_instance
+SET temporal_run_id = $2, updated_at = now()
+WHERE id = $1;
+
 -- name: UpdateWorkflowInstanceStatus :one
 -- completed_at is set only when the new status is terminal (COMPLETED,
 -- TERMINATED, FAILED) — a non-terminal transition (e.g. RUNNING -> DEGRADED)
