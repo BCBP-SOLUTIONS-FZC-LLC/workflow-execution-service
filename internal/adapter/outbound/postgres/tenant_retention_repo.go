@@ -113,3 +113,20 @@ func (r *TenantRetentionRepo) PurgeBatch(ctx context.Context, tenantID uuid.UUID
 	})
 	return deleted, err
 }
+
+func (r *TenantRetentionRepo) HasRows(ctx context.Context, tenantID uuid.UUID) (bool, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var has bool
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		v, err := db.New(dbtx).TenantHasRows(ctx, db.TenantHasRowsParams{
+			TenantID: tenantID, TenantText: tenantID.String(),
+			TenantScope: "tenant:" + tenantID.String(), UserScope: "user_availability:" + tenantID.String() + ":%",
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		has = v
+		return nil
+	})
+	return has, err
+}

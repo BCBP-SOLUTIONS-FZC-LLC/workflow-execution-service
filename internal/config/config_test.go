@@ -85,7 +85,7 @@ func TestValidate(t *testing.T) {
 		{"retention sweep batch zero", func(c *Config) { c.RetentionSweepBatch = 0 }, true},
 		{"queue topology poll interval zero", func(c *Config) { c.QueueTopologyPollInterval = 0 }, true},
 		{"tenant history retention zero while the purge is on", func(c *Config) { c.TenantPurgeEnabled = true; c.TenantHistoryRetention = 0 }, true},
-		{"tenant history retention zero while the purge is off", func(c *Config) { c.TenantPurgeEnabled = false; c.TenantHistoryRetention = 0 }, false},
+		{"tenant history retention zero while the purge is off", func(c *Config) { c.TenantPurgeEnabled = false; c.TenantHistoryRetention = 0 }, true},
 	}
 
 	for _, tt := range tests {

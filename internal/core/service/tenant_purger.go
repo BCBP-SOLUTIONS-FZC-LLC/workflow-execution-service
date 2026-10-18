@@ -64,6 +64,13 @@ func (p *TenantPurger) purgeTenant(ctx context.Context, tenantID uuid.UUID) erro
 			return fmt.Errorf("purge tenant %s: %w", tenantID, err)
 		}
 		if len(deleted) == 0 {
+			remaining, err := p.deps.Data.HasRows(ctx, tenantID)
+			if err != nil {
+				return fmt.Errorf("check tenant %s for remaining rows: %w", tenantID, err)
+			}
+			if remaining {
+				return fmt.Errorf("purge tenant %s: rows remain after a pass that deleted none, another replica may be purging it", tenantID)
+			}
 			break
 		}
 		for table, n := range deleted {

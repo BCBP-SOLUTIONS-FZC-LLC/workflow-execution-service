@@ -15,4 +15,5 @@ type TenantRetentionRepository interface {
 
 type TenantDataPurger interface {
 	PurgeBatch(ctx context.Context, tenantID uuid.UUID, limit int) (map[string]int64, error)
+	HasRows(ctx context.Context, tenantID uuid.UUID) (bool, error)
 }

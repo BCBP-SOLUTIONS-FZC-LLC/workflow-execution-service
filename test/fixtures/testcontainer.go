@@ -43,10 +43,9 @@ func NewTestPoolAndDSN(t *testing.T) (*pgcommon.Pool, string) {
 			"POSTGRES_PASSWORD": "postgres",
 			"POSTGRES_DB":       "testdb",
 		},
-		WaitingFor: wait.ForAll(
-			wait.ForLog("database system is ready to accept connections").WithOccurrence(2),
-			wait.ForListeningPort("5432/tcp"),
-		).WithDeadline(120 * time.Second),
+		WaitingFor: wait.ForLog("database system is ready to accept connections").
+			WithOccurrence(2).
+			WithStartupTimeout(120 * time.Second),
 	}
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -62,12 +61,15 @@ func NewTestPoolAndDSN(t *testing.T) (*pgcommon.Pool, string) {
 	if err != nil {
 		t.Fatalf("fixtures.NewTestPoolAndDSN: container host: %v", err)
 	}
-	port, err := container.MappedPort(ctx, "5432")
+	port, err := mappedPort(func() (string, error) {
+		p, err := container.MappedPort(ctx, "5432")
+		return p.Port(), err
+	})
 	if err != nil {
 		t.Fatalf("fixtures.NewTestPoolAndDSN: mapped port: %v", err)
 	}
 
-	dsn := fmt.Sprintf("postgres://postgres:postgres@%s:%s/testdb?sslmode=disable", host, port.Port())
+	dsn := fmt.Sprintf("postgres://postgres:postgres@%s:%s/testdb?sslmode=disable", host, port)
 
 	applyMigrations(t, dsn)
 
@@ -101,4 +103,17 @@ func applyMigrations(t *testing.T, dsn string) {
 	if err := domainRunner.Up(ctx); err != nil {
 		t.Fatalf("fixtures: domain migrations: %v", err)
 	}
+}
+
+func mappedPort(lookup func() (string, error)) (string, error) {
+	var lastErr error
+	for attempt := 0; attempt < 60; attempt++ {
+		p, err := lookup()
+		if err == nil {
+			return p, nil
+		}
+		lastErr = err
+		time.Sleep(200 * time.Millisecond)
+	}
+	return "", lastErr
 }

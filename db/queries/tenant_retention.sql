@@ -54,3 +54,16 @@ WHERE scope_key IN (
     WHERE g.scope_key = $1 OR g.scope_key LIKE $2
     LIMIT $3
 );
+
+-- name: TenantHasRows :one
+SELECT (
+    EXISTS (SELECT 1 FROM assignee_overrides o WHERE o.tenant_id = @tenant_id::uuid)
+    OR EXISTS (SELECT 1 FROM workflow_task_assignment a WHERE a.tenant_id = @tenant_id::uuid)
+    OR EXISTS (SELECT 1 FROM workflow_task t WHERE t.tenant_id = @tenant_id::uuid)
+    OR EXISTS (SELECT 1 FROM workflow_instance i WHERE i.tenant_id = @tenant_id::uuid)
+    OR EXISTS (SELECT 1 FROM connector_documents d WHERE d.tenant_id = @tenant_text::text)
+    OR EXISTS (SELECT 1 FROM connector_document_attempts da WHERE da.tenant_id = @tenant_text::text)
+    OR EXISTS (SELECT 1 FROM connector_send_intents s WHERE s.tenant_id = @tenant_text::text)
+    OR EXISTS (SELECT 1 FROM active_task_queues q WHERE q.tenant_id = @tenant_id::uuid)
+    OR EXISTS (SELECT 1 FROM event_recency_guard g WHERE g.scope_key = @tenant_scope::text OR g.scope_key LIKE @user_scope::text)
+)::boolean AS has_rows;

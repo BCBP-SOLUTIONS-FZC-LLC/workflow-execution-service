@@ -113,7 +113,18 @@ func TestTenantPurge_AsTheTenantUnderRLSDeletesADueTenantChildFirstAndLeavesEver
 		Logger: nil,
 	})
 
+	has, err := repo.HasRows(ctx, due)
+	require.NoError(t, err)
+	assert.True(t, has, "the seeded tenant has rows")
+
 	require.NoError(t, purger.Tick(ctx))
+
+	has, err = repo.HasRows(ctx, due)
+	require.NoError(t, err)
+	assert.False(t, has, "nothing is left of the purged tenant")
+	has, err = repo.HasRows(ctx, notDue)
+	require.NoError(t, err)
+	assert.True(t, has, "another tenant's rows are not counted")
 
 	for _, table := range purgeTables {
 		assert.Zero(t, countRows(t, superPool, table, due), "%s rows of the due tenant", table)

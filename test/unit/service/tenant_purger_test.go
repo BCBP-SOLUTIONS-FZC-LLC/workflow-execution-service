@@ -52,10 +52,16 @@ func (f *fakeRetention) MarkPurged(_ context.Context, tenantID uuid.UUID, _ time
 }
 
 type fakeDataPurger struct {
-	script map[uuid.UUID][]map[string]int64
-	errFor map[uuid.UUID]error
-	calls  map[uuid.UUID]int
-	limits []int
+	script  map[uuid.UUID][]map[string]int64
+	errFor  map[uuid.UUID]error
+	calls   map[uuid.UUID]int
+	limits  []int
+	rows    map[uuid.UUID]bool
+	rowsErr error
+}
+
+func (f *fakeDataPurger) HasRows(_ context.Context, tenantID uuid.UUID) (bool, error) {
+	return f.rows[tenantID], f.rowsErr
 }
 
 func (f *fakeDataPurger) PurgeBatch(_ context.Context, tenantID uuid.UUID, limit int) (map[string]int64, error) {
@@ -203,4 +209,27 @@ func TestTenantPurger_DefaultsTheClockAndLoggerWhenNoneAreGiven(t *testing.T) {
 	require.NoError(t, p.Tick(context.Background()))
 	assert.WithinDuration(t, time.Now(), r.listedAt, time.Minute)
 	assert.Equal(t, []uuid.UUID{tenant}, r.purged)
+}
+
+func TestTenantPurger_ATenantWithRowsLeftIsNotMarkedPurged(t *testing.T) {
+	tenant := uuid.New()
+	r := &fakeRetention{due: []uuid.UUID{tenant}}
+	d := &fakeDataPurger{rows: map[uuid.UUID]bool{tenant: true}}
+	rec, failed := map[string]int64{}, 0
+
+	err := newPurger(r, d, rec, &failed).Tick(context.Background())
+
+	require.Error(t, err, "a batch that deleted nothing can mean another replica took the rows, not that none are left")
+	assert.Empty(t, r.purged)
+	assert.Equal(t, 1, failed)
+}
+
+func TestTenantPurger_AFailureToCheckForRemainingRowsIsReturned(t *testing.T) {
+	tenant := uuid.New()
+	r := &fakeRetention{due: []uuid.UUID{tenant}}
+	d := &fakeDataPurger{rowsErr: errors.New("db down")}
+	rec, failed := map[string]int64{}, 0
+
+	require.Error(t, newPurger(r, d, rec, &failed).Tick(context.Background()))
+	assert.Empty(t, r.purged)
 }

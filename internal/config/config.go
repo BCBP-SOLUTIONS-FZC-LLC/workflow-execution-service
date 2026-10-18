@@ -322,8 +322,8 @@ func (c *Config) validate() error {
 	if c.OutboxRetention <= 0 {
 		return fmt.Errorf("OUTBOX_RETENTION must be > 0")
 	}
-	if c.TenantPurgeEnabled && c.TenantHistoryRetention <= 0 {
-		return fmt.Errorf("TENANT_HISTORY_RETENTION must be > 0 when TENANT_PURGE_ENABLED is true")
+	if c.TenantHistoryRetention <= 0 {
+		return fmt.Errorf("TENANT_HISTORY_RETENTION must be > 0")
 	}
 	if c.ProcessedEventRetention <= 0 {
 		return fmt.Errorf("PROCESSED_EVENT_RETENTION must be > 0")
