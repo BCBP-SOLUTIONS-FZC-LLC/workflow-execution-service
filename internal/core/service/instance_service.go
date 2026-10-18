@@ -31,6 +31,7 @@ type InstanceService struct {
 	Definitions port.DefinitionServiceClient
 	Eligibility port.EligibilityChecker
 	Queues      port.ActiveTaskQueueRepository
+	Gate        port.TenantGate
 	Validator   port.EventValidator
 	Cache       port.CacheStore
 	Log         port.Logger
@@ -76,6 +77,11 @@ func (s *InstanceService) readCompiledWorkflow(ctx context.Context, tenantID, ve
 }
 
 func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput) (*port.Instance, error) {
+	if s.Gate != nil {
+		if err := s.Gate.Allow(ctx, in.TenantID); err != nil {
+			return nil, err
+		}
+	}
 	compiled, err := s.readCompiledWorkflow(ctx, in.TenantID, in.WorkflowVersionID)
 	if err != nil {
 		return nil, err

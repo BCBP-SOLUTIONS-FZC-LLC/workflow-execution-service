@@ -55,6 +55,7 @@ type Config struct {
 	OutboxRetention            time.Duration
 	TenantPurgeEnabled         bool
 	TenantHistoryRetention     time.Duration
+	StartRefusedStatuses       []string
 	ProcessedEventRetention    time.Duration
 	RetentionSweepInterval     time.Duration
 	RetentionSweepBatch        int
@@ -197,6 +198,7 @@ func Load() (*Config, error) {
 		OutboxRetention:            envDuration("OUTBOX_RETENTION", 7*365*24*time.Hour),
 		TenantPurgeEnabled:         envBool("TENANT_PURGE_ENABLED", true),
 		TenantHistoryRetention:     envDuration("TENANT_HISTORY_RETENTION", 7*365*24*time.Hour),
+		StartRefusedStatuses:       envCSVLower("START_REFUSED_STATUSES"),
 		ProcessedEventRetention:    envDuration("PROCESSED_EVENT_RETENTION", 7*24*time.Hour),
 		RetentionSweepInterval:     envDuration("RETENTION_SWEEP_INTERVAL", 24*time.Hour),
 		RetentionSweepBatch:        envInt("RETENTION_SWEEP_BATCH", 1000),
@@ -321,6 +323,11 @@ func (c *Config) validate() error {
 	}
 	if c.OutboxRetention <= 0 {
 		return fmt.Errorf("OUTBOX_RETENTION must be > 0")
+	}
+	for _, status := range c.StartRefusedStatuses {
+		if !slices.Contains(knownTenantStatuses, status) {
+			return fmt.Errorf("START_REFUSED_STATUSES names %q, which is not one of %s", status, strings.Join(knownTenantStatuses, ", "))
+		}
 	}
 	if c.TenantHistoryRetention <= 0 {
 		return fmt.Errorf("TENANT_HISTORY_RETENTION must be > 0")
@@ -461,6 +468,18 @@ func (c *Config) MigrationDSN() string {
 		return c.MigrationDatabaseURL
 	}
 	return c.DatabaseURL
+}
+
+var knownTenantStatuses = []string{"trial", "active", "past_due", "cancelled", "suspended", "trial_expired", "offboarded"}
+
+func envCSVLower(key string) []string {
+	var out []string
+	for _, part := range strings.Split(os.Getenv(key), ",") {
+		if v := strings.ToLower(strings.TrimSpace(part)); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func getEnvOrDefault(key, fallback string) string {

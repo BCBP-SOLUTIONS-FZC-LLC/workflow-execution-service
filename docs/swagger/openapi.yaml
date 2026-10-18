@@ -653,7 +653,7 @@ components:
             BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_ASSIGNEE, NOT_AUTHORIZED_FOR_RESOURCE,
             TENANT_MISMATCH, INSTANCE_NOT_FOUND, TASK_NOT_FOUND,
             TARGET_NODE_NOT_FOUND, WAIT_NOT_FOUND, NOT_WAITING, OVERRIDE_NO_OP, DUPLICATE_BUSINESS_KEY,
-            VERSION_NOT_PUBLISHED, VERSION_INVALID,
+            TENANT_NOT_ACTIVE, VERSION_NOT_PUBLISHED, VERSION_INVALID,
             RECORD_VERSION_CONFLICT, INSTANCE_ALREADY_TERMINAL, INVALID_INSTANCE_STATE,
             TASK_ALREADY_CLAIMED, CLAIM_NOT_APPLICABLE, INVALID_TASK_STATE,
             FORCE_BACK_NO_SAVED_BRANCH, NODE_ALREADY_RESOLVED, IDEMPOTENCY_KEY_REPLAY,
@@ -947,6 +947,7 @@ paths:
             State conflict. See code field:
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body;
             DUPLICATE_BUSINESS_KEY — an active instance for this subject_id and business_key already exists;
+            TENANT_NOT_ACTIVE — the tenant's recorded status is one the service is configured to refuse starts for (none by default);
             VERSION_NOT_PUBLISHED — the referenced version is DRAFT or ARCHIVED;
             VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked).
           content:

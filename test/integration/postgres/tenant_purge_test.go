@@ -23,7 +23,7 @@ import (
 var purgeTables = []string{
 	"assignee_overrides", "workflow_task_assignment", "workflow_task", "workflow_instance",
 	"connector_documents", "connector_document_attempts", "connector_send_intents",
-	"active_task_queues", "event_recency_guard",
+	"active_task_queues", "tenant_state", "event_recency_guard",
 }
 
 func countRows(t *testing.T, pool *pgcommon.Pool, table string, tenantID uuid.UUID) int {
@@ -75,6 +75,7 @@ func seedPurgeTenant(t *testing.T, superPool *pgcommon.Pool, tenantID uuid.UUID,
 			sql  string
 			args []any
 		}{
+			{`INSERT INTO tenant_state (tenant_id, status, changed_at) VALUES ($1, 'offboarded', now())`, []any{tenantID}},
 			{`INSERT INTO event_recency_guard (scope_key, last_applied_at) VALUES ($1, now())`, []any{"tenant:" + tenantID.String()}},
 			{`INSERT INTO event_recency_guard (scope_key, last_applied_at) VALUES ($1, now())`, []any{"user_availability:" + tenantID.String() + ":" + uuid.NewString()}},
 			{`INSERT INTO connector_documents (tenant_id, provider, container, filename, state) VALUES ($1, 'drive', 'c', 'f', 'AVAILABLE')`, []any{tenantID.String()}},
@@ -182,4 +183,25 @@ func TestTenantRetentionRepo_ARedeliveredOffboardingKeepsTheFirstDates(t *testin
 	due, err := repo.ListDue(ctx, first.Add(25*time.Hour), 10)
 	require.NoError(t, err)
 	assert.Equal(t, []uuid.UUID{tenant}, due, "the first purge date still applies")
+}
+
+func TestTenantStateRepo_ARecordedStatusIsReadBackAndAnOlderChangeNeverOverwritesANewerOne(t *testing.T) {
+	pool := fixtures.NewTestPool(t)
+	repo := postgres.NewTenantStateRepo(pool)
+	ctx := context.Background()
+	tenant := uuid.New()
+	t0 := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+
+	_, found, err := repo.Get(ctx, tenant)
+	require.NoError(t, err)
+	assert.False(t, found, "a tenant with no event yet has no status")
+
+	require.NoError(t, repo.Record(ctx, tenant, "suspended", t0))
+	require.NoError(t, repo.Record(ctx, tenant, "active", t0.Add(time.Hour)))
+	require.NoError(t, repo.Record(ctx, tenant, "suspended", t0.Add(-time.Hour)))
+
+	status, found, err := repo.Get(ctx, tenant)
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, "active", status, "a delayed older event must not undo the newer status")
 }

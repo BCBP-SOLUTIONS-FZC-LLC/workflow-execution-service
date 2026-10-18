@@ -84,6 +84,12 @@ spec:
               value: {{ .Values.env.outboxPollInterval | quote }}
             - name: OUTBOX_BATCH_SIZE
               value: {{ .Values.env.outboxBatchSize | quote }}
+            - name: START_REFUSED_STATUSES
+              value: {{ .Values.env.startRefusedStatuses | quote }}
+            - name: TENANT_PURGE_ENABLED
+              value: {{ .Values.env.tenantPurgeEnabled | quote }}
+            - name: TENANT_HISTORY_RETENTION
+              value: {{ .Values.env.tenantHistoryRetention | quote }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

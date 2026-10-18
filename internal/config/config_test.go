@@ -384,3 +384,40 @@ func TestLoad_TenantPurgeCanBeSwitchedOffAndTuned(t *testing.T) {
 		t.Errorf("tenant purge = enabled %v, retention %v; want off and 720h", cfg.TenantPurgeEnabled, cfg.TenantHistoryRetention)
 	}
 }
+
+func TestLoad_StartRefusedStatusesDefaultToNone(t *testing.T) {
+	setValidEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.StartRefusedStatuses) != 0 {
+		t.Errorf("StartRefusedStatuses = %v, want none: refusing a start is a decision, not a default", cfg.StartRefusedStatuses)
+	}
+}
+
+func TestLoad_StartRefusedStatusesAreTrimmedAndLowerCased(t *testing.T) {
+	setValidEnv(t)
+	t.Setenv("START_REFUSED_STATUSES", " Suspended, trial_expired ,,CANCELLED")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := []string{"suspended", "trial_expired", "cancelled"}
+	if len(cfg.StartRefusedStatuses) != len(want) {
+		t.Fatalf("StartRefusedStatuses = %v, want %v", cfg.StartRefusedStatuses, want)
+	}
+	for i := range want {
+		if cfg.StartRefusedStatuses[i] != want[i] {
+			t.Errorf("StartRefusedStatuses = %v, want %v", cfg.StartRefusedStatuses, want)
+		}
+	}
+}
+
+func TestLoad_StartRefusedStatusesRefuseAnUnknownStatus(t *testing.T) {
+	setValidEnv(t)
+	t.Setenv("START_REFUSED_STATUSES", "suspended,frozen")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "START_REFUSED_STATUSES") {
+		t.Fatalf("Load() error = %v, want one naming START_REFUSED_STATUSES: a misspelt status would silently refuse nothing", err)
+	}
+}

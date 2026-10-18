@@ -21,6 +21,7 @@ var (
 	ErrWorkflowNotFound        = errors.New("workflow execution not found")
 	ErrTargetNodeNotFound      = errors.New("target node not found in the compiled plan")
 	ErrDuplicateBusinessKey    = errors.New("business key already active for this subject")
+	ErrTenantNotActive         = errors.New("the tenant's status does not allow starting an instance")
 	ErrVersionNotPublished     = errors.New("workflow version is not published")
 	ErrVersionInvalid          = errors.New("workflow version is not valid")
 	ErrInstanceAlreadyTerminal = errors.New("instance is already in a terminal state")

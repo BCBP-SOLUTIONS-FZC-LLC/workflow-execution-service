@@ -189,6 +189,13 @@ env:
   tokenServiceBaseURL: ""
   outboxPollInterval: 500ms
   outboxBatchSize: "50"
+  # Tenant statuses (comma-separated) for which POST /instances answers 409 TENANT_NOT_ACTIVE:
+  # trial, active, past_due, cancelled, suspended, trial_expired, offboarded. Empty refuses nothing.
+  startRefusedStatuses: ""
+  # The tenant data purge (LLD §4.13): an offboarded tenant's instances, tasks and connector rows
+  # are deleted this long after it left. The audit trail keeps its own retention.
+  tenantPurgeEnabled: "true"
+  tenantHistoryRetention: 61320h
 
 # Secret-backed env vars. existingSecretName takes precedence when set;
 # secretValues is for CI/values-overlay injection — never commit real

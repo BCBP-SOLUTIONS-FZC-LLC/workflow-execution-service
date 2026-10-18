@@ -181,12 +181,14 @@ func newApp(cfg *config.Config) (*app, error) {
 	recency := postgres.NewRecencyGuardRepo(appPool)
 	overrides := postgres.NewAssigneeOverrideRepo(appPool)
 	queues := postgres.NewActiveTaskQueueRepo(appPool)
+	tenantStates := postgres.NewTenantStateRepo(appPool)
 	transactor := postgres.NewTransactor(appPool)
 
 	instanceService := &service.InstanceService{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
-		Queues: queues, Validator: validator, Cache: cache, Log: log,
+		Queues: queues, Gate: service.NewTenantStartGate(tenantStates, cfg.StartRefusedStatuses),
+		Validator: validator, Cache: cache, Log: log,
 	}
 	taskService := &service.TaskService{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides,
@@ -212,7 +214,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	tenantLifecycleReconciler := &service.TenantLifecycleReconciler{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Queues: queues, Outbox: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Validator: validator, Log: log,
-		Retention: postgres.NewTenantRetentionRepo(appPool), HistoryRetention: cfg.TenantHistoryRetention,
+		States: tenantStates, Retention: postgres.NewTenantRetentionRepo(appPool), HistoryRetention: cfg.TenantHistoryRetention,
 	}
 	userSafetyNetReconciler := &service.UserSafetyNetReconciler{Assignments: assignments}
 	oooAvailabilityReconciler := &service.OOOAvailabilityReconciler{

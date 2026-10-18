@@ -158,6 +158,7 @@ func TestStartInstance_ErrorCodes(t *testing.T) {
 		code   string
 	}{
 		{"DuplicateBusinessKey", port.ErrDuplicateBusinessKey, http.StatusConflict, "DUPLICATE_BUSINESS_KEY"},
+		{"TenantNotActive", port.ErrTenantNotActive, http.StatusConflict, "TENANT_NOT_ACTIVE"},
 		{"VersionNotPublished", port.ErrVersionNotPublished, http.StatusConflict, "VERSION_NOT_PUBLISHED"},
 		{"VersionInvalid", port.ErrVersionInvalid, http.StatusConflict, "VERSION_INVALID"},
 		{"OverrideMapInvalid", port.ErrOverrideMapInvalid, http.StatusUnprocessableEntity, "OVERRIDE_MAP_INVALID"},

@@ -41,6 +41,7 @@ const (
 	CodeWaitNotFound            ErrCode = "WAIT_NOT_FOUND"
 	CodeNotWaiting              ErrCode = "NOT_WAITING"
 	CodeDuplicateBusinessKey    ErrCode = "DUPLICATE_BUSINESS_KEY"
+	CodeTenantNotActive         ErrCode = "TENANT_NOT_ACTIVE"
 	CodeVersionNotPublished     ErrCode = "VERSION_NOT_PUBLISHED"
 	CodeVersionInvalid          ErrCode = "VERSION_INVALID"
 	CodeInstanceAlreadyTerminal ErrCode = "INSTANCE_ALREADY_TERMINAL"
@@ -238,6 +239,8 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusConflict, CodeNotWaiting, err.Error()
 	case errors.Is(err, port.ErrDuplicateBusinessKey):
 		return http.StatusConflict, CodeDuplicateBusinessKey, err.Error()
+	case errors.Is(err, port.ErrTenantNotActive):
+		return http.StatusConflict, CodeTenantNotActive, err.Error()
 	case errors.Is(err, port.ErrVersionNotPublished):
 		return http.StatusConflict, CodeVersionNotPublished, err.Error()
 	case errors.Is(err, port.ErrVersionInvalid):

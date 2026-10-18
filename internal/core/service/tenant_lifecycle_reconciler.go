@@ -24,6 +24,7 @@ type TenantLifecycleReconciler struct {
 	Validator   port.EventValidator
 	Log         port.Logger
 
+	States           port.TenantStateRepository
 	Retention        port.TenantRetentionRepository
 	HistoryRetention time.Duration
 	Now              func() time.Time
@@ -47,7 +48,25 @@ func (s *TenantLifecycleReconciler) Apply(ctx context.Context, in port.TenantLif
 			return err
 		}
 	}
-	return nil
+	return s.recordStatus(ctx, in)
+}
+
+func (s *TenantLifecycleReconciler) recordStatus(ctx context.Context, in port.TenantLifecycleInput) error {
+	if s.States == nil || in.Status == "" {
+		return nil
+	}
+	changedAt := in.ChangedAt
+	if changedAt.IsZero() {
+		changedAt = s.now()
+	}
+	return s.States.Record(ctx, in.TenantID, in.Status, changedAt)
+}
+
+func (s *TenantLifecycleReconciler) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 func (s *TenantLifecycleReconciler) applyStatusTransition(ctx context.Context, in port.TenantLifecycleInput) error {
@@ -135,10 +154,7 @@ func (s *TenantLifecycleReconciler) recordOffboarded(ctx context.Context, tenant
 	if s.Retention == nil {
 		return nil
 	}
-	now := time.Now()
-	if s.Now != nil {
-		now = s.Now()
-	}
+	now := s.now()
 	return s.Retention.RecordOffboarded(ctx, tenantID, now, now.Add(s.HistoryRetention))
 }
 
