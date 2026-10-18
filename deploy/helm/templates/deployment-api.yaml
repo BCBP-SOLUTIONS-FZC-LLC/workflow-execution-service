@@ -90,6 +90,14 @@ spec:
               value: {{ .Values.env.tenantPurgeEnabled | quote }}
             - name: TENANT_HISTORY_RETENTION
               value: {{ .Values.env.tenantHistoryRetention | quote }}
+            - name: PG_MAX_CONNS
+              value: {{ .Values.env.pgMaxConns | quote }}
+            - name: PG_BOUNCER_MODE
+              value: {{ .Values.env.pgBouncerMode | quote }}
+            {{- with .Values.api.goMemLimit }}
+            - name: GOMEMLIMIT
+              value: {{ . | quote }}
+            {{- end }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -124,6 +132,13 @@ spec:
                   key: OUTBOX_RELAY_DATABASE_URL
                   {{- /* secret.yaml requires it outside dev */}}
                   optional: {{ has .Values.env.appEnv (list "dev" "local") }}
+            - name: LOCK_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: LOCK_DATABASE_URL
+                  {{- /* a direct DSN for the tenant-event advisory lock; required through a pooler, see PG_BOUNCER_MODE */}}
+                  optional: true
             - name: DEFINITION_SERVICE_URL
               value: {{ .Values.definitionServiceURL | quote }}
             - name: DEFINITION_SERVICE_TOKEN

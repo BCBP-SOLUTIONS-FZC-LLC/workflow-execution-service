@@ -348,7 +348,7 @@ func buildExecution(t *testing.T, pool *pgcommon.Pool, sdk client.Client, rdb *r
 	outboxRepo := postgres.NewOutboxRepo(pool)
 	overrides := postgres.NewAssigneeOverrideRepo(pool)
 	processedEvents := postgres.NewProcessedEventRepo(pool)
-	recency := postgres.NewRecencyGuardRepo(pool)
+	recency := postgres.NewRecencyGuardRepo(pool, pool)
 	queues := postgres.NewActiveTaskQueueRepo(pool)
 	transactor := postgres.NewTransactor(pool)
 	validator, err := eventbus.NewSchemaValidator()

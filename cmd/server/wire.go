@@ -66,6 +66,13 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 	cleanups = append(cleanups, relayPool.Close)
 
+	lockPool, err := newLockPool(ctx, cfg, log)
+	if err != nil {
+		unwind()
+		return nil, err
+	}
+	cleanups = append(cleanups, lockPool.Close)
+
 	cache, cacheClient, err := newCacheStore(ctx, cfg)
 	if err != nil {
 		unwind()
@@ -178,7 +185,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	assignments := postgres.NewTaskAssignmentRepo(appPool)
 	outboxRepo := postgres.NewOutboxRepo(appPool)
 	processedEvents := postgres.NewProcessedEventRepo(appPool)
-	recency := postgres.NewRecencyGuardRepo(appPool)
+	recency := postgres.NewRecencyGuardRepo(appPool, lockPool)
 	overrides := postgres.NewAssigneeOverrideRepo(appPool)
 	queues := postgres.NewActiveTaskQueueRepo(appPool)
 	tenantStates := postgres.NewTenantStateRepo(appPool)
@@ -267,6 +274,7 @@ func newApp(cfg *config.Config) (*app, error) {
 		log:              log,
 		appPool:          appPool,
 		relayPool:        relayPool,
+		lockPool:         lockPool,
 		cache:            cacheClient,
 		httpServer:       httpServer,
 		metricsServer:    metricsServer,

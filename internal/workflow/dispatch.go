@@ -155,12 +155,13 @@ func deptUUID(iamDeptID string) uuid.UUID {
 }
 
 func (in *interpreter) currentPendingNode(deptID string) domain.NodeKey {
+	var first domain.NodeKey
 	for key := range in.pending {
-		if deptFromNodeKey(key.Node) == deptID {
-			return key.Node
+		if deptFromNodeKey(key.Node) == deptID && (first == "" || key.Node < first) {
+			first = key.Node
 		}
 	}
-	return ""
+	return first
 }
 
 func (in *interpreter) currentPendingNodes() []domain.NodeKey {

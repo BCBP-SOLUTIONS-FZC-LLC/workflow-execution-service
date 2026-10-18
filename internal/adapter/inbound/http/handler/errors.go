@@ -247,7 +247,7 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusConflict, CodeVersionInvalid, err.Error()
 	case errors.Is(err, port.ErrInstanceAlreadyTerminal):
 		return http.StatusConflict, CodeInstanceAlreadyTerminal, err.Error()
-	case errors.Is(err, port.ErrInvalidInstanceState):
+	case errors.Is(err, port.ErrInvalidInstanceState), errors.Is(err, port.ErrWorkflowNotFound):
 		return http.StatusConflict, CodeInvalidInstanceState, err.Error()
 	case errors.Is(err, port.ErrForceBackNoSavedBranch):
 		return http.StatusConflict, CodeForceBackNoSavedBranch, err.Error()

@@ -39,4 +39,10 @@ spec:
                 secretKeyRef:
                   name: {{ include "workflow-execution-service.secretName" . }}
                   key: DATABASE_URL
+            - name: MIGRATION_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflow-execution-service.secretName" . }}
+                  key: MIGRATION_DATABASE_URL
+                  optional: true
 {{- end }}

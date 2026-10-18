@@ -63,6 +63,7 @@ type Config struct {
 	OutboxBatchSize            int
 
 	OutboxRelayDatabaseURL string
+	LockDatabaseURL        string
 
 	DefinitionServiceURL    string
 	DefinitionServiceToken  string
@@ -78,6 +79,7 @@ type Config struct {
 	TokenServiceClientTimeout time.Duration
 
 	QueueTopologyPollInterval time.Duration
+	WorkflowCacheSize         int
 
 	InternalAPIToken string
 
@@ -205,6 +207,7 @@ func Load() (*Config, error) {
 		OperationalStatsInterval:   envDuration("OPERATIONAL_STATS_INTERVAL", 30*time.Second),
 		OutboxBatchSize:            envInt("OUTBOX_BATCH_SIZE", 50),
 		OutboxRelayDatabaseURL:     getEnvOrDefault("OUTBOX_RELAY_DATABASE_URL", ""),
+		LockDatabaseURL:            getEnvOrDefault("LOCK_DATABASE_URL", ""),
 
 		DefinitionServiceURL:    getEnvOrDefault("DEFINITION_SERVICE_URL", ""),
 		DefinitionServiceToken:  getEnvOrDefault("DEFINITION_SERVICE_TOKEN", ""),
@@ -220,6 +223,7 @@ func Load() (*Config, error) {
 		TokenServiceClientTimeout: envDuration("TOKEN_SERVICE_CLIENT_TIMEOUT", 5*time.Second),
 
 		QueueTopologyPollInterval: envDuration("QUEUE_TOPOLOGY_POLL_INTERVAL", 60*time.Second),
+		WorkflowCacheSize:         envInt("WORKFLOW_CACHE_SIZE", 0),
 
 		InternalAPIToken: getEnvOrDefault("INTERNAL_API_TOKEN", ""),
 
@@ -359,6 +363,9 @@ func (c *Config) validate() error {
 	if c.IAMClientTimeout <= 0 {
 		return fmt.Errorf("IAM_CLIENT_TIMEOUT must be > 0")
 	}
+	if c.WorkflowCacheSize < 0 {
+		return fmt.Errorf("WORKFLOW_CACHE_SIZE must be >= 0")
+	}
 	if c.QueueTopologyPollInterval <= 0 {
 		return fmt.Errorf("QUEUE_TOPOLOGY_POLL_INTERVAL must be > 0")
 	}
@@ -405,6 +412,9 @@ func (c *Config) RequireServer() error {
 		}
 		if c.OutboxRelayDatabaseURL == "" {
 			return fmt.Errorf("OUTBOX_RELAY_DATABASE_URL is required outside dev and local — a missing relay DSN would silently fall back to the RLS-enforced app role and see zero rows forever")
+		}
+		if c.PGBouncerMode && c.LockDatabaseURL == "" {
+			return fmt.Errorf("LOCK_DATABASE_URL is required outside dev and local when PG_BOUNCER_MODE is true — a session advisory lock taken through a transaction-pooling proxy can stay held on a server connection and block tenant events")
 		}
 	}
 	return nil
@@ -459,6 +469,13 @@ func (c *Config) RequireConnectorWorker() error {
 func (c *Config) OutboxRelayDSN() string {
 	if c.OutboxRelayDatabaseURL != "" {
 		return c.OutboxRelayDatabaseURL
+	}
+	return c.DatabaseURL
+}
+
+func (c *Config) LockDSN() string {
+	if c.LockDatabaseURL != "" {
+		return c.LockDatabaseURL
 	}
 	return c.DatabaseURL
 }

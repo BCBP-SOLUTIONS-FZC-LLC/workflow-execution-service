@@ -64,6 +64,18 @@ spec:
               value: {{ .Values.env.temporalNamespace | quote }}
             - name: TEMPORAL_TASK_QUEUE
               value: {{ .Values.env.temporalTaskQueue | quote }}
+            - name: PG_MAX_CONNS
+              value: {{ .Values.env.pgMaxConns | quote }}
+            - name: PG_BOUNCER_MODE
+              value: {{ .Values.env.pgBouncerMode | quote }}
+            - name: QUEUE_TOPOLOGY_POLL_INTERVAL
+              value: {{ .Values.env.queueTopologyPollInterval | quote }}
+            - name: WORKFLOW_CACHE_SIZE
+              value: {{ .Values.env.workflowCacheSize | quote }}
+            {{- with .Values.worker.goMemLimit }}
+            - name: GOMEMLIMIT
+              value: {{ . | quote }}
+            {{- end }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

@@ -291,6 +291,9 @@ func TestRequire(t *testing.T) {
 		{"server needs the definition token outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.DefinitionServiceToken = "" }, "DEFINITION_SERVICE_TOKEN"},
 		{"server needs the token service outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.TokenServiceBaseURL = "" }, "TOKEN_SERVICE_BASE_URL"},
 		{"server needs the relay dsn outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.OutboxRelayDatabaseURL = "" }, "OUTBOX_RELAY_DATABASE_URL"},
+		{"server behind a pooler needs a direct dsn for its locks outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.PGBouncerMode = true }, "LOCK_DATABASE_URL"},
+		{"server behind a pooler is valid with a direct lock dsn", (*Config).RequireServer, func(c *Config) { prod(c); c.PGBouncerMode = true; c.LockDatabaseURL = "postgres://direct" }, ""},
+		{"server behind a pooler may share the database in dev", (*Config).RequireServer, func(c *Config) { c.PGBouncerMode = true }, ""},
 
 		{"worker valid in dev", (*Config).RequireWorker, func(c *Config) {}, ""},
 		{"worker valid in production without the api's settings", (*Config).RequireWorker, func(c *Config) { c.AppEnv = "prod"; c.DefinitionServiceToken = "def-tok" }, ""},
@@ -419,5 +422,39 @@ func TestLoad_StartRefusedStatusesRefuseAnUnknownStatus(t *testing.T) {
 	t.Setenv("START_REFUSED_STATUSES", "suspended,frozen")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "START_REFUSED_STATUSES") {
 		t.Fatalf("Load() error = %v, want one naming START_REFUSED_STATUSES: a misspelt status would silently refuse nothing", err)
+	}
+}
+
+func TestLockDSN(t *testing.T) {
+	cfg := &Config{DatabaseURL: "postgres://primary"}
+	if got := cfg.LockDSN(); got != "postgres://primary" {
+		t.Errorf("LockDSN() = %q, want fallback to DatabaseURL", got)
+	}
+
+	cfg.LockDatabaseURL = "postgres://direct"
+	if got := cfg.LockDSN(); got != "postgres://direct" {
+		t.Errorf("LockDSN() = %q, want LockDatabaseURL", got)
+	}
+}
+
+func TestLoad_WorkflowCacheSizeDefaultsToTheSDKDefaultAndRefusesANegativeValue(t *testing.T) {
+	setValidEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.WorkflowCacheSize != 0 {
+		t.Errorf("WorkflowCacheSize = %d, want 0 (the SDK's own default)", cfg.WorkflowCacheSize)
+	}
+
+	t.Setenv("WORKFLOW_CACHE_SIZE", "500")
+	cfg, err = Load()
+	if err != nil || cfg.WorkflowCacheSize != 500 {
+		t.Fatalf("Load() = %v, %v; want a cache size of 500", cfg, err)
+	}
+
+	t.Setenv("WORKFLOW_CACHE_SIZE", "-1")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "WORKFLOW_CACHE_SIZE") {
+		t.Fatalf("Load() error = %v, want one naming WORKFLOW_CACHE_SIZE", err)
 	}
 }

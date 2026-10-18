@@ -21,6 +21,8 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
 
+const lockPoolMaxConns = 4
+
 func newAppPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgcommon.Pool, error) {
 	pool, err := pgcommon.NewPool(ctx, pgcommon.Config{
 		DSN:                cfg.DatabaseURL,
@@ -49,6 +51,19 @@ func newRelayPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pg
 	})
 	if err != nil {
 		return nil, fmt.Errorf("outbox relay db pool: %w", err)
+	}
+	return pool, nil
+}
+
+func newLockPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgcommon.Pool, error) {
+	pool, err := pgcommon.NewPool(ctx, pgcommon.Config{
+		DSN:      cfg.LockDSN(),
+		MaxConns: lockPoolMaxConns,
+		MinConns: 0,
+		Logger:   pglogger.New(log),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("lock db pool: %w", err)
 	}
 	return pool, nil
 }

@@ -25,6 +25,7 @@ type app struct {
 
 	appPool   *pgcommon.Pool
 	relayPool *pgcommon.Pool
+	lockPool  *pgcommon.Pool
 	cache     io.Closer
 
 	httpServer    *http.Server
@@ -112,6 +113,9 @@ func (a *app) stopServers(ctx context.Context) {
 	}
 	if err := a.relayPool.DrainAndClose(ctx); err != nil {
 		a.log.Warn("relay db pool drain timed out", map[string]any{"error": err.Error()})
+	}
+	if err := a.lockPool.DrainAndClose(ctx); err != nil {
+		a.log.Warn("lock db pool drain timed out", map[string]any{"error": err.Error()})
 	}
 	if err := a.cache.Close(); err != nil {
 		a.log.Error("valkey close error", map[string]any{"error": err.Error()})

@@ -19,7 +19,7 @@ import (
 
 func TestRecencyGuardRepo_ShouldApply_NoPriorRow_ReturnsTrue(t *testing.T) {
 	pool := fixtures.NewTestPool(t)
-	repo := postgres.NewRecencyGuardRepo(pool)
+	repo := postgres.NewRecencyGuardRepo(pool, pool)
 
 	should, err := repo.ShouldApply(context.Background(), "tenant:"+uuid.New().String(), time.Now())
 	require.NoError(t, err)
@@ -28,7 +28,7 @@ func TestRecencyGuardRepo_ShouldApply_NoPriorRow_ReturnsTrue(t *testing.T) {
 
 func TestRecencyGuardRepo_ShouldApply_TieResolvesToSkip(t *testing.T) {
 	pool := fixtures.NewTestPool(t)
-	repo := postgres.NewRecencyGuardRepo(pool)
+	repo := postgres.NewRecencyGuardRepo(pool, pool)
 	ctx := context.Background()
 	scopeKey := "tenant:" + uuid.New().String()
 	at := time.Now().Truncate(time.Second)
@@ -42,7 +42,7 @@ func TestRecencyGuardRepo_ShouldApply_TieResolvesToSkip(t *testing.T) {
 
 func TestRecencyGuardRepo_ShouldApply_OlderSkip_NewerApplies(t *testing.T) {
 	pool := fixtures.NewTestPool(t)
-	repo := postgres.NewRecencyGuardRepo(pool)
+	repo := postgres.NewRecencyGuardRepo(pool, pool)
 	ctx := context.Background()
 	scopeKey := "tenant:" + uuid.New().String()
 	base := time.Now().Truncate(time.Second)
@@ -60,7 +60,7 @@ func TestRecencyGuardRepo_ShouldApply_OlderSkip_NewerApplies(t *testing.T) {
 
 func TestRecencyGuardRepo_CheckAndCommit_AtomicSingleShot(t *testing.T) {
 	pool := fixtures.NewTestPool(t)
-	repo := postgres.NewRecencyGuardRepo(pool)
+	repo := postgres.NewRecencyGuardRepo(pool, pool)
 	ctx := context.Background()
 	scopeKey := "user_availability:" + uuid.New().String()
 	base := time.Now().Truncate(time.Second)
@@ -80,7 +80,7 @@ func TestRecencyGuardRepo_CheckAndCommit_AtomicSingleShot(t *testing.T) {
 
 func TestRecencyGuardRepo_CheckAndCommit_ConcurrentRace(t *testing.T) {
 	pool := fixtures.NewTestPool(t)
-	repo := postgres.NewRecencyGuardRepo(pool)
+	repo := postgres.NewRecencyGuardRepo(pool, pool)
 	ctx := context.Background()
 	scopeKey := "template:" + uuid.New().String()
 	base := time.Now().Truncate(time.Second)
@@ -112,7 +112,7 @@ func TestRecencyGuardRepo_CheckAndCommit_ConcurrentRace(t *testing.T) {
 
 func TestRecencyGuardRepo_WithLock_RunsFnAndPropagatesResult(t *testing.T) {
 	pool := fixtures.NewTestPool(t)
-	repo := postgres.NewRecencyGuardRepo(pool)
+	repo := postgres.NewRecencyGuardRepo(pool, pool)
 	ctx := context.Background()
 	scopeKey := "tenant:" + uuid.New().String()
 
@@ -137,7 +137,7 @@ func TestRecencyGuardRepo_WithLock_RunsFnAndPropagatesResult(t *testing.T) {
 // callers on DIFFERENT scope keys must not block each other at all.
 func TestRecencyGuardRepo_WithLock_SerializesSameScopeKey(t *testing.T) {
 	pool := fixtures.NewTestPool(t)
-	repo := postgres.NewRecencyGuardRepo(pool)
+	repo := postgres.NewRecencyGuardRepo(pool, pool)
 	ctx := context.Background()
 	scopeKey := "tenant:" + uuid.New().String()
 
@@ -179,7 +179,7 @@ func TestRecencyGuardRepo_WithLock_SerializesSameScopeKey(t *testing.T) {
 
 func TestRecencyGuardRepo_WithLock_DifferentScopeKeysDoNotBlock(t *testing.T) {
 	pool := fixtures.NewTestPool(t)
-	repo := postgres.NewRecencyGuardRepo(pool)
+	repo := postgres.NewRecencyGuardRepo(pool, pool)
 	ctx := context.Background()
 
 	release := make(chan struct{})
@@ -221,7 +221,7 @@ func TestRecencyGuardRepo_WithLock_DifferentScopeKeysDoNotBlock(t *testing.T) {
 
 func TestRecencyGuardRepo_Commit_IsMonotonic(t *testing.T) {
 	pool := fixtures.NewTestPool(t)
-	repo := postgres.NewRecencyGuardRepo(pool)
+	repo := postgres.NewRecencyGuardRepo(pool, pool)
 	ctx := context.Background()
 	scopeKey := "tenant:" + uuid.New().String()
 	newer := time.Now().Truncate(time.Second)

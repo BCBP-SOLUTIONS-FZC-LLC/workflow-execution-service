@@ -14,6 +14,8 @@ fullnameOverride: ""
 # old pod gone before the new one starts). Environments intentionally
 # running at replicas:1 must delete the PDB manually first.
 api:
+  # GOMEMLIMIT for the API process; empty leaves the Go default.
+  goMemLimit: ""
   replicas: 2
   httpPort: 8080
   metricsPort: 9091  # /metrics only — served on its own http.Server (cmd/server/wire.go)
@@ -40,6 +42,8 @@ api:
     targetRPSPerReplica: ""
 
 worker:
+  # GOMEMLIMIT for the worker process, for example 200MiB under a 256Mi limit; empty leaves the Go default.
+  goMemLimit: ""
   replicas: 2
   healthPort: 8081
   metricsPort: 8082  # /metrics only — served on its own http.Server (cmd/worker/health.go's newMetricsServer)
@@ -189,6 +193,16 @@ env:
   tokenServiceBaseURL: ""
   outboxPollInterval: 500ms
   outboxBatchSize: "50"
+  # Per-process Postgres pool ceiling. A worker runs up to 1,000 concurrent activities (200 per tenant
+  # queue), so a value near the busiest activity concurrency avoids waiting on a connection.
+  pgMaxConns: "10"
+  # true when DATABASE_URL points at PgBouncer (simple protocol, transaction-local GUCs); then
+  # secret.secretValues.LOCK_DATABASE_URL is required.
+  pgBouncerMode: "false"
+  queueTopologyPollInterval: 60s
+  # Temporal sticky workflow cache entries per worker process; 0 keeps the SDK default of 10,000, which
+  # does not fit a small memory limit.
+  workflowCacheSize: "0"
   # Tenant statuses (comma-separated) for which POST /instances answers 409 TENANT_NOT_ACTIVE:
   # trial, active, past_due, cancelled, suspended, trial_expired, offboarded. Empty refuses nothing.
   startRefusedStatuses: ""
@@ -207,6 +221,10 @@ secret:
   existingSecretName: ""
   secretValues:
     DATABASE_URL: ""
+    # A direct (not pooled) DSN for the migration job's advisory locks; required when DATABASE_URL points at PgBouncer.
+    MIGRATION_DATABASE_URL: ""
+    # A direct (not pooled) DSN for the tenant-event advisory lock; required outside dev when PG_BOUNCER_MODE is true.
+    LOCK_DATABASE_URL: ""
     VALKEY_ADDR: ""
     VALKEY_PASSWORD: ""
     TEMPORAL_HOST_PORT: ""

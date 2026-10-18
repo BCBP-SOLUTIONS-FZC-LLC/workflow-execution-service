@@ -143,7 +143,7 @@ func buildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, definitio
 	outboxRepo := postgres.NewOutboxRepo(pool)
 	overrides := postgres.NewAssigneeOverrideRepo(pool)
 	processedEvents := postgres.NewProcessedEventRepo(pool)
-	recency := postgres.NewRecencyGuardRepo(pool)
+	recency := postgres.NewRecencyGuardRepo(pool, pool)
 	queues := postgres.NewActiveTaskQueueRepo(pool)
 	transactor := postgres.NewTransactor(pool)
 

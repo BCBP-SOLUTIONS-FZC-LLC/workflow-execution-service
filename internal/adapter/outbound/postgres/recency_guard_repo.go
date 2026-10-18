@@ -18,11 +18,12 @@ import (
 var _ port.RecencyGuard = (*RecencyGuardRepo)(nil)
 
 type RecencyGuardRepo struct {
-	pool *pgcommon.Pool
+	pool     *pgcommon.Pool
+	lockPool *pgcommon.Pool
 }
 
-func NewRecencyGuardRepo(pool *pgcommon.Pool) *RecencyGuardRepo {
-	return &RecencyGuardRepo{pool: pool}
+func NewRecencyGuardRepo(pool, lockPool *pgcommon.Pool) *RecencyGuardRepo {
+	return &RecencyGuardRepo{pool: pool, lockPool: lockPool}
 }
 
 func (r *RecencyGuardRepo) ShouldApply(ctx context.Context, scopeKey string, eventTime time.Time) (bool, error) {
@@ -71,7 +72,7 @@ func (r *RecencyGuardRepo) Commit(ctx context.Context, scopeKey string, eventTim
 }
 
 func (r *RecencyGuardRepo) WithLock(ctx context.Context, scopeKey string, fn func(context.Context) error) error {
-	err := r.pool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+	err := r.lockPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
 		if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock(hashtext($1))", scopeKey); err != nil {
 			return fmt.Errorf("acquire advisory lock: %w", err)
 		}

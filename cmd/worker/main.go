@@ -76,6 +76,10 @@ func main() {
 	}
 	defer sdk.Close()
 
+	if cfg.WorkflowCacheSize > 0 {
+		worker.SetStickyWorkflowCacheSize(cfg.WorkflowCacheSize)
+	}
+
 	registry := newWorkerRegistry()
 	defaultWorker, err := startWorkerForQueue(sdk, deps, cfg.TemporalTaskQueue, worker.Options{WorkerStopTimeout: 25 * time.Second, Interceptors: []interceptor.WorkerInterceptor{observability.NewTemporalMetricsInterceptor()}})
 	if err != nil {

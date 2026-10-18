@@ -556,6 +556,7 @@ func TestPauseInstance_ErrorCodes(t *testing.T) {
 	}{
 		{"NotFound", port.ErrInstanceNotFound, http.StatusNotFound, "INSTANCE_NOT_FOUND"},
 		{"InvalidInstanceState", port.ErrInvalidInstanceState, http.StatusConflict, "INVALID_INSTANCE_STATE"},
+		{"ExecutionNoLongerRunning", fmt.Errorf("signal stage-transition: %w", port.ErrWorkflowNotFound), http.StatusConflict, "INVALID_INSTANCE_STATE"},
 		{"RecordVersionConflict", port.ErrRecordVersionConflict, http.StatusConflict, "RECORD_VERSION_CONFLICT"},
 	}
 	for _, tc := range cases {
