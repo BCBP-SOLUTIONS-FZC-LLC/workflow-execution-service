@@ -90,11 +90,11 @@ func seedPurgeTenant(t *testing.T, superPool *pgcommon.Pool, tenantID uuid.UUID,
 	}))
 }
 
-func TestTenantPurge_DeletesADueTenantChildFirstAndLeavesEveryoneElse(t *testing.T) {
+func TestTenantPurge_AsTheTenantUnderRLSDeletesADueTenantChildFirstAndLeavesEveryoneElse(t *testing.T) {
 	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
-	relayPool := newOutboxRelayRolePool(t, superPool, superDSN)
+	appPool := newAppRolePool(t, superPool, superDSN)
 	ctx := context.Background()
-	repo := postgres.NewTenantRetentionRepo(relayPool)
+	repo := postgres.NewTenantRetentionRepo(appPool)
 
 	due, notDue, neverOffboarded := uuid.New(), uuid.New(), uuid.New()
 	for _, tenant := range []uuid.UUID{due, notDue, neverOffboarded} {
@@ -134,9 +134,9 @@ func TestTenantPurge_DeletesADueTenantChildFirstAndLeavesEveryoneElse(t *testing
 
 func TestTenantPurge_LeavesTheAuditTrailAlone(t *testing.T) {
 	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
-	relayPool := newOutboxRelayRolePool(t, superPool, superDSN)
+	appPool := newAppRolePool(t, superPool, superDSN)
 	ctx := context.Background()
-	repo := postgres.NewTenantRetentionRepo(relayPool)
+	repo := postgres.NewTenantRetentionRepo(appPool)
 	tenant := uuid.New()
 	seedPurgeTenant(t, superPool, tenant, 1, 1)
 	require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {

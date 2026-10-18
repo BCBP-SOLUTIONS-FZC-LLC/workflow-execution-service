@@ -96,6 +96,7 @@ var tenantPurgeSteps = []purgeStep{
 
 func (r *TenantRetentionRepo) PurgeBatch(ctx context.Context, tenantID uuid.UUID, limit int) (map[string]int64, error) {
 	deleted := map[string]int64{}
+	ctx = withTenantGUC(ctx, tenantID)
 	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
 		q := db.New(dbtx)
 		for _, step := range tenantPurgeSteps {

@@ -128,7 +128,7 @@ func newApp(cfg *config.Config) (*app, error) {
 
 	var tenantPurger *service.TenantPurger
 	if cfg.TenantPurgeEnabled {
-		purgeRepo := postgres.NewTenantRetentionRepo(relayPool)
+		purgeRepo := postgres.NewTenantRetentionRepo(appPool)
 		tenantPurger = service.NewTenantPurger(service.TenantPurgerDeps{
 			Retention: purgeRepo,
 			Data:      purgeRepo,
