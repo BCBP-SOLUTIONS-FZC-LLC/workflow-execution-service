@@ -94,14 +94,18 @@ func (s *TenantLifecycleReconciler) signalAllNonTerminal(ctx context.Context, te
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, inst := range instances {
 		if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, signalName, adminSignalWire{
 			Initiator: domain.InitiatorTenantState, RecordVersion: inst.RecordVersion,
 		}); err != nil {
 			s.logger().Warn("tenant lifecycle: failed to signal instance", map[string]any{"instance_id": inst.ID, "signal": signalName, "error": err.Error()})
+			if !errors.Is(err, port.ErrWorkflowNotFound) {
+				failures = append(failures, err)
+			}
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func (s *TenantLifecycleReconciler) terminateAllNonTerminal(ctx context.Context, tenantID uuid.UUID) error {

@@ -263,3 +263,14 @@ func TestClient_QueryWorkflow(t *testing.T) {
 		assert.Contains(t, err.Error(), "bad payload")
 	})
 }
+
+func TestClient_SignalWorkflow_AMissingExecutionIsReportedAsNotFound(t *testing.T) {
+	sdk := &fakeSDKClient{
+		signalWorkflowFunc: func(context.Context, string, string, string, interface{}) error {
+			return serviceerror.NewNotFound("workflow execution already completed")
+		},
+	}
+	err := temporalclient.New(sdk).SignalWorkflow(context.Background(), "tenant:biz-key", uuid.New(), "instance-pause", nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, port.ErrWorkflowNotFound)
+}

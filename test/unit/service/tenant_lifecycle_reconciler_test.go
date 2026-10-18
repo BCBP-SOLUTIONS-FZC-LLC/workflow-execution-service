@@ -3,6 +3,8 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -151,7 +153,7 @@ func TestTenantLifecycleReconciler_Apply_StatusTransitions(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("a signal failure during the tenant-wide sweep is logged, not returned", func(t *testing.T) {
+	t.Run("a signal failure during the tenant-wide sweep is logged and returned", func(t *testing.T) {
 		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
 		log := &fakeLogger{}
 		svc.Log = log
@@ -161,7 +163,7 @@ func TestTenantLifecycleReconciler_Apply_StatusTransitions(t *testing.T) {
 		instances.byID[running.ID] = running
 
 		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"})
-		require.NoError(t, err)
+		require.ErrorIs(t, err, assert.AnError)
 		assert.NotEmpty(t, log.warnCalls)
 	})
 
@@ -456,4 +458,42 @@ func TestTenantLifecycleReconciler_AnUnknownOrEmptyPreviousStatusStillAppliesThe
 		require.Len(t, temporal.signals, 1)
 		assert.Equal(t, tc.want, temporal.signals[0].SignalName)
 	}
+}
+
+func TestTenantLifecycleReconciler_AFailedPauseOrResumeSignalIsReturnedSoTheEventIsRedelivered(t *testing.T) {
+	for _, tc := range []struct{ name, status, previous string }{
+		{"resume", "active", "suspended"},
+		{"pause", "suspended", "active"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+			tenantID := uuid.New()
+			for _, wfID := range []string{"tenant:a", "tenant:b"} {
+				inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: wfID, RecordVersion: 1}
+				instances.byID[inst.ID] = inst
+			}
+			temporal.signalFunc = func(_ context.Context, wfID string, _ uuid.UUID, _ string, _ any) error {
+				if wfID == "tenant:a" {
+					return errors.New("temporal unavailable")
+				}
+				return nil
+			}
+
+			err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: tc.status, PreviousStatus: tc.previous})
+			require.Error(t, err, "one instance was not signalled, so the event must not be acknowledged")
+			assert.Len(t, temporal.signals, 2, "every instance is still attempted")
+		})
+	}
+}
+
+func TestTenantLifecycleReconciler_ASignalToAWorkflowThatNoLongerExistsIsNotAnError(t *testing.T) {
+	svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+	tenantID := uuid.New()
+	inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:gone", RecordVersion: 1}
+	instances.byID[inst.ID] = inst
+	temporal.signalFunc = func(context.Context, string, uuid.UUID, string, any) error {
+		return fmt.Errorf("signal workflow: %w", port.ErrWorkflowNotFound)
+	}
+
+	require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"}))
 }

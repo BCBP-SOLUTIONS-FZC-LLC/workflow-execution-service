@@ -52,6 +52,10 @@ func (c *Client) StartWorkflow(ctx context.Context, in port.StartWorkflowInput) 
 func (c *Client) SignalWorkflow(ctx context.Context, temporalWorkflowID string, instanceID uuid.UUID, signalName string, payload any) error {
 	channelName := signalName + ":" + instanceID.String()
 	if err := c.sdk.SignalWorkflow(ctx, temporalWorkflowID, "", channelName, payload); err != nil {
+		var notFound *serviceerror.NotFound
+		if errors.As(err, &notFound) {
+			return fmt.Errorf("signal workflow %q: %w: %w", channelName, port.ErrWorkflowNotFound, err)
+		}
 		return fmt.Errorf("signal workflow %q: %w", channelName, err)
 	}
 	return nil

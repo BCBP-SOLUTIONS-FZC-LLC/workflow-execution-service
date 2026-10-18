@@ -18,6 +18,7 @@ var (
 	ErrIdempotencyKeyReplay = errors.New("idempotency key replay with different payload")
 
 	ErrInstanceNotFound        = errors.New("instance not found")
+	ErrWorkflowNotFound        = errors.New("workflow execution not found")
 	ErrTargetNodeNotFound      = errors.New("target node not found in the compiled plan")
 	ErrDuplicateBusinessKey    = errors.New("business key already active for this subject")
 	ErrVersionNotPublished     = errors.New("workflow version is not published")

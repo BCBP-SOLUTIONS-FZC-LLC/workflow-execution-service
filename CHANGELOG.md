@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- A failed pause or resume signal during a tenant status change was logged and the event acknowledged, so a Temporal outage for a moment could leave a suspended tenant's instances running or a resumed tenant's instances paused. Every sweep returns its failures after trying every instance and the event is redelivered; a signal to an execution that no longer exists is not a failure.
 - Tenant offboarding failed only the first 100 tasks of an instance, and a failed termination was logged while the event was recorded as processed, so nothing retried it. Every open task is failed, each instance is attempted, and a database failure fails the event so it is redelivered.
 - Admin terminate and the offboarding sweep wrote the instance as terminated and then closed the workflow execution, so a failed close left a TERMINATED row over a running workflow that no retry could reach. The execution is closed first, a close of an already-closed execution succeeds, the database write re-reads the instance, and the execution is closed once more after the write. Instance creation closes the execution it started if the row was terminated meanwhile.
 - The instance detail, its event list and an outside party's answer decided access from the first 100 tasks, and the detail returned only 100. Visibility uses the instance list's own rule through an `instance_id` filter, and the detail returns every task.
