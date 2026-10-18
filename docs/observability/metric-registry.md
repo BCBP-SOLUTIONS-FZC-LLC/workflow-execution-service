@@ -64,7 +64,7 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 | `workflow_execution_service_wf_cache_hits_total` | counter | - | Total compiled-plan cache hits. |
 | `workflow_execution_service_wf_cache_misses_total` | counter | - | Total compiled-plan cache misses. |
 | `workflow_execution_service_worker_active_queues` | gauge | - | Live count of dynamically-registered worker.Worker instances. |
-| `workflow_execution_service_worker_queue_last_poll_timestamp` | gauge | `queue` | Unix timestamp of the last successful poll on a tenant-isolated task queue. |
+| `workflow_execution_service_worker_queue_last_poll_timestamp` | gauge | `queue` | Unix time of the last topology poll in which this process served the task queue (set on every poll for every queue it runs a worker for, not a measure of the Temporal long poll itself). |
 | `workflow_execution_service_workflow_activity_duration_seconds` | histogram | `activity_name`, `outcome` | Per-Activity execution latency, by activity_name and outcome. |
 | `workflow_execution_service_workflow_replay_failures_total` | counter | `workflow_type` | Total Temporal workflow replay/non-determinism failures, by workflow_type. |
 

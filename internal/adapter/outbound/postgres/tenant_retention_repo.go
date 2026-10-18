@@ -87,9 +87,6 @@ var tenantPurgeSteps = []purgeStep{
 	{"active_task_queues", func(ctx context.Context, q *db.Queries, t uuid.UUID, _ int32) (int64, error) {
 		return q.PurgeTenantQueues(ctx, t)
 	}},
-	{"tenant_state", func(ctx context.Context, q *db.Queries, t uuid.UUID, _ int32) (int64, error) {
-		return q.PurgeTenantState(ctx, t)
-	}},
 	{"event_recency_guard", func(ctx context.Context, q *db.Queries, t uuid.UUID, n int32) (int64, error) {
 		return q.PurgeTenantRecencyGuards(ctx, db.PurgeTenantRecencyGuardsParams{
 			ScopeKey: "tenant:" + t.String(), ScopeKey_2: "user_availability:" + t.String() + ":%", Limit: n,

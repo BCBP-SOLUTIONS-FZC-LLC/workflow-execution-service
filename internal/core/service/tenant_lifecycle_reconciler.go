@@ -38,6 +38,9 @@ func (s *TenantLifecycleReconciler) logger() port.Logger {
 }
 
 func (s *TenantLifecycleReconciler) Apply(ctx context.Context, in port.TenantLifecycleInput) error {
+	if err := s.recordStatus(ctx, in); err != nil {
+		return err
+	}
 	if in.Status != in.PreviousStatus {
 		if err := s.applyStatusTransition(ctx, in); err != nil {
 			return err
@@ -48,7 +51,7 @@ func (s *TenantLifecycleReconciler) Apply(ctx context.Context, in port.TenantLif
 			return err
 		}
 	}
-	return s.recordStatus(ctx, in)
+	return nil
 }
 
 func (s *TenantLifecycleReconciler) recordStatus(ctx context.Context, in port.TenantLifecycleInput) error {

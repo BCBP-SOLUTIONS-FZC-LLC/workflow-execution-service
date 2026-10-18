@@ -73,6 +73,9 @@ spec:
             - name: WORKFLOW_CACHE_SIZE
               value: {{ .Values.env.workflowCacheSize | quote }}
             {{- with .Values.worker.goMemLimit }}
+            {{- if not (regexMatch "^[0-9]+(B|KiB|MiB|GiB|TiB)$" (toString .)) }}
+            {{- fail "worker.goMemLimit must carry a unit, for example 200MiB: a bare number is bytes" }}
+            {{- end }}
             - name: GOMEMLIMIT
               value: {{ . | quote }}
             {{- end }}

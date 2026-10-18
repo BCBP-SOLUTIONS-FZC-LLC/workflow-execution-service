@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/temporal"
@@ -20,6 +21,8 @@ import (
 	outboundtemporal "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability/obstest"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl/dsltest"
 )
@@ -176,4 +179,26 @@ func TestGetCompiledPlan_PlanOverTheStageBudget_IsNonRetryable(t *testing.T) {
 	_, err := readPlan(planDeps(t, sizedPlan(domain.MaxPlanStages+1)))
 	requireNonRetryable(t, err)
 	assert.ErrorIs(t, err, dsl.ErrPlanTooLarge)
+}
+
+func TestGetCompiledPlan_ATransientFailureCountsAsADefinitionDependencyError(t *testing.T) {
+	obstest.Init(t)
+	counter := observability.UpstreamDependencyErrorsTotal.WithLabelValues("definition_service")
+	before := testutil.ToFloat64(counter)
+
+	_, err := readPlan(planServer(t, http.StatusServiceUnavailable, `{}`))
+	require.Error(t, err)
+
+	assert.Equal(t, before+1, testutil.ToFloat64(counter), "the activity retries without limit, so each failed read must show on the upstream error alert")
+}
+
+func TestGetCompiledPlan_ARejectionIsNotADependencyError(t *testing.T) {
+	obstest.Init(t)
+	counter := observability.UpstreamDependencyErrorsTotal.WithLabelValues("definition_service")
+	before := testutil.ToFloat64(counter)
+
+	_, err := readPlan(planServer(t, http.StatusNotFound, `{}`))
+	require.Error(t, err)
+
+	assert.Equal(t, before, testutil.ToFloat64(counter))
 }

@@ -10,8 +10,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
@@ -233,4 +236,68 @@ func TestRecencyGuardRepo_Commit_IsMonotonic(t *testing.T) {
 	should, err := repo.ShouldApply(ctx, scopeKey, older)
 	require.NoError(t, err)
 	assert.False(t, should, "committing an older value after a newer one must not lower the stored value")
+}
+
+func TestRecencyGuardRepo_WithLock_WaitersForOneScopeDoNotStarveOtherScopes(t *testing.T) {
+	_, dsn := fixtures.NewTestPoolAndDSN(t)
+	lockPool, err := pgcommon.NewPool(context.Background(), pgcommon.Config{DSN: dsn, MaxConns: 2})
+	require.NoError(t, err)
+	t.Cleanup(lockPool.Close)
+	repo := postgres.NewRecencyGuardRepo(lockPool, lockPool)
+	ctx := context.Background()
+	busy, other := "tenant:"+uuid.NewString(), "tenant:"+uuid.NewString()
+
+	holding := make(chan struct{})
+	release := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_ = repo.WithLock(ctx, busy, func(context.Context) error {
+			close(holding)
+			<-release
+			return nil
+		})
+	}()
+	<-holding
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			_ = repo.WithLock(waitCtx, busy, func(context.Context) error { return nil })
+		}()
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	otherCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	err = repo.WithLock(otherCtx, other, func(context.Context) error { return nil })
+	close(release)
+	wg.Wait()
+
+	require.NoError(t, err, "an event for another tenant must not wait behind three queued events for a busy one, whatever the lock pool size")
+}
+
+func TestRecencyGuardRepo_WithLock_ALockConnectionThatDiesLeavesNoLockAndIsNotReused(t *testing.T) {
+	superPool, dsn := fixtures.NewTestPoolAndDSN(t)
+	lockPool, err := pgcommon.NewPool(context.Background(), pgcommon.Config{DSN: dsn, MaxConns: 1})
+	require.NoError(t, err)
+	t.Cleanup(lockPool.Close)
+	repo := postgres.NewRecencyGuardRepo(lockPool, lockPool)
+	ctx := context.Background()
+	key := "tenant:" + uuid.NewString()
+
+	err = repo.WithLock(ctx, key, func(context.Context) error {
+		return superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+			_, err := conn.Exec(ctx, `SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid <> pg_backend_pid()`)
+			return err
+		})
+	})
+	require.NoError(t, err, "the handler's own result is returned; a failed release is not its error")
+
+	again, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	require.NoError(t, repo.WithLock(again, key, func(context.Context) error { return nil }), "the next call must get a working connection")
 }

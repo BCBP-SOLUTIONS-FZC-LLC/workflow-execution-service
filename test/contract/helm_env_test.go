@@ -65,3 +65,43 @@ func TestHelmSecret_RefusesARenderWithoutTheValkeyAddress(t *testing.T) {
 	require.Error(t, err, "a Secret without VALKEY_ADDR renders a pod that cannot start")
 	assert.Contains(t, string(out), "VALKEY_ADDR")
 }
+
+func helmRender(t *testing.T, extra ...string) (string, error) {
+	t.Helper()
+	helm, err := exec.LookPath("helm")
+	if err != nil {
+		t.Skip("helm is not installed")
+	}
+	args := []string{"template", "x", "../../deploy/helm"}
+	for _, key := range []string{"DATABASE_URL", "TEMPORAL_HOST_PORT", "VALKEY_ADDR", "INTERNAL_API_TOKEN", "DEFINITION_SERVICE_TOKEN", "OUTBOX_RELAY_DATABASE_URL", "SNS_TOPIC_ARN", "OPENBAO_TOKEN"} {
+		args = append(args, "--set-string", "secret.secretValues."+key+"=placeholder")
+	}
+	args = append(args, "--set-string", "env.eligibilityBaseURL=http://eligibility.invalid", "--set-string", "env.tokenServiceBaseURL=http://token-service.invalid")
+	args = append(args, extra...)
+	out, err := exec.Command(helm, args...).CombinedOutput()
+	return string(out), err
+}
+
+func TestHelmSecret_BehindAPoolerItNeedsTheDirectLockAndMigrationAddresses(t *testing.T) {
+	out, err := helmRender(t, "--set-string", "env.pgBouncerMode=true")
+	require.Error(t, err, "a pooled deployment without direct addresses would take its session locks through the pooler")
+	assert.Contains(t, out, "LOCK_DATABASE_URL")
+
+	out, err = helmRender(t, "--set-string", "env.pgBouncerMode=true", "--set-string", "secret.secretValues.LOCK_DATABASE_URL=postgres://direct")
+	require.Error(t, err)
+	assert.Contains(t, out, "MIGRATION_DATABASE_URL")
+
+	_, err = helmRender(t, "--set-string", "env.pgBouncerMode=true",
+		"--set-string", "secret.secretValues.LOCK_DATABASE_URL=postgres://direct",
+		"--set-string", "secret.secretValues.MIGRATION_DATABASE_URL=postgres://direct")
+	require.NoError(t, err)
+}
+
+func TestHelmDeployments_AGoMemLimitMustCarryAUnit(t *testing.T) {
+	out, err := helmRender(t, "--set-string", "worker.goMemLimit=200")
+	require.Error(t, err, "GOMEMLIMIT=200 means 200 bytes")
+	assert.Contains(t, out, "goMemLimit")
+
+	_, err = helmRender(t, "--set-string", "worker.goMemLimit=200MiB", "--set-string", "api.goMemLimit=1GiB")
+	require.NoError(t, err)
+}

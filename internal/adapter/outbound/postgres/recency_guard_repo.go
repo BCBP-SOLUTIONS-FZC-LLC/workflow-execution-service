@@ -71,18 +71,49 @@ func (r *RecencyGuardRepo) Commit(ctx context.Context, scopeKey string, eventTim
 	})
 }
 
+const (
+	lockRetryInterval  = 50 * time.Millisecond
+	lockReleaseTimeout = 5 * time.Second
+)
+
 func (r *RecencyGuardRepo) WithLock(ctx context.Context, scopeKey string, fn func(context.Context) error) error {
+	for {
+		acquired, err := r.withLockOnce(ctx, scopeKey, fn)
+		if err != nil {
+			return fmt.Errorf("recency guard: with lock: %w", err)
+		}
+		if acquired {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("recency guard: with lock: waiting for %q: %w", scopeKey, ctx.Err())
+		case <-time.After(lockRetryInterval):
+		}
+	}
+}
+
+func (r *RecencyGuardRepo) withLockOnce(ctx context.Context, scopeKey string, fn func(context.Context) error) (bool, error) {
+	var acquired bool
+	var fnErr error
 	err := r.lockPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
-		if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock(hashtext($1))", scopeKey); err != nil {
+		if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtext($1))", scopeKey).Scan(&acquired); err != nil {
 			return fmt.Errorf("acquire advisory lock: %w", err)
 		}
-		defer func() {
-			_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(hashtext($1))", scopeKey)
-		}()
-		return fn(ctx)
+		if !acquired {
+			return nil
+		}
+		fnErr = fn(ctx)
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lockReleaseTimeout)
+		defer cancel()
+		var released bool
+		if err := conn.QueryRow(releaseCtx, "SELECT pg_advisory_unlock(hashtext($1))", scopeKey).Scan(&released); err != nil || !released {
+			_ = conn.Conn().Close(context.WithoutCancel(ctx))
+		}
+		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("recency guard: with lock: %w", err)
+		return false, fmt.Errorf("lock connection: %w", err)
 	}
-	return nil
+	return acquired, fnErr
 }

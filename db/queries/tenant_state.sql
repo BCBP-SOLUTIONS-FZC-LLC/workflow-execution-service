@@ -7,6 +7,3 @@ WHERE EXCLUDED.changed_at >= tenant_state.changed_at;
 
 -- name: GetTenantState :one
 SELECT status FROM tenant_state WHERE tenant_id = $1;
-
--- name: PurgeTenantState :execrows
-DELETE FROM tenant_state WHERE tenant_id = $1;

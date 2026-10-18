@@ -65,6 +65,5 @@ SELECT (
     OR EXISTS (SELECT 1 FROM connector_document_attempts da WHERE da.tenant_id = @tenant_text::text)
     OR EXISTS (SELECT 1 FROM connector_send_intents s WHERE s.tenant_id = @tenant_text::text)
     OR EXISTS (SELECT 1 FROM active_task_queues q WHERE q.tenant_id = @tenant_id::uuid)
-    OR EXISTS (SELECT 1 FROM tenant_state ts WHERE ts.tenant_id = @tenant_id::uuid)
     OR EXISTS (SELECT 1 FROM event_recency_guard g WHERE g.scope_key = @tenant_scope::text OR g.scope_key LIKE @user_scope::text)
 )::boolean AS has_rows;

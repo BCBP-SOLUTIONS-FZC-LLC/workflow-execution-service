@@ -10,6 +10,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -28,6 +29,7 @@ func (d *Deps) GetCompiledPlan(ctx context.Context, in port.GetCompiledPlanInput
 		if errors.Is(err, port.ErrDefinitionRejected) {
 			return port.GetCompiledPlanOutput{}, nonRetryable("DefinitionServiceClientError", err)
 		}
+		observability.IncCounterVec(observability.UpstreamDependencyErrorsTotal, "definition_service")
 		return port.GetCompiledPlanOutput{}, fmt.Errorf("get compiled workflow: %w", err)
 	}
 	if cw.Status != "PUBLISHED" {

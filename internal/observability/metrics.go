@@ -122,7 +122,7 @@ func registerServiceMetrics() {
 		"Age in seconds of the longest-parked DEGRADED instance."))
 	WorkerQueueLastPollTimestamp = must(gincommon.NewGaugeVec(nil,
 		"workflow_execution_service_worker_queue_last_poll_timestamp",
-		"Unix timestamp of the last successful poll on a tenant-isolated task queue.", "queue"))
+		"Unix time of the last topology poll in which this process served the task queue (set on every poll for every queue it runs a worker for, not a measure of the Temporal long poll itself).", "queue"))
 	InstancesByQueue = must(gincommon.NewGaugeVec(nil,
 		"workflow_execution_service_instances_by_queue",
 		"Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue, sampled by the API process. A queue with none is absent.",
@@ -205,9 +205,22 @@ func RecordOperationalStats(degraded int64, oldestDegradedAgeSeconds, oldestRead
 	SetGauge(InstanceDegradedOldestAgeSeconds, oldestDegradedAgeSeconds)
 	SetGauge(OldestReadyTaskAgeSeconds, oldestReadyTaskAgeSeconds)
 	if InstancesByQueue != nil {
-		InstancesByQueue.Reset()
+		instancesByQueueMu.Lock()
+		defer instancesByQueueMu.Unlock()
+		for queue := range instancesByQueueSeen {
+			if _, still := instancesByQueue[queue]; !still {
+				InstancesByQueue.DeleteLabelValues(queue)
+				delete(instancesByQueueSeen, queue)
+			}
+		}
 		for queue, n := range instancesByQueue {
 			InstancesByQueue.WithLabelValues(queue).Set(float64(n))
+			instancesByQueueSeen[queue] = struct{}{}
 		}
 	}
 }
+
+var (
+	instancesByQueueMu   sync.Mutex
+	instancesByQueueSeen = map[string]struct{}{}
+)

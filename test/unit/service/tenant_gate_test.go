@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 )
@@ -124,4 +125,20 @@ func TestTenantLifecycleReconciler_AFailureToRecordTheStatusIsReturned(t *testin
 	svc, _, _, _, _, _, _ := newTenantLifecycleHarness()
 	svc.States = &fakeTenantStates{recErr: errors.New("db down")}
 	require.Error(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "suspended", PreviousStatus: "active"}))
+}
+
+func TestTenantLifecycleReconciler_TheStatusIsRecordedEvenWhenASignalFails(t *testing.T) {
+	svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+	states := &fakeTenantStates{}
+	svc.States = states
+	tenantID := uuid.New()
+	inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:a", RecordVersion: 1}
+	instances.byID[inst.ID] = inst
+	temporal.signalFunc = func(context.Context, string, uuid.UUID, string, any) error { return errors.New("temporal unavailable") }
+
+	err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"})
+
+	require.Error(t, err, "the failed signal still fails the event so it is redelivered")
+	require.Len(t, states.recorded, 1, "a suspended tenant must not keep starting instances while its pause is retried")
+	assert.Equal(t, "suspended", states.recorded[0].status)
 }

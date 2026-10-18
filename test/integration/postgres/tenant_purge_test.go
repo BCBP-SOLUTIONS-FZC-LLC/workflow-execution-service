@@ -23,7 +23,7 @@ import (
 var purgeTables = []string{
 	"assignee_overrides", "workflow_task_assignment", "workflow_task", "workflow_instance",
 	"connector_documents", "connector_document_attempts", "connector_send_intents",
-	"active_task_queues", "tenant_state", "event_recency_guard",
+	"active_task_queues", "event_recency_guard",
 }
 
 func countRows(t *testing.T, pool *pgcommon.Pool, table string, tenantID uuid.UUID) int {
@@ -134,6 +134,8 @@ func TestTenantPurge_AsTheTenantUnderRLSDeletesADueTenantChildFirstAndLeavesEver
 	}
 	assert.EqualValues(t, 3, recorded["workflow_instance"])
 	assert.EqualValues(t, 12, recorded["workflow_task"])
+
+	assert.Equal(t, 1, countRows(t, superPool, "tenant_state", due), "the recorded status stays as a marker, so the start gate still sees an offboarded tenant after its rows are gone")
 
 	var purgedAt *time.Time
 	require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {

@@ -95,6 +95,9 @@ spec:
             - name: PG_BOUNCER_MODE
               value: {{ .Values.env.pgBouncerMode | quote }}
             {{- with .Values.api.goMemLimit }}
+            {{- if not (regexMatch "^[0-9]+(B|KiB|MiB|GiB|TiB)$" (toString .)) }}
+            {{- fail "api.goMemLimit must carry a unit, for example 200MiB: a bare number is bytes" }}
+            {{- end }}
             - name: GOMEMLIMIT
               value: {{ . | quote }}
             {{- end }}

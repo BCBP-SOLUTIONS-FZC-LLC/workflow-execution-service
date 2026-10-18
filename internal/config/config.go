@@ -366,8 +366,8 @@ func (c *Config) validate() error {
 	if c.WorkflowCacheSize < 0 {
 		return fmt.Errorf("WORKFLOW_CACHE_SIZE must be >= 0")
 	}
-	if c.QueueTopologyPollInterval <= 0 {
-		return fmt.Errorf("QUEUE_TOPOLOGY_POLL_INTERVAL must be > 0")
+	if c.QueueTopologyPollInterval <= 0 || c.QueueTopologyPollInterval > 2*time.Minute {
+		return fmt.Errorf("QUEUE_TOPOLOGY_POLL_INTERVAL must be > 0 and at most 2m: the queue polling alerts treat a queue unpolled for 5 minutes as stalled")
 	}
 	return nil
 }
