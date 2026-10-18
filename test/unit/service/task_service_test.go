@@ -288,11 +288,43 @@ func TestTaskService_Claim(t *testing.T) {
 	})
 }
 
+func TestTaskService_Complete_RefusesAnInstanceThatIsNotRunning(t *testing.T) {
+	for _, status := range []domain.InstanceStatus{domain.InstanceStatusPaused, domain.InstanceStatusCompleted, domain.InstanceStatusTerminated, domain.InstanceStatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+			tenantID, instanceID := uuid.New(), uuid.New()
+			instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: status}
+			task := newReadyTask(tenantID, instanceID)
+			tasks.byID[task.ID] = task
+			userID := uuid.New()
+			assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+			_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)
+			assert.ErrorIs(t, err, port.ErrInvalidInstanceState, "a completion the workflow would drop must not be acknowledged")
+			assert.Empty(t, temporal.signals)
+		})
+	}
+}
+
+func TestTaskService_Complete_AcceptsADegradedInstance(t *testing.T) {
+	svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+	tenantID, instanceID := uuid.New(), uuid.New()
+	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusDegraded}
+	task := newReadyTask(tenantID, instanceID)
+	tasks.byID[task.ID] = task
+	userID := uuid.New()
+	assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+	_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)
+	require.NoError(t, err)
+	assert.Len(t, temporal.signals, 1)
+}
+
 func TestTaskService_Complete(t *testing.T) {
 	t.Run("success signals stage-transition with the right node parts", func(t *testing.T) {
 		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
 		tenantID, instanceID := uuid.New(), uuid.New()
-		inst := &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		inst := &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 		instances.byID[instanceID] = inst
 		task := newReadyTask(tenantID, instanceID)
 		tasks.byID[task.ID] = task
@@ -357,7 +389,7 @@ func TestTaskService_Complete(t *testing.T) {
 		tasks := newFakeTaskRepo()
 		assignments := newFakeAssignmentRepo()
 		tenantID, instanceID := uuid.New(), uuid.New()
-		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID}
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning}
 		task := newReadyTask(tenantID, instanceID)
 		tasks.byID[task.ID] = task
 		userID := uuid.New()
@@ -376,7 +408,7 @@ func TestTaskService_Complete(t *testing.T) {
 	t.Run("multi-assignee lead may complete", func(t *testing.T) {
 		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
 		tenantID, instanceID := uuid.New(), uuid.New()
-		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 		task := newReadyTask(tenantID, instanceID)
 		task.AssigneeMode = "all"
 		tasks.byID[task.ID] = task
@@ -392,7 +424,7 @@ func TestTaskService_Complete(t *testing.T) {
 	t.Run("multi-assignee non-lead caller is rejected", func(t *testing.T) {
 		svc, instances, tasks, assignments, _, _ := newTaskServiceHarness()
 		tenantID, instanceID := uuid.New(), uuid.New()
-		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 		task := newReadyTask(tenantID, instanceID)
 		task.AssigneeMode = "all"
 		tasks.byID[task.ID] = task
@@ -407,7 +439,7 @@ func TestTaskService_Complete(t *testing.T) {
 	t.Run("multi-assignee with no lead yet is rejected", func(t *testing.T) {
 		svc, instances, tasks, assignments, _, _ := newTaskServiceHarness()
 		tenantID, instanceID := uuid.New(), uuid.New()
-		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 		task := newReadyTask(tenantID, instanceID)
 		task.AssigneeMode = "all"
 		tasks.byID[task.ID] = task
@@ -433,7 +465,7 @@ func TestTaskService_Complete(t *testing.T) {
 	t.Run("SignalWorkflow failure is wrapped and returned", func(t *testing.T) {
 		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
 		tenantID, instanceID := uuid.New(), uuid.New()
-		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 		task := newReadyTask(tenantID, instanceID)
 		tasks.byID[task.ID] = task
 		userID := uuid.New()

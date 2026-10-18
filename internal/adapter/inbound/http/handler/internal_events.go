@@ -111,6 +111,7 @@ func (h *Handler) unhandledType(c *gin.Context, eventType string) {
 }
 
 func (h *Handler) HandleDelegationEvents(c *gin.Context) {
+	defer detachRequest(c)()
 	env, ok := h.decodeEnvelope(c)
 	if !ok {
 		return
@@ -126,6 +127,7 @@ func (h *Handler) HandleDelegationEvents(c *gin.Context) {
 }
 
 func (h *Handler) HandleUserProfileEvents(c *gin.Context) {
+	defer detachRequest(c)()
 	env, ok := h.decodeEnvelope(c)
 	if !ok {
 		return
@@ -143,6 +145,7 @@ func (h *Handler) HandleUserProfileEvents(c *gin.Context) {
 }
 
 func (h *Handler) HandleTenantEvents(c *gin.Context) {
+	defer detachRequest(c)()
 	env, ok := h.decodeEnvelope(c)
 	if !ok {
 		return
@@ -158,6 +161,7 @@ func (h *Handler) HandleTenantEvents(c *gin.Context) {
 }
 
 func (h *Handler) HandleWorkflowTaskEvents(c *gin.Context) {
+	defer detachRequest(c)()
 	env, ok := h.decodeEnvelope(c)
 	if !ok {
 		return
@@ -240,6 +244,14 @@ func (h *Handler) alreadyProcessed(c *gin.Context, eventID uuid.UUID, consumer, 
 	h.markOK(eventType)
 	c.Status(http.StatusOK)
 	return true
+}
+
+const eventHandlingTimeout = 10 * time.Minute
+
+func detachRequest(c *gin.Context) context.CancelFunc {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), eventHandlingTimeout)
+	c.Request = c.Request.WithContext(ctx)
+	return cancel
 }
 
 func guCtx(c *gin.Context, tenantID string) context.Context {

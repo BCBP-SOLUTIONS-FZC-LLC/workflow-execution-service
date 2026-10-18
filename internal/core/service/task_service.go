@@ -247,6 +247,9 @@ func (s *TaskService) Complete(ctx context.Context, tenantID, taskID, userID uui
 	if err != nil {
 		return nil, wrapInstanceErr(err)
 	}
+	if inst.Status != domain.InstanceStatusRunning && inst.Status != domain.InstanceStatusDegraded {
+		return nil, port.ErrInvalidInstanceState
+	}
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-transition", stageTransitionWire{
 		DeptID: deptID, NodeID: nodeID, UserID: userID.String(), ResultJSON: string(resultJSON), RecordVersion: recordVersion,

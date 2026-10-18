@@ -1541,3 +1541,43 @@ func TestHandleInternalEvent_TenantMembershipsPurged_DuplicateDeliveryIsNoOp(t *
 	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
 	assert.Equal(t, 1, calls, "a redelivered purge signal must not run the cascade twice")
 }
+
+func TestHandleInternalEvent_TenantSweeps_OutliveACallerThatGaveUp(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		body  func() map[string]any
+		isErr string
+	}{
+		{"status change", func() map[string]any {
+			return envelope("TenantStateChanged", uuid.New(), testTenantID, time.Now(), map[string]any{
+				"tenant_id": testTenantID.String(), "status": "suspended", "previous_status": "active",
+				"plan": "pro", "previous_plan": "pro", "changed_at": time.Now().Format(time.RFC3339), "cause": "x",
+			})
+		}, ""},
+		{"memberships purged", func() map[string]any {
+			return envelope("TenantMembershipsPurged", uuid.New(), testTenantID, time.Now(), map[string]any{})
+		}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fakes := newEventsFakes()
+			var sweepCtxErr error
+			var hasDeadline bool
+			fakes.tenantLifecycle.apply = func(ctx context.Context, _ port.TenantLifecycleInput) error {
+				sweepCtxErr = ctx.Err()
+				_, hasDeadline = ctx.Deadline()
+				return nil
+			}
+			router := newInternalRouter(newEventsHandler(fakes))
+
+			body := tc.body()
+			eventType, _ := body["type"].(string)
+			r := internalReq(http.MethodPost, eventRoute(eventType), body)
+			gone, cancel := context.WithCancel(r.Context())
+			cancel()
+			do(router, r.WithContext(gone))
+
+			assert.NoError(t, sweepCtxErr, "the consumer's forward timeout must not cut a sweep short and strand instances")
+			assert.True(t, hasDeadline, "a detached sweep still needs its own bound")
+		})
+	}
+}

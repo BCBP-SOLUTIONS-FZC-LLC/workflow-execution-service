@@ -24,7 +24,7 @@ spec:
         {{- toYaml .Values.securityContext | nindent 8 }}
       # LLD §7.6: WorkerStopTimeout 25s (5s margin under the 30s SIGTERM
       # budget) for worker.Worker.Stop()'s in-flight-Activity drain.
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: 60
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:

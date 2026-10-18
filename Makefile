@@ -415,10 +415,15 @@ HELM_LINT_VALUES := --set-string secret.secretValues.DATABASE_URL=placeholder \
 
 # The render goes to a file first: piped straight into kubeconform, a failed
 # render reached it as empty input and passed.
+HELM_CHART ?= deploy/helm
 helm-lint:
-	$(HELM) lint deploy/helm $(HELM_LINT_VALUES)
+	$(HELM) lint $(HELM_CHART) $(HELM_LINT_VALUES)
 	@mkdir -p $(TOOLS_DIR)
-	$(HELM) template deploy/helm $(HELM_LINT_VALUES) > $(TOOLS_DIR)/helm-rendered.yaml
+	$(HELM) template $(HELM_CHART) $(HELM_LINT_VALUES) > $(TOOLS_DIR)/helm-rendered.yaml
+	@for t in serviceaccount secret; do \
+		$(HELM) template $(HELM_CHART) $(HELM_LINT_VALUES) -s templates/$$t.yaml | grep -q '"helm.sh/hook-weight": "-10"' \
+			|| { echo "helm-lint: templates/$$t.yaml is not a pre-install hook, so the migration job cannot start on a first install"; exit 1; }; \
+	done
 	$(KUBECONFORM) -strict -skip PrometheusRule,ServiceMonitor $(TOOLS_DIR)/helm-rendered.yaml
 	@echo "✓ helm chart valid"
 

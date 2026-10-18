@@ -2387,6 +2387,7 @@ paths:
             State conflict. See code field:
             RECORD_VERSION_CONFLICT — version mismatch;
             INVALID_TASK_STATE — task is not IN_PROGRESS;
+            INVALID_INSTANCE_STATE — the instance is not RUNNING or DEGRADED (for example paused), so the workflow would drop the completion;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:
             application/problem+json:
