@@ -33,7 +33,7 @@ func TestExecute_ParallelBranchesSharingADepartmentID_Join(t *testing.T) {
 			env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 				DeptID: visit.dept, ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: visit.count,
 			})
-		}, time.Duration(i+1)*time.Millisecond)
+		}, time.Duration(i+1)*tick)
 	}
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{

@@ -2,7 +2,6 @@ package workflow_test
 
 import (
 	"testing"
-	"time"
 
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
@@ -49,13 +48,13 @@ func TestExecute_BaseForceBackRegressesAndContinues(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "deptA", TargetNodeKey: "deptA/prep", RecordVersion: 1,
 		})
-	}, 5*time.Millisecond)
+	}, 5*tick)
 
 	// Regressed deptA must be completed again — its second visit, so
 	// VisitCount: 2 (the interpreter's own taskVisits counter for
@@ -64,7 +63,7 @@ func TestExecute_BaseForceBackRegressesAndContinues(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
-	}, 10*time.Millisecond)
+	}, 10*tick)
 
 	// The plan must still continue on to deptB afterward — its own second
 	// visit too: force-back's cancelRun() (workflow.go) abandons the
@@ -75,7 +74,7 @@ func TestExecute_BaseForceBackRegressesAndContinues(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
-	}, 15*time.Millisecond)
+	}, 15*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -120,19 +119,19 @@ func TestExecute_ForceBackRevisit_GetsDistinctTaskID(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "deptA", TargetNodeKey: "deptA/prep", RecordVersion: 1,
 		})
-	}, 5*time.Millisecond)
+	}, 5*tick)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
-	}, 10*time.Millisecond)
+	}, 10*tick)
 
 	// deptB/prep's own second visit — same reasoning as the sibling test
 	// above (force-back abandons the original pending attempt).
@@ -140,7 +139,7 @@ func TestExecute_ForceBackRevisit_GetsDistinctTaskID(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
-	}, 15*time.Millisecond)
+	}, 15*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -207,13 +206,13 @@ func TestExecute_BaseForceForwardSkipsWithoutWipingHistory(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "deptC", TargetNodeKey: "deptC/prep", RecordVersion: 1,
 		})
-	}, 5*time.Millisecond)
+	}, 5*tick)
 
 	// Deliberately never signal deptB:prep's completion — if the
 	// implementation regressed to waiting on deptB instead of skipping to
@@ -223,7 +222,7 @@ func TestExecute_BaseForceForwardSkipsWithoutWipingHistory(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptC", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, 10*time.Millisecond)
+	}, 10*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -283,7 +282,7 @@ func TestExecute_InstanceCancelWhileRunning(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-cancel:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
-	}, time.Millisecond)
+	}, tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -332,7 +331,7 @@ func TestExecute_InstanceCancelActivityErrorPropagates(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-cancel:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
-	}, time.Millisecond)
+	}, tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -368,13 +367,13 @@ func TestExecute_InstancePauseAndResumePersist(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-pause:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
-	}, time.Millisecond)
+	}, tick)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-resume:instance-1", adminSignalWire{AdminUserID: "admin-2", RecordVersion: 2})
-	}, 2*time.Millisecond)
+	}, 2*tick)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-cancel:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 3})
-	}, 3*time.Millisecond)
+	}, 3*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -420,17 +419,17 @@ func TestExecute_InstanceReassignCallsActivity(t *testing.T) {
 		env.SignalWorkflow("instance-reassign:instance-1", reassignSignalWire{
 			TaskID: "task-1", OldUserID: "user-1", NewUserID: "user-2", AdminUserID: "admin-1", RecordVersion: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, 2*time.Millisecond)
+	}, 2*tick)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, 3*time.Millisecond)
+	}, 3*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -467,15 +466,15 @@ func TestExecute_InstanceReassignRejectedWhilePaused(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-pause:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
-	}, time.Millisecond)
+	}, tick)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-reassign:instance-1", reassignSignalWire{
 			TaskID: "task-1", OldUserID: "user-1", NewUserID: "user-2", AdminUserID: "admin-1", RecordVersion: 1,
 		})
-	}, 2*time.Millisecond)
+	}, 2*tick)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-cancel:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 2})
-	}, 3*time.Millisecond)
+	}, 3*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -531,7 +530,7 @@ func TestExecute_ActiveParallelForceBackPausesAndResumes(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "intake", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 
 	// Fires while both warehouse and billing are still pending (neither has
 	// settled) — the active-parallel-gateway extension, not DEGRADED.
@@ -539,25 +538,25 @@ func TestExecute_ActiveParallelForceBackPausesAndResumes(t *testing.T) {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "intake", TargetNodeKey: "intake/prep", RecordVersion: 1,
 		})
-	}, 5*time.Millisecond)
+	}, 5*tick)
 
 	// Regressed intake must be completed again — its second visit.
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "intake", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
-	}, 10*time.Millisecond)
+	}, 10*tick)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, 15*time.Millisecond)
+	}, 15*tick)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "billing", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, 20*time.Millisecond)
+	}, 20*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",

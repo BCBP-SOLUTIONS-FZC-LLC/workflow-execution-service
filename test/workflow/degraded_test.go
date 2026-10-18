@@ -2,7 +2,6 @@ package workflow_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"go.temporal.io/sdk/temporal"
@@ -53,13 +52,13 @@ func TestExecute_ParallelBranchFailureDegradesThenForceForwardResolves(t *testin
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
 		})
-	}, 10*time.Millisecond)
+	}, 10*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -118,13 +117,13 @@ func TestExecute_DegradedFailedBranchUsesRealIAMDepartmentID(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
 		})
-	}, 10*time.Millisecond)
+	}, 10*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -165,13 +164,13 @@ func TestExecute_ParallelBranchFailureDegradesThenForceBackRespawns(t *testing.T
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", RecordVersion: 1,
 		})
-	}, 10*time.Millisecond)
+	}, 10*tick)
 
 	// The respawned attempt is billing/prep's second visit (the first,
 	// failed CreateTask call never reached the pending-signal registration
@@ -181,7 +180,7 @@ func TestExecute_ParallelBranchFailureDegradesThenForceBackRespawns(t *testing.T
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "billing", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
-	}, 20*time.Millisecond)
+	}, 20*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -245,49 +244,39 @@ func TestExecute_ParallelBranchRespawnResumesPastLastCompletedDeptNotFromScratch
 	env := suite.NewTestWorkflowEnvironment()
 
 	collab := multiDeptBranchCollaboration()
+	transition := func(dept string, visit int64) {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: dept, ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: visit,
+		})
+	}
 	chargeCalls, invoiceCalls := 0, 0
 	firstInvoiceAttempt := true
-	registerFakeActivities(env, collab, &activityHooks{createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
-		switch in.NodeKey {
-		case "billing_charge/prep":
-			chargeCalls++
-			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
-		case "billing_invoice/prep":
-			invoiceCalls++
-			if firstInvoiceAttempt {
-				firstInvoiceAttempt = false
-				return port.CreateTaskOutput{}, temporal.NewApplicationError("invoice service down", "ValidationError")
+	registerFakeActivities(env, collab, &activityHooks{
+		createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			switch in.NodeKey {
+			case "warehouse/prep":
+				transition("warehouse", 1)
+			case "billing_charge/prep":
+				chargeCalls++
+				transition("billing_charge", 1)
+			case "billing_invoice/prep":
+				invoiceCalls++
+				if firstInvoiceAttempt {
+					firstInvoiceAttempt = false
+					return port.CreateTaskOutput{}, temporal.NewApplicationError("invoice service down", "ValidationError")
+				}
+				transition("billing_invoice", 2)
 			}
 			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
-		default:
-			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
-		}
-	}})
-
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
-		})
-	}, time.Millisecond)
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "billing_charge", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
-		})
-	}, 2*time.Millisecond)
-
-	// billing_charge/prep resolves, billing_invoice/prep fails and DEGRADEs.
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
-			AdminUserID: "admin-1", TargetDeptID: "billing_charge", RecordVersion: 1,
-		})
-	}, 10*time.Millisecond)
-	// billing_invoice/prep's respawned (second) attempt — the first, failed
-	// CreateTask call never reached pending-signal registration.
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "billing_invoice", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
-		})
-	}, 20*time.Millisecond)
+		},
+		updateInstanceStatus: func(in port.UpdateInstanceStatusInput) {
+			if in.Status == domain.InstanceStatusDegraded {
+				env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
+					AdminUserID: "admin-1", TargetDeptID: "billing_charge", RecordVersion: 1,
+				})
+			}
+		},
+	})
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -346,7 +335,7 @@ func TestExecute_ActiveParallelForceForwardSupersedesOneBranch(t *testing.T) {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
 		})
-	}, 5*time.Millisecond)
+	}, 5*tick)
 
 	// Deliberately never signal billing/prep's completion — if the
 	// implementation fell back to the old drop-and-log behavior, this test
@@ -356,7 +345,7 @@ func TestExecute_ActiveParallelForceForwardSupersedesOneBranch(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, 10*time.Millisecond)
+	}, 10*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -397,19 +386,19 @@ func TestExecute_ActiveParallelForceForwardDuplicateSignalIsNoOp(t *testing.T) {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
 		})
-	}, 5*time.Millisecond)
+	}, 5*tick)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
 		})
-	}, 6*time.Millisecond)
+	}, 6*tick)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, 10*time.Millisecond)
+	}, 10*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -446,20 +435,20 @@ func TestExecute_DEGRADEDRejectsInstancePause(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 
 	// Arrives while DEGRADED: instance-pause requires RUNNING, so this must
 	// be rejected at signal validation before it ever reaches the park
 	// loop's Selector (which registers no case for it at all).
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-pause:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
-	}, 5*time.Millisecond)
+	}, 5*tick)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
 		})
-	}, 10*time.Millisecond)
+	}, 10*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",

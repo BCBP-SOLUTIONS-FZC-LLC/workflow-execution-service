@@ -99,7 +99,7 @@ func TestExecute_SLATimerCancelledOnEarlyResolution(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "sales", ToStage: "approve", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",

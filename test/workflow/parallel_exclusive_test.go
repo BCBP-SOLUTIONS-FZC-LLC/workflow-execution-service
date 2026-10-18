@@ -3,7 +3,6 @@ package workflow_test
 import (
 	"sync"
 	"testing"
-	"time"
 
 	"go.temporal.io/sdk/testsuite"
 
@@ -72,22 +71,22 @@ func TestExecute_ParallelBranchesResolveTheirOwnExclusiveGate(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptB", ToStage: "prep", ResultJSON: `{"decision":"beta"}`, RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: `{"decision":"alpha"}`, RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA2", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, 2*time.Millisecond)
+	}, 2*tick)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptB2", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
-	}, 2*time.Millisecond)
+	}, 2*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",

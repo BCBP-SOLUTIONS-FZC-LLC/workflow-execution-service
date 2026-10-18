@@ -3,7 +3,6 @@ package workflow_test
 import (
 	"reflect"
 	"testing"
-	"time"
 
 	"go.temporal.io/sdk/testsuite"
 
@@ -27,7 +26,7 @@ func TestExecute_SequentialDispatchCompletes(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "sales", ToStage: "approve", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -84,12 +83,12 @@ func TestExecute_ExclusiveGatewayRoutesOnCondition(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "review", ToStage: "review", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "shipping", ToStage: "prep", ResultJSON: `{}`, RecordVersion: 1, VisitCount: 1,
 		})
-	}, 2*time.Millisecond)
+	}, 2*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
@@ -129,7 +128,7 @@ func TestExecute_OverrideMapReachesCreateTask(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "sales", ToStage: "approve", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 
 	overrideMap := map[string]string{"sales/approve": "user-42"}
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{

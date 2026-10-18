@@ -2,7 +2,6 @@ package workflow_test
 
 import (
 	"testing"
-	"time"
 
 	"go.temporal.io/sdk/testsuite"
 
@@ -36,13 +35,13 @@ func TestExecute_SignalChannelNamingMatchesTemporalClientConvention(t *testing.T
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(channelName(port.SignalInstancePause), adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
-	}, time.Millisecond)
+	}, tick)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(channelName(port.SignalInstanceResume), adminSignalWire{AdminUserID: "admin-2", RecordVersion: 2})
-	}, 2*time.Millisecond)
+	}, 2*tick)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(channelName(port.SignalInstanceCancel), adminSignalWire{AdminUserID: "admin-1", RecordVersion: 3})
-	}, 3*time.Millisecond)
+	}, 3*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: instanceID, VersionID: "version-1",

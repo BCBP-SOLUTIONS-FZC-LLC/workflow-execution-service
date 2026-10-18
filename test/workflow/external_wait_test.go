@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"sync"
 	"testing"
-	"time"
 
 	"go.temporal.io/sdk/testsuite"
 	wf "go.temporal.io/sdk/workflow"
@@ -26,9 +25,9 @@ type externalAnswerWire struct {
 // The first checkpoint after the activity round trips (see
 // TestExecute_GetWorkflowStatusQuery for why 1ms is not enough).
 const (
-	afterStart  = 100 * time.Millisecond
-	afterAnswer = 200 * time.Millisecond
-	afterThat   = 300 * time.Millisecond
+	afterStart  = 1 * tick
+	afterAnswer = 2 * tick
+	afterThat   = 3 * tick
 )
 
 // contextRecorder records, per node key, the context_json each task was
@@ -268,7 +267,7 @@ func TestExecute_OutsideAnswerBeforeTheWait_IsDropped(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "Ops", NodeID: "Award", ResultJSON: `{}`, RecordVersion: 1, VisitCount: 1,
 		})
-	}, 400*time.Millisecond)
+	}, 4*tick)
 
 	if got := runToCompletion(t, env, collab, ""); got != domain.InstanceStatusCompleted {
 		t.Fatalf("Status = %v, want COMPLETED", got)

@@ -2,7 +2,6 @@ package workflow_test
 
 import (
 	"testing"
-	"time"
 
 	"go.temporal.io/sdk/testsuite"
 
@@ -39,7 +38,7 @@ func TestExecute_StageFailSignalFailsTaskNotAssignment(t *testing.T) {
 		env.SignalWorkflow("stage-fail:instance-1", stageFailWire{
 			DeptID: "sales", NodeID: "connector", ErrorClass: "provider_timeout", RecordVersion: 1, VisitCount: 1,
 		})
-	}, time.Millisecond)
+	}, tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",

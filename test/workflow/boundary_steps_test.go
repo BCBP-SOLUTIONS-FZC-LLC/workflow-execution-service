@@ -248,13 +248,13 @@ func TestExecute_FailedStageInACallFiresItsErrorBoundary(t *testing.T) {
 // open task like any other, and is not mistaken for a force-route still under way.
 func TestExecute_BoundaryAfterAForceRouteStillSupersedesItsOpenTasks(t *testing.T) {
 	signals := map[time.Duration]any{
-		10 * time.Millisecond: adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "a/a_task", RecordVersion: 1},
-		20 * time.Millisecond: done("a"),
+		10 * tick: adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "a/a_task", RecordVersion: 1},
+		20 * tick: done("a"),
 	}
-	names := map[time.Duration]string{10 * time.Millisecond: "instance-force-forward", 20 * time.Millisecond: "stage-transition"}
+	names := map[time.Duration]string{10 * tick: "instance-force-forward", 20 * tick: "stage-transition"}
 	// The first run of "a" is abandoned by the force-forward, so the second
 	// visit's completion carries VisitCount 2.
-	signals[20*time.Millisecond] = stageTransitionWire{DeptID: "a", NodeID: "a_task", ToStage: "review", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2}
+	signals[20*tick] = stageTransitionWire{DeptID: "a", NodeID: "a_task", ToStage: "review", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2}
 
 	run := runPathPlan(t,
 		[]dsl.DepartmentDef{dept("a"), dept("review")},

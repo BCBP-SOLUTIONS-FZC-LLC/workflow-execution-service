@@ -67,14 +67,14 @@ func TestExecute_DeferSendsTheInstanceOneStepBack(t *testing.T) {
 		recordForceRoute: func(port.RecordForceRouteInput) { mu.Lock(); forceRoutes++; mu.Unlock() },
 	})
 
-	transitionAt(env, time.Millisecond, "deptA", 1)
+	transitionAt(env, tick, "deptA", 1)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-defer:instance-1", deferWire{
 			DeptID: "deptB", FromStage: "prep", Reason: "need more info", UserID: "user-1", RecordVersion: 1, TaskID: "deptB/prep", AssignmentID: "assign-1",
 		})
-	}, 5*time.Millisecond)
-	transitionAt(env, 10*time.Millisecond, "deptA", 2)
-	transitionAt(env, 15*time.Millisecond, "deptB", 2)
+	}, 5*tick)
+	transitionAt(env, 10*tick, "deptA", 2)
+	transitionAt(env, 15*tick, "deptB", 2)
 
 	out := finish(t, env, "instance-1")
 
@@ -110,9 +110,9 @@ func TestExecute_DeferAtTheFirstStepGoesNowhere(t *testing.T) {
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-defer:instance-1", deferWire{DeptID: "deptA", FromStage: "prep", UserID: "user-1", RecordVersion: 1, TaskID: "deptA/prep", AssignmentID: "assign-1"})
-	}, time.Millisecond)
-	transitionAt(env, 5*time.Millisecond, "deptA", 1)
-	transitionAt(env, 10*time.Millisecond, "deptB", 1)
+	}, tick)
+	transitionAt(env, 5*tick, "deptA", 1)
+	transitionAt(env, 10*tick, "deptB", 1)
 
 	out := finish(t, env, "instance-1")
 
@@ -128,10 +128,10 @@ func TestExecute_ForceForwardInAParallelStepNeedsOnlyTheNodeKey(t *testing.T) {
 	env := suite.NewTestWorkflowEnvironment()
 	registerFakeActivities(env, parallelCollaboration(), nil)
 
-	transitionAt(env, time.Millisecond, "warehouse", 1)
+	transitionAt(env, tick, "warehouse", 1)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "billing/prep", RecordVersion: 1})
-	}, 5*time.Millisecond)
+	}, 5*tick)
 
 	out := finish(t, env, "instance-1")
 
@@ -151,10 +151,10 @@ func TestExecute_DegradedForceForwardNeedsOnlyTheNodeKey(t *testing.T) {
 		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
 	}})
 
-	transitionAt(env, time.Millisecond, "warehouse", 1)
+	transitionAt(env, tick, "warehouse", 1)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "billing/prep", RecordVersion: 1})
-	}, 10*time.Millisecond)
+	}, 10*tick)
 
 	out := finish(t, env, "instance-1")
 
@@ -180,12 +180,12 @@ func TestExecute_DegradedForceBackNamesTheBranchByANodeKey(t *testing.T) {
 		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
 	}})
 
-	transitionAt(env, time.Millisecond, "warehouse", 1)
-	transitionAt(env, 2*time.Millisecond, "billing_charge", 1)
+	transitionAt(env, tick, "warehouse", 1)
+	transitionAt(env, 2*tick, "billing_charge", 1)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "billing_invoice/prep", RecordVersion: 1})
-	}, 10*time.Millisecond)
-	transitionAt(env, 20*time.Millisecond, "billing_invoice", 2)
+	}, 10*tick)
+	transitionAt(env, 20*tick, "billing_invoice", 2)
 
 	out := finish(t, env, "instance-1")
 
@@ -211,14 +211,14 @@ func TestExecute_ARespawnedBranchThatFailsAgainKeepsItsSteps(t *testing.T) {
 		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
 	}})
 
-	transitionAt(env, time.Millisecond, "warehouse", 1)
-	transitionAt(env, 2*time.Millisecond, "billing_charge", 1)
-	for _, at := range []time.Duration{10 * time.Millisecond, 20 * time.Millisecond} {
+	transitionAt(env, tick, "warehouse", 1)
+	transitionAt(env, 2*tick, "billing_charge", 1)
+	for _, at := range []time.Duration{10 * tick, 20 * tick} {
 		env.RegisterDelayedCallback(func() {
 			env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "billing_invoice/prep", RecordVersion: 1})
 		}, at)
 	}
-	transitionAt(env, 30*time.Millisecond, "billing_invoice", 3)
+	transitionAt(env, 30*tick, "billing_invoice", 3)
 
 	out := finish(t, env, "instance-1")
 

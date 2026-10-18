@@ -2,7 +2,6 @@ package workflow_test
 
 import (
 	"testing"
-	"time"
 
 	"go.temporal.io/sdk/testsuite"
 
@@ -48,13 +47,13 @@ func TestExecute_GetWorkflowStatusQuery(t *testing.T) {
 		if len(status.CurrentNodeKeys) != 1 || status.CurrentNodeKeys[0] != "sales/approve" {
 			t.Errorf("CurrentNodeKeys = %v, want [sales/approve]", status.CurrentNodeKeys)
 		}
-	}, 100*time.Millisecond)
+	}, tick)
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "sales", ToStage: "approve", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1,
 		})
-	}, 200*time.Millisecond)
+	}, 2*tick)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",

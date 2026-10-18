@@ -43,9 +43,10 @@ func NewTestPoolAndDSN(t *testing.T) (*pgcommon.Pool, string) {
 			"POSTGRES_PASSWORD": "postgres",
 			"POSTGRES_DB":       "testdb",
 		},
-		WaitingFor: wait.ForLog("database system is ready to accept connections").
-			WithOccurrence(2).
-			WithStartupTimeout(120 * time.Second),
+		WaitingFor: wait.ForAll(
+			wait.ForLog("database system is ready to accept connections").WithOccurrence(2),
+			wait.ForListeningPort("5432/tcp"),
+		).WithDeadline(120 * time.Second),
 	}
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{

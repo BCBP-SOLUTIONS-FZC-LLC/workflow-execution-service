@@ -8,6 +8,7 @@ package workflow_test
 
 import (
 	"context"
+	"time"
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
@@ -15,6 +16,11 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
+
+// tick is the unit for ordering delayed test callbacks. While an activity
+// runs, the SDK fires delayed callbacks on wall time, so an offset shorter
+// than a loaded or -race run of that activity delivers a signal early.
+const tick = 100 * time.Millisecond
 
 // singleStageCollaboration is the smallest valid fixture: one pool, one
 // department, one prep/review/approve-shaped stage, dispatched Sequential.
