@@ -9,4 +9,5 @@ type OperationalStats struct {
 	DegradedInstances         int64
 	OldestDegradedAgeSeconds  float64
 	OldestReadyTaskAgeSeconds float64
+	InstancesByQueue          map[string]int64
 }

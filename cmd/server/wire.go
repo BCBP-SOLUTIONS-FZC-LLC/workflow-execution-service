@@ -109,7 +109,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	statsSampler := service.NewOperationalGaugeSampler(service.OperationalGaugeSamplerDeps{
 		Stats: postgres.NewOperationalStatsRepo(relayPool),
 		Record: func(s domain.OperationalStats) {
-			observability.RecordOperationalStats(s.DegradedInstances, s.OldestDegradedAgeSeconds, s.OldestReadyTaskAgeSeconds)
+			observability.RecordOperationalStats(s.DegradedInstances, s.OldestDegradedAgeSeconds, s.OldestReadyTaskAgeSeconds, s.InstancesByQueue)
 		},
 		Interval: cfg.OperationalStatsInterval,
 		Logger:   log,

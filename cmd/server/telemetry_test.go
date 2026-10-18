@@ -113,7 +113,7 @@ func exerciseEveryCollector() {
 	observability.InternalEventsLastReceivedTimestamp.WithLabelValues("DelegationStarted").Set(1)
 	observability.AddRLSViolations("cross_tenant_access", 1)
 	observability.IncCounterVec(observability.WorkflowReplayFailuresTotal, "InstanceWorkflow")
-	observability.RecordOperationalStats(1, 1, 1)
+	observability.RecordOperationalStats(1, 1, 1, map[string]int64{"wf-queue": 1})
 	observability.WorkerQueueLastPollTimestamp.WithLabelValues("default-queue").Set(1)
 	observability.IncCounter(observability.SLABreachesTotal)
 	observability.IncCounterVec(observability.UpstreamDependencyErrorsTotal, "iam")

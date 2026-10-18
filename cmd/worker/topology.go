@@ -116,7 +116,11 @@ func pollQueueTopologyOnce(
 	observability.WorkerQueueLastPollTimestamp.WithLabelValues(defaultQueue).SetToCurrentTime()
 
 	for _, q := range active {
-		if q.QueueName == defaultQueue || registry.has(q.QueueName) {
+		if q.QueueName == defaultQueue {
+			continue
+		}
+		if registry.has(q.QueueName) {
+			observability.WorkerQueueLastPollTimestamp.WithLabelValues(q.QueueName).SetToCurrentTime()
 			continue
 		}
 		w, err := startWorkerForQueue(sdk, deps, q.QueueName, dynamicQueueWorkerOptions)

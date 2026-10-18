@@ -92,3 +92,33 @@ func TestOperationalStatsRepo_ReadsDegradedAndReadyTaskState(t *testing.T) {
 	assert.InDelta(t, 7200, stats.OldestDegradedAgeSeconds, 30)
 	assert.InDelta(t, 1800, stats.OldestReadyTaskAgeSeconds, 30)
 }
+
+func TestOperationalStatsRepo_CountsNonTerminalInstancesPerQueue(t *testing.T) {
+	pool := fixtures.NewTestPool(t)
+	repo := postgres.NewOperationalStatsRepo(pool)
+	ctx := context.Background()
+	tenant := uuid.New()
+	ids := map[string]uuid.UUID{}
+	for _, name := range []string{"run-a1", "run-a2", "paused-a", "degraded-b", "done-a", "terminated-b"} {
+		ids[name] = uuid.New()
+		seedWorkflowInstance(t, pool, ctx, ids[name], tenant)
+	}
+	set := func(status, queue string, names ...string) {
+		for _, n := range names {
+			require.NoError(t, pool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+				_, err := conn.Exec(ctx, `UPDATE workflow_instance SET status = $2, task_queue = $3 WHERE id = $1`, ids[n], status, queue)
+				return err
+			}))
+		}
+	}
+	set("RUNNING", "wf-queue-a", "run-a1", "run-a2")
+	set("PAUSED", "wf-queue-a", "paused-a")
+	set("DEGRADED", "wf-queue-b", "degraded-b")
+	set("COMPLETED", "wf-queue-a", "done-a")
+	set("TERMINATED", "wf-queue-b", "terminated-b")
+
+	stats, err := repo.Read(ctx)
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]int64{"wf-queue-a": 3, "wf-queue-b": 1}, stats.InstancesByQueue, "only running, paused and degraded instances count")
+}

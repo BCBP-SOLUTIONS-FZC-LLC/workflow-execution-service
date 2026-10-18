@@ -27,10 +27,19 @@ func (r *OperationalStatsRepo) Read(ctx context.Context) (domain.OperationalStat
 		if err != nil {
 			return mapErr(err)
 		}
+		queues, err := db.New(dbtx).NonTerminalInstancesByQueue(ctx)
+		if err != nil {
+			return mapErr(err)
+		}
+		byQueue := make(map[string]int64, len(queues))
+		for _, q := range queues {
+			byQueue[q.TaskQueue] = q.Instances
+		}
 		stats = domain.OperationalStats{
 			DegradedInstances:         row.DegradedInstances,
 			OldestDegradedAgeSeconds:  row.OldestDegradedAgeSeconds,
 			OldestReadyTaskAgeSeconds: row.OldestReadyTaskAgeSeconds,
+			InstancesByQueue:          byQueue,
 		}
 		return nil
 	})

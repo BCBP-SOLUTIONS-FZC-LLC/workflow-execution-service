@@ -38,6 +38,7 @@ var (
 	InstanceDegradedCurrent             prometheus.Gauge
 	InstanceDegradedOldestAgeSeconds    prometheus.Gauge
 	WorkerQueueLastPollTimestamp        *prometheus.GaugeVec
+	InstancesByQueue                    *prometheus.GaugeVec
 	SLABreachesTotal                    prometheus.Counter
 	DelegationScopeUnhandledTotal       *prometheus.CounterVec
 	RetentionRowsDeletedTotal           *prometheus.CounterVec
@@ -122,6 +123,10 @@ func registerServiceMetrics() {
 	WorkerQueueLastPollTimestamp = must(gincommon.NewGaugeVec(nil,
 		"workflow_execution_service_worker_queue_last_poll_timestamp",
 		"Unix timestamp of the last successful poll on a tenant-isolated task queue.", "queue"))
+	InstancesByQueue = must(gincommon.NewGaugeVec(nil,
+		"workflow_execution_service_instances_by_queue",
+		"Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue, sampled by the API process. A queue with none is absent.",
+		"queue"))
 	SLABreachesTotal = must(gincommon.NewCounter(nil,
 		"workflow_execution_service_sla_breaches_total",
 		"Total workflow.task.sla-breached events."))
@@ -195,8 +200,14 @@ func AddRetentionRowsDeleted(table string, n int64) {
 	}
 }
 
-func RecordOperationalStats(degraded int64, oldestDegradedAgeSeconds, oldestReadyTaskAgeSeconds float64) {
+func RecordOperationalStats(degraded int64, oldestDegradedAgeSeconds, oldestReadyTaskAgeSeconds float64, instancesByQueue map[string]int64) {
 	SetGauge(InstanceDegradedCurrent, float64(degraded))
 	SetGauge(InstanceDegradedOldestAgeSeconds, oldestDegradedAgeSeconds)
 	SetGauge(OldestReadyTaskAgeSeconds, oldestReadyTaskAgeSeconds)
+	if InstancesByQueue != nil {
+		InstancesByQueue.Reset()
+		for queue, n := range instancesByQueue {
+			InstancesByQueue.WithLabelValues(queue).Set(float64(n))
+		}
+	}
 }

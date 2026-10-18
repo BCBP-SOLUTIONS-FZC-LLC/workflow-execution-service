@@ -279,6 +279,18 @@ groups:
           summary: "Queue {{ $labels.queue }} has not been polled in 5 minutes"
           description: "A Worker silently failing to poll one tenant-isolated queue is invisible to the aggregate workflow_execution_service_worker_active_queues gauge alone (LLD §7.6)."
 
+      - alert: InstancesOnUnpolledQueue
+        expr: |
+          max by (queue) (workflow_execution_service_instances_by_queue) > 0
+          unless on (queue)
+          max by (queue) (workflow_execution_service_worker_queue_last_poll_timestamp > time() - 300)
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Queue {{ $labels.queue }} has instances and no Worker polling it"
+          description: "A Worker that could not start the worker for a queue only logs, so its instances wait with no task and no other signal (LLD §3.2, §7.6)."
+
       - alert: UpstreamDependencyErrors
         expr: rate(workflow_execution_service_upstream_dependency_errors_total[5m]) > 0
         for: 5m

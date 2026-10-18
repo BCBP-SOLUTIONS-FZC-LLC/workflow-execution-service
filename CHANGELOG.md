@@ -10,6 +10,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- `WorkerQueuePollingStalled` fired for every tenant queue five minutes after its worker started, because the poll timestamp of a dynamic queue was set once; it is refreshed on every topology poll. A worker that could not be started for a queue left its instances waiting with no signal; `workflow_execution_service_instances_by_queue` and the `InstancesOnUnpolledQueue` alert report instances on a queue nobody polls. LLD §3.2 and §7.6, rev 1.99.
+- The unbuilt volume-triggered queue isolation and the per-process cap with sharding (`MAX_TENANT_QUEUES_PER_WORKER`) are removed from the LLD; every replica polls every registry row.
 - A Definition outage of a few seconds right after `POST /instances` failed the instance for good: the first activity read the compiled plan with five attempts over about eight seconds, then the workflow wrote the instance `FAILED`. The read retries without limit with backoff capped at 30 seconds; only a rejection of the version (unknown, unpublished, invalid) is final. LLD §3.3, rev 1.98.
 - Completing a task of a paused instance answered success while the workflow dropped the signal, so the task stayed open and nothing redelivered it. Complete is refused with `409 INVALID_INSTANCE_STATE` unless the instance is running or degraded.
 - Internal event handlers took the sender's request context, so the Event Consumer's forward timeout cancelled a tenant sweep after a few seconds and a large tenant was dead-lettered half done. Handlers run under their own ten-minute bound.

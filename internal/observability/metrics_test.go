@@ -155,7 +155,7 @@ func TestRegister_PreInitializesClosedLabelSets(t *testing.T) {
 func TestRecordOperationalStats_SetsTheThreeGauges(t *testing.T) {
 	initIdentity(t)
 
-	observability.RecordOperationalStats(4, 120.5, 7)
+	observability.RecordOperationalStats(4, 120.5, 7, nil)
 
 	body := scrape(t)
 	for _, want := range []string{
@@ -200,4 +200,18 @@ func TestRecordingHelpers_RecordOnRegisteredCollectors(t *testing.T) {
 		observability.ObserveHistogramVec(observability.TaskSignalDurationSeconds, 0.2, "claim")
 		observability.IncCounterVec(observability.UpstreamDependencyErrorsTotal, "iam")
 	})
+}
+
+func TestRecordOperationalStats_PublishesInstancesPerQueueAndDropsQueuesThatEmptied(t *testing.T) {
+	initIdentity(t)
+
+	observability.RecordOperationalStats(0, 0, 0, map[string]int64{"wf-queue-a": 3, "wf-queue-b": 1})
+	require.Equal(t, 3.0, testutil.ToFloat64(observability.InstancesByQueue.WithLabelValues("wf-queue-a")))
+	require.Equal(t, 1.0, testutil.ToFloat64(observability.InstancesByQueue.WithLabelValues("wf-queue-b")))
+
+	observability.RecordOperationalStats(0, 0, 0, map[string]int64{"wf-queue-b": 2})
+
+	require.Equal(t, 1, testutil.CollectAndCount(observability.InstancesByQueue), "a queue with no instance left must not keep its last value")
+	require.Equal(t, 2.0, testutil.ToFloat64(observability.InstancesByQueue.WithLabelValues("wf-queue-b")))
+	require.Contains(t, scrape(t), "workflow_execution_service_instances_by_queue")
 }
