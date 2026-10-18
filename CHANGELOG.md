@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- A Definition outage of a few seconds right after `POST /instances` failed the instance for good: the first activity read the compiled plan with five attempts over about eight seconds, then the workflow wrote the instance `FAILED`. The read retries without limit with backoff capped at 30 seconds; only a rejection of the version (unknown, unpublished, invalid) is final. LLD §3.3, rev 1.98.
 - Completing a task of a paused instance answered success while the workflow dropped the signal, so the task stayed open and nothing redelivered it. Complete is refused with `409 INVALID_INSTANCE_STATE` unless the instance is running or degraded.
 - Internal event handlers took the sender's request context, so the Event Consumer's forward timeout cancelled a tenant sweep after a few seconds and a large tenant was dead-lettered half done. Handlers run under their own ten-minute bound.
 - A first `helm install` could not start the migration hook, which needs the API ServiceAccount and the chart's Secret before either exists; both are pre-install hooks now, and `make helm-lint` fails if they stop being. The API and worker grace periods are 45 s and 60 s, above the processes' own shutdown timeouts.

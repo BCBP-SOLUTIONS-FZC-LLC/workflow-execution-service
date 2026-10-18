@@ -47,6 +47,7 @@ func singleStageCollaboration(stage dsl.StageDef) *dsl.CompiledCollaboration {
 // activity bodies without every test needing to know every activity's
 // signature. Nil fields fall back to a harmless default.
 type activityHooks struct {
+	getCompiledPlan      func(port.GetCompiledPlanInput) (port.GetCompiledPlanOutput, error)
 	createTask           func(port.CreateTaskInput) (port.CreateTaskOutput, error)
 	completeAssignment   func(port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error)
 	updateTaskStatus     func(port.UpdateTaskStatusInput) error
@@ -78,7 +79,12 @@ func registerFakeActivities(env *testsuite.TestWorkflowEnvironment, collab *dsl.
 	}
 
 	env.RegisterActivityWithOptions(
-		func(_ context.Context, _ port.GetCompiledPlanInput) (port.GetCompiledPlanOutput, error) {
+		func(_ context.Context, in port.GetCompiledPlanInput) (port.GetCompiledPlanOutput, error) {
+			if hooks.getCompiledPlan != nil {
+				if out, err := hooks.getCompiledPlan(in); err != nil {
+					return out, err
+				}
+			}
 			out := *collab
 			// Fixtures that don't care about schema versioning leave this
 			// zero; default it to the current version so they don't need to

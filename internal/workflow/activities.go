@@ -27,7 +27,8 @@ var (
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:        500 * time.Millisecond,
 			BackoffCoefficient:     2.0,
-			MaximumAttempts:        5,
+			MaximumInterval:        30 * time.Second,
+			MaximumAttempts:        0,
 			NonRetryableErrorTypes: []string{"DefinitionServiceClientError"},
 		},
 	}
