@@ -126,6 +126,20 @@ func newApp(cfg *config.Config) (*app, error) {
 		Logger:                  log,
 	})
 
+	var tenantPurger *service.TenantPurger
+	if cfg.TenantPurgeEnabled {
+		purgeRepo := postgres.NewTenantRetentionRepo(relayPool)
+		tenantPurger = service.NewTenantPurger(service.TenantPurgerDeps{
+			Retention: purgeRepo,
+			Data:      purgeRepo,
+			Batch:     cfg.RetentionSweepBatch,
+			Interval:  cfg.RetentionSweepInterval,
+			Record:    func(table string, deleted int64) { observability.AddRetentionRowsDeleted(table, deleted) },
+			Failed:    func() { observability.IncCounter(observability.TenantPurgeFailuresTotal) },
+			Logger:    log,
+		})
+	}
+
 	var interceptors []interceptor.ClientInterceptor
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
 		tracingInterceptor, err := observability.NewTemporalTracingInterceptor(opentelemetry.TracerOptions{})
@@ -198,6 +212,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	tenantLifecycleReconciler := &service.TenantLifecycleReconciler{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Queues: queues, Outbox: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Validator: validator, Log: log,
+		Retention: postgres.NewTenantRetentionRepo(appPool), HistoryRetention: cfg.TenantHistoryRetention,
 	}
 	userSafetyNetReconciler := &service.UserSafetyNetReconciler{Assignments: assignments}
 	oooAvailabilityReconciler := &service.OOOAvailabilityReconciler{
@@ -257,6 +272,7 @@ func newApp(cfg *config.Config) (*app, error) {
 		rlsExporter:      rlsExporter,
 		statsSampler:     statsSampler,
 		retentionSweeper: retentionSweeper,
+		tenantPurger:     tenantPurger,
 		sdkClient:        sdkClient,
 		tracingShutdown:  tracingShutdown,
 	}, nil

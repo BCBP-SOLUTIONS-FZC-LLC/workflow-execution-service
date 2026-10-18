@@ -34,6 +34,7 @@ type app struct {
 	rlsExporter      *service.RLSViolationExporter
 	statsSampler     *service.OperationalGaugeSampler
 	retentionSweeper *service.RetentionSweeper
+	tenantPurger     *service.TenantPurger
 	cancelExporters  context.CancelFunc
 
 	sdkClient client.Client
@@ -62,6 +63,9 @@ func (a *app) startServers() {
 	go a.rlsExporter.Run(exportCtx)
 	go a.statsSampler.Run(exportCtx)
 	go a.retentionSweeper.Run(exportCtx)
+	if a.tenantPurger != nil {
+		go a.tenantPurger.Run(exportCtx)
+	}
 
 	go func() {
 		a.log.Info("HTTP server starting", map[string]any{"addr": a.httpServer.Addr})

@@ -63,6 +63,7 @@ func TestRegister_EveryMetricIsScrapable(t *testing.T) {
 	observability.RecordVersionConflictTotal.WithLabelValues("workflow_instance").Inc()
 	observability.DelegationScopeUnhandledTotal.WithLabelValues("some-new-scope").Inc()
 	observability.AddRetentionRowsDeleted("outbox_events", 1)
+	observability.IncCounter(observability.TenantPurgeFailuresTotal)
 	observability.InternalEventsIngestTotal.WithLabelValues("DelegationStarted", "ok").Inc()
 	observability.DelegationRerouteDurationSeconds.Observe(1.5)
 	observability.TaskSignalDurationSeconds.WithLabelValues("claim").Observe(0.1)

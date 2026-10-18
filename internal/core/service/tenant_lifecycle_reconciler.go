@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -22,6 +23,10 @@ type TenantLifecycleReconciler struct {
 	Temporal    port.TemporalClient
 	Validator   port.EventValidator
 	Log         port.Logger
+
+	Retention        port.TenantRetentionRepository
+	HistoryRetention time.Duration
+	Now              func() time.Time
 }
 
 func (s *TenantLifecycleReconciler) logger() port.Logger {
@@ -48,7 +53,10 @@ func (s *TenantLifecycleReconciler) Apply(ctx context.Context, in port.TenantLif
 func (s *TenantLifecycleReconciler) applyStatusTransition(ctx context.Context, in port.TenantLifecycleInput) error {
 	switch {
 	case in.Status == "offboarded":
-		return s.terminateAllNonTerminal(ctx, in.TenantID)
+		if err := s.terminateAllNonTerminal(ctx, in.TenantID); err != nil {
+			return err
+		}
+		return s.recordOffboarded(ctx, in.TenantID)
 	case runsInstances(in.Status):
 		return s.signalAllNonTerminal(ctx, in.TenantID, port.SignalInstanceResume)
 	default:
@@ -121,6 +129,17 @@ func (s *TenantLifecycleReconciler) terminateAllNonTerminal(ctx context.Context,
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func (s *TenantLifecycleReconciler) recordOffboarded(ctx context.Context, tenantID uuid.UUID) error {
+	if s.Retention == nil {
+		return nil
+	}
+	now := time.Now()
+	if s.Now != nil {
+		now = s.Now()
+	}
+	return s.Retention.RecordOffboarded(ctx, tenantID, now, now.Add(s.HistoryRetention))
 }
 
 func (s *TenantLifecycleReconciler) terminateOne(ctx context.Context, tenantID uuid.UUID, inst *domain.Instance) error {

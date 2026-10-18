@@ -35,6 +35,7 @@ domain ← port ← service ← adapter
 3. The outbox relay, running as a `BYPASSRLS` role, publishes each event to the `wf-workflow-events` SNS topic with the Glue wire format.
 4. Human tasks are claimed and completed through the API, which signals the workflow. Connector tasks are published to a Valkey Stream; the connector worker runs them and reports the outcome to the internal endpoints, which signal the workflow.
 5. Events from IAM and Org & Membership reach the internal event endpoints through the shared Workflow-Events Consumer. Each handler checks the processed-event table, applies the change in one transaction and records the event id.
+6. When a tenant is offboarded its instances are terminated and the tenant is recorded in `tenant_retention` with a purge date (`TENANT_HISTORY_RETENTION`, 7 years by default). A sweep in the API process deletes the tenant's instance, task, assignment, override and connector rows, its queue registry row and its recency rows in batches through the relay role once the date has passed. The outbox, the audit trail, keeps its own retention.
 
 ## Tenant isolation
 

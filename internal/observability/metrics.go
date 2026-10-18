@@ -41,6 +41,7 @@ var (
 	SLABreachesTotal                    prometheus.Counter
 	DelegationScopeUnhandledTotal       *prometheus.CounterVec
 	RetentionRowsDeletedTotal           *prometheus.CounterVec
+	TenantPurgeFailuresTotal            prometheus.Counter
 	ConnectorDispatchDeadLetteredTotal  *prometheus.CounterVec
 	ConnectorTaskFailuresTotal          *prometheus.CounterVec
 	OldestReadyTaskAgeSeconds           prometheus.Gauge
@@ -75,7 +76,10 @@ func registerServiceMetrics() {
 		"Delegations arriving with a scope this service has no case for, by scope. They match no assignment.", "scope"))
 	RetentionRowsDeletedTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_retention_rows_deleted_total",
-		"Rows the retention sweep deleted, by table (outbox_events or processed_event).", "table"))
+		"Rows the retention sweeps deleted, by table (outbox_events, processed_event, or a tenant's purged tables).", "table"))
+	TenantPurgeFailuresTotal = must(gincommon.NewCounter(nil,
+		"workflow_execution_service_tenant_purge_failures_total",
+		"Tenant purges that failed part-way and will be retried on the next sweep."))
 	ConnectorDispatchDeadLetteredTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_connector_dispatch_dead_lettered_total",
 		"Connector stream entries moved to the dead-letter stream after exceeding their delivery cap, by connector_type.", "connector_type"))

@@ -54,10 +54,11 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 | `workflow_execution_service_internal_events_last_received_timestamp` | gauge | `event_type` | Unix timestamp of the last successfully dispatched POST /internal/events call, by event_type. |
 | `workflow_execution_service_oldest_ready_task_age_seconds` | gauge | - | Age in seconds of the oldest unclaimed READY task. |
 | `workflow_execution_service_record_version_conflict_total` | counter | `table` | Total optimistic-lock record_version conflicts, by table. |
-| `workflow_execution_service_retention_rows_deleted_total` | counter | `table` | Rows the retention sweep deleted, by table (outbox_events or processed_event). |
+| `workflow_execution_service_retention_rows_deleted_total` | counter | `table` | Rows the retention sweeps deleted, by table (outbox_events, processed_event, or a tenant's purged tables). |
 | `workflow_execution_service_rls_violations_total` | counter | `violation_type` | Sampled row-level-security violations recorded in rls_violation_log, by violation_type. |
 | `workflow_execution_service_sla_breaches_total` | counter | - | Total workflow.task.sla-breached events. |
 | `workflow_execution_service_task_signal_duration_seconds` | histogram | `operation` | HTTP-request-received to 202-returned latency for task claim/complete/defer (LLD §10.3 SLO, p99 <= 300ms). |
+| `workflow_execution_service_tenant_purge_failures_total` | counter | - | Tenant purges that failed part-way and will be retried on the next sweep. |
 | `workflow_execution_service_upstream_dependency_errors_total` | counter | `dependency` | Total upstream dependency call failures, by dependency. |
 | `workflow_execution_service_wf_cache_hits_total` | counter | - | Total compiled-plan cache hits. |
 | `workflow_execution_service_wf_cache_misses_total` | counter | - | Total compiled-plan cache misses. |

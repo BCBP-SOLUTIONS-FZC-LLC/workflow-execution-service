@@ -53,6 +53,8 @@ type Config struct {
 	RLSViolationExportInterval time.Duration
 	RLSViolationRetention      time.Duration
 	OutboxRetention            time.Duration
+	TenantPurgeEnabled         bool
+	TenantHistoryRetention     time.Duration
 	ProcessedEventRetention    time.Duration
 	RetentionSweepInterval     time.Duration
 	RetentionSweepBatch        int
@@ -193,6 +195,8 @@ func Load() (*Config, error) {
 		RLSViolationExportInterval: envDuration("RLS_VIOLATION_EXPORT_INTERVAL", 30*time.Second),
 		RLSViolationRetention:      envDuration("RLS_VIOLATION_RETENTION", 7*24*time.Hour),
 		OutboxRetention:            envDuration("OUTBOX_RETENTION", 7*365*24*time.Hour),
+		TenantPurgeEnabled:         envBool("TENANT_PURGE_ENABLED", true),
+		TenantHistoryRetention:     envDuration("TENANT_HISTORY_RETENTION", 7*365*24*time.Hour),
 		ProcessedEventRetention:    envDuration("PROCESSED_EVENT_RETENTION", 7*24*time.Hour),
 		RetentionSweepInterval:     envDuration("RETENTION_SWEEP_INTERVAL", 24*time.Hour),
 		RetentionSweepBatch:        envInt("RETENTION_SWEEP_BATCH", 1000),
@@ -317,6 +321,9 @@ func (c *Config) validate() error {
 	}
 	if c.OutboxRetention <= 0 {
 		return fmt.Errorf("OUTBOX_RETENTION must be > 0")
+	}
+	if c.TenantPurgeEnabled && c.TenantHistoryRetention <= 0 {
+		return fmt.Errorf("TENANT_HISTORY_RETENTION must be > 0 when TENANT_PURGE_ENABLED is true")
 	}
 	if c.ProcessedEventRetention <= 0 {
 		return fmt.Errorf("PROCESSED_EVENT_RETENTION must be > 0")

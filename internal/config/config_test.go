@@ -84,6 +84,8 @@ func TestValidate(t *testing.T) {
 		{"retention sweep interval zero", func(c *Config) { c.RetentionSweepInterval = 0 }, true},
 		{"retention sweep batch zero", func(c *Config) { c.RetentionSweepBatch = 0 }, true},
 		{"queue topology poll interval zero", func(c *Config) { c.QueueTopologyPollInterval = 0 }, true},
+		{"tenant history retention zero while the purge is on", func(c *Config) { c.TenantPurgeEnabled = true; c.TenantHistoryRetention = 0 }, true},
+		{"tenant history retention zero while the purge is off", func(c *Config) { c.TenantPurgeEnabled = false; c.TenantHistoryRetention = 0 }, false},
 	}
 
 	for _, tt := range tests {
@@ -112,6 +114,7 @@ func TestValidate(t *testing.T) {
 				ProcessedEventRetention:    time.Hour,
 				RetentionSweepInterval:     time.Hour,
 				RetentionSweepBatch:        100,
+				TenantHistoryRetention:     time.Hour,
 			}
 			tt.mutate(cfg)
 
@@ -362,5 +365,22 @@ func TestLoad_RetentionDefaultsFollowTheLLD(t *testing.T) {
 	}
 	if cfg.RetentionSweepInterval != 24*time.Hour || cfg.RetentionSweepBatch != 1000 {
 		t.Errorf("sweep = %v every, batch %d; want daily, 1000", cfg.RetentionSweepInterval, cfg.RetentionSweepBatch)
+	}
+	if want := 7 * 365 * 24 * time.Hour; cfg.TenantHistoryRetention != want || !cfg.TenantPurgeEnabled {
+		t.Errorf("tenant purge = %v retention, enabled %v; want %v and on: nothing is deleted before the audit period", cfg.TenantHistoryRetention, cfg.TenantPurgeEnabled, want)
+	}
+}
+
+func TestLoad_TenantPurgeCanBeSwitchedOffAndTuned(t *testing.T) {
+	setValidEnv(t)
+	t.Setenv("TENANT_PURGE_ENABLED", "false")
+	t.Setenv("TENANT_HISTORY_RETENTION", "720h")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.TenantPurgeEnabled || cfg.TenantHistoryRetention != 720*time.Hour {
+		t.Errorf("tenant purge = enabled %v, retention %v; want off and 720h", cfg.TenantPurgeEnabled, cfg.TenantHistoryRetention)
 	}
 }

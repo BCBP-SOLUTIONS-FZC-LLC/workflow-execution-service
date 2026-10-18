@@ -497,3 +497,48 @@ func TestTenantLifecycleReconciler_ASignalToAWorkflowThatNoLongerExistsIsNotAnEr
 
 	require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"}))
 }
+
+func TestTenantLifecycleReconciler_OffboardingRecordsTheTenantForThePurge(t *testing.T) {
+	now := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	newRecording := func() (*service.TenantLifecycleReconciler, *fakeRetention, *fakeTemporalClient, *fakeInstanceRepo) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		ret := &fakeRetention{}
+		svc.Retention = ret
+		svc.HistoryRetention = 24 * time.Hour
+		svc.Now = func() time.Time { return now }
+		return svc, ret, temporal, instances
+	}
+
+	t.Run("an offboarded tenant is recorded with the purge date after the retention period", func(t *testing.T) {
+		svc, ret, _, _ := newRecording()
+		tenantID := uuid.New()
+
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
+
+		require.Len(t, ret.recorded, 1)
+		assert.Equal(t, recordedOffboard{tenantID, now, now.Add(24 * time.Hour)}, ret.recorded[0])
+	})
+
+	t.Run("a tenant whose instances could not all be terminated is not recorded yet", func(t *testing.T) {
+		svc, ret, temporal, instances := newRecording()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:x", RecordVersion: 1}
+		instances.byID[inst.ID] = inst
+		temporal.terminateFunc = func(context.Context, string, string) error { return assert.AnError }
+
+		require.Error(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
+		assert.Empty(t, ret.recorded)
+	})
+
+	t.Run("other status changes record nothing", func(t *testing.T) {
+		svc, ret, _, _ := newRecording()
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "suspended", PreviousStatus: "active"}))
+		assert.Empty(t, ret.recorded)
+	})
+
+	t.Run("a failure to record is returned so the event is redelivered", func(t *testing.T) {
+		svc, ret, _, _ := newRecording()
+		ret.recordErr = assert.AnError
+		require.Error(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "offboarded", PreviousStatus: "active"}))
+	})
+}

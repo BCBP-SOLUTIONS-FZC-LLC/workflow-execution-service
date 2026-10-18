@@ -204,6 +204,15 @@ spec:
             summary: "Outbound event dead-lettered for {{ "{{" }} $labels.event_type {{ "}}" }}"
             description: "An event failed all publish retries; operable via the outbox runner's DLQ replay (LLD §6.6, §7.6)."
 
+        - alert: TenantPurgeFailing
+          expr: increase(workflow_execution_service_tenant_purge_failures_total[1h]) > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "A tenant data purge keeps failing"
+            description: "An offboarded tenant's rows could not be fully deleted after its retention period; the sweep retries on its next run (LLD §4.13)."
+
         - alert: InboundEventIngestErrors
           expr: rate(workflow_execution_service_internal_events_ingest_total{result="error"}[5m]) > 0
           for: 5m
