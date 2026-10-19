@@ -50,7 +50,7 @@ func main() {
 
 	deps, cleanup, err := buildDeps(cfg, wlog)
 	if err != nil {
-		log.Fatalf("cmd/connector-worker: %v", err)
+		fatalf(tracingShutdown, "cmd/connector-worker: %v", err)
 	}
 	defer cleanup()
 
@@ -117,4 +117,10 @@ func checkRequiredConfig(cfg *config.Config) error {
 		return fmt.Errorf("2 x CONNECTOR_STREAM_MAX_DELIVERIES x CONNECTOR_STREAM_CLAIM_MIN_IDLE must stay under the %s outcome record", outcomeTTL)
 	}
 	return nil
+}
+
+func fatalf(flush func(), format string, v ...any) {
+	log.Printf(format, v...)
+	flush()
+	os.Exit(1)
 }

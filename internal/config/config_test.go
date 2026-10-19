@@ -49,6 +49,20 @@ func TestLoad_InvalidIntEnvVarFailsFast(t *testing.T) {
 	}
 }
 
+func TestLoad_APoolSizeThatDoesNotFitIn32BitsFailsFast(t *testing.T) {
+	for _, key := range []string{"PG_MAX_CONNS", "PG_MIN_CONNS"} {
+		t.Run(key, func(t *testing.T) {
+			setValidEnv(t)
+			t.Setenv(key, "4294967299")
+
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), key) {
+				t.Fatalf("Load() error = %v, want one naming %s (the value used to wrap to 3)", err, key)
+			}
+		})
+	}
+}
+
 func TestValidate(t *testing.T) {
 	tests := []struct {
 		name    string

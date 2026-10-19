@@ -58,7 +58,7 @@ func main() {
 
 	deps, queueRepo, pool, cleanup, err := buildDeps(cfg, wlog)
 	if err != nil {
-		log.Fatalf("cmd/worker: %v", err)
+		fatalf(tracingShutdown, "cmd/worker: %v", err)
 	}
 	defer cleanup()
 
@@ -66,13 +66,13 @@ func main() {
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
 		tracingInterceptor, err := observability.NewTemporalTracingInterceptor(opentelemetry.TracerOptions{})
 		if err != nil {
-			log.Fatalf("cmd/worker: temporal tracing interceptor: %v", err)
+			fatalf(func() { cleanup(); tracingShutdown() }, "cmd/worker: temporal tracing interceptor: %v", err)
 		}
 		clientInterceptors = append(clientInterceptors, tracingInterceptor)
 	}
 	sdk, err := client.Dial(client.Options{HostPort: cfg.TemporalHostPort, Namespace: cfg.TemporalNamespace, Interceptors: clientInterceptors})
 	if err != nil {
-		log.Fatalf("cmd/worker: dial temporal: %v", err)
+		fatalf(func() { cleanup(); tracingShutdown() }, "cmd/worker: dial temporal: %v", err)
 	}
 	defer sdk.Close()
 
@@ -83,7 +83,7 @@ func main() {
 	registry := newWorkerRegistry()
 	defaultWorker, err := startWorkerForQueue(sdk, deps, cfg.TemporalTaskQueue, worker.Options{WorkerStopTimeout: 25 * time.Second, Interceptors: []interceptor.WorkerInterceptor{observability.NewTemporalMetricsInterceptor()}})
 	if err != nil {
-		log.Fatalf("cmd/worker: start default worker: %v", err)
+		fatalf(func() { cleanup(); tracingShutdown() }, "cmd/worker: start default worker: %v", err)
 	}
 	registry.add(cfg.TemporalTaskQueue, defaultWorker)
 
@@ -172,4 +172,10 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*outboundtemporal.Deps, po
 		_ = pool.DrainAndClose(ctx)
 	}
 	return deps, queueRepo, pool, cleanup, nil
+}
+
+func fatalf(flush func(), format string, v ...any) {
+	log.Printf(format, v...)
+	flush()
+	os.Exit(1)
 }

@@ -118,7 +118,7 @@ func (c *EligibilityClient) tryCheckEligibility(
 	if err != nil {
 		return false, true, fmt.Errorf("%w: eligibility check: %w", ErrUpstreamUnavailable, err)
 	}
-	defer resp.Body.Close() //nolint:errcheck // a failed close of a fully read response body is not actionable
+	defer resp.Body.Close() //nolint:errcheck // a failed close of a response body is not actionable
 
 	switch {
 	case resp.StatusCode >= 500:

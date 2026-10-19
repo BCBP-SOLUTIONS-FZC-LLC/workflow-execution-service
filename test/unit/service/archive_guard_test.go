@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/google/uuid"
@@ -22,6 +23,17 @@ func TestArchiveGuard_CheckActiveInstances(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, hasActive)
 		assert.Equal(t, int32(3), count)
+	})
+
+	t.Run("a count beyond 32 bits is reported as the largest value that fits", func(t *testing.T) {
+		instances := newFakeInstanceRepo()
+		instances.countResult = math.MaxInt32 + 5
+		guard := &service.ArchiveGuard{Instances: instances}
+
+		hasActive, count, err := guard.CheckActiveInstances(context.Background(), uuid.New(), uuid.New())
+		require.NoError(t, err)
+		assert.True(t, hasActive)
+		assert.Equal(t, int32(math.MaxInt32), count)
 	})
 
 	t.Run("no active instances", func(t *testing.T) {

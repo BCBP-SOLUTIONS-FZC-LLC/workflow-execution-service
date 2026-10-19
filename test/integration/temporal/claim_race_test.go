@@ -136,10 +136,10 @@ func TestClaim_SecondLeadAttemptRejectedAgainstLiveWorkflow(t *testing.T) {
 
 	successes, rejections := 0, 0
 	for _, err := range results {
-		switch {
-		case err == nil:
+		switch err {
+		case nil:
 			successes++
-		case err == port.ErrTaskAlreadyClaimed || err == port.ErrRecordVersionConflict:
+		case port.ErrTaskAlreadyClaimed, port.ErrRecordVersionConflict:
 			rejections++
 		default:
 			t.Fatalf("unexpected Claim error: %v", err)

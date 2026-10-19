@@ -46,7 +46,7 @@ func e2eStartInstance(t *testing.T, httpClient *http.Client, execSrvURL string, 
 	if err != nil {
 		t.Fatalf("POST /instances: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /instances status = %d, want 201", resp.StatusCode)
 	}

@@ -246,10 +246,10 @@ func e2ePollInstance(t *testing.T, httpClient *http.Client, baseURL string, tena
 			t.Fatalf("GET /instances/:id: %v", err)
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			t.Fatalf("decode instance detail: %v", err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if ready(detail) {
 			return detail
 		}
@@ -297,7 +297,7 @@ func e2ePostWorkflowTaskCreated(t *testing.T, httpClient *http.Client, baseURL s
 	if err != nil {
 		t.Fatalf("POST /internal/events/workflow-task: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("POST /internal/events/workflow-task status = %d, want 200", resp.StatusCode)
 	}
@@ -427,10 +427,10 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 		t.Fatalf("POST /instances status = %d, want 201", startResp2.StatusCode)
 	}
 	if err := json.NewDecoder(startResp2.Body).Decode(&startResp); err != nil {
-		startResp2.Body.Close()
+		_ = startResp2.Body.Close()
 		t.Fatalf("decode start response: %v", err)
 	}
-	startResp2.Body.Close()
+	_ = startResp2.Body.Close()
 	instanceID := startResp.ID
 
 	detail := e2ePollInstance(t, httpClient, execSrv.URL, tenantID, instanceID, func(d e2eInstanceDetail) bool {
