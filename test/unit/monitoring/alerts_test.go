@@ -46,7 +46,7 @@ func TestEveryAlertCarriesARunbookThatIsDocumented(t *testing.T) {
 				continue
 			}
 			assert.Contains(t, runbooks, "`runbook: "+m[1]+"`", "%s: runbook %s is not documented", file, m[1])
-			assert.Contains(t, runbooks, name, "%s: alert %s is not named in the runbooks", file, name)
+			assert.Regexp(t, `(?m)^### .*\b`+name+`\b`, runbooks, "%s: alert %s has no heading in the runbooks", file, name)
 		}
 	}
 }

@@ -42,7 +42,7 @@ Common starting points:
 **Triage.**
 1. Group by route: `sum by (route) (rate(platform_http_requests_total{job="workflow-execution-service-api",status_class="5xx"}[5m]))`.
 2. Check Postgres, PgBouncer, Valkey and the Temporal frontend, and whether a deploy started at the same time.
-3. A failing start or signal that names the Definition Service is covered by `ExecutionServiceDefinitionCallsHighErrorRate`.
+3. A failure on the two routes the Definition Service calls is covered by `ExecutionServiceDefinitionCallsHighErrorRate`; a failing plan read shows as `UpstreamDependencyErrors` with `dependency=definition_service`.
 
 **Mitigate.** Roll back the last deploy; restore the failing dependency.
 
@@ -58,9 +58,9 @@ Common starting points:
 
 `runbook: workflow-execution-service/definition-calls`
 
-**Meaning.** Calls to the Definition Service on the named route fail more than 5% of the time. The Execution Service reads compiled plans from it and retries the read before giving up.
+**Meaning.** The Definition Service calls two routes of this API, `active-instances` and `pause-tasks`, and the named route answers 5xx to more than 5% of those calls. The alert measures this service's own inbound routes, not its calls to the Definition Service.
 
-**Triage.** Check the Definition Service's own alerts first (`compiled-plan`, `service-down`). A request that cannot get its plan answers 503 with the upstream-unavailable code and does nothing.
+**Triage.** The failing route is in the alert. The Definition Service's publish and departure handling wait on these answers, so check Postgres and the Temporal frontend for this API and recent deploys. For the reverse direction, a plan read that fails, see `UpstreamDependencyErrors` and the Definition Service's `compiled-plan` runbook; a request that cannot get its plan answers 503 with the upstream-unavailable code and does nothing.
 
 ### ExecutionServiceHTTPPanic
 
@@ -122,7 +122,7 @@ Common starting points:
 
 **Meaning.** The oldest pending outbox row is more than 10 minutes old, so the relay is not publishing. A relay that has stopped produces no attempts and no dead letters.
 
-**Triage.** Look for relay errors or no relay log lines in the Worker logs, and for a long lock or a stuck transaction on the outbox table.
+**Triage.** The relay runs inside the API process, so look at the API pods' logs for relay errors or for no relay lines at all (`outbox relay starting` is logged at boot), and for a long lock or a stuck transaction on the outbox table. The Worker only writes outbox rows.
 
 ### InboundEventIngestErrors
 
@@ -156,7 +156,7 @@ Common starting points:
 
 **Meaning.** The named tenant queue has not been polled in 5 minutes, although the Worker is up.
 
-**Triage.** Look in the Worker logs for the start failure of that queue (a worker that cannot start for one queue only logs). Restarting the Worker pod retries every queue.
+**Triage.** Look in the Worker logs for `failed to start worker for queue` for that queue (a worker that cannot start for one queue only logs). The topology poll retries every queue without a registered worker on each interval, so a persistent failure names its own cause in that line; a restart is only needed when the cause is fixed and the next poll has not yet passed.
 
 ### InstancesOnUnpolledQueue
 
@@ -200,4 +200,4 @@ Common starting points:
 
 **Meaning.** A connection queried a tenant table without a valid tenant setting (`missing_or_invalid_guc`), or row-level security blocked access to another tenant's rows (`cross_tenant_access`).
 
-**Triage.** A missing setting is a route or a raw session without the tenant middleware; find it in the logs of the sampled event. A cross-tenant block is a security event: identify the caller, and check for a service bug that passes the wrong tenant and for probing.
+**Triage.** The sampled rows are in the `rls_violation_log` table (the offending query text and the violation type); the exporter only counts them and prunes them after the retention period, so read the rows before they expire. A missing setting is a route or a raw session without the tenant middleware. A cross-tenant block is a security event: find the query, and check for a service bug that passes the wrong tenant and for probing.

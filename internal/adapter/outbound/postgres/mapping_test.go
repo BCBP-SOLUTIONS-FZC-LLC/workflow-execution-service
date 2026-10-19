@@ -22,3 +22,10 @@ func TestFromPgtypeUUID(t *testing.T) {
 		assert.Equal(t, id, *got)
 	}
 }
+
+func TestTextPointerRoundTrip(t *testing.T) {
+	assert.Nil(t, fromPgtypeTextPtr(toPgtypeTextPtr(nil)))
+	v := "abc"
+	assert.True(t, toPgtypeTextPtr(&v).Valid)
+	assert.Equal(t, &v, fromPgtypeTextPtr(toPgtypeTextPtr(&v)))
+}
