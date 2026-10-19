@@ -164,7 +164,7 @@ Logs, metrics and traces go through `platform-gincommon`; every binary calls the
 | Workflow domain-shared | none defined yet | Registry |
 | Service-specific | `workflow_execution_service_*` | This service |
 
-[docs/observability/metric-registry.md](docs/observability/metric-registry.md) is generated from the registry and a real scrape. `make metrics-lint` fails on a collector built outside `internal/observability`, a name or label the standard rejects, an alert naming a retired metric, a stale inventory, and a test checks that every metric an alert rule names is exported. Tracing exports over OTLP and propagates through Temporal and outbound HTTP calls. The API server exports sampled `rls_violation_log` rows and samples the DEGRADED and READY-task gauges through the outbox relay role.
+[docs/observability/metric-registry.md](docs/observability/metric-registry.md) is generated from the registry and a real scrape. `make metrics-lint` fails on a collector built outside `internal/observability`, a name or label the standard rejects, an alert naming a retired metric, a stale inventory, and a test checks that every metric an alert rule names is exported. Every alert carries a `runbook` annotation naming its entry in [docs/observability/runbooks.md](docs/observability/runbooks.md), and a test keeps the annotations, the entries and the chart in step. Tracing exports over OTLP and propagates through Temporal and outbound HTTP calls. The API server exports sampled `rls_violation_log` rows and samples the DEGRADED and READY-task gauges through the outbox relay role.
 
 ---
 

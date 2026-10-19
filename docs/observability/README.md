@@ -1,6 +1,6 @@
 # Observability
 
-Logs, metrics and traces go through `platform-gincommon`. Database metrics come from `platform-pgcommon`, and `platform-events` identifies its library version in every scrape. [metric-registry.md](metric-registry.md) lists every series this service exposes.
+Logs, metrics and traces go through `platform-gincommon`. Database metrics come from `platform-pgcommon`, and `platform-events` identifies its library version in every scrape. [metric-registry.md](metric-registry.md) lists every series this service exposes. [runbooks.md](runbooks.md) has an entry for every alert; each alert's `runbook` annotation names its entry.
 
 ## Tiers
 
