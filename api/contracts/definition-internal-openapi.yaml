@@ -86,7 +86,7 @@ components:
         id:        { type: string, format: uuid, description: "Unique event id; logged for correlation. Redelivery is absorbed by handler idempotency, not by a dedup registry." }
         type:      { type: string, example: DepartmentMembershipRevoked, description: "Event type used for dispatch. Unknown types are accepted and ignored." }
         tenant_id: { type: string, format: uuid, description: "Tenant the event applies to; used to set the RLS GUC." }
-        time:      { type: string, format: date-time, description: "When the event was produced. A revocation leaves alone every default assignee added after this time, so a redelivered or reordered event cannot invalidate a version published after the user was added back. Absent means no such filter." }
+        time:      { type: string, format: date-time, description: "When the event was produced. A revocation leaves alone every default assignee added after this time, so a redelivered or reordered event cannot invalidate a version published after the user was added back. Absent means no such filter. An offboarding event takes it as the start of the tenant's retention period; absent means the time of receipt." }
         dataschema: { type: string, nullable: true, description: "Schema registry version identifier for the encoded payload (platform-events Envelope SchemaID). Present when the producer encodes through a schema registry; then data is a base64 string of the registry-framed JSON payload. Absent for plain JSON." }
         data:
           description: "Type-specific payload (e.g. user_id, department_id, role). CloudEvents data field. An object for plain JSON, or a base64 string of a schema-registry frame when dataschema is present."
@@ -125,6 +125,12 @@ components:
         code:
           type: string
           description: Service-specific error code for programmatic handling.
+        trace_id:
+          type: string
+          description: The OpenTelemetry trace id of the request, equal to the X-Trace-ID response header.
+        request_id:
+          type: string
+          description: The request id, equal to the X-Request-ID response header.
         invalid_params:
           type: array
           description: Details about specific fields that failed validation.
@@ -151,31 +157,31 @@ components:
     BadRequest:
       description: A path or query parameter is missing or malformed.
       content:
-        application/json:
+        application/problem+json:
           schema: { $ref: '#/components/schemas/ProblemDetails' }
 
     Unauthorized:
       description: Missing or wrong x-internal-token.
       content:
-        application/json:
+        application/problem+json:
           schema: { $ref: '#/components/schemas/ProblemDetails' }
 
     NotFound:
       description: No such resource for this tenant.
       content:
-        application/json:
+        application/problem+json:
           schema: { $ref: '#/components/schemas/ProblemDetails' }
 
     PayloadTooLarge:
       description: The request body exceeds the 10 MB limit. Not retryable.
       content:
-        application/json:
+        application/problem+json:
           schema: { $ref: '#/components/schemas/ProblemDetails' }
 
     InternalError:
       description: Unexpected server error.
       content:
-        application/json:
+        application/problem+json:
           schema: { $ref: '#/components/schemas/ProblemDetails' }
           example:
             type: "https://api.workflow.platform/errors/internal-error"
@@ -223,7 +229,10 @@ paths:
         Service-to-service ingest endpoint called by the shared workflow-events consumer (which
         consumes the SQS queues, e.g. membership-workflow-q). Accepts a single event envelope, sets the
         RLS GUC from the envelope tenant_id, and dispatches by type — currently
-        DepartmentMembershipRevoked and MembershipRevoked → template invalidation (see LLD §7.4). An envelope with a dataschema has its schema-registry framed payload decoded first. Idempotent: a repeated
+        DepartmentMembershipRevoked and MembershipRevoked → template invalidation (see LLD §7.4), and
+        TenantMembershipsPurged and TenantStateChanged with a status of offboarded → the tenant is
+        recorded for the purge of its templates and credentials (LLD §7.4.4, §7.4.6); any other
+        TenantStateChanged status is acknowledged and ignored. An envelope with a dataschema has its schema-registry framed payload decoded first. Idempotent: a repeated
         envelope id returns 2xx with no side effects. This route is internal-only — it is not
         exposed on the public Envoy gateway and carries no gateway identity headers.
       tags: [Internal]
@@ -240,18 +249,18 @@ paths:
         "400":
           description: Malformed envelope or payload (non-retryable — the consumer routes to its DLQ).
           content:
-            application/json:
+            application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetails' }
         "401":
           description: Missing or invalid internal service credential.
           content:
-            application/json:
+            application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetails' }
         "413": { $ref: '#/components/responses/PayloadTooLarge' }
         "500":
           description: Transient processing failure (DB/transaction). The consumer retries and eventually DLQs.
           content:
-            application/json:
+            application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetails' }
         "502":
           description: >
@@ -260,7 +269,7 @@ paths:
             frame. Retryable, so the consumer retries it and does not route it to its DLQ as a
             malformed event.
           content:
-            application/json:
+            application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetails' }
 
   /api/v1/internal/connector-aliases:
@@ -289,7 +298,7 @@ paths:
         "401":
           description: Missing or invalid internal service credential.
           content:
-            application/json:
+            application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetails' }
         "500": { $ref: '#/components/responses/InternalError' }
 
@@ -306,6 +315,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [alias, method, baseURL, pathTemplate]
               properties:
                 alias:        { type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9_-]+$' }
@@ -341,12 +351,12 @@ paths:
             alias, method or pathTemplate, a timeoutMs over the limit, or a
             baseURL whose scheme, credentials, host or port the allowlist rejects.
           content:
-            application/json:
+            application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetails' }
         "401":
           description: Missing or invalid internal service credential.
           content:
-            application/json:
+            application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetails' }
         "413": { $ref: '#/components/responses/PayloadTooLarge' }
         "500": { $ref: '#/components/responses/InternalError' }
@@ -369,7 +379,7 @@ paths:
         "401":
           description: Missing or invalid internal service credential.
           content:
-            application/json:
+            application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetails' }
         "500": { $ref: '#/components/responses/InternalError' }
 
