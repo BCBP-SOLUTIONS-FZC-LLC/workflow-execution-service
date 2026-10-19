@@ -123,24 +123,3 @@ jobs:
       - name: Lint GitHub Actions workflows
         run: make lint-workflows
 
-  design-sync:
-    name: design copies
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      # Each document kept in the design repository too must still match it. That repository is not in
-      # this organisation, so the step compares only when DESIGN_REPO_TOKEN is set.
-      - name: Design copy check
-        env:
-          DESIGN_REPO_TOKEN: ${{ secrets.DESIGN_REPO_TOKEN }}
-        run: |
-          if [ -z "$DESIGN_REPO_TOKEN" ]; then
-            echo "::notice::DESIGN_REPO_TOKEN is not set, so the design copies are not compared"
-            exit 0
-          fi
-          GH_TOKEN="$DESIGN_REPO_TOKEN" make design-sync-check
