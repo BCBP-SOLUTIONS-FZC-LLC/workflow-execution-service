@@ -16,6 +16,14 @@ linters:
     - misspell
     - unconvert
     - unparam
+    - bodyclose
+    - noctx
+    - nilerr
+    - gosec
+    - contextcheck
+    - gocritic
+    - nolintlint
+    - sqlclosecheck
   settings:
     revive:
       rules:
@@ -24,6 +32,9 @@ linters:
         - name: error-strings
         - name: error-naming
         - name: if-return
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     wrapcheck:
       ignore-package-globs:
         - github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/*
@@ -39,6 +50,16 @@ linters:
         linters:
           - wrapcheck
           - unparam
+          - noctx
+          - gosec
+      - path: ^test/
+        linters:
+          - noctx
+          - gosec
+      - path: ^(cmd|test)/
+        text: exitAfterDefer
+        linters:
+          - gocritic
       - path: internal/
         text: "exported: "
         linters:
