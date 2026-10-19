@@ -18,6 +18,11 @@ temporal workflow show --address localhost:17233 --workflow-id initial-interpret
 # stop the dev server (fg + Ctrl-C, or: pkill -f "temporal server start-dev.*17233")
 ```
 
+`gen/main.go` takes the scenario as its first argument (`initial-interpreter`, the default,
+or `degraded-pause`); export `degraded-pause` with `--workflow-id degraded-pause-fixture` to
+`testdata/degraded_pause.json`. The `degraded-pause` history was recorded before the
+interpreter kept a pause across `DEGRADED`, so it is the old-history guard for that change.
+
 `gen/main.go` is never run by CI — only when adding or regenerating a fixture. Add a
 second scenario function (not a generic flag) only once a second fixture actually
 needs one — same "3+ consumers before generalizing" threshold this repo already uses
