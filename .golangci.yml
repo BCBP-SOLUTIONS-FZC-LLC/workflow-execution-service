@@ -44,7 +44,6 @@ linters:
       - platform-libs/
       - internal/adapter/outbound/postgres/db/
       - internal/core/port/mocks/
-      - test/integration/
     rules:
       - path: _test\.go
         linters:
@@ -52,11 +51,15 @@ linters:
           - unparam
           - noctx
           - gosec
+          - contextcheck
+          - bodyclose
       - path: ^test/
         linters:
           - noctx
           - gosec
-      - path: ^(cmd|test)/
+          - contextcheck
+          - bodyclose
+      - path: ^test/workflow/replay/gen/
         text: exitAfterDefer
         linters:
           - gocritic
