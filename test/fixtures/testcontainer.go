@@ -48,26 +48,14 @@ func NewTestPoolAndDSN(t *testing.T) (*pgcommon.Pool, string) {
 			WithStartupTimeout(120 * time.Second),
 	}
 
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
+	container, host, port, err := startWithMappedPort(ctx, req, func(ctx context.Context, c testcontainers.Container) (string, error) {
+		p, err := c.MappedPort(ctx, "5432")
+		return p.Port(), err
 	})
 	if err != nil {
 		t.Fatalf("fixtures.NewTestPoolAndDSN: start container: %v", err)
 	}
 	t.Cleanup(func() { _ = container.Terminate(context.Background()) })
-
-	host, err := container.Host(ctx)
-	if err != nil {
-		t.Fatalf("fixtures.NewTestPoolAndDSN: container host: %v", err)
-	}
-	port, err := mappedPort(func() (string, error) {
-		p, err := container.MappedPort(ctx, "5432")
-		return p.Port(), err
-	})
-	if err != nil {
-		t.Fatalf("fixtures.NewTestPoolAndDSN: mapped port: %v", err)
-	}
 
 	dsn := fmt.Sprintf("postgres://postgres:postgres@%s:%s/testdb?sslmode=disable", host, port)
 
@@ -105,15 +93,57 @@ func applyMigrations(t *testing.T, dsn string) {
 	}
 }
 
-func mappedPort(lookup func() (string, error)) (string, error) {
+const (
+	startAttempts   = 3
+	portMapTimeout  = 20 * time.Second
+	portMapInterval = 200 * time.Millisecond
+)
+
+func startWithMappedPort(
+	ctx context.Context,
+	req testcontainers.ContainerRequest,
+	lookup func(context.Context, testcontainers.Container) (string, error),
+) (testcontainers.Container, string, string, error) {
 	var lastErr error
-	for attempt := 0; attempt < 60; attempt++ {
-		p, err := lookup()
+	for attempt := 0; attempt < startAttempts; attempt++ {
+		container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+			ContainerRequest: req,
+			Started:          true,
+		})
+		if err != nil {
+			lastErr = err
+			if container != nil {
+				_ = container.Terminate(ctx)
+			}
+			continue
+		}
+		host, err := container.Host(ctx)
 		if err == nil {
-			return p, nil
+			var port string
+			if port, err = mappedPortWithin(ctx, container, lookup); err == nil {
+				return container, host, port, nil
+			}
 		}
 		lastErr = err
-		time.Sleep(200 * time.Millisecond)
+		_ = container.Terminate(ctx)
+	}
+	return nil, "", "", fmt.Errorf("a container with a published port after %d attempts: %w", startAttempts, lastErr)
+}
+
+func mappedPortWithin(ctx context.Context, container testcontainers.Container, lookup func(context.Context, testcontainers.Container) (string, error)) (string, error) {
+	lookupCtx, cancel := context.WithTimeout(ctx, portMapTimeout)
+	defer cancel()
+	var lastErr error
+	for lookupCtx.Err() == nil {
+		port, err := lookup(lookupCtx, container)
+		if err == nil {
+			return port, nil
+		}
+		lastErr = err
+		select {
+		case <-lookupCtx.Done():
+		case <-time.After(portMapInterval):
+		}
 	}
 	return "", lastErr
 }

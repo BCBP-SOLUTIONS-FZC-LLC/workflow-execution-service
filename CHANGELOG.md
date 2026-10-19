@@ -10,7 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
-- Problem documents carry `trace_id` and `request_id` (the values of the `X-Trace-ID` and `X-Request-ID` response headers), and a public request body with a field the endpoint does not define is `400 BAD_REQUEST` naming it in `invalid_params` instead of being ignored, so a misspelt optional field no longer silently does nothing. The internal event envelope and connector callbacks stay tolerant of a field a newer sender adds. The public spec declares `additionalProperties: false` on its request bodies; both specs declare the new problem members. LLD rev 1.108.
+- Problem documents carry `trace_id` and `request_id` (the values of the `X-Trace-ID` and `X-Request-ID` response headers), and a public request body with a field the endpoint does not define is `400 BAD_REQUEST` naming it in `invalid_params` instead of being ignored, so a misspelt optional field no longer silently does nothing. Every internal endpoint's body (event envelopes, connector callbacks, delegate reassignment and cancellation, the user task pause) stays tolerant of a field a newer sender adds; a body with data after its JSON value is refused everywhere. The internal-token refusal carries the correlation ids too, and the public spec declares the library's flat 401 body beside the problem document. Not problem documents: the library's flat bodies (missing identity, timeout, recovered panic), the plain 404 of an unrouted path, the health bodies and the AsyncAPI endpoint's error. The public spec declares `additionalProperties: false` on its request bodies; both specs declare the new problem members. LLD rev 1.108.
 
 ### Fixed
 

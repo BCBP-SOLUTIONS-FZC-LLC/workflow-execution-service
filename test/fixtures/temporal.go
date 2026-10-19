@@ -23,26 +23,17 @@ func NewTestTemporalServer(t *testing.T) client.Client {
 		Image:        "temporalio/temporal:latest",
 		Cmd:          []string{"server", "start-dev", "--ip", "0.0.0.0"},
 		ExposedPorts: []string{"7233/tcp"},
-		WaitingFor:   wait.ForListeningPort("7233/tcp").WithStartupTimeout(90 * time.Second),
+		WaitingFor:   wait.ForListeningPort("7233/tcp").WithStartupTimeout(45 * time.Second),
 	}
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
+	container, host, port, err := startWithMappedPort(ctx, req, func(ctx context.Context, c testcontainers.Container) (string, error) {
+		p, err := c.MappedPort(ctx, "7233")
+		return p.Port(), err
 	})
 	if err != nil {
 		t.Fatalf("fixtures.NewTestTemporalServer: start container: %v", err)
 	}
 	t.Cleanup(func() { _ = container.Terminate(context.Background()) })
-
-	host, err := container.Host(ctx)
-	if err != nil {
-		t.Fatalf("fixtures.NewTestTemporalServer: container host: %v", err)
-	}
-	port, err := container.MappedPort(ctx, "7233")
-	if err != nil {
-		t.Fatalf("fixtures.NewTestTemporalServer: mapped port: %v", err)
-	}
-	hostPort := host + ":" + port.Port()
+	hostPort := host + ":" + port
 
 	var sdk client.Client
 	deadline := time.Now().Add(60 * time.Second)

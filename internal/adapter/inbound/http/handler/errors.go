@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -190,6 +191,8 @@ func bindErrResponse(c *gin.Context, err error) {
 	writeProblem(c, http.StatusBadRequest, CodeBadRequest, err.Error(), nil)
 }
 
+var errTrailingData = errors.New("request body has data after its JSON value")
+
 const (
 	unknownFieldPrefix = "json: unknown field "
 	maxEchoedFieldName = 64
@@ -219,6 +222,9 @@ func bindStrictJSON(c *gin.Context, obj any) error {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(obj); err != nil {
 		return fmt.Errorf("decode request body: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return errTrailingData
 	}
 	if err := binding.Validator.ValidateStruct(obj); err != nil {
 		return fmt.Errorf("validate request body: %w", err)

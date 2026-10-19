@@ -76,3 +76,24 @@ func assertProblemBody(t *testing.T, w *httptest.ResponseRecorder) {
 	assert.Equal(t, "UNAUTHORIZED", body.Code)
 	assert.Equal(t, http.StatusUnauthorized, body.Status)
 }
+
+func TestRequireInternalToken_TheRefusalCarriesTheCorrelationIds(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Header("X-Trace-ID", "trace-abc")
+		c.Header("X-Request-ID", "request-xyz")
+	})
+	r.Use(middleware.RequireInternalToken("secret-token"))
+	r.GET("/probe", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/probe", nil))
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, "application/problem+json", w.Header().Get("Content-Type"))
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "trace-abc", body["trace_id"])
+	assert.Equal(t, "request-xyz", body["request_id"])
+}

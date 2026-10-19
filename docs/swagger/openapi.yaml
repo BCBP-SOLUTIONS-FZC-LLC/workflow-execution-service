@@ -619,6 +619,16 @@ components:
           additionalProperties: true
           example: { bid: "42" }
 
+    GatewayAuthError:
+      type: object
+      required: [error, status]
+      description: The flat envelope the shared HTTP library writes before a handler runs (a missing identity, the request timeout, a recovered panic).
+      properties:
+        error:      { type: string, example: "missing or invalid authentication headers" }
+        status:     { type: integer, example: 401 }
+        trace_id:   { type: string }
+        request_id: { type: string }
+
     ProblemDetails:
       type: object
       required: [type, title, status, detail, instance, code]
@@ -706,7 +716,10 @@ components:
             code: "BAD_REQUEST"
 
     Unauthorized:
-      description: Missing or invalid x-tenant-id / x-user-id gateway headers.
+      description: >
+        Missing or invalid x-tenant-id / x-user-id gateway headers. A missing identity is refused
+        by the shared HTTP library with `GatewayAuthError`; an identity that is present but not
+        acceptable is refused with a problem document.
       content:
         application/problem+json:
           schema:
@@ -715,9 +728,12 @@ components:
             type: "https://errors.bcbp.io/execution/unauthorized"
             title: "Unauthorized"
             status: 401
-            detail: "x-tenant-id header is required"
+            detail: "x-tenant-id header is not a valid UUID"
             instance: "/api/v1/instances"
             code: "UNAUTHORIZED"
+        application/json:
+          schema:
+            $ref: "#/components/schemas/GatewayAuthError"
 
     Forbidden:
       description: Caller lacks the required role or active assignment for this resource.

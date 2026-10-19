@@ -42,7 +42,7 @@ func (h *Handler) PauseUserTasks(c *gin.Context) {
 		return
 	}
 	var req pauseUserTasksReq
-	if !bindJSON(c, &req) {
+	if !bindInternalJSON(c, &req) {
 		return
 	}
 	if err := h.userTaskPauser.PauseUserTasks(c.Request.Context(), req.TenantID, userID); err != nil {

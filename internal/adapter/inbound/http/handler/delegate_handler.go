@@ -22,7 +22,7 @@ type reassignDelegateResp struct {
 
 func (h *Handler) ReassignDelegate(c *gin.Context) {
 	var req reassignDelegateReq
-	if !bindJSON(c, &req) {
+	if !bindInternalJSON(c, &req) {
 		return
 	}
 
@@ -51,7 +51,7 @@ type cancelByDelegateResp struct {
 
 func (h *Handler) CancelByDelegate(c *gin.Context) {
 	var req cancelByDelegateReq
-	if !bindJSON(c, &req) {
+	if !bindInternalJSON(c, &req) {
 		return
 	}
 

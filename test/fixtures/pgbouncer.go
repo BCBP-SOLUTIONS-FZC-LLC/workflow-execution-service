@@ -61,16 +61,16 @@ func NewPgBouncer(t *testing.T) (bouncerDSN, directDSN string) {
 	t.Cleanup(func() { _ = pgb.Terminate(context.Background()) })
 
 	pgHost, _ := pg.Host(ctx)
-	pgPort, err := mappedPort(func() (string, error) {
-		p, err := pg.MappedPort(ctx, "5432")
+	pgPort, err := mappedPortWithin(ctx, pg, func(ctx context.Context, c testcontainers.Container) (string, error) {
+		p, err := c.MappedPort(ctx, "5432")
 		return p.Port(), err
 	})
 	if err != nil {
 		t.Fatalf("fixtures.NewPgBouncer: postgres port: %v", err)
 	}
 	bHost, _ := pgb.Host(ctx)
-	bPort, err := mappedPort(func() (string, error) {
-		p, err := pgb.MappedPort(ctx, "6432")
+	bPort, err := mappedPortWithin(ctx, pgb, func(ctx context.Context, c testcontainers.Container) (string, error) {
+		p, err := c.MappedPort(ctx, "6432")
 		return p.Port(), err
 	})
 	if err != nil {

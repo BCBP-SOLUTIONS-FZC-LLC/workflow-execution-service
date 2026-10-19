@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -110,4 +111,111 @@ func TestInternalBodies_ANewerSendersExtraFieldIsTolerated(t *testing.T) {
 		assert.Equal(t, http.StatusNoContent, w.Code)
 		assert.True(t, completed)
 	})
+}
+
+type fakeUserTaskPauser struct{ called bool }
+
+func (f *fakeUserTaskPauser) PauseUserTasks(context.Context, uuid.UUID, uuid.UUID) error {
+	f.called = true
+	return nil
+}
+
+func TestInternalBodies_EveryInternalEndpointToleratesAnAddedField(t *testing.T) {
+	userID := uuid.NewString()
+	cases := []struct {
+		name, path string
+		body       map[string]any
+		want       int
+	}{
+		{"reassign delegate", "/api/v1/internal/workflows/reassign-delegate", map[string]any{
+			"tenant_id": testTenantID, "old_delegate_id": uuid.New(), "new_delegate_id": uuid.New(), "added_by_a_newer_caller": 1,
+		}, http.StatusOK},
+		{"cancel by delegate", "/api/v1/internal/workflows/cancel-by-delegate", map[string]any{
+			"tenant_id": testTenantID, "delegate_user_id": uuid.New(), "added_by_a_newer_caller": 1,
+		}, http.StatusOK},
+		{"pause user tasks", "/api/v1/internal/users/" + userID + "/pause-tasks", map[string]any{
+			"tenant_id": testTenantID, "added_by_a_newer_caller": 1,
+		}, http.StatusNoContent},
+	}
+	gin.SetMode(gin.TestMode)
+	pauser := &fakeUserTaskPauser{}
+	h := handler.New(handler.Services{WorkflowClient: &fakeWorkflowClient{}, UserTaskPauser: pauser})
+	r := gin.New()
+	r.POST("/api/v1/internal/workflows/reassign-delegate", h.ReassignDelegate)
+	r.POST("/api/v1/internal/workflows/cancel-by-delegate", h.CancelByDelegate)
+	r.POST("/api/v1/internal/users/:user_id/pause-tasks", h.PauseUserTasks)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := do(r, internalReq(http.MethodPost, tc.path, tc.body))
+			assert.Equal(t, tc.want, w.Code, w.Body.String())
+		})
+	}
+	assert.True(t, pauser.called)
+}
+
+func TestStrictBodies_TrailingDataAfterTheValueIsRefused(t *testing.T) {
+	called := false
+	router := newRouter(newInstanceHandler(&fakeInstanceService{
+		start: func(context.Context, port.StartInstanceInput) (*port.Instance, error) {
+			called = true
+			return &port.Instance{}, nil
+		},
+	}))
+	r := httptest.NewRequest(http.MethodPost, instancesPath(),
+		strings.NewReader(`{"subject_id":"SUBJ-1","business_key":"TND-001","workflow_version_id":"`+uuid.NewString()+`"}{"zzz":1}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("x-tenant-id", testTenantID.String())
+	r.Header.Set("x-user-id", testUserID.String())
+
+	w := do(router, r)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.False(t, called, "a body with a second value must not reach the service")
+}
+
+func TestStrictBodies_EveryPublicEndpointWithABodyRefusesAnUnknownField(t *testing.T) {
+	id := uuid.NewString()
+	paths := map[string]string{
+		"start instance": "/api/v1/instances",
+		"pause":          "/api/v1/instances/" + id + "/pause",
+		"resume":         "/api/v1/instances/" + id + "/resume",
+		"cancel":         "/api/v1/instances/" + id + "/cancel",
+		"terminate":      "/api/v1/instances/" + id + "/terminate",
+		"force forward":  "/api/v1/instances/" + id + "/force-forward",
+		"force back":     "/api/v1/instances/" + id + "/force-back",
+		"node override":  "/api/v1/instances/" + id + "/nodes/review/override",
+		"outside answer": "/api/v1/instances/" + id + "/nodes/review/complete",
+		"boundary fire":  "/api/v1/instances/" + id + "/nodes/review/boundaries/timeout/fire",
+		"claim task":     "/api/v1/tasks/" + id + "/claim",
+		"complete task":  "/api/v1/tasks/" + id + "/complete",
+		"defer task":     "/api/v1/tasks/" + id + "/defer",
+		"reassign task":  "/api/v1/tasks/" + id + "/reassign",
+	}
+	called := false
+	router := newRouter(handler.New(handler.Services{
+		Instances: &fakeInstanceService{start: func(context.Context, port.StartInstanceInput) (*port.Instance, error) {
+			called = true
+			return &port.Instance{}, nil
+		}},
+		Tasks: &fakeTaskService{},
+	}))
+	for name, path := range paths {
+		t.Run(name, func(t *testing.T) {
+			r := req(http.MethodPost, path, map[string]any{"unknown_member": "typo"})
+			r.Header.Set("x-tenant-roles", "tenant_admin")
+			w := do(router, r)
+
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+			var prob struct {
+				InvalidParams []struct {
+					Name   string `json:"name"`
+					Reason string `json:"reason"`
+				} `json:"invalid_params"`
+			}
+			decodeJSON(t, w.Body, &prob)
+			require.Len(t, prob.InvalidParams, 1, "the refusal must name the unknown field, not fail on something else")
+			assert.Equal(t, "unknown_member", prob.InvalidParams[0].Name)
+		})
+	}
+	assert.False(t, called)
 }
