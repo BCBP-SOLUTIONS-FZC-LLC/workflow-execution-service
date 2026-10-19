@@ -144,7 +144,7 @@ func TestPublicContract_Instances_And_Tasks(t *testing.T) {
 		{"list tasks", call(http.MethodGet, "/api/v1/tasks", ""), http.StatusOK},
 		{"get a task", call(http.MethodGet, tsk, ""), http.StatusOK},
 		{"claim a task", call(http.MethodPost, tsk+"/claim", `{"record_version":3}`), http.StatusAccepted},
-		{"complete a task", call(http.MethodPost, tsk+"/complete", `{"record_version":3,"result":{}}`), http.StatusAccepted},
+		{"complete a task", call(http.MethodPost, tsk+"/complete", `{"record_version":3,"result_json":{}}`), http.StatusAccepted},
 		{"defer a task", call(http.MethodPost, tsk+"/defer", `{"reason":"waiting","record_version":3}`), http.StatusAccepted},
 		{"active tasks of a user", call(http.MethodGet, "/api/v1/workflows/active-by-user?user_id="+user.String(), ""), http.StatusOK},
 	} {

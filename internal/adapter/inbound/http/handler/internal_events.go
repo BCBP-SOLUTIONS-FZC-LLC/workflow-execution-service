@@ -80,7 +80,7 @@ func (h *Handler) parseTenantID(c *gin.Context, eventType, raw string) (uuid.UUI
 
 func (h *Handler) decodeEnvelope(c *gin.Context) (events.Envelope[json.RawMessage], bool) {
 	var env events.Envelope[json.RawMessage]
-	if !bindJSON(c, &env) {
+	if !bindInternalJSON(c, &env) {
 		incIngestTotal("unknown", "bad_payload")
 		return env, false
 	}

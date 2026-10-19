@@ -2,10 +2,16 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 
 	adapterhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -147,6 +153,8 @@ type problemDetails struct {
 	Detail        string         `json:"detail"`
 	Instance      string         `json:"instance"`
 	Code          ErrCode        `json:"code"`
+	TraceID       string         `json:"trace_id,omitempty"`
+	RequestID     string         `json:"request_id,omitempty"`
 	InvalidParams []invalidParam `json:"invalid_params,omitempty"`
 }
 
@@ -163,6 +171,8 @@ func writeProblem(c *gin.Context, status int, code ErrCode, detail string, inval
 		Detail:        detail,
 		Instance:      c.Request.URL.Path,
 		Code:          code,
+		TraceID:       c.Writer.Header().Get("X-Trace-ID"),
+		RequestID:     c.Writer.Header().Get("X-Request-ID"),
 		InvalidParams: invalidParams,
 	})
 }
@@ -172,7 +182,48 @@ func bindErrResponse(c *gin.Context, err error) {
 		writeProblem(c, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, "request body exceeds the 10 MB limit", nil)
 		return
 	}
+	if name := unknownFieldName(err); name != "" {
+		writeProblem(c, http.StatusBadRequest, CodeBadRequest, "request body has a field this endpoint does not define",
+			[]invalidParam{{Name: name, Reason: "is not a known field"}})
+		return
+	}
 	writeProblem(c, http.StatusBadRequest, CodeBadRequest, err.Error(), nil)
+}
+
+const (
+	unknownFieldPrefix = "json: unknown field "
+	maxEchoedFieldName = 64
+)
+
+func unknownFieldName(err error) string {
+	msg := err.Error()
+	at := strings.Index(msg, unknownFieldPrefix)
+	if at < 0 {
+		return ""
+	}
+	name, unquoteErr := strconv.Unquote(msg[at+len(unknownFieldPrefix):])
+	if unquoteErr != nil || name == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(name) > maxEchoedFieldName {
+		name = string([]rune(name)[:maxEchoedFieldName])
+	}
+	return name
+}
+
+func bindStrictJSON(c *gin.Context, obj any) error {
+	if c.Request == nil || c.Request.Body == nil {
+		return errors.New("invalid request")
+	}
+	dec := json.NewDecoder(c.Request.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(obj); err != nil {
+		return fmt.Errorf("decode request body: %w", err)
+	}
+	if err := binding.Validator.ValidateStruct(obj); err != nil {
+		return fmt.Errorf("validate request body: %w", err)
+	}
+	return nil
 }
 
 func errResponse(c *gin.Context, err error) {

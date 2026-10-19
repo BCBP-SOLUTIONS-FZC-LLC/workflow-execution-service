@@ -610,6 +610,7 @@ components:
 
     OutsideAnswer:
       type: object
+      additionalProperties: false
       description: An outside party's answer or message, delivered by the service that deals with it.
       properties:
         variables:
@@ -660,11 +661,18 @@ components:
             ASSIGNEE_INELIGIBLE, OVERRIDE_MAP_INVALID, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE,
             UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, INTERNAL_ERROR.
           example: "RECORD_VERSION_CONFLICT"
+        trace_id:
+          type: string
+          description: The OpenTelemetry trace id of the request, equal to the X-Trace-ID response header.
+        request_id:
+          type: string
+          description: The request id, equal to the X-Request-ID response header.
         invalid_params:
           type: array
           description: >
             Present on validation errors carrying more than one offending field/node — one entry
-            per violation (e.g. ASSIGNEE_INELIGIBLE's bulk node-eligibility failures, §5.5).
+            per violation (e.g. ASSIGNEE_INELIGIBLE's bulk node-eligibility failures, §5.5, or a
+            request body field the endpoint does not define, reason "is not a known field").
             Absent (omitted entirely, not null) on every other error.
           items:
             type: object
@@ -898,6 +906,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [subject_id, business_key, workflow_version_id]
               properties:
                 subject_id:
@@ -1172,6 +1181,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [record_version]
               properties:
                 record_version:
@@ -1269,6 +1279,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [record_version]
               properties:
                 record_version:
@@ -1359,6 +1370,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [reason, record_version]
               properties:
                 reason:
@@ -1457,6 +1469,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [reason]
               properties:
                 reason:
@@ -1703,6 +1716,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [target_node_key, record_version]
               properties:
                 target_node_key:
@@ -1809,6 +1823,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [record_version]
               properties:
                 record_version:
@@ -1909,6 +1924,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [new_user_id, record_version]
               properties:
                 new_user_id:
@@ -2233,6 +2249,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [record_version]
               properties:
                 record_version:
@@ -2342,6 +2359,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [record_version]
               properties:
                 record_version:
@@ -2439,6 +2457,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [record_version]
               properties:
                 record_version:
@@ -2533,6 +2552,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [new_assignee_user_id, record_version]
               properties:
                 new_assignee_user_id:

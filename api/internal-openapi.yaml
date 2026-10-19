@@ -208,6 +208,12 @@ components:
             ASSIGNEE_INELIGIBLE, OVERRIDE_MAP_INVALID, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE,
             UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, INTERNAL_ERROR.
           example: "RECORD_VERSION_CONFLICT"
+        trace_id:
+          type: string
+          description: The OpenTelemetry trace id of the request, equal to the X-Trace-ID response header.
+        request_id:
+          type: string
+          description: The request id, equal to the X-Request-ID response header.
         invalid_params:
           type: array
           description: >

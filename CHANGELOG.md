@@ -8,6 +8,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## [Unreleased]
 
+### Changed
+
+- Problem documents carry `trace_id` and `request_id` (the values of the `X-Trace-ID` and `X-Request-ID` response headers), and a public request body with a field the endpoint does not define is `400 BAD_REQUEST` naming it in `invalid_params` instead of being ignored, so a misspelt optional field no longer silently does nothing. The internal event envelope and connector callbacks stay tolerant of a field a newer sender adds. The public spec declares `additionalProperties: false` on its request bodies; both specs declare the new problem members. LLD rev 1.108.
+
 ### Fixed
 
 - A start that slipped in after a tenant's offboarding sweep (through a token that outlives the tenant by minutes) created an instance whose rows the later purge would delete while its workflow ran, because the start gate refuses only the statuses a setting names and the setting is empty by default. An offboarded tenant is refused regardless of the setting. LLD rev 1.107.

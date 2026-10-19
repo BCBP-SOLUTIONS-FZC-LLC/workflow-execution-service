@@ -174,6 +174,19 @@ func bindJSON(c *gin.Context, req any) bool {
 		return false
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
+	if err := bindStrictJSON(c, req); err != nil {
+		bindErrResponse(c, err)
+		return false
+	}
+	return true
+}
+
+func bindInternalJSON(c *gin.Context, req any) bool {
+	if ct := c.GetHeader("Content-Type"); ct != "" && !strings.HasPrefix(ct, "application/json") {
+		writeProblem(c, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "request body must be application/json", nil)
+		return false
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
 	if err := c.ShouldBindJSON(req); err != nil {
 		bindErrResponse(c, err)
 		return false

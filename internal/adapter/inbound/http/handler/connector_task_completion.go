@@ -24,7 +24,7 @@ func (h *Handler) CompleteConnectorTask(c *gin.Context) {
 		return
 	}
 	var req completeConnectorTaskReq
-	if !bindJSON(c, &req) {
+	if !bindInternalJSON(c, &req) {
 		return
 	}
 
@@ -41,7 +41,7 @@ func (h *Handler) FailConnectorTask(c *gin.Context) {
 		return
 	}
 	var req failConnectorTaskReq
-	if !bindJSON(c, &req) {
+	if !bindInternalJSON(c, &req) {
 		return
 	}
 
