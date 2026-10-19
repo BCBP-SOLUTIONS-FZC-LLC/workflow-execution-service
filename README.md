@@ -130,17 +130,17 @@ Platform libraries and what each owns:
 | Produced events | [api/asyncapi.yaml](api/asyncapi.yaml) | Subscribers of the `wf-workflow-events` SNS topic |
 | Consumed events | the same file | The Workflow-Events Consumer forwards each to `/api/v1/internal/events/{delegation,user-profile,tenant,workflow-task}` |
 
-Tests fail when a router operation is missing from its spec or the reverse, and when the AsyncAPI messages differ from the produced and handled event types.
+Tests fail when a router operation is missing from its spec or the reverse, and when the AsyncAPI messages differ from the produced and handled event types. `make design-sync-check` fails when a spec, the LLD or an event schema differs from its copy in the design repository.
 
 ---
 
 ## Configuration
 
-`.env.example` lists every variable. `APP_ENV` is one of `local`, `dev`, `test`, `staging`, `prod`; outside `dev` and `local` each binary refuses to start without the settings it needs:
+`.env.example` lists every variable, including the ones with a product decision behind them: `START_REFUSED_STATUSES` (tenant statuses whose instance starts are refused, empty by default), the tenant purge settings (`TENANT_PURGE_ENABLED`, `TENANT_HISTORY_RETENTION`), `WORKFLOW_CACHE_SIZE` (sizing) and `LOCK_DATABASE_URL`; the chart also sets `GOMEMLIMIT` per process. `APP_ENV` is one of `local`, `dev`, `test`, `staging`, `prod`; outside `dev` and `local` each binary refuses to start without the settings it needs:
 
 | Binary | Required outside dev |
 | --- | --- |
-| API server | `DATABASE_URL`, `OUTBOX_RELAY_DATABASE_URL`, `VALKEY_ADDR`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL` and `_TOKEN`, `INTERNAL_API_TOKEN`, `ELIGIBILITY_BASE_URL`, `TOKEN_SERVICE_BASE_URL`, `SNS_TOPIC_ARN`, `GLUE_REGISTRY_NAME`, `AWS_USE_STUB=false` |
+| API server | `DATABASE_URL`, `OUTBOX_RELAY_DATABASE_URL`, `VALKEY_ADDR`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL` and `_TOKEN`, `INTERNAL_API_TOKEN`, `ELIGIBILITY_BASE_URL`, `TOKEN_SERVICE_BASE_URL`, `SNS_TOPIC_ARN`, `GLUE_REGISTRY_NAME`, `AWS_USE_STUB=false`, `LOCK_DATABASE_URL` when `PG_BOUNCER_MODE` is true |
 | Worker | `DATABASE_URL`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL` and `_TOKEN` |
 | Connector worker | `DATABASE_URL`, `VALKEY_ADDR`, `DEFINITION_SERVICE_URL` and `_TOKEN`, `INTERNAL_API_TOKEN`, `EXECUTION_SERVICE_INTERNAL_ADDR`, `OPENBAO_TOKEN`, `CONNECTOR_DOCS_BUCKET`; `OPENBAO_ADDR` and `EXECUTION_SERVICE_INTERNAL_ADDR` in every environment, dev included |
 
@@ -189,7 +189,7 @@ Logs, metrics and traces go through `platform-gincommon`; every binary calls the
 | `test/e2e/` | The API and worker against real Temporal, Postgres and Valkey, driven over HTTP | `make test-e2e` |
 | `test/compat/` | The Definition Service (`DEFINITION_SERVICE_DIR`, default `../definition_service`), this repository's connector worker and the Workflow-Events Consumer (`EVENT_CONSUMER_DIR`, default `../event_consumer`) as real binaries against this service's real API, worker and stores, with LocalStack SNS and SQS | `make test-compat` |
 
-`make check` runs formatting, lint, vet, arch-lint, metrics-lint, the contract gate and the merged-coverage gate.
+`make check` runs formatting, lint (build tags `integration`, `e2e` and `compat` included), vet, arch-lint, metrics-lint, the breaking-change gate, the design-sync script's test and the merged-coverage gate.
 
 | Command | What it does |
 | --- | --- |
@@ -201,6 +201,8 @@ Logs, metrics and traces go through `platform-gincommon`; every binary calls the
 | `make lint` / `make fix` | golangci-lint read-only or fixing |
 | `make arch-lint` / `make metrics-lint` / `make metrics-inventory` | Import graph, observability standard, regenerate the inventory |
 | `make contract-check` / `make contract-breaking` | Copied Definition contract, internal spec breaking-change gate |
+| `make design-sync-check` / `make design-sync-check-test` | Fail when a document kept here and in the design repository differs (`DESIGN_DIR=<checkout>`, or `GH_TOKEN` reads `Haroon-BCBP/design`); CI skips it with a notice until the `DESIGN_REPO_TOKEN` secret exists |
+| `make docker-build` / `make pin-base-images` / `make lint-workflows` | The three images, base-image digests, `actionlint` on the workflows |
 | `make helm-lint` / `make vuln` / `make docker-check` | Chart, dependency vulnerabilities, Dockerfile lint and scan |
 | `make check` | Everything CI gates on, locally |
 

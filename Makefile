@@ -75,7 +75,8 @@ COVER_PKG_FLOORS   := internal/workflow:88 cmd/connector-worker:55 internal/obse
         tidy fmt-check fix check \
         setup install-hooks \
         docker-up docker-down \
-        docker-build docker-build-server docker-build-worker docker-lint docker-trivy docker-check pin-base-images \
+        docker-build docker-build-server docker-build-worker docker-build-connector-worker docker-lint docker-trivy docker-check pin-base-images \
+        helm-lint lint-workflows \
         extract-schemas schema-validate schema-diff schema-register schema-prune \
         clean help
 
@@ -293,7 +294,7 @@ fix:
 	@echo "==> gofmt (auto-fix)"
 	gofmt -w cmd/ internal/ test/
 	@echo "==> lint (auto-fix)"
-	$(GOLANGCI) run --fix ./...
+	$(GOLANGCI) run --fix --build-tags=integration,e2e,compat ./cmd/... ./internal/... ./test/...
 	@echo "✓ formatting and lint fixes applied"
 
 ## check: Verify formatting/lint (read-only), run vet, tests, and coverage gate — full local CI pass

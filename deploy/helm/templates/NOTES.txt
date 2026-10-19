@@ -2,14 +2,11 @@
 
 API:    {{ include "workflow-execution-service.apiFullname" . }} — {{ .Values.api.replicas }} replica(s), :{{ .Values.api.httpPort }} HTTP (public routes, and /api/v1/internal for in-cluster callers only)
 Worker: {{ include "workflow-execution-service.workerFullname" . }} — {{ .Values.worker.replicas }} replica(s), :{{ .Values.worker.healthPort }} health + :{{ .Values.worker.metricsPort }} metrics
-
-IMPORTANT: cmd/server and cmd/worker are both still stub mains as of this
-chart's authoring (T1.12) — neither has a real listener, Temporal
-client/worker, or /healthz//readyz endpoint yet (composition-root wiring is
-later Tier-2 work). Deployed today, both Deployments' pods will exit
-immediately and crash-loop — expected, not a chart defect. This chart
-documents the LLD's real target deploy shape so it's ready the moment that
-composition root lands, per this task's own "easy to reuse" bar.
+{{- if .Values.connectorWorker.enabled }}
+Connector worker: {{ include "workflow-execution-service.connectorWorkerFullname" . }} — {{ .Values.connectorWorker.replicas }} replica(s), :{{ .Values.connectorWorker.healthPort }} health and metrics
+{{- else }}
+Connector worker: disabled (connectorWorker.enabled=false); set it, with its OpenBao and document-store settings, to run connector tasks.
+{{- end }}
 
 {{- if not .Values.temporalMTLS.enabled }}
 

@@ -6,7 +6,7 @@
 
 ## Getting Started
 
-Run `make help` for all available targets, or see [README.md](../README.md) for the full setup walkthrough. Use `make test`, `make lint`, `make arch-lint`, `make check` rather than calling `go test`/`golangci-lint`/`go-arch-lint` directly — the Makefile targets carry the flags (coverage, race, package scope) CI actually enforces.
+Run `make help` for all available targets, or see [README.md](../README.md) for the full setup walkthrough. Use `make test`, `make lint`, `make arch-lint`, `make design-sync-check` (documents kept in the design repository equal their copies; `DESIGN_DIR=<checkout>` or `GH_TOKEN`), `make check` rather than calling `go test`/`golangci-lint`/`go-arch-lint` directly — the Makefile targets carry the flags (coverage, race, package scope) CI actually enforces.
 
 ## Critical Rules — Never Break These
 

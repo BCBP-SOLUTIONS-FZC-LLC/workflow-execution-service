@@ -26,10 +26,7 @@ interpreter kept a pause across `DEGRADED`, so it is the old-history guard for t
 present, the park ends `PAUSED`), exported with `--workflow-id degraded-pause-held-fixture` to
 `testdata/degraded_pause_held.json`.
 
-`gen/main.go` is never run by CI — only when adding or regenerating a fixture. Add a
-second scenario function (not a generic flag) only once a second fixture actually
-needs one — same "3+ consumers before generalizing" threshold this repo already uses
-elsewhere.
+`gen/main.go` is never run by CI — only when adding or regenerating a fixture. It takes the scenario name as its argument (`initial-interpreter`, `degraded-pause`, `degraded-pause-held`) and each scenario is its own function; add one per new fixture rather than a generic flag, the "3+ consumers before generalizing" threshold this repo already uses elsewhere.
 
 `replayer.RegisterWorkflow(wfengine.Execute)` registers the workflow under Go's
 default derived type name (`"Execute"`). Whatever name `gen/main.go`'s worker

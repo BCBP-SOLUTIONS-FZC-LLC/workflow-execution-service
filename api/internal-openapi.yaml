@@ -457,7 +457,7 @@ paths:
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
         "500":
-          description: Transient processing failure. The consumer retries until the queue's maxReceiveCount (5) moves the message to its DLQ.
+          description: Transient processing failure. The consumer redelivers with backoff until its receive threshold (MAX_RECEIVE_COUNT, four handling attempts) dead-letters the message on the fifth receive.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
@@ -497,7 +497,7 @@ paths:
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
         "500":
-          description: Transient processing failure. The consumer retries until the queue's maxReceiveCount (5) moves the message to its DLQ.
+          description: Transient processing failure. The consumer redelivers with backoff until its receive threshold (MAX_RECEIVE_COUNT, four handling attempts) dead-letters the message on the fifth receive.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
@@ -537,7 +537,7 @@ paths:
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
         "500":
-          description: Transient processing failure. The consumer retries until the queue's maxReceiveCount (5) moves the message to its DLQ.
+          description: Transient processing failure. The consumer redelivers with backoff until its receive threshold (MAX_RECEIVE_COUNT, four handling attempts) dead-letters the message on the fifth receive.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
@@ -577,7 +577,7 @@ paths:
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
         "500":
-          description: Transient processing failure. The consumer retries until the queue's maxReceiveCount (5) moves the message to its DLQ.
+          description: Transient processing failure. The consumer redelivers with backoff until its receive threshold (MAX_RECEIVE_COUNT, four handling attempts) dead-letters the message on the fifth receive.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }

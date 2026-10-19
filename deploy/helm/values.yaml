@@ -1,6 +1,6 @@
 image:
-  # Two images from one multi-target Dockerfile — repository is the shared
-  # base; each Deployment appends its own -server/-worker suffix and target.
+  # Three images from one multi-target Dockerfile (server, worker, connector-worker) —
+  # repository is the shared base; each Deployment appends its own suffix and target.
   repository: ghcr.io/bcbp-solutions-fzc-llc/workflow-execution-service
   tag: ""
   pullPolicy: IfNotPresent
