@@ -310,6 +310,8 @@ check:
 	$(MAKE) metrics-lint
 	@echo "==> contract-breaking"
 	$(MAKE) contract-breaking
+	@echo "==> design-sync-check-test"
+	$(MAKE) design-sync-check-test
 	@echo "==> test-ci (unit + integration, merged coverage gate)"
 	$(MAKE) cover-check
 	@echo "✓ all checks passed"
@@ -529,3 +531,13 @@ clean:
 ## help: List available targets
 help:
 	@grep -E '^## ' Makefile | sed 's/## /  /'
+
+.PHONY: design-sync-check design-sync-check-test
+
+## design-sync-check: Fail if a document kept in the design repository too differs (DESIGN_DIR=<checkout> reads it locally, else GH_TOKEN reads Haroon-BCBP/design)
+design-sync-check:
+	@scripts/design-sync-check.sh
+
+## design-sync-check-test: Test the design-sync-check script against throwaway directories
+design-sync-check-test:
+	@scripts/design-sync-check_test.sh

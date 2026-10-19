@@ -1,0 +1,6 @@
+# <kind> <repo path> <design path>; see scripts/design-sync-check.sh
+lld docs/lld/execution_service.md LLD/execution_service.md
+raw api/asyncapi.yaml LLD/execution_asyncapi.yaml
+raw api/internal-openapi.yaml LLD/execution_internal_openapi.yaml
+raw docs/swagger/openapi.yaml LLD/execution_openapi.yaml
+dir internal/eventschema LLD/exec_eventschema
