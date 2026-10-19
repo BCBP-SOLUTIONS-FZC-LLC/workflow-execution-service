@@ -4,6 +4,7 @@ package temporal_test
 
 import (
 	"context"
+	"encoding/json"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -77,6 +78,7 @@ type degradedFixture struct {
 	taskService     *service.TaskService
 	temporalClient  port.TemporalClient
 	billingAttempts *atomic.Int32
+	outbox          port.OutboxRepository
 }
 
 // setupDegradedInstance deliberately wraps only ActivityCreateTask (the
@@ -193,7 +195,7 @@ func setupDegradedInstance(t *testing.T) *degradedFixture {
 	return &degradedFixture{
 		tenantID: tenantID, assigneeUserID: assigneeUserID, inst: inst,
 		instances: instances, tasks: tasks, taskService: taskService,
-		temporalClient: temporalClient, billingAttempts: &billingAttempts,
+		temporalClient: temporalClient, billingAttempts: &billingAttempts, outbox: outboxRepo,
 	}
 }
 
@@ -259,32 +261,144 @@ func TestDegraded_ParallelBranchFailsRespawnsAndCompletes(t *testing.T) {
 	}
 }
 
-// TestDegraded_RejectsTenantStatePauseSignal drives LLD §7.2 test #5: a
-// DEGRADED instance is never pausable — instance-pause requires RUNNING
-// (signalPreconditions, signals.go), and runSignalRouter validates every
-// admin signal BEFORE it ever reaches enterDegraded's own Selector (which
-// registers no case for instance-pause at all). Sends the exact signal
-// TenantLifecycleReconciler would for a tenant-suspend sweep, directly via
-// SignalWorkflow (no HTTP layer, matching this tier's own design) — the
-// instance must remain DEGRADED, never PAUSED.
-func TestDegraded_RejectsTenantStatePauseSignal(t *testing.T) {
+// TestDegraded_RecordsTenantStatePauseSignal drives LLD §7.2 test #5: a
+// tenant-suspend pause reaching a DEGRADED instance is recorded, not
+// rejected. The stored status stays DEGRADED (there is no degraded-and-paused
+// status) and nothing is written for the pause until the park ends; when a
+// force-back respawn then settles the failed branch the park ends in a
+// paused event carrying the tenant_state initiator, never a degraded-recovery
+// resume.
+func TestDegraded_RecordsTenantStatePauseSignal(t *testing.T) {
 	f := setupDegradedInstance(t)
 
 	if err := f.temporalClient.SignalWorkflow(context.Background(), f.inst.TemporalWorkflowID, f.inst.ID, port.SignalInstancePause, adminSignalWire{
-		AdminUserID: f.assigneeUserID.String(), Initiator: "tenant_state", RecordVersion: 1,
+		Initiator: "tenant_state", RecordVersion: 1,
 	}); err != nil {
 		t.Fatalf("signal instance-pause: %v", err)
 	}
 
-	// Give the signal a moment to actually reach the workflow and be
-	// processed (or, correctly, dropped) before asserting it had no effect.
 	time.Sleep(2 * time.Second)
 	inst2, err := f.instances.GetByID(context.Background(), f.tenantID, f.inst.ID)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
 	if inst2.Status != domain.InstanceStatusDegraded {
-		t.Fatalf("instance status after instance-pause while DEGRADED = %v, want still DEGRADED (the signal must be rejected, not silently applied)", inst2.Status)
+		t.Fatalf("instance status after instance-pause while DEGRADED = %v, want still DEGRADED", inst2.Status)
+	}
+	if got := outboxInitiators(t, f, domain.EventWorkflowInstancePaused); len(got) != 0 {
+		t.Fatalf("a paused event was written while the park was still open: %v", got)
+	}
+
+	forceBackAndCompleteBilling(t, f)
+
+	waitForOutboxInitiator(t, f, domain.EventWorkflowInstancePaused, "tenant_state")
+	if got := outboxInitiators(t, f, domain.EventWorkflowInstanceResumed); len(got) != 0 {
+		t.Fatalf("the park ended with a resume %v although a pause was held", got)
+	}
+}
+
+// TestDegraded_TenantReactivationBeforeTheParkEndsLeavesNoPause is the other
+// half of test #5: the reactivation that follows the suspension clears the
+// held pause, so the park ends with the ordinary degraded-recovery resume and
+// no paused event.
+func TestDegraded_TenantReactivationBeforeTheParkEndsLeavesNoPause(t *testing.T) {
+	f := setupDegradedInstance(t)
+
+	for _, name := range []string{port.SignalInstancePause, port.SignalInstanceResume} {
+		if err := f.temporalClient.SignalWorkflow(context.Background(), f.inst.TemporalWorkflowID, f.inst.ID, name, adminSignalWire{
+			Initiator: "tenant_state", RecordVersion: 1,
+		}); err != nil {
+			t.Fatalf("signal %s: %v", name, err)
+		}
+	}
+
+	forceBackAndCompleteBilling(t, f)
+
+	waitForOutboxInitiator(t, f, domain.EventWorkflowInstanceResumed, "degraded_recovery")
+	if got := outboxInitiators(t, f, domain.EventWorkflowInstancePaused); len(got) != 0 {
+		t.Fatalf("a paused event was written although the pause was lifted: %v", got)
+	}
+}
+
+func forceBackAndCompleteBilling(t *testing.T, f *degradedFixture) {
+	t.Helper()
+	inst, err := f.instances.GetByID(context.Background(), f.tenantID, f.inst.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if err := f.temporalClient.SignalWorkflow(context.Background(), f.inst.TemporalWorkflowID, f.inst.ID, port.SignalInstanceForceBack, adminSignalWire{
+		AdminUserID: f.assigneeUserID.String(), TargetDeptID: "billing", RecordVersion: inst.RecordVersion,
+	}); err != nil {
+		t.Fatalf("signal instance-force-back: %v", err)
+	}
+
+	var billingTask *domain.Task
+	deadline := time.Now().Add(30 * time.Second)
+	for billingTask == nil {
+		rows, _, err := f.tasks.ListByInstance(context.Background(), f.tenantID, f.inst.ID, port.PageRequest{Limit: 10})
+		if err != nil {
+			t.Fatalf("ListByInstance: %v", err)
+		}
+		for _, r := range rows {
+			if r.NodeKey == "billing/charge" && r.Status == domain.TaskStatusReady {
+				billingTask = r
+			}
+		}
+		if billingTask == nil {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for the respawned billing/charge task; rows=%+v", rows)
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+	}
+	if _, err := f.taskService.Complete(context.Background(), f.tenantID, billingTask.ID, f.assigneeUserID, []byte(`{}`), billingTask.RecordVersion); err != nil {
+		t.Fatalf("complete respawned billing task: %v", err)
+	}
+}
+
+func outboxInitiators(t *testing.T, f *degradedFixture, eventType string) []string {
+	t.Helper()
+	var out []string
+	var after *port.Cursor
+	for {
+		rows, next, err := f.outbox.ListByInstance(context.Background(), f.tenantID, f.inst.ID, port.PageRequest{After: after, Limit: 100})
+		if err != nil {
+			t.Fatalf("ListByInstance outbox: %v", err)
+		}
+		for _, r := range rows {
+			if r.EventType != eventType {
+				continue
+			}
+			var envelope struct {
+				Data struct {
+					Initiator string `json:"initiator"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(r.Payload, &envelope); err != nil {
+				t.Fatalf("decode %s envelope: %v", eventType, err)
+			}
+			out = append(out, envelope.Data.Initiator)
+		}
+		if next == nil {
+			return out
+		}
+		after = next
+	}
+}
+
+func waitForOutboxInitiator(t *testing.T, f *degradedFixture, eventType, initiator string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		for _, got := range outboxInitiators(t, f, eventType) {
+			if got == initiator {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for a %s event with initiator %q; have %v, events %v", eventType, initiator, outboxInitiators(t, f, eventType), outboxEventTypes(t, f))
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 }
 
@@ -304,4 +418,17 @@ func waitForInstanceStatus(t *testing.T, instances port.InstanceRepository, tena
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+}
+
+func outboxEventTypes(t *testing.T, f *degradedFixture) []string {
+	t.Helper()
+	rows, _, err := f.outbox.ListByInstance(context.Background(), f.tenantID, f.inst.ID, port.PageRequest{Limit: 100})
+	if err != nil {
+		t.Fatalf("ListByInstance outbox: %v", err)
+	}
+	types := make([]string, len(rows))
+	for i, r := range rows {
+		types[i] = r.EventType
+	}
+	return types
 }

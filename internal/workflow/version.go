@@ -41,3 +41,5 @@ const externalWaitChangeID = "external-wait-by-key"
 const receiveRecordsNodeChangeID = "receive-records-node"
 
 const abandonedMidActivityChangeID = "abandoned-mid-activity"
+
+const pauseSurvivesDegradedChangeID = "pause-survives-degraded"

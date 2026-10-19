@@ -22,6 +22,9 @@ temporal workflow show --address localhost:17233 --workflow-id initial-interpret
 or `degraded-pause`); export `degraded-pause` with `--workflow-id degraded-pause-fixture` to
 `testdata/degraded_pause.json`. The `degraded-pause` history was recorded before the
 interpreter kept a pause across `DEGRADED`, so it is the old-history guard for that change.
+`degraded-pause-held` is the same scenario recorded after it (marker `pause-survives-degraded`
+present, the park ends `PAUSED`), exported with `--workflow-id degraded-pause-held-fixture` to
+`testdata/degraded_pause_held.json`.
 
 `gen/main.go` is never run by CI — only when adding or regenerating a fixture. Add a
 second scenario function (not a generic flag) only once a second fixture actually

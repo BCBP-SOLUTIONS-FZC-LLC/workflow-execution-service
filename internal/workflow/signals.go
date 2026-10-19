@@ -149,6 +149,10 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 		sel.AddReceive(ch, func(c wf.ReceiveChannel, more bool) {
 			var sig adminSignal
 			c.Receive(ctx, &sig)
+			if in.holdsPauseDuringPark(name) {
+				in.recordHeldPause(ctx, name, sig)
+				return
+			}
 			if err := validateSignal(in.status, name); err != nil {
 				logger.Warn("dropping admin signal", "signal", name, "error", err)
 				return
@@ -277,9 +281,42 @@ func (in *interpreter) handleInstanceReassign(ctx wf.Context, sig reassignSignal
 	}
 }
 
+func (in *interpreter) holdsPauseDuringPark(signal string) bool {
+	return in.status == domain.InstanceStatusDegraded && in.degradedKeepsPause &&
+		(signal == SignalInstancePause || signal == SignalInstanceResume)
+}
+
+func (in *interpreter) recordHeldPause(ctx wf.Context, signal string, sig adminSignal) {
+	logger := wf.GetLogger(ctx)
+	if signal == SignalInstancePause {
+		if in.pauseHeld {
+			logger.Warn("dropping instance-pause signal: a pause is already held", "paused_by", in.pauseInitiator)
+			return
+		}
+		in.pauseHeld = true
+		in.pauseInitiator = sig.Initiator
+		in.pauseSignal = sig
+		return
+	}
+	if !in.pauseHeld {
+		logger.Warn("dropping instance-resume signal: no pause is held")
+		return
+	}
+	if !canResume(in.pauseInitiator, sig.Initiator) {
+		logger.Warn("dropping instance-resume signal: initiator does not own the held pause",
+			"resume_initiator", sig.Initiator, "paused_by", in.pauseInitiator)
+		return
+	}
+	in.pauseHeld = false
+	in.pauseInitiator = ""
+	in.pauseSignal = adminSignal{}
+}
+
 func (in *interpreter) handleInstancePause(ctx wf.Context, sig adminSignal) {
 	in.status = domain.InstanceStatusPaused
 	in.pauseInitiator = sig.Initiator
+	in.pauseHeld = true
+	in.pauseSignal = sig
 	if err := pauseInstance(ctx, port.PauseInstanceInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID,
 		AdminUserID: sig.AdminUserID, Initiator: sig.Initiator, RecordVersion: sig.RecordVersion,
@@ -291,6 +328,8 @@ func (in *interpreter) handleInstancePause(ctx wf.Context, sig adminSignal) {
 func (in *interpreter) handleInstanceResume(ctx wf.Context, sig adminSignal) {
 	in.status = domain.InstanceStatusRunning
 	in.pauseInitiator = ""
+	in.pauseHeld = false
+	in.pauseSignal = adminSignal{}
 	if err := resumeInstance(ctx, port.ResumeInstanceInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID,
 		AdminUserID: sig.AdminUserID, Initiator: sig.Initiator, RecordVersion: sig.RecordVersion,

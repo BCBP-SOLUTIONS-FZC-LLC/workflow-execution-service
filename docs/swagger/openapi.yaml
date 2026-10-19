@@ -1152,8 +1152,10 @@ paths:
       tags: [Instances]
       summary: Pause a running workflow instance (admin)
       description: >
-        Sends a pause signal to the Temporal workflow. The instance transitions from
-        RUNNING to PAUSED. Returns 409 if the instance is not RUNNING.
+        Sends a pause signal to the Temporal workflow. A RUNNING instance transitions to
+        PAUSED. A DEGRADED instance keeps its status and the pause is held until the
+        park ends, which then leaves the instance PAUSED. Returns 409 if the instance
+        is neither RUNNING nor DEGRADED.
       security:
         - GatewayTenantContext: []
           UserContext: []
@@ -1200,7 +1202,7 @@ paths:
           $ref: "#/components/responses/InstanceNotFound"
         "409":
           description: >
-            State conflict. See code field: INVALID_INSTANCE_STATE — instance is not RUNNING;
+            State conflict. See code field: INVALID_INSTANCE_STATE — instance is neither RUNNING nor DEGRADED;
             RECORD_VERSION_CONFLICT — record_version is stale;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:
@@ -1247,8 +1249,10 @@ paths:
       tags: [Instances]
       summary: Resume a paused workflow instance (admin)
       description: >
-        Sends a resume signal to the Temporal workflow. The instance transitions from
-        PAUSED to RUNNING. Returns 409 if the instance is not PAUSED.
+        Sends a resume signal to the Temporal workflow. A PAUSED instance transitions to
+        RUNNING. On a DEGRADED instance the resume clears a pause held for the park, under
+        the same initiator rule, and is dropped when none is held. Returns 409 if the
+        instance is neither PAUSED nor DEGRADED.
       security:
         - GatewayTenantContext: []
           UserContext: []
@@ -1290,7 +1294,7 @@ paths:
           $ref: "#/components/responses/InstanceNotFound"
         "409":
           description: >
-            State conflict. See code field: INVALID_INSTANCE_STATE — instance is not PAUSED;
+            State conflict. See code field: INVALID_INSTANCE_STATE — instance is neither PAUSED nor DEGRADED;
             RECORD_VERSION_CONFLICT — record_version is stale;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:

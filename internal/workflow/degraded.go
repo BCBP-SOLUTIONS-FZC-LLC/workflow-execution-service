@@ -109,6 +109,7 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 }
 
 func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, preFork domain.NodeKey, completed []completedBranch, failed []failedBranch, admin wf.Channel) (stepOutcome, error) {
+	in.degradedKeepsPause = getVersion(ctx, pauseSurvivesDegradedChangeID) != wf.DefaultVersion
 	in.status = domain.InstanceStatusDegraded
 	failedBranches := make([]domain.FailedBranch, len(failed))
 	for i, fb := range failed {
@@ -181,6 +182,20 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 		}
 	}
 
+	keepsPause := in.degradedKeepsPause
+	in.degradedKeepsPause = false
+	if keepsPause && in.pauseHeld {
+		in.status = domain.InstanceStatusPaused
+		if err := pauseInstance(ctx, port.PauseInstanceInput{
+			InstanceID: in.instanceID, TenantID: in.tenantID,
+			AdminUserID: in.pauseSignal.AdminUserID, Initiator: in.pauseInitiator, RecordVersion: in.pauseSignal.RecordVersion,
+		}); err != nil {
+			wf.GetLogger(ctx).Warn("pauseInstance failed", "error", err)
+		}
+		return stepOutcome{LastNode: preFork}, nil
+	}
+
+	in.pauseHeld = false
 	in.status = domain.InstanceStatusRunning
 	if err := updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusRunning,

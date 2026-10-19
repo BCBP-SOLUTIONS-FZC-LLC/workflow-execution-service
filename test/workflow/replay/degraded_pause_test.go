@@ -23,3 +23,18 @@ func TestReplay_DegradedPauseDropped(t *testing.T) {
 		t.Fatalf("replay failed: %v", err)
 	}
 }
+
+// TestReplay_DegradedPauseHeld replays an instance that held a pause across
+// DEGRADED and left the park PAUSED, recorded by the interpreter that keeps
+// the pause. Any edit to that path must still replay this history.
+func TestReplay_DegradedPauseHeld(t *testing.T) {
+	replayer, err := worker.NewWorkflowReplayerWithOptions(worker.WorkflowReplayerOptions{})
+	if err != nil {
+		t.Fatalf("NewWorkflowReplayerWithOptions: %v", err)
+	}
+	replayer.RegisterWorkflow(wfengine.Execute)
+
+	if err := replayer.ReplayWorkflowHistoryFromJSONFile(nil, "testdata/degraded_pause_held.json"); err != nil {
+		t.Fatalf("replay failed: %v", err)
+	}
+}

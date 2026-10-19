@@ -69,6 +69,10 @@ type interpreter struct {
 	status         domain.InstanceStatus
 	pauseInitiator string
 
+	pauseHeld          bool
+	pauseSignal        adminSignal
+	degradedKeepsPause bool
+
 	parallelDepth int
 }
 

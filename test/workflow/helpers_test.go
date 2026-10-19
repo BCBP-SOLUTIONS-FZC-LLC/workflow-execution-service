@@ -260,6 +260,7 @@ type stageFailWire struct {
 type adminSignalWire struct {
 	AdminUserID   string
 	Reason        string
+	Initiator     string
 	TargetDeptID  string
 	TargetNodeKey string
 	RecordVersion int64

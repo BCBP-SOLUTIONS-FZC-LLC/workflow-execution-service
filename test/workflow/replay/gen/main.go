@@ -53,7 +53,9 @@ func main() {
 	case "initial-interpreter":
 		runInitialInterpreter(c)
 	case "degraded-pause":
-		runDegradedPause(c)
+		runDegradedPause(c, "degraded-pause-fixture")
+	case "degraded-pause-held":
+		runDegradedPause(c, "degraded-pause-held-fixture")
 	default:
 		log.Fatalf("unknown scenario %q", scenario)
 	}
@@ -164,7 +166,7 @@ func runInitialInterpreter(c client.Client) {
 	fmt.Println("workflow completed with status:", out.Status)
 }
 
-func runDegradedPause(c client.Client) {
+func runDegradedPause(c client.Client, wfID string) {
 	collab := dsl.CompiledCollaboration{
 		MainPlan:      "main",
 		SchemaVersion: dsl.CurrentSchemaVersion,
@@ -190,7 +192,6 @@ func runDegradedPause(c client.Client) {
 	})
 	defer w.Stop()
 
-	wfID := "degraded-pause-fixture"
 	run, err := c.ExecuteWorkflow(context.Background(), client.StartWorkflowOptions{
 		ID: wfID, TaskQueue: taskQueue,
 	}, wfengine.Execute, wfengine.ExecuteInput{

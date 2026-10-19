@@ -746,6 +746,12 @@ func TestInstanceService_LifecycleSignals(t *testing.T) {
 		{"resume from paused", domain.InstanceStatusPaused, func(s *service.InstanceService, t, i, a uuid.UUID, rv int64) error {
 			return s.Resume(context.Background(), t, i, a, rv)
 		}, port.SignalInstanceResume},
+		{"pause from degraded", domain.InstanceStatusDegraded, func(s *service.InstanceService, t, i, a uuid.UUID, rv int64) error {
+			return s.Pause(context.Background(), t, i, a, "reason", rv)
+		}, port.SignalInstancePause},
+		{"resume from degraded", domain.InstanceStatusDegraded, func(s *service.InstanceService, t, i, a uuid.UUID, rv int64) error {
+			return s.Resume(context.Background(), t, i, a, rv)
+		}, port.SignalInstanceResume},
 		{"cancel from running", domain.InstanceStatusRunning, func(s *service.InstanceService, t, i, a uuid.UUID, rv int64) error {
 			return s.Cancel(context.Background(), t, i, a, "reason", rv)
 		}, port.SignalInstanceCancel},
@@ -828,6 +834,17 @@ func TestInstanceService_LifecycleSignals(t *testing.T) {
 
 		err := svc.Pause(context.Background(), tenantID, inst.ID, uuid.New(), "", 1)
 		assert.ErrorIs(t, err, port.ErrInvalidInstanceState)
+	})
+
+	t.Run("resume of a running instance is refused", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, _, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1}
+		instances.byID[inst.ID] = inst
+
+		err := svc.Resume(context.Background(), tenantID, inst.ID, uuid.New(), 1)
+		assert.ErrorIs(t, err, port.ErrInvalidInstanceState)
+		assert.Empty(t, temporal.signals)
 	})
 
 	t.Run("already terminal", func(t *testing.T) {
