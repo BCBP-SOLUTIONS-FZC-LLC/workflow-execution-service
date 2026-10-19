@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"math"
 
 	"github.com/google/uuid"
 
@@ -19,5 +20,8 @@ func (s *ArchiveGuard) CheckActiveInstances(ctx context.Context, tenantID, workf
 	if err != nil {
 		return false, 0, err
 	}
-	return count > 0, int32(count), nil //nolint:gosec
+	if count > math.MaxInt32 {
+		count = math.MaxInt32
+	}
+	return count > 0, int32(count), nil
 }

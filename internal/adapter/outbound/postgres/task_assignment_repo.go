@@ -114,7 +114,7 @@ func (r *TaskAssignmentRepo) ListActiveByUserPaginated(
 	params := db.ListActiveTasksByUserParams{
 		TenantID: tenantID,
 		UserID:   userID,
-		Limit:    int32(limit + 1), //nolint:gosec
+		Limit:    clampInt32(limit + 1),
 	}
 	if page.After != nil {
 		params.CursorCreatedAt = toPgtypeTimestamptz(&page.After.CreatedAt)

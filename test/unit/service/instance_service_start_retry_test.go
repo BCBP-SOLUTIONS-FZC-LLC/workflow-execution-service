@@ -286,8 +286,8 @@ func TestInstanceService_StartRetry(t *testing.T) {
 	t.Run("a close of an instance terminated while starting names the run", func(t *testing.T) {
 		svc, _, _, _, _, temporal, definitions, _ := newInstanceServiceHarness()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
-		temporal.startFunc = func(_ context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
-			require.NoError(t, svc.Terminate(context.Background(), tenantID, in.InstanceID, uuid.New(), "admin requested"))
+		temporal.startFunc = func(ctx context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
+			require.NoError(t, svc.Terminate(ctx, tenantID, in.InstanceID, uuid.New(), "admin requested"))
 			return port.StartWorkflowOutput{TemporalWorkflowID: in.TemporalWorkflowID, TemporalRunID: "run-1"}, nil
 		}
 

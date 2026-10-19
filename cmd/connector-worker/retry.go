@@ -57,7 +57,7 @@ func executeWithRetry(
 }
 
 func withJitter(d time.Duration) time.Duration {
-	return d + time.Duration(rand.Int64N(int64(d/2)+1))
+	return d + time.Duration(rand.Int64N(int64(d/2)+1)) //nolint:gosec // backoff jitter, not a secret
 }
 
 func observeFailures(wlog port.Logger, job dispatchJob, input map[string]any) func(int, connectors.RetryDecision) {

@@ -61,7 +61,7 @@ func (r *OutboxRepo) ListByInstance(
 	params := db.ListOutboxEventsByInstanceParams{
 		TenantID:           tenantID.String(),
 		WorkflowInstanceID: instanceID.String(),
-		PageLimit:          int32(limit + 1), //nolint:gosec
+		PageLimit:          clampInt32(limit + 1),
 	}
 	if page.After != nil {
 		params.CursorCreatedAt = toPgtypeTimestamptz(&page.After.CreatedAt)

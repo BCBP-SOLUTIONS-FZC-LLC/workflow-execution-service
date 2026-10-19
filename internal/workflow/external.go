@@ -85,7 +85,7 @@ func (in *interpreter) mergeResult(resultJSON string) error {
 	}
 	var vars map[string]any
 	if err := json.Unmarshal([]byte(resultJSON), &vars); err != nil {
-		return nil
+		return nil //nolint:nilerr // a result that is not a JSON object adds no variables
 	}
 	return in.mergeVariables(vars)
 }

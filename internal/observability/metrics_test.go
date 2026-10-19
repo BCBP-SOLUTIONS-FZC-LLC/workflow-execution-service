@@ -39,7 +39,7 @@ func scrape(t *testing.T) string {
 	srv := httptest.NewServer(gincommon.MetricsHandler())
 	t.Cleanup(srv.Close)
 
-	resp, err := http.Get(srv.URL) //nolint:noctx,gosec // test-only, fixed httptest URL
+	resp, err := http.Get(srv.URL)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"slices"
 	"strconv"
@@ -140,6 +141,14 @@ func Load() (*Config, error) {
 		record(err)
 		return v
 	}
+	envInt32 := func(key string, fallback int32) int32 {
+		v := envInt(key, int(fallback))
+		if v < math.MinInt32 || v > math.MaxInt32 {
+			record(fmt.Errorf("%s: %d does not fit in 32 bits", key, v))
+			return fallback
+		}
+		return int32(v)
+	}
 	envBool := func(key string, fallback bool) bool {
 		v, err := getEnvBoolOrDefault(key, fallback)
 		record(err)
@@ -171,8 +180,8 @@ func Load() (*Config, error) {
 		OTELTracesSamplerRatio: envFloat64("OTEL_TRACES_SAMPLER_RATIO", 1.0),
 
 		DatabaseURL:            getEnvOrDefault("DATABASE_URL", ""),
-		PGMaxConns:             int32(envInt("PG_MAX_CONNS", 10)),
-		PGMinConns:             int32(envInt("PG_MIN_CONNS", 2)),
+		PGMaxConns:             envInt32("PG_MAX_CONNS", 10),
+		PGMinConns:             envInt32("PG_MIN_CONNS", 2),
 		PGSlowQueryThresholdMS: envInt("PG_SLOW_QUERY_THRESHOLD_MS", 200),
 		PGBouncerMode:          envBool("PG_BOUNCER_MODE", false),
 		MigrationDatabaseURL:   getEnvOrDefault("MIGRATION_DATABASE_URL", ""),

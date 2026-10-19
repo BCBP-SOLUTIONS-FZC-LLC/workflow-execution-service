@@ -57,7 +57,7 @@ func fetchAliases(ctx context.Context, addr, internalToken string, timeout time.
 	}
 	req.Header.Set("x-internal-token", internalToken)
 
-	gincommon.InjectTraceContext(req.Context(), req.Header)
+	gincommon.InjectTraceContext(reqCtx, req.Header)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return aliasconfig.Config{}, fmt.Errorf("fetch aliases from %s: %w", url, err)

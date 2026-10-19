@@ -110,8 +110,8 @@ func TestInstanceService_Start(t *testing.T) {
 			delete(live, id)
 			return nil
 		}
-		temporal.startFunc = func(_ context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
-			require.NoError(t, svc.Terminate(context.Background(), tenantID, in.InstanceID, uuid.New(), "admin requested"))
+		temporal.startFunc = func(ctx context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
+			require.NoError(t, svc.Terminate(ctx, tenantID, in.InstanceID, uuid.New(), "admin requested"))
 			live[in.TemporalWorkflowID] = true
 			return port.StartWorkflowOutput{TemporalWorkflowID: in.TemporalWorkflowID, TemporalRunID: "run-1"}, nil
 		}
@@ -132,8 +132,8 @@ func TestInstanceService_Start(t *testing.T) {
 		svc.Log = log
 		tenantID, versionID := uuid.New(), uuid.New()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
-		temporal.startFunc = func(_ context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
-			require.NoError(t, svc.Terminate(context.Background(), tenantID, in.InstanceID, uuid.New(), "admin requested"))
+		temporal.startFunc = func(ctx context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
+			require.NoError(t, svc.Terminate(ctx, tenantID, in.InstanceID, uuid.New(), "admin requested"))
 			temporal.terminateFunc = func(context.Context, string, string, string) error { return errors.New("temporal unavailable") }
 			return port.StartWorkflowOutput{TemporalWorkflowID: in.TemporalWorkflowID, TemporalRunID: "run-1"}, nil
 		}

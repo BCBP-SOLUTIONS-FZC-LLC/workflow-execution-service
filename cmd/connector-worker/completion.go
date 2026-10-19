@@ -62,7 +62,7 @@ func (c *completionClient) post(ctx context.Context, path string, body []byte) e
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-internal-token", c.token)
 
-	gincommon.InjectTraceContext(req.Context(), req.Header)
+	gincommon.InjectTraceContext(ctx, req.Header)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("call %s: %w", path, err)

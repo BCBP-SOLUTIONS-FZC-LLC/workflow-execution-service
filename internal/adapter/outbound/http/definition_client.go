@@ -73,12 +73,12 @@ func (c *DefinitionClient) tryGet(ctx context.Context, rawURL string) (*port.Com
 	if c.token != "" {
 		req.Header.Set(internalTokenHeader, c.token)
 	}
-	gincommon.InjectTraceContext(req.Context(), req.Header)
+	gincommon.InjectTraceContext(ctx, req.Header)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, ctx.Err() == nil, fmt.Errorf("%w: compiled plan: %w", port.ErrDefinitionUnavailable, err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck // a failed close of a fully read response body is not actionable
 
 	switch {
 	case resp.StatusCode >= 500:

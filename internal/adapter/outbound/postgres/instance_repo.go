@@ -137,7 +137,7 @@ func (r *InstanceRepo) ListByTenant(
 
 	params := db.ListWorkflowInstancesByTenantParams{
 		TenantID: tenantID,
-		Limit:    int32(limit + 1), //nolint:gosec
+		Limit:    clampInt32(limit + 1),
 	}
 	if filter.Status != nil {
 		params.Status = db.NullWorkflowInstanceStatus{WorkflowInstanceStatus: db.WorkflowInstanceStatus(*filter.Status), Valid: true}

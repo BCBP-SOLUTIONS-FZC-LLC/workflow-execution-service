@@ -138,7 +138,7 @@ func checkUserLiveWith(ctx context.Context, iam port.IAMClient, log port.Logger,
 	status, err := iam.GetUserStatus(ctx, tenantID, userID)
 	if err != nil {
 		log.Warn("live user-status check failed, proceeding fail-open", map[string]any{"user_id": userID, "error": err.Error()})
-		return nil
+		return nil //nolint:nilerr // fail-open by design: a failed live check is logged and the action proceeds
 	}
 	if status.IsDeleted || status.IsOOO {
 		return port.ErrAssigneeUnavailable

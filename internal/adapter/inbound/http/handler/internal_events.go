@@ -254,8 +254,8 @@ func detachRequest(c *gin.Context) context.CancelFunc {
 	return cancel
 }
 
-func guCtx(c *gin.Context, tenantID string) context.Context {
-	return pgcommon.WithGUCSet(c.Request.Context(), pgdomain.GUCSet{TenantID: tenantID})
+func guCtx(ctx context.Context, tenantID string) context.Context {
+	return pgcommon.WithGUCSet(ctx, pgdomain.GUCSet{TenantID: tenantID})
 }
 
 type delegationStartedPayload struct {
@@ -317,7 +317,7 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 		return
 	}
 
-	ctx := guCtx(c, env.TenantID)
+	ctx := guCtx(c.Request.Context(), env.TenantID)
 	start := env.Timestamp
 	err = h.delegation.Reroute(ctx, port.DelegationRerouteInput{
 		TenantID:     tenantID,
@@ -386,7 +386,7 @@ func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json
 		})
 	}
 
-	ctx := guCtx(c, env.TenantID)
+	ctx := guCtx(c.Request.Context(), env.TenantID)
 	if err := h.delegation.Reverse(ctx, port.DelegationReversalInput{
 		TenantID:     tenantID,
 		DelegationID: delegationID,
@@ -445,7 +445,7 @@ func (h *Handler) handleUserDeleted(c *gin.Context, env events.Envelope[json.Raw
 		return
 	}
 
-	ctx := guCtx(c, env.TenantID)
+	ctx := guCtx(c.Request.Context(), env.TenantID)
 	if err := h.userSafetyNet.VacateAssignments(ctx, port.UserDeletedInput{
 		TenantID:  tenantID,
 		UserID:    userID,
@@ -533,7 +533,7 @@ func (h *Handler) applyUserAvailabilityLocked(
 			return nil
 		}
 
-		applyCtx := guCtx(c, env.TenantID)
+		applyCtx := guCtx(ctx, env.TenantID)
 		if err := h.oooAvailability.Apply(applyCtx, input); err != nil {
 			return err
 		}
@@ -598,7 +598,7 @@ func (h *Handler) handleMembershipRevoked(c *gin.Context, env events.Envelope[js
 		return
 	}
 
-	ctx := guCtx(c, env.TenantID)
+	ctx := guCtx(c.Request.Context(), env.TenantID)
 	if err := h.userSafetyNet.VacateAssignments(ctx, port.UserDeletedInput{
 		TenantID:  tenantID,
 		UserID:    userID,
@@ -626,7 +626,7 @@ func (h *Handler) handleTenantMembershipsPurged(c *gin.Context, env events.Envel
 		return
 	}
 
-	ctx := guCtx(c, env.TenantID)
+	ctx := guCtx(c.Request.Context(), env.TenantID)
 	if err := h.tenantLifecycle.Apply(ctx, port.TenantLifecycleInput{
 		TenantID:       tenantID,
 		Status:         "offboarded",
@@ -692,7 +692,7 @@ func (h *Handler) applyTenantStateChangeLocked(
 			}
 		}
 
-		applyCtx := guCtx(c, env.TenantID)
+		applyCtx := guCtx(ctx, env.TenantID)
 		if err := h.tenantLifecycle.Apply(applyCtx, port.TenantLifecycleInput{
 			TenantID:       tenantID,
 			Status:         p.Status,

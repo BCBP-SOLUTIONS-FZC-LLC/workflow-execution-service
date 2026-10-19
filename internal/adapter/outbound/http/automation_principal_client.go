@@ -59,7 +59,7 @@ func (c *AutomationPrincipalClient) AutomationPrincipal(ctx context.Context, ten
 	req.Header.Set("x-user-id", iamSystemUserID)
 	req.Header.Set("x-tenant-id", tenantID.String())
 
-	gincommon.InjectTraceContext(req.Context(), req.Header)
+	gincommon.InjectTraceContext(ctx, req.Header)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("%w: token service: %v", ErrUpstreamUnavailable, err)

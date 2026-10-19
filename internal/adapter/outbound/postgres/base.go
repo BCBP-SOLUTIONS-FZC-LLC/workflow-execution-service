@@ -15,7 +15,7 @@ func exec(ctx context.Context, pool *pgcommon.Pool, fn func(db.DBTX) error) erro
 	if tx, ok := txFromContext(ctx); ok {
 		return fn(tx)
 	}
-	return pool.WithConn(ctx, func(_ context.Context, conn *pgxpool.Conn) error { //nolint:wrapcheck
+	return pool.WithConn(ctx, func(_ context.Context, conn *pgxpool.Conn) error { //nolint:wrapcheck // the pool's error is the caller's to classify
 		return fn(conn)
 	})
 }

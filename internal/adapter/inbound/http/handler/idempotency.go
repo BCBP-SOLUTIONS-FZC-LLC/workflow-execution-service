@@ -29,7 +29,7 @@ type bodyRecorder struct {
 
 func (r *bodyRecorder) Write(b []byte) (int, error) {
 	r.buf.Write(b)
-	return r.ResponseWriter.Write(b) //nolint:wrapcheck
+	return r.ResponseWriter.Write(b) //nolint:wrapcheck // a recorder passes the wrapped writer's result through unchanged
 }
 
 func hashBody(b []byte) string {

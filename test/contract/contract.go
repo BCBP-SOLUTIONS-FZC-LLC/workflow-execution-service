@@ -2,7 +2,6 @@ package contract
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -54,7 +53,7 @@ func (s *Spec) Request(t testing.TB, req *http.Request) {
 	body := readBody(t, req)
 	restore(req, body)
 	defer restore(req, body)
-	if err := openapi3filter.ValidateRequest(context.Background(), s.input(t, req)); err != nil {
+	if err := openapi3filter.ValidateRequest(req.Context(), s.input(t, req)); err != nil {
 		t.Errorf("request %s %s breaks the spec: %v", req.Method, req.URL.Path, err)
 	}
 }
@@ -63,7 +62,7 @@ func (s *Spec) Response(t testing.TB, req *http.Request, status int, header http
 	t.Helper()
 	in := &openapi3filter.ResponseValidationInput{RequestValidationInput: s.input(t, req), Status: status, Header: header, Options: options}
 	in.SetBodyBytes(body)
-	if err := openapi3filter.ValidateResponse(context.Background(), in); err != nil {
+	if err := openapi3filter.ValidateResponse(req.Context(), in); err != nil {
 		t.Errorf("response %d to %s %s breaks the spec: %v\n%s", status, req.Method, req.URL.Path, err, body)
 	}
 }
