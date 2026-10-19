@@ -48,6 +48,8 @@ func TestTenantStartGate_RefusesOnlyTheConfiguredStatuses(t *testing.T) {
 		want    error
 	}{
 		{"nothing is refused by default", nil, map[uuid.UUID]string{tenant: "suspended"}, nil},
+		{"an offboarded tenant is refused with nothing configured", nil, map[uuid.UUID]string{tenant: "offboarded"}, port.ErrTenantNotActive},
+		{"an offboarded tenant is refused whatever else is configured", []string{"suspended"}, map[uuid.UUID]string{tenant: "offboarded"}, port.ErrTenantNotActive},
 		{"a configured status is refused", []string{"suspended", "trial_expired"}, map[uuid.UUID]string{tenant: "suspended"}, port.ErrTenantNotActive},
 		{"another configured status is refused", []string{"suspended", "trial_expired"}, map[uuid.UUID]string{tenant: "trial_expired"}, port.ErrTenantNotActive},
 		{"a status that is not configured is allowed", []string{"suspended"}, map[uuid.UUID]string{tenant: "past_due"}, nil},
@@ -69,9 +71,9 @@ func TestTenantStartGate_RefusesOnlyTheConfiguredStatuses(t *testing.T) {
 		assert.Error(t, gate.Allow(context.Background(), tenant))
 	})
 
-	t.Run("with nothing refused the status is not even read", func(t *testing.T) {
+	t.Run("a failed status read is returned even with nothing configured", func(t *testing.T) {
 		gate := service.NewTenantStartGate(&fakeTenantStates{getErr: errors.New("db down")}, nil)
-		assert.NoError(t, gate.Allow(context.Background(), tenant))
+		assert.Error(t, gate.Allow(context.Background(), tenant))
 	})
 }
 

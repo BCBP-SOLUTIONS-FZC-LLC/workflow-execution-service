@@ -17,8 +17,10 @@ type TenantStartGate struct {
 	refused map[string]bool
 }
 
+const offboardedStatus = "offboarded"
+
 func NewTenantStartGate(states port.TenantStateRepository, refusedStatuses []string) *TenantStartGate {
-	refused := make(map[string]bool, len(refusedStatuses))
+	refused := map[string]bool{offboardedStatus: true}
 	for _, s := range refusedStatuses {
 		refused[strings.ToLower(strings.TrimSpace(s))] = true
 	}
@@ -26,9 +28,6 @@ func NewTenantStartGate(states port.TenantStateRepository, refusedStatuses []str
 }
 
 func (g *TenantStartGate) Allow(ctx context.Context, tenantID uuid.UUID) error {
-	if len(g.refused) == 0 {
-		return nil
-	}
 	status, found, err := g.states.Get(ctx, tenantID)
 	if err != nil {
 		return fmt.Errorf("read the tenant status: %w", err)

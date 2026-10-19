@@ -947,7 +947,7 @@ paths:
             State conflict. See code field:
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body;
             DUPLICATE_BUSINESS_KEY — a live instance for this subject_id and business_key already exists and is not this caller's own unfinished start (a RUNNING instance of the same version started by the same caller with the same context_json and override_map is the same start sent again and is returned with 201);
-            TENANT_NOT_ACTIVE — the tenant's recorded status is one the service is configured to refuse starts for (none by default);
+            TENANT_NOT_ACTIVE — the tenant is offboarded, or its recorded status is one the service is configured to refuse starts for (no other status by default);
             VERSION_NOT_PUBLISHED — the referenced version is DRAFT or ARCHIVED;
             VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked).
           content:

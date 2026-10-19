@@ -207,3 +207,54 @@ func TestTenantStateRepo_ARecordedStatusIsReadBackAndAnOlderChangeNeverOverwrite
 	assert.True(t, found)
 	assert.Equal(t, "active", status, "a delayed older event must not undo the newer status")
 }
+
+func deleteTenantRows(t *testing.T, superPool *pgcommon.Pool, table string, tenantID uuid.UUID) {
+	t.Helper()
+	require.NoError(t, superPool.WithConn(context.Background(), func(ctx context.Context, conn *pgxpool.Conn) error {
+		if _, err := conn.Exec(ctx, `SET session_replication_role = replica`); err != nil {
+			return err
+		}
+		defer func() { _, _ = conn.Exec(ctx, `SET session_replication_role = DEFAULT`) }()
+		switch table {
+		case "event_recency_guard":
+			_, err := conn.Exec(ctx, `DELETE FROM event_recency_guard WHERE scope_key = $1 OR scope_key LIKE $2`,
+				"tenant:"+tenantID.String(), "user_availability:"+tenantID.String()+":%")
+			return err
+		case "connector_documents", "connector_document_attempts", "connector_send_intents":
+			_, err := conn.Exec(ctx, `DELETE FROM `+table+` WHERE tenant_id = $1`, tenantID.String())
+			return err
+		default:
+			_, err := conn.Exec(ctx, `DELETE FROM `+table+` WHERE tenant_id = $1`, tenantID)
+			return err
+		}
+	}))
+}
+
+func TestTenantRetentionRepo_HasRowsSeesARowInEveryPurgedTable(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewTenantRetentionRepo(appPool)
+	ctx := context.Background()
+
+	for _, only := range purgeTables {
+		t.Run(only, func(t *testing.T) {
+			tenantID := uuid.New()
+			seedPurgeTenant(t, superPool, tenantID, 1, 1)
+			for _, other := range purgeTables {
+				if other != only {
+					deleteTenantRows(t, superPool, other, tenantID)
+				}
+			}
+			require.NotZero(t, countRows(t, superPool, only, tenantID), "the table under test must hold a row")
+
+			has, err := repo.HasRows(ctx, tenantID)
+			require.NoError(t, err)
+			assert.True(t, has, "a row left only in %s must be seen", only)
+
+			deleteTenantRows(t, superPool, only, tenantID)
+			has, err = repo.HasRows(ctx, tenantID)
+			require.NoError(t, err)
+			assert.False(t, has)
+		})
+	}
+}
