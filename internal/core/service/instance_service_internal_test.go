@@ -86,7 +86,7 @@ func TestCompiledPlanCache_ExpandsLibraryCalls(t *testing.T) {
 	}
 	level, ok := requiredLevelForTask(plan, task)
 	assert.True(t, ok, "no stage for the module task")
-	assert.Equal(t, "checker", level)
+	assert.Equal(t, "approver", level)
 }
 
 type sizedDefinitions struct{ stages int }

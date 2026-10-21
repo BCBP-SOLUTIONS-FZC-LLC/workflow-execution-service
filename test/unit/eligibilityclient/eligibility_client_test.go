@@ -37,7 +37,7 @@ func TestCheckEligibility(t *testing.T) {
 			makeHandler: func(t *testing.T, calls *int) http.HandlerFunc {
 				return func(w http.ResponseWriter, r *http.Request) {
 					*calls++
-					require.Equal(t, http.MethodPost, r.Method)
+					require.Equal(t, http.MethodGet, r.Method)
 					w.WriteHeader(http.StatusOK)
 					_ = json.NewEncoder(w).Encode(map[string]bool{"eligible": true})
 				}
@@ -51,7 +51,7 @@ func TestCheckEligibility(t *testing.T) {
 				return func(w http.ResponseWriter, r *http.Request) {
 					*calls++
 					w.WriteHeader(http.StatusOK)
-					_ = json.NewEncoder(w).Encode(map[string]bool{"eligible": false})
+					_ = json.NewEncoder(w).Encode(map[string]any{"eligible": false, "reason": "level_insufficient", "role_level": "preparator"})
 				}
 			},
 			wantEligible: false,
@@ -105,6 +105,30 @@ func TestCheckEligibility(t *testing.T) {
 					*calls++
 					w.WriteHeader(http.StatusOK)
 					_, _ = w.Write([]byte("{}"))
+				}
+			},
+			wantErr:      true,
+			wantSentinel: httpadapter.ErrUpstreamUnavailable,
+			wantCalls:    1,
+		},
+		{
+			name: "a 409 is not an answer",
+			makeHandler: func(t *testing.T, calls *int) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					*calls++
+					w.WriteHeader(http.StatusConflict)
+				}
+			},
+			wantErr:      true,
+			wantSentinel: httpadapter.ErrUpstreamUnavailable,
+			wantCalls:    1,
+		},
+		{
+			name: "a 403 is not retried",
+			makeHandler: func(t *testing.T, calls *int) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					*calls++
+					w.WriteHeader(http.StatusForbidden)
 				}
 			},
 			wantErr:      true,
@@ -171,7 +195,7 @@ func TestCheckEligibility(t *testing.T) {
 			}
 
 			start := time.Now()
-			eligible, err := client.CheckEligibility(ctx, uuid.New(), uuid.New(), "reviewer", uuid.New())
+			eligible, err := client.CheckEligibility(ctx, uuid.New(), uuid.New(), uuid.New(), "reviewer")
 			elapsed := time.Since(start)
 
 			if tt.wantErr {
@@ -205,7 +229,7 @@ func TestNewEligibilityClient(t *testing.T) {
 func TestCheckEligibility_MalformedBaseURLFailsWithoutRetry(t *testing.T) {
 	client := httpadapter.NewEligibilityClient("http://example.invalid\x7f", 5*time.Second)
 
-	_, err := client.CheckEligibility(context.Background(), uuid.New(), uuid.New(), "reviewer", uuid.New())
+	_, err := client.CheckEligibility(context.Background(), uuid.New(), uuid.New(), uuid.New(), "reviewer")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "build eligibility request")
@@ -230,7 +254,7 @@ func TestCheckEligibilityBatch(t *testing.T) {
 			{NewUserID: uuid.New(), DepartmentID: uuid.New(), RequiredLevel: "reviewer"},
 		}
 
-		results, err := client.CheckEligibilityBatch(context.Background(), requests, uuid.New())
+		results, err := client.CheckEligibilityBatch(context.Background(), uuid.New(), requests)
 		require.NoError(t, err)
 		require.Len(t, results, 3)
 		for _, result := range results {
@@ -247,15 +271,12 @@ func TestCheckEligibilityBatch(t *testing.T) {
 		// prior all-or-nothing behavior, fixed as a real reliability gap).
 		failingDept := uuid.New()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var body struct {
-				DepartmentID uuid.UUID `json:"department_id"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body.DepartmentID == failingDept {
+			department := uuid.MustParse(r.URL.Query().Get("department_id"))
+			if department == failingDept {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			eligible := body.DepartmentID != uuid.Nil
+			eligible := department != uuid.Nil
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"eligible": eligible})
 		}))
@@ -269,7 +290,7 @@ func TestCheckEligibilityBatch(t *testing.T) {
 			{NewUserID: uuid.New(), DepartmentID: uuid.Nil, RequiredLevel: "reviewer"},
 		}
 
-		results, err := client.CheckEligibilityBatch(context.Background(), requests, uuid.New())
+		results, err := client.CheckEligibilityBatch(context.Background(), uuid.New(), requests)
 		require.NoError(t, err, "a per-item failure must not surface as a whole-batch error")
 		require.Len(t, results, 3)
 		assert.NoError(t, results[0].Err)
@@ -281,7 +302,7 @@ func TestCheckEligibilityBatch(t *testing.T) {
 
 	t.Run("empty request list returns an empty, non-nil-error result", func(t *testing.T) {
 		client := httpadapter.NewEligibilityClient("http://example.invalid", 5*time.Second)
-		results, err := client.CheckEligibilityBatch(context.Background(), nil, uuid.New())
+		results, err := client.CheckEligibilityBatch(context.Background(), uuid.New(), nil)
 		require.NoError(t, err)
 		assert.Empty(t, results)
 	})
@@ -309,9 +330,55 @@ func TestCheckEligibilityBatch(t *testing.T) {
 			requests[i] = port.EligibilityCheckRequest{NewUserID: uuid.New(), DepartmentID: uuid.New(), RequiredLevel: "reviewer"}
 		}
 
-		results, err := client.CheckEligibilityBatch(context.Background(), requests, uuid.New())
+		results, err := client.CheckEligibilityBatch(context.Background(), uuid.New(), requests)
 		require.NoError(t, err)
 		require.Len(t, results, 60)
 		assert.LessOrEqual(t, atomic.LoadInt32(&peak), int32(20), "batch fan-out must stay under its concurrency cap, not open one goroutine per request")
 	})
+}
+
+func TestCheckEligibility_RequestShape(t *testing.T) {
+	tenantID, userID, departmentID := uuid.New(), uuid.New(), uuid.New()
+	var got *http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r
+		_ = json.NewEncoder(w).Encode(map[string]bool{"eligible": true})
+	}))
+	defer srv.Close()
+
+	client := httpadapter.NewEligibilityClient(srv.URL+"/", 5*time.Second)
+	_, err := client.CheckEligibility(context.Background(), tenantID, userID, departmentID, "approver")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/api/v1/internal/tenants/"+tenantID.String()+"/members/"+userID.String()+"/eligibility", got.URL.Path)
+	assert.Equal(t, departmentID.String(), got.URL.Query().Get("department_id"))
+	assert.Equal(t, "approver", got.URL.Query().Get("required_level"))
+	assert.Equal(t, "iam-system", got.Header.Get("x-user-id"))
+	assert.Equal(t, "iam-system", got.Header.Get("x-tenant-roles"))
+	assert.Equal(t, tenantID.String(), got.Header.Get("x-tenant-id"))
+}
+
+func TestCheckEligibility_ALevelThatIsNotARoleLevelIsIneligibleWithoutACall(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		_ = json.NewEncoder(w).Encode(map[string]bool{"eligible": true})
+	}))
+	defer srv.Close()
+	client := httpadapter.NewEligibilityClient(srv.URL, 5*time.Second)
+
+	eligible, err := client.CheckEligibility(context.Background(), uuid.New(), uuid.New(), uuid.New(), "engineering")
+	require.NoError(t, err)
+	assert.False(t, eligible)
+
+	results, err := client.CheckEligibilityBatch(context.Background(), uuid.New(), []port.EligibilityCheckRequest{
+		{NewUserID: uuid.New(), DepartmentID: uuid.New(), RequiredLevel: "checker"},
+		{NewUserID: uuid.New(), DepartmentID: uuid.New(), RequiredLevel: "reviewer"},
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.False(t, results[0].Eligible)
+	assert.NoError(t, results[0].Err)
+	assert.True(t, results[1].Eligible)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "only the reviewer request reached the service")
 }

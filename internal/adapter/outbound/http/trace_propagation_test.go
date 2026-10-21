@@ -53,7 +53,7 @@ func TestEligibilityClient_PropagatesTraceContext(t *testing.T) {
 	defer srv.Close()
 
 	c := NewEligibilityClient(srv.URL, time.Second)
-	_, _, _ = c.tryCheckEligibility(tracedContext(t), srv.URL, []byte(`{}`))
+	_, _, _ = c.tryCheckEligibility(tracedContext(t), srv.URL, uuid.New())
 
 	if traceparent == "" {
 		t.Error("traceparent header missing on the eligibility call")

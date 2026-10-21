@@ -1,12 +1,13 @@
 package http
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
@@ -32,22 +34,17 @@ type EligibilityClient struct {
 
 func NewEligibilityClient(baseURL string, timeout time.Duration) *EligibilityClient {
 	return &EligibilityClient{
-		baseURL: baseURL,
+		baseURL: strings.TrimRight(baseURL, "/"),
 		client:  &http.Client{Timeout: timeout},
 	}
 }
 
-type eligibilityReq struct {
-	NewUserID     uuid.UUID `json:"new_user_id"`
-	DepartmentID  uuid.UUID `json:"department_id"`
-	RequiredLevel string    `json:"required_level"`
-	ActorID       uuid.UUID `json:"actor_id"`
-}
+const systemPrincipal = "iam-system"
 
 func (c *EligibilityClient) CheckEligibilityBatch(
 	ctx context.Context,
+	tenantID uuid.UUID,
 	requests []port.EligibilityCheckRequest,
-	actorID uuid.UUID,
 ) ([]port.EligibilityResult, error) {
 	results := make([]port.EligibilityResult, len(requests))
 	var wg sync.WaitGroup
@@ -58,7 +55,7 @@ func (c *EligibilityClient) CheckEligibilityBatch(
 		go func(i int, req port.EligibilityCheckRequest) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			eligible, err := c.CheckEligibility(ctx, req.NewUserID, req.DepartmentID, req.RequiredLevel, actorID)
+			eligible, err := c.CheckEligibility(ctx, tenantID, req.NewUserID, req.DepartmentID, req.RequiredLevel)
 			results[i] = port.EligibilityResult{Eligible: eligible, Err: err}
 		}(i, req)
 	}
@@ -68,24 +65,19 @@ func (c *EligibilityClient) CheckEligibilityBatch(
 
 func (c *EligibilityClient) CheckEligibility(
 	ctx context.Context,
-	newUserID, departmentID uuid.UUID,
+	tenantID, newUserID, departmentID uuid.UUID,
 	requiredLevel string,
-	actorID uuid.UUID,
 ) (bool, error) {
-	body, err := json.Marshal(eligibilityReq{
-		NewUserID:     newUserID,
-		DepartmentID:  departmentID,
-		RequiredLevel: requiredLevel,
-		ActorID:       actorID,
-	})
-	if err != nil {
-		return false, fmt.Errorf("marshal eligibility request: %w", err)
+	if !domain.ValidRoleLevel(requiredLevel) {
+		return false, nil
 	}
-	rawURL := c.baseURL + "/eligibility"
+	params := url.Values{"department_id": {departmentID.String()}, "required_level": {requiredLevel}}
+	rawURL := fmt.Sprintf("%s/api/v1/internal/tenants/%s/members/%s/eligibility?%s",
+		c.baseURL, tenantID, newUserID, params.Encode())
 
 	var lastErr error
 	for attempt := 1; attempt <= maxEligibilityAttempts; attempt++ {
-		eligible, retryable, err := c.tryCheckEligibility(ctx, rawURL, body)
+		eligible, retryable, err := c.tryCheckEligibility(ctx, rawURL, tenantID)
 		if err == nil {
 			return eligible, nil
 		}
@@ -105,13 +97,15 @@ func (c *EligibilityClient) CheckEligibility(
 func (c *EligibilityClient) tryCheckEligibility(
 	ctx context.Context,
 	rawURL string,
-	body []byte,
+	tenantID uuid.UUID,
 ) (eligible, retryable bool, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return false, false, fmt.Errorf("build eligibility request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-user-id", systemPrincipal)
+	req.Header.Set("x-tenant-roles", systemPrincipal)
+	req.Header.Set("x-tenant-id", tenantID.String())
 
 	gincommon.InjectTraceContext(ctx, req.Header)
 	resp, err := c.client.Do(req)

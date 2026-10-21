@@ -228,20 +228,20 @@ var _ port.InstanceService = (*fakeInstanceService)(nil)
 // fakeEligibilityChecker is the equivalent hand-rolled fake for
 // port.EligibilityChecker.
 type fakeEligibilityChecker struct {
-	check func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error)
+	check func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error)
 }
 
-func (f *fakeEligibilityChecker) CheckEligibility(ctx context.Context, newUserID, departmentID uuid.UUID, requiredLevel string, actorID uuid.UUID) (bool, error) {
+func (f *fakeEligibilityChecker) CheckEligibility(ctx context.Context, tenantID, newUserID, departmentID uuid.UUID, requiredLevel string) (bool, error) {
 	if f.check != nil {
-		return f.check(ctx, newUserID, departmentID, requiredLevel, actorID)
+		return f.check(ctx, tenantID, newUserID, departmentID, requiredLevel)
 	}
 	return true, nil
 }
 
-func (f *fakeEligibilityChecker) CheckEligibilityBatch(ctx context.Context, requests []port.EligibilityCheckRequest, actorID uuid.UUID) ([]port.EligibilityResult, error) {
+func (f *fakeEligibilityChecker) CheckEligibilityBatch(ctx context.Context, tenantID uuid.UUID, requests []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 	results := make([]port.EligibilityResult, len(requests))
 	for i, req := range requests {
-		eligible, err := f.CheckEligibility(ctx, req.NewUserID, req.DepartmentID, req.RequiredLevel, actorID)
+		eligible, err := f.CheckEligibility(ctx, tenantID, req.NewUserID, req.DepartmentID, req.RequiredLevel)
 		results[i] = port.EligibilityResult{Eligible: eligible, Err: err}
 	}
 	return results, nil

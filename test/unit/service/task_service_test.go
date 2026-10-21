@@ -160,6 +160,35 @@ func TestTaskService_GetByNode(t *testing.T) {
 	assert.ErrorIs(t, err, port.ErrTaskNotFound)
 }
 
+func TestTaskService_GetByNode_CarriesTheRequiredLevelFromThePlan(t *testing.T) {
+	svc, instances, tasks, _, _, _ := newTaskServiceHarness()
+	definitions := &fakeDefinitionClient{}
+	svc.Definitions = definitions
+	tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+	definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "approver"}))
+	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID}
+	task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review"}
+	tasks.byID[task.ID] = task
+
+	got, err := svc.GetByNode(context.Background(), tenantID, instanceID, "finance/review")
+
+	require.NoError(t, err)
+	assert.Equal(t, "approver", got.RequiredLevel, "node override asks Org & Membership for the level the plan names")
+}
+
+func TestTaskService_GetByNode_AnUnreadablePlanIsAnError(t *testing.T) {
+	svc, instances, tasks, _, _, _ := newTaskServiceHarness()
+	svc.Definitions = &fakeDefinitionClient{err: assert.AnError}
+	tenantID, instanceID := uuid.New(), uuid.New()
+	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: uuid.New()}
+	task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review"}
+	tasks.byID[task.ID] = task
+
+	_, err := svc.GetByNode(context.Background(), tenantID, instanceID, "finance/review")
+
+	require.ErrorIs(t, err, assert.AnError)
+}
+
 func TestTaskService_ActiveByUser(t *testing.T) {
 	svc, _, _, assignments, _, _ := newTaskServiceHarness()
 	tenantID, userID := uuid.New(), uuid.New()
@@ -736,7 +765,7 @@ func TestTaskService_Reassign(t *testing.T) {
 		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
 		definitions := &fakeDefinitionClient{}
 		svc.Definitions = definitions
-		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) { return true, nil }}
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) { return true, nil }}
 
 		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))
@@ -755,7 +784,7 @@ func TestTaskService_Reassign(t *testing.T) {
 		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
 		definitions := &fakeDefinitionClient{}
 		svc.Definitions = definitions
-		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) { return false, nil }}
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) { return false, nil }}
 
 		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))
@@ -774,7 +803,7 @@ func TestTaskService_Reassign(t *testing.T) {
 		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
 		definitions := &fakeDefinitionClient{}
 		svc.Definitions = definitions
-		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
 			return false, assert.AnError
 		}}
 
@@ -817,7 +846,7 @@ func TestTaskService_Reassign(t *testing.T) {
 		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
 		definitions := &fakeDefinitionClient{}
 		svc.Definitions = definitions
-		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
 			t.Fatal("CheckEligibility must not be called when the node has no matching compiled-plan stage")
 			return false, nil
 		}}

@@ -18,8 +18,6 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 )
 
-type uuidT = uuid.UUID
-
 // caller is one identity against one service: the same tenant and user
 // headers reach both services, as they do behind the gateway.
 type caller struct {

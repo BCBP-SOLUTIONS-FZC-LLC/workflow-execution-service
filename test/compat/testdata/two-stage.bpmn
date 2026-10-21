@@ -14,8 +14,8 @@
       </bpmn:lane>
     </bpmn:laneSet>
     <bpmn:startEvent id="Start_1"/>
-    <bpmn:userTask id="Prepare" name="Prepare"><bpmn:extensionElements><zeebe:taskDefinition type="prep"/><zeebe:assignmentDefinition candidateGroups="ops" candidateUsers="{{ASSIGNEE}}"/></bpmn:extensionElements></bpmn:userTask>
-    <bpmn:userTask id="Approve" name="Approve"><bpmn:extensionElements><zeebe:taskDefinition type="approve"/><zeebe:assignmentDefinition candidateGroups="ops" candidateUsers="{{ASSIGNEE}}"/></bpmn:extensionElements></bpmn:userTask>
+    <bpmn:userTask id="Prepare" name="Prepare"><bpmn:extensionElements><zeebe:taskDefinition type="prep"/><zeebe:assignmentDefinition candidateGroups="preparator" candidateUsers="{{ASSIGNEE}}"/></bpmn:extensionElements></bpmn:userTask>
+    <bpmn:userTask id="Approve" name="Approve"><bpmn:extensionElements><zeebe:taskDefinition type="approve"/><zeebe:assignmentDefinition candidateGroups="approver" candidateUsers="{{ASSIGNEE}}"/></bpmn:extensionElements></bpmn:userTask>
     <bpmn:endEvent id="End_1"/>
     <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_1" targetRef="Prepare"/>
     <bpmn:sequenceFlow id="Flow_2" sourceRef="Prepare" targetRef="Approve"/>

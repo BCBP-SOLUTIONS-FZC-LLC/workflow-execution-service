@@ -25,8 +25,8 @@ func TestOverrideNodeAssignee_Success(t *testing.T) {
 	previousUser := uuid.New()
 
 	var eligibilityCalledWith struct {
-		newUserID, deptID, actorID uuid.UUID
-		level                      string
+		newUserID, deptID, tenantID uuid.UUID
+		level                       string
 	}
 	fake := &fakeTaskService{
 		getByNode: func(_ context.Context, tenantID, instanceID uuid.UUID, nodeKey string) (*port.Task, error) {
@@ -55,11 +55,11 @@ func TestOverrideNodeAssignee_Success(t *testing.T) {
 		},
 	}
 	elig := &fakeEligibilityChecker{
-		check: func(_ context.Context, newUserID, departmentID uuid.UUID, level string, actorID uuid.UUID) (bool, error) {
+		check: func(_ context.Context, tenantID, newUserID, departmentID uuid.UUID, level string) (bool, error) {
 			eligibilityCalledWith.newUserID = newUserID
 			eligibilityCalledWith.deptID = departmentID
 			eligibilityCalledWith.level = level
-			eligibilityCalledWith.actorID = actorID
+			eligibilityCalledWith.tenantID = tenantID
 			return true, nil
 		},
 	}
@@ -73,7 +73,7 @@ func TestOverrideNodeAssignee_Success(t *testing.T) {
 	assert.Equal(t, newUser, eligibilityCalledWith.newUserID)
 	assert.Equal(t, deptID, eligibilityCalledWith.deptID)
 	assert.Equal(t, "reviewer", eligibilityCalledWith.level)
-	assert.Equal(t, testUserID, eligibilityCalledWith.actorID)
+	assert.Equal(t, testTenantID, eligibilityCalledWith.tenantID)
 
 	var body struct {
 		PreviousUserID uuid.UUID `json:"previous_user_id"`
@@ -96,7 +96,7 @@ func TestOverrideNodeAssignee_AlreadyResolved(t *testing.T) {
 		},
 	}
 	elig := &fakeEligibilityChecker{
-		check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+		check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
 			t.Fatal("must not call eligibility when step 1 already rejects")
 			return false, nil
 		},
@@ -122,7 +122,7 @@ func TestOverrideNodeAssignee_StaleRecordVersion(t *testing.T) {
 		},
 	}
 	elig := &fakeEligibilityChecker{
-		check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+		check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
 			t.Fatal("must not call eligibility on a stale record_version")
 			return false, nil
 		},
@@ -153,7 +153,7 @@ func TestOverrideNodeAssignee_Ineligible(t *testing.T) {
 		},
 	}
 	elig := &fakeEligibilityChecker{
-		check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+		check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
 			return false, nil
 		},
 	}
@@ -179,7 +179,7 @@ func TestOverrideNodeAssignee_UpstreamUnavailable(t *testing.T) {
 		},
 	}
 	elig := &fakeEligibilityChecker{
-		check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+		check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
 			return false, fmt.Errorf("wrapped: %w", adapterhttp.ErrUpstreamUnavailable)
 		},
 	}

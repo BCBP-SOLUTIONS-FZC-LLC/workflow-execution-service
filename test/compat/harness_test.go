@@ -10,6 +10,7 @@ package compat_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -84,20 +85,6 @@ type env struct {
 
 type definitionDB struct {
 	appDSN, migratorDSN string
-}
-
-type eligibleForAll struct{}
-
-func (eligibleForAll) CheckEligibility(context.Context, uuidT, uuidT, string, uuidT) (bool, error) {
-	return true, nil
-}
-
-func (eligibleForAll) CheckEligibilityBatch(_ context.Context, reqs []port.EligibilityCheckRequest, _ uuidT) ([]port.EligibilityResult, error) {
-	out := make([]port.EligibilityResult, len(reqs))
-	for i := range reqs {
-		out[i] = port.EligibilityResult{Eligible: true}
-	}
-	return out, nil
 }
 
 // automationPrincipal stands in for the Token Service: every tenant's
@@ -276,6 +263,16 @@ func (e *env) startMembershipStub(t *testing.T) {
 	e.membershipURL = e.startDefinitionStub(t, "membership")
 }
 
+func (e *env) setEligible(t *testing.T, eligible bool) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]bool{"eligible": eligible})
+	resp, err := http.Post(e.membershipURL+"/control", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("membership stub control: %v", err)
+	}
+	_ = resp.Body.Close()
+}
+
 func (e *env) startCatalogStub(t *testing.T) {
 	t.Helper()
 	e.catalogURL = e.startDefinitionStub(t, "catalog")
@@ -338,9 +335,8 @@ func startWorker(t *testing.T, sdk client.Client, deps *temporaladapter.Deps) {
 }
 
 // buildExecution wires the API the way cmd/server/wire.go does, with the
-// real Definition client and Valkey cache; only eligibility is faked, since
-// the IAM route it calls is not built yet.
-func buildExecution(t *testing.T, pool *pgcommon.Pool, sdk client.Client, rdb *redis.Client, definitions port.DefinitionServiceClient) http.Handler {
+// real Definition client, eligibility client and Valkey cache.
+func buildExecution(t *testing.T, pool *pgcommon.Pool, sdk client.Client, rdb *redis.Client, definitions port.DefinitionServiceClient, eligibility port.EligibilityChecker) http.Handler {
 	cache := valkey.NewCache(rdb)
 	instances := postgres.NewInstanceRepo(pool)
 	tasks := postgres.NewTaskRepo(pool)
@@ -356,7 +352,6 @@ func buildExecution(t *testing.T, pool *pgcommon.Pool, sdk client.Client, rdb *r
 		t.Fatalf("schema validator: %v", err)
 	}
 	temporal := temporalclient.New(sdk)
-	eligibility := eligibleForAll{}
 
 	h := handler.New(handler.Services{
 		Instances: &service.InstanceService{
@@ -436,7 +431,7 @@ func setup(t *testing.T) *env {
 		Outbox: postgres.NewOutboxRepo(pool), Transactor: postgres.NewTransactor(pool), Validator: validator, Definitions: definitions,
 	})
 
-	srv := httptest.NewServer(buildExecution(t, pool, sdk, rdb, definitions))
+	srv := httptest.NewServer(buildExecution(t, pool, sdk, rdb, definitions, outboundhttp.NewEligibilityClient(e.membershipURL, 5*time.Second)))
 	t.Cleanup(srv.Close)
 	e.executionURL = srv.URL
 

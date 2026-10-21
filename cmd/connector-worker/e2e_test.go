@@ -73,11 +73,11 @@ func (f *e2eDefinitionClient) GetCompiledWorkflow(_ context.Context, _, versionI
 
 type e2eEligibilityChecker struct{}
 
-func (e2eEligibilityChecker) CheckEligibility(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+func (e2eEligibilityChecker) CheckEligibility(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
 	return true, nil
 }
 
-func (e2eEligibilityChecker) CheckEligibilityBatch(_ context.Context, reqs []port.EligibilityCheckRequest, _ uuid.UUID) ([]port.EligibilityResult, error) {
+func (e2eEligibilityChecker) CheckEligibilityBatch(_ context.Context, _ uuid.UUID, reqs []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 	results := make([]port.EligibilityResult, len(reqs))
 	for i := range reqs {
 		results[i] = port.EligibilityResult{Eligible: true}

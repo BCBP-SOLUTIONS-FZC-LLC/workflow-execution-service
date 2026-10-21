@@ -20,14 +20,13 @@ type EligibilityResult struct {
 type EligibilityChecker interface {
 	CheckEligibility(
 		ctx context.Context,
-		newUserID, departmentID uuid.UUID,
+		tenantID, newUserID, departmentID uuid.UUID,
 		requiredLevel string,
-		actorID uuid.UUID,
 	) (eligible bool, err error)
 
 	CheckEligibilityBatch(
 		ctx context.Context,
+		tenantID uuid.UUID,
 		requests []EligibilityCheckRequest,
-		actorID uuid.UUID,
 	) (results []EligibilityResult, err error)
 }

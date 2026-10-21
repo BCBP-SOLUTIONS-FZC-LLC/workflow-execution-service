@@ -46,6 +46,7 @@ func TestCompat(t *testing.T) {
 	t.Run("every Definition fixture publishes and runs", func(t *testing.T) { e.everyFixtureRuns(t) })
 	t.Run("a two-stage template runs to completion", func(t *testing.T) { e.roundTrip(t) })
 	t.Run("a template calling a published library module runs through the module", func(t *testing.T) { e.libraryCall(t) })
+	t.Run("an assignee the membership read refuses blocks a start", func(t *testing.T) { e.eligibility(t) })
 	t.Run("a connector stage runs through the connector worker with Definition's alias", func(t *testing.T) { e.connectorRoundTrip(t) })
 	t.Run("archive waits for live instances", func(t *testing.T) { e.archiveGuard(t) })
 	t.Run("a revoked membership invalidates the version and pauses the user's work", func(t *testing.T) { e.revocation(t) })
@@ -533,4 +534,21 @@ func (e *env) eventsThroughConsumer(t *testing.T) {
 
 		e.waitInstance(t, tn, id, "PAUSED", func(d instanceDetail) bool { return d.Status == "PAUSED" })
 	})
+}
+
+func (e *env) eligibility(t *testing.T) {
+	tn := newTenant()
+	p := e.mustPublish(t, tn, twoStage(t, newUser(), uuid.New()))
+
+	e.setEligible(t, false)
+	t.Cleanup(func() { e.setEligible(t, true) })
+	a := e.startInstance(t, tn, p.versionID)
+	if a.status != http.StatusUnprocessableEntity || a.code(t) != "ASSIGNEE_INELIGIBLE" {
+		t.Fatalf("start with an assignee Org & Membership refuses = %d %s, want 422 ASSIGNEE_INELIGIBLE", a.status, a.body)
+	}
+
+	e.setEligible(t, true)
+	if a := e.startInstance(t, tn, p.versionID); a.status != http.StatusCreated {
+		t.Fatalf("start with an eligible assignee = %d %s, want 201", a.status, a.body)
+	}
 }

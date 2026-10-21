@@ -79,7 +79,7 @@ func (h *Handler) OverrideNodeAssignee(c *gin.Context) {
 		return
 	}
 
-	eligible, err := h.eligibility.CheckEligibility(ctx, req.NewUserID, task.DepartmentID, task.RequiredLevel, actorUserID)
+	eligible, err := h.eligibility.CheckEligibility(ctx, tenantID, req.NewUserID, task.DepartmentID, task.RequiredLevel)
 	if err != nil {
 		errResponse(c, err)
 		return

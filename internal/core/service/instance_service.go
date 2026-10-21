@@ -113,7 +113,7 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 		return nil, err
 	}
 
-	if err := s.validateAssigneeEligibility(ctx, mainPlan, in.OverrideMap); err != nil {
+	if err := s.validateAssigneeEligibility(ctx, in.TenantID, mainPlan, in.OverrideMap); err != nil {
 		return nil, err
 	}
 

@@ -61,7 +61,7 @@ func TestInstanceService_Start_LibraryCalls(t *testing.T) {
 		svc, _, _, _, _, _, definitions, eligibility := newInstanceServiceHarness()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), string(dsltest.LibraryCalls()))
 		var got []port.EligibilityCheckRequest
-		eligibility.batchCheck = func(_ context.Context, reqs []port.EligibilityCheckRequest, _ uuid.UUID) ([]port.EligibilityResult, error) {
+		eligibility.batchCheck = func(_ context.Context, _ uuid.UUID, reqs []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 			got = reqs
 			results := make([]port.EligibilityResult, len(reqs))
 			for i := range results {
@@ -76,9 +76,9 @@ func TestInstanceService_Start_LibraryCalls(t *testing.T) {
 		assert.Equal(t, []string{goldenCheckOps}, ineligible.Nodes, "the refusal names the call-scoped node key")
 		assert.ElementsMatch(t, []port.EligibilityCheckRequest{
 			{NewUserID: uuid.MustParse(goldenReviewer), DepartmentID: uuid.MustParse(goldenEngIAM), RequiredLevel: "reviewer"},
-			{NewUserID: uuid.MustParse(goldenEngCheck), DepartmentID: uuid.MustParse(goldenEngIAM), RequiredLevel: "checker"},
+			{NewUserID: uuid.MustParse(goldenEngCheck), DepartmentID: uuid.MustParse(goldenEngIAM), RequiredLevel: "approver"},
 			{NewUserID: uuid.MustParse(goldenOpsReview), DepartmentID: uuid.MustParse(goldenOpsIAM), RequiredLevel: "reviewer"},
-			{NewUserID: uuid.MustParse(goldenOpsCheck), DepartmentID: uuid.MustParse(goldenOpsIAM), RequiredLevel: "checker"},
+			{NewUserID: uuid.MustParse(goldenOpsCheck), DepartmentID: uuid.MustParse(goldenOpsIAM), RequiredLevel: "approver"},
 		}, got)
 	})
 
@@ -87,7 +87,7 @@ func TestInstanceService_Start_LibraryCalls(t *testing.T) {
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), string(dsltest.LibraryCalls()))
 		engChecker, opsChecker := uuid.New(), uuid.New()
 		var got []port.EligibilityCheckRequest
-		eligibility.batchCheck = func(_ context.Context, reqs []port.EligibilityCheckRequest, _ uuid.UUID) ([]port.EligibilityResult, error) {
+		eligibility.batchCheck = func(_ context.Context, _ uuid.UUID, reqs []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 			got = reqs
 			results := make([]port.EligibilityResult, len(reqs))
 			for i := range results {
@@ -100,9 +100,9 @@ func TestInstanceService_Start_LibraryCalls(t *testing.T) {
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []port.EligibilityCheckRequest{
 			{NewUserID: uuid.MustParse(goldenReviewer), DepartmentID: uuid.MustParse(goldenEngIAM), RequiredLevel: "reviewer"},
-			{NewUserID: engChecker, DepartmentID: uuid.MustParse(goldenEngIAM), RequiredLevel: "checker"},
+			{NewUserID: engChecker, DepartmentID: uuid.MustParse(goldenEngIAM), RequiredLevel: "approver"},
 			{NewUserID: uuid.MustParse(goldenOpsReview), DepartmentID: uuid.MustParse(goldenOpsIAM), RequiredLevel: "reviewer"},
-			{NewUserID: opsChecker, DepartmentID: uuid.MustParse(goldenOpsIAM), RequiredLevel: "checker"},
+			{NewUserID: opsChecker, DepartmentID: uuid.MustParse(goldenOpsIAM), RequiredLevel: "approver"},
 		}, got)
 	})
 
@@ -119,7 +119,7 @@ func TestInstanceService_Start_LibraryCalls(t *testing.T) {
 		svc, _, _, _, _, _, definitions, eligibility := newInstanceServiceHarness()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), string(dsltest.LibraryCalls()))
 		var checked []uuid.UUID
-		eligibility.batchCheck = func(_ context.Context, reqs []port.EligibilityCheckRequest, _ uuid.UUID) ([]port.EligibilityResult, error) {
+		eligibility.batchCheck = func(_ context.Context, _ uuid.UUID, reqs []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 			results := make([]port.EligibilityResult, len(reqs))
 			for i := range reqs {
 				checked = append(checked, reqs[i].NewUserID)

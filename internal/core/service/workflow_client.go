@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -11,6 +13,8 @@ import (
 )
 
 var _ port.WorkflowClient = (*WorkflowClient)(nil)
+
+var errEligibilityRead = errors.New("eligibility read failed")
 
 type WorkflowClient struct {
 	Instances   port.InstanceRepository
@@ -68,6 +72,9 @@ func (s *WorkflowClient) ReassignDelegate(ctx context.Context, in port.ReassignD
 			continue
 		}
 		eligible, err := s.checkAssigneeEligible(ctx, plans, in.TenantID, task, in.NewDelegateID)
+		if errors.Is(err, errEligibilityRead) {
+			return count, err
+		}
 		if err != nil {
 			s.logger().Warn("skipping assignment: eligibility check failed", map[string]any{"task_id": task.ID, "error": err.Error()})
 			continue
@@ -162,7 +169,11 @@ func (s *WorkflowClient) checkAssigneeEligible(ctx context.Context, plans *compi
 	if !ok {
 		return false, nil
 	}
-	return s.Eligibility.CheckEligibility(ctx, newUserID, task.DepartmentID, level, newUserID)
+	eligible, err := s.Eligibility.CheckEligibility(ctx, tenantID, newUserID, task.DepartmentID, level)
+	if err != nil {
+		return false, fmt.Errorf("%w: %w", errEligibilityRead, err)
+	}
+	return eligible, nil
 }
 
 func (s *WorkflowClient) signalReassignForTask(ctx context.Context, task *domain.Task, oldUserID, newUserID uuid.UUID) error {

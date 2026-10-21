@@ -161,7 +161,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		svc, instances, tasks, assignments, temporal := newWorkflowClientHarness()
 		definitions := &fakeDefinitionClient{}
 		svc.Definitions = definitions
-		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) { return true, nil }}
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) { return true, nil }}
 
 		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
 		instanceID, versionID := uuid.New(), uuid.New()
@@ -182,7 +182,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		svc, instances, tasks, assignments, temporal := newWorkflowClientHarness()
 		definitions := &fakeDefinitionClient{}
 		svc.Definitions = definitions
-		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) { return false, nil }}
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) { return false, nil }}
 
 		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
 		instanceID, versionID := uuid.New(), uuid.New()
@@ -200,11 +200,11 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		assert.Empty(t, temporal.signals)
 	})
 
-	t.Run("eligibility check error on one task is logged and skipped, not counted", func(t *testing.T) {
+	t.Run("a failed eligibility read fails the call so the delegation event is retried", func(t *testing.T) {
 		svc, instances, tasks, assignments, temporal := newWorkflowClientHarness()
 		definitions := &fakeDefinitionClient{}
 		svc.Definitions = definitions
-		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
 			return false, assert.AnError
 		}}
 
@@ -218,7 +218,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		assignments.byID[a.ID] = a
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
-		require.NoError(t, err)
+		require.ErrorIs(t, err, assert.AnError)
 		assert.Zero(t, count)
 		assert.True(t, assignments.byID[a.ID].IsActive)
 		assert.Empty(t, temporal.signals)
@@ -246,7 +246,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		svc, instances, tasks, assignments, _ := newWorkflowClientHarness()
 		definitions := &fakeDefinitionClient{}
 		svc.Definitions = definitions
-		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
 			t.Fatal("CheckEligibility must not be called when the node has no matching compiled-plan stage")
 			return false, nil
 		}}

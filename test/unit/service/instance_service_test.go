@@ -265,7 +265,7 @@ func TestInstanceService_Start(t *testing.T) {
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(),
 			compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer", DefaultAssignees: []string{userID.String()}}))
 		var gotRequests []port.EligibilityCheckRequest
-		eligibility.batchCheck = func(_ context.Context, reqs []port.EligibilityCheckRequest, _ uuid.UUID) ([]port.EligibilityResult, error) {
+		eligibility.batchCheck = func(_ context.Context, _ uuid.UUID, reqs []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 			gotRequests = reqs
 			results := make([]port.EligibilityResult, len(reqs))
 			for i := range results {
@@ -287,7 +287,7 @@ func TestInstanceService_Start(t *testing.T) {
 		svc, _, _, _, _, _, definitions, eligibility := newInstanceServiceHarness()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(),
 			compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review", DefaultAssignees: []string{uuid.New().String()}}))
-		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]port.EligibilityResult, error) {
+		eligibility.batchCheck = func(context.Context, uuid.UUID, []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 			return []port.EligibilityResult{{Eligible: false}}, nil
 		}
 
@@ -300,12 +300,51 @@ func TestInstanceService_Start(t *testing.T) {
 		assert.Equal(t, []string{"finance/review"}, ineligible.Nodes)
 	})
 
+	t.Run("a failed eligibility read is an upstream failure, not an ineligible node", func(t *testing.T) {
+		svc, _, instances, _, _, _, definitions, eligibility := newInstanceServiceHarness()
+		down := errors.New("org & membership down")
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t,
+			dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer", DefaultAssignees: []string{uuid.New().String()}},
+			dsl.StageDef{Type: "userTask", NodeID: "approve", Role: "approver", DefaultAssignees: []string{uuid.New().String()}}))
+		eligibility.batchCheck = func(_ context.Context, _ uuid.UUID, reqs []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
+			return []port.EligibilityResult{{Eligible: false}, {Err: down}}, nil
+		}
+
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: uuid.New(), WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-003b", StartedByUserID: uuid.New(),
+		})
+
+		require.ErrorIs(t, err, down)
+		var ineligible *port.AssigneeIneligibleError
+		assert.False(t, errors.As(err, &ineligible), "an unreachable service is not an ineligible assignee")
+		assert.Empty(t, instances.byID)
+	})
+
+	t.Run("the eligibility reads carry the tenant of the start", func(t *testing.T) {
+		svc, _, _, _, _, _, definitions, eligibility := newInstanceServiceHarness()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(),
+			compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer", DefaultAssignees: []string{uuid.New().String()}}))
+		tenantID := uuid.New()
+		var gotTenant uuid.UUID
+		eligibility.batchCheck = func(_ context.Context, tenant uuid.UUID, reqs []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
+			gotTenant = tenant
+			return []port.EligibilityResult{{Eligible: true}}, nil
+		}
+
+		_, err := svc.Start(context.Background(), port.StartInstanceInput{
+			TenantID: tenantID, WorkflowVersionID: uuid.New(), SubjectID: "SUBJ-1", BusinessKey: "TND-003c", StartedByUserID: uuid.New(),
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, tenantID, gotTenant)
+	})
+
 	t.Run("connector-typed stage is skipped from eligibility checks", func(t *testing.T) {
 		svc, _, _, _, _, _, definitions, eligibility := newInstanceServiceHarness()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(),
 			compiledPlanJSON(t, dsl.StageDef{Type: "serviceTask", NodeID: "send", ConnectorType: "send-email", DefaultAssignees: []string{uuid.New().String()}}))
 		called := false
-		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]port.EligibilityResult, error) {
+		eligibility.batchCheck = func(context.Context, uuid.UUID, []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 			called = true
 			return nil, nil
 		}
@@ -324,7 +363,7 @@ func TestInstanceService_Start(t *testing.T) {
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(),
 			compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "review", DefaultAssignees: []string{defaultUser.String()}}))
 		var gotUser uuid.UUID
-		eligibility.batchCheck = func(_ context.Context, reqs []port.EligibilityCheckRequest, _ uuid.UUID) ([]port.EligibilityResult, error) {
+		eligibility.batchCheck = func(_ context.Context, _ uuid.UUID, reqs []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 			require.Len(t, reqs, 1)
 			gotUser = reqs[0].NewUserID
 			return []port.EligibilityResult{{Eligible: true}}, nil

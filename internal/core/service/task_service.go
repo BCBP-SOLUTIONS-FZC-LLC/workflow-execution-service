@@ -112,7 +112,22 @@ func (s *TaskService) GetByNode(ctx context.Context, tenantID, instanceID uuid.U
 	if err != nil {
 		return nil, wrapTaskErr(err)
 	}
-	return toPortTask(task), nil
+	out := toPortTask(task)
+	if s.Definitions == nil {
+		return out, nil
+	}
+	inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
+	if err != nil {
+		return nil, wrapInstanceErr(err)
+	}
+	plan, err := newCompiledPlanCache(s.Definitions, s.logger()).mainPlan(ctx, tenantID, inst.WorkflowVersionID)
+	if err != nil {
+		return nil, fmt.Errorf("get compiled plan for the task's required level: %w", err)
+	}
+	if level, ok := requiredLevelForTask(plan, task); ok {
+		out.RequiredLevel = level
+	}
+	return out, nil
 }
 
 func (s *TaskService) ActiveByUser(ctx context.Context, tenantID, userID uuid.UUID, page port.Page) (port.PageResult[*port.ActiveUserTask], error) {
@@ -371,7 +386,7 @@ func (s *TaskService) checkReassignEligibility(ctx context.Context, inst *domain
 		s.logger().Warn("reassign eligibility: no matching stage in compiled plan, skipping check", map[string]any{"task_id": task.ID})
 		return nil
 	}
-	eligible, err := s.Eligibility.CheckEligibility(ctx, newUserID, task.DepartmentID, level, newUserID)
+	eligible, err := s.Eligibility.CheckEligibility(ctx, inst.TenantID, newUserID, task.DepartmentID, level)
 	if err != nil {
 		return fmt.Errorf("check reassign eligibility: %w", err)
 	}

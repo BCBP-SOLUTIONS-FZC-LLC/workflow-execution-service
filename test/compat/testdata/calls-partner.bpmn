@@ -24,7 +24,7 @@
         </zeebe:ioMapping>
       </bpmn:extensionElements>
     </bpmn:serviceTask>
-    <bpmn:userTask id="Review" name="Review"><bpmn:extensionElements><zeebe:taskDefinition type="approve"/><zeebe:assignmentDefinition candidateGroups="ops" candidateUsers="{{ASSIGNEE}}"/></bpmn:extensionElements></bpmn:userTask>
+    <bpmn:userTask id="Review" name="Review"><bpmn:extensionElements><zeebe:taskDefinition type="approve"/><zeebe:assignmentDefinition candidateGroups="approver" candidateUsers="{{ASSIGNEE}}"/></bpmn:extensionElements></bpmn:userTask>
     <bpmn:endEvent id="End_1"/>
     <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_1" targetRef="Call_Partner"/>
     <bpmn:sequenceFlow id="Flow_2" sourceRef="Call_Partner" targetRef="Review"/>

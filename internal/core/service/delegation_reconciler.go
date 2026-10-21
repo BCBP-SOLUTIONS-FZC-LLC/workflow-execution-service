@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -79,23 +80,22 @@ func (s *DelegationReconciler) eligibleCandidates(ctx context.Context, tenantID,
 		return nil, nil
 	}
 
-	eligible, err := s.Eligibility.CheckEligibilityBatch(ctx, requests, candidateUserID)
+	eligible, err := s.Eligibility.CheckEligibilityBatch(ctx, tenantID, requests)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]delegationCandidate, 0, len(resolved))
+	for _, result := range eligible {
+		if result.Err != nil {
+			return nil, fmt.Errorf("%s: eligibility read: %w", logPrefix, result.Err)
+		}
+	}
 	for i, result := range eligible {
-		if result.Err == nil && result.Eligible {
+		if result.Eligible {
 			out = append(out, resolved[i])
 			continue
 		}
-		fields := map[string]any{"task_id": resolved[i].task.ID}
-		reason := "candidate ineligible for node"
-		if result.Err != nil {
-			reason = "eligibility check failed"
-			fields["error"] = result.Err.Error()
-		}
-		s.logger().Warn(logPrefix+": row held, "+reason, fields)
+		s.logger().Warn(logPrefix+": row held, candidate ineligible for node", map[string]any{"task_id": resolved[i].task.ID})
 	}
 	return out, nil
 }

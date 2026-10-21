@@ -94,11 +94,31 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		assert.Equal(t, "delegation:"+delegationID.String(), found.Reason)
 	})
 
+	t.Run("a failed eligibility read fails the reroute so the event is retried, and asks for the delegate's tenant", func(t *testing.T) {
+		svc, instances, tasks, assignments, outbox, temporal, definitions, eligibility := newDelegationReconcilerHarness()
+		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+		var askedTenant uuid.UUID
+		eligibility.batchCheck = func(_ context.Context, tenant uuid.UUID, _ []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
+			askedTenant = tenant
+			return []port.EligibilityResult{{Err: assert.AnError}}, nil
+		}
+
+		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{
+			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, Scope: "all",
+		})
+		require.ErrorIs(t, err, assert.AnError)
+		assert.Equal(t, tenantID, askedTenant)
+		assert.True(t, assignments.byID[a.ID].IsActive, "nothing is rerouted while the read is unavailable")
+		assert.Empty(t, outbox.enqueued)
+		assert.Empty(t, temporal.signals)
+	})
+
 	t.Run("ineligible delegate holds the row at the delegator", func(t *testing.T) {
 		svc, instances, tasks, assignments, outbox, temporal, definitions, eligibility := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
-		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]port.EligibilityResult, error) {
+		eligibility.batchCheck = func(context.Context, uuid.UUID, []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 			return []port.EligibilityResult{{Eligible: false}}, nil
 		}
 
@@ -345,7 +365,7 @@ func TestDelegationReconciler_Reverse(t *testing.T) {
 		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegateID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
 		a.Reason = "delegation:" + delegationID.String()
-		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]port.EligibilityResult, error) {
+		eligibility.batchCheck = func(context.Context, uuid.UUID, []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 			return []port.EligibilityResult{{Eligible: false}}, nil
 		}
 
@@ -450,7 +470,7 @@ func TestDelegationReconciler_EligibleCandidates(t *testing.T) {
 		svc, instances, tasks, assignments, _, _, definitions, eligibility := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID := uuid.New(), uuid.New(), uuid.New()
 		seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
-		eligibility.batchCheck = func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]port.EligibilityResult, error) {
+		eligibility.batchCheck = func(context.Context, uuid.UUID, []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 			return nil, assert.AnError
 		}
 

@@ -54,11 +54,11 @@ func (f *fakeDefinitionClient) GetCompiledWorkflow(_ context.Context, _, version
 // the instantiate/dispatch/complete mechanics, not eligibility policy.
 type fakeEligibilityChecker struct{}
 
-func (fakeEligibilityChecker) CheckEligibility(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error) {
+func (fakeEligibilityChecker) CheckEligibility(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
 	return true, nil
 }
 
-func (fakeEligibilityChecker) CheckEligibilityBatch(_ context.Context, reqs []port.EligibilityCheckRequest, _ uuid.UUID) ([]port.EligibilityResult, error) {
+func (fakeEligibilityChecker) CheckEligibilityBatch(_ context.Context, _ uuid.UUID, reqs []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 	results := make([]port.EligibilityResult, len(reqs))
 	for i := range reqs {
 		results[i] = port.EligibilityResult{Eligible: true}

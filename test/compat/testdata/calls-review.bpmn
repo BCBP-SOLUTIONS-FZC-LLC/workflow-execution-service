@@ -15,7 +15,7 @@
     </bpmn:laneSet>
     <bpmn:startEvent id="Start_1"/>
     <bpmn:callActivity id="CA_Review" name="Review"><bpmn:extensionElements><zeebe:calledElement processId="{{PROCESS}}"/></bpmn:extensionElements></bpmn:callActivity>
-    <bpmn:userTask id="Approve" name="Approve"><bpmn:extensionElements><zeebe:taskDefinition type="approve"/><zeebe:assignmentDefinition candidateGroups="ops" candidateUsers="{{ASSIGNEE}}"/></bpmn:extensionElements></bpmn:userTask>
+    <bpmn:userTask id="Approve" name="Approve"><bpmn:extensionElements><zeebe:taskDefinition type="approve"/><zeebe:assignmentDefinition candidateGroups="approver" candidateUsers="{{ASSIGNEE}}"/></bpmn:extensionElements></bpmn:userTask>
     <bpmn:endEvent id="End_1"/>
     <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_1" targetRef="CA_Review"/>
     <bpmn:sequenceFlow id="Flow_2" sourceRef="CA_Review" targetRef="Approve"/>

@@ -684,20 +684,20 @@ func (c *fakeDefinitionClient) GetCompiledWorkflow(_ context.Context, _, _ uuid.
 // --- EligibilityChecker ---
 
 type fakeEligibilityChecker struct {
-	check      func(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (bool, error)
-	batchCheck func(context.Context, []port.EligibilityCheckRequest, uuid.UUID) ([]port.EligibilityResult, error)
+	check      func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error)
+	batchCheck func(context.Context, uuid.UUID, []port.EligibilityCheckRequest) ([]port.EligibilityResult, error)
 }
 
-func (f *fakeEligibilityChecker) CheckEligibility(ctx context.Context, newUserID, departmentID uuid.UUID, requiredLevel string, actorID uuid.UUID) (bool, error) {
+func (f *fakeEligibilityChecker) CheckEligibility(ctx context.Context, tenantID, newUserID, departmentID uuid.UUID, requiredLevel string) (bool, error) {
 	if f.check != nil {
-		return f.check(ctx, newUserID, departmentID, requiredLevel, actorID)
+		return f.check(ctx, tenantID, newUserID, departmentID, requiredLevel)
 	}
 	return true, nil
 }
 
-func (f *fakeEligibilityChecker) CheckEligibilityBatch(ctx context.Context, requests []port.EligibilityCheckRequest, actorID uuid.UUID) ([]port.EligibilityResult, error) {
+func (f *fakeEligibilityChecker) CheckEligibilityBatch(ctx context.Context, tenantID uuid.UUID, requests []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
 	if f.batchCheck != nil {
-		return f.batchCheck(ctx, requests, actorID)
+		return f.batchCheck(ctx, tenantID, requests)
 	}
 	results := make([]port.EligibilityResult, len(requests))
 	for i := range results {

@@ -91,7 +91,7 @@ func collectAssigneeChecks(
 	return checks, unresolvedNodes
 }
 
-func (s *InstanceService) validateAssigneeEligibility(ctx context.Context, plan *dsl.CompiledPlan, overrideMap map[string]uuid.UUID) error {
+func (s *InstanceService) validateAssigneeEligibility(ctx context.Context, tenantID uuid.UUID, plan *dsl.CompiledPlan, overrideMap map[string]uuid.UUID) error {
 	checks, ineligibleNodes := collectAssigneeChecks(plan, overrideMap)
 
 	if len(checks) > 0 {
@@ -99,12 +99,15 @@ func (s *InstanceService) validateAssigneeEligibility(ctx context.Context, plan 
 		for i, c := range checks {
 			requests[i] = c.req
 		}
-		results, err := s.Eligibility.CheckEligibilityBatch(ctx, requests, uuid.Nil)
+		results, err := s.Eligibility.CheckEligibilityBatch(ctx, tenantID, requests)
 		if err != nil {
 			return err
 		}
 		for i, result := range results {
-			if result.Err != nil || !result.Eligible {
+			if result.Err != nil {
+				return fmt.Errorf("check assignee eligibility: %w", result.Err)
+			}
+			if !result.Eligible {
 				ineligibleNodes = append(ineligibleNodes, checks[i].nodeKey)
 			}
 		}
