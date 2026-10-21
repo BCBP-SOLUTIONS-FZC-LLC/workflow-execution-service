@@ -187,7 +187,7 @@ env:
   awsUseStub: "false"
   # Glue schema registry the API's SNS codec encodes against; required while awsUseStub is false.
   glueRegistryName: wf-workflow-events
-  # The Org & Membership eligibility endpoint the API calls. Required: the API refuses to start without it.
+  # The Org & Membership base URL; the API reads assignee eligibility under it. Required: the API refuses to start without it.
   eligibilityBaseURL: ""
   # The identity subsystem's Token Service, read for each tenant's automation principal. Required outside dev.
   tokenServiceBaseURL: ""

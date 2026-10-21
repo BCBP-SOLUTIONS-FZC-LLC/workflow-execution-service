@@ -2549,8 +2549,10 @@ paths:
       description: >
         Admin override: vacates the current active assignment(s) and creates a new assignment
         for the specified user. Sends an instance-reassign signal to Temporal.
-        No eligibility check is performed — admin reassignment is an explicit override, unlike
-        node-override (§5.4), which does check eligibility.
+        The new assignee's eligibility for the node is checked before the signal, as for
+        node-override (§5.4): 422 ASSIGNEE_INELIGIBLE when the Org & Membership read answers
+        ineligible or the node has no stage in the compiled plan, 503 UPSTREAM_UNAVAILABLE when
+        the read fails.
         Returns 400 OVERRIDE_NO_OP if new_assignee_user_id is already the current assignee.
       security:
         - GatewayTenantContext: []
