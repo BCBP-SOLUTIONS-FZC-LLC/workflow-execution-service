@@ -64,6 +64,7 @@ func (s *WorkflowClient) ReassignDelegate(ctx context.Context, in port.ReassignD
 	matched := matchingAssignments(active, in.DelegationID)
 
 	plans := newCompiledPlanCache(s.Definitions, s.logger())
+	answered := map[eligibilityPair]bool{}
 	count := 0
 	for _, a := range matched {
 		task, err := s.Tasks.GetByID(ctx, in.TenantID, a.TaskID)
@@ -71,7 +72,7 @@ func (s *WorkflowClient) ReassignDelegate(ctx context.Context, in port.ReassignD
 			s.logger().Warn("skipping assignment with unreadable task", map[string]any{"assignment_id": a.ID, "error": err.Error()})
 			continue
 		}
-		eligible, err := s.checkAssigneeEligible(ctx, plans, in.TenantID, task, in.NewDelegateID)
+		eligible, err := s.checkAssigneeEligible(ctx, plans, answered, in.TenantID, task, in.NewDelegateID)
 		if errors.Is(err, errEligibilityRead) {
 			return count, err
 		}
@@ -153,7 +154,7 @@ func (s *WorkflowClient) DelegateImpact(ctx context.Context, in port.DelegateImp
 	}, nil
 }
 
-func (s *WorkflowClient) checkAssigneeEligible(ctx context.Context, plans *compiledPlanCache, tenantID uuid.UUID, task *domain.Task, newUserID uuid.UUID) (bool, error) {
+func (s *WorkflowClient) checkAssigneeEligible(ctx context.Context, plans *compiledPlanCache, answered map[eligibilityPair]bool, tenantID uuid.UUID, task *domain.Task, newUserID uuid.UUID) (bool, error) {
 	if s.Eligibility == nil || s.Definitions == nil {
 		return true, nil
 	}
@@ -169,10 +170,15 @@ func (s *WorkflowClient) checkAssigneeEligible(ctx context.Context, plans *compi
 	if !ok {
 		return false, nil
 	}
+	pair := eligibilityPair{department: task.DepartmentID, level: level}
+	if eligible, seen := answered[pair]; seen {
+		return eligible, nil
+	}
 	eligible, err := s.Eligibility.CheckEligibility(ctx, tenantID, newUserID, task.DepartmentID, level)
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", errEligibilityRead, err)
 	}
+	answered[pair] = eligible
 	return eligible, nil
 }
 

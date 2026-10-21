@@ -58,10 +58,17 @@ func (s *DelegationReconciler) resolveCandidates(ctx context.Context, tenantID u
 	return out
 }
 
+type eligibilityPair struct {
+	department uuid.UUID
+	level      string
+}
+
 func (s *DelegationReconciler) eligibleCandidates(ctx context.Context, tenantID, candidateUserID uuid.UUID, rows []delegationCandidate, logPrefix string) ([]delegationCandidate, error) {
 	plans := newCompiledPlanCache(s.Definitions, s.logger())
-	requests := make([]port.EligibilityCheckRequest, 0, len(rows))
+	pairOf := make([]eligibilityPair, 0, len(rows))
 	resolved := make([]delegationCandidate, 0, len(rows))
+	index := map[eligibilityPair]int{}
+	var requests []port.EligibilityCheckRequest
 	for _, c := range rows {
 		plan, err := plans.mainPlan(ctx, tenantID, c.instance.WorkflowVersionID)
 		if err != nil {
@@ -73,29 +80,34 @@ func (s *DelegationReconciler) eligibleCandidates(ctx context.Context, tenantID,
 			s.logger().Warn(logPrefix+": skipping row with no matching stage in compiled plan", map[string]any{"task_id": c.task.ID})
 			continue
 		}
-		requests = append(requests, port.EligibilityCheckRequest{NewUserID: candidateUserID, DepartmentID: c.task.DepartmentID, RequiredLevel: level})
+		pair := eligibilityPair{department: c.task.DepartmentID, level: level}
+		if _, seen := index[pair]; !seen {
+			index[pair] = len(requests)
+			requests = append(requests, port.EligibilityCheckRequest{NewUserID: candidateUserID, DepartmentID: pair.department, RequiredLevel: pair.level})
+		}
+		pairOf = append(pairOf, pair)
 		resolved = append(resolved, c)
 	}
 	if len(resolved) == 0 {
 		return nil, nil
 	}
 
-	eligible, err := s.Eligibility.CheckEligibilityBatch(ctx, tenantID, requests)
+	answers, err := s.Eligibility.CheckEligibilityBatch(ctx, tenantID, requests)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]delegationCandidate, 0, len(resolved))
-	for _, result := range eligible {
+	for _, result := range answers {
 		if result.Err != nil {
 			return nil, fmt.Errorf("%s: eligibility read: %w", logPrefix, result.Err)
 		}
 	}
-	for i, result := range eligible {
-		if result.Eligible {
-			out = append(out, resolved[i])
+	out := make([]delegationCandidate, 0, len(resolved))
+	for i, c := range resolved {
+		if answers[index[pairOf[i]]].Eligible {
+			out = append(out, c)
 			continue
 		}
-		s.logger().Warn(logPrefix+": row held, candidate ineligible for node", map[string]any{"task_id": resolved[i].task.ID})
+		s.logger().Warn(logPrefix+": row held, candidate ineligible for node", map[string]any{"task_id": c.task.ID})
 	}
 	return out, nil
 }

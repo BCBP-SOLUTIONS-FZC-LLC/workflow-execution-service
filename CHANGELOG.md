@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- A delegation reroute, reversal and delegate reassignment read eligibility once per distinct department and level of the affected tasks, and give each task its pair's answer, where they read once per task (LLD rev 1.111; the LLD already stated one read per pair).
 - The module requires Go 1.26.10: `govulncheck` reports GO-2026-6809 (`crypto/x509`) on 1.26.9; the base image digest follows.
 - The public specification says an admin reassignment checks the new assignee's eligibility (it said none was performed), and the chart names `eligibilityBaseURL` as the Org & Membership base URL (LLD rev 1.110).
 - Admin reassignment of a task whose node is not in its compiled plan is refused with `422 ASSIGNEE_INELIGIBLE` and nothing is signalled, where it used to reassign without any eligibility check; the LLD already stated the check as fail-closed.

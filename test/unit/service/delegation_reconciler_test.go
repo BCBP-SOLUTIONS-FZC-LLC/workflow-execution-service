@@ -114,6 +114,46 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		assert.Empty(t, temporal.signals)
 	})
 
+	t.Run("one read per distinct department and level, answered back to every row of the pair", func(t *testing.T) {
+		svc, instances, tasks, assignments, outbox, temporal, definitions, eligibility := newDelegationReconcilerHarness()
+		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		inst, _, _ := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-pairs", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), inst.WorkflowVersionID, compiledPlanJSON(t,
+			dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"},
+			dsl.StageDef{Type: "userTask", NodeID: "approve", Role: "approver"}))
+		rows := map[string]*domain.TaskAssignment{}
+		for _, spec := range []struct{ name, node string }{{"review-2", "review"}, {"review-3", "review"}, {"approve-1", "approve"}, {"approve-2", "approve"}} {
+			task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, NodeKey: "finance/" + spec.node, RecordVersion: 1}
+			tasks.byID[task.ID] = task
+			a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegatorID, IsActive: true}
+			assignments.byID[a.ID] = a
+			rows[spec.name] = a
+		}
+		var asked []port.EligibilityCheckRequest
+		eligibility.batchCheck = func(_ context.Context, _ uuid.UUID, reqs []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
+			asked = reqs
+			out := make([]port.EligibilityResult, len(reqs))
+			for i, r := range reqs {
+				out[i] = port.EligibilityResult{Eligible: r.RequiredLevel == "reviewer"}
+			}
+			return out, nil
+		}
+
+		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{
+			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, Scope: "all",
+		})
+
+		require.NoError(t, err)
+		require.Len(t, asked, 2, "five rows of two distinct pairs are two reads")
+		assert.ElementsMatch(t, []string{"reviewer", "approver"}, []string{asked[0].RequiredLevel, asked[1].RequiredLevel})
+		assert.False(t, assignments.byID[rows["review-2"].ID].IsActive, "a reviewer row follows its pair's answer")
+		assert.False(t, assignments.byID[rows["review-3"].ID].IsActive)
+		assert.True(t, assignments.byID[rows["approve-1"].ID].IsActive, "an approver row is held when its pair is ineligible")
+		assert.True(t, assignments.byID[rows["approve-2"].ID].IsActive)
+		assert.Len(t, outbox.enqueued, 3, "the seeded row and the two other reviewer rows are rerouted")
+		assert.Len(t, temporal.signals, 3)
+	})
+
 	t.Run("ineligible delegate holds the row at the delegator", func(t *testing.T) {
 		svc, instances, tasks, assignments, outbox, temporal, definitions, eligibility := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()

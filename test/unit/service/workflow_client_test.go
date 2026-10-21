@@ -178,6 +178,34 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		require.Len(t, temporal.signals, 1)
 	})
 
+	t.Run("one read per distinct department and level of the old delegate's tasks", func(t *testing.T) {
+		svc, instances, tasks, assignments, temporal := newWorkflowClientHarness()
+		definitions := &fakeDefinitionClient{}
+		svc.Definitions = definitions
+		var reads int
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
+			reads++
+			return true, nil
+		}}
+		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
+		instanceID, versionID := uuid.New(), uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		for i := 0; i < 4; i++ {
+			task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review", RecordVersion: 1}
+			tasks.byID[task.ID] = task
+			a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+			assignments.byID[a.ID] = a
+		}
+
+		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
+
+		require.NoError(t, err)
+		assert.Equal(t, 4, count)
+		assert.Equal(t, 1, reads, "four tasks of one department and level are one read")
+		assert.Len(t, temporal.signals, 4)
+	})
+
 	t.Run("ineligible new delegate's row is held, not counted", func(t *testing.T) {
 		svc, instances, tasks, assignments, temporal := newWorkflowClientHarness()
 		definitions := &fakeDefinitionClient{}
