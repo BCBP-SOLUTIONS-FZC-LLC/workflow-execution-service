@@ -842,7 +842,7 @@ func TestTaskService_Reassign(t *testing.T) {
 		assert.Equal(t, assert.AnError.Error(), log.warnFields[0]["error"])
 	})
 
-	t.Run("node not found in compiled plan skips the eligibility check", func(t *testing.T) {
+	t.Run("node not found in compiled plan is ineligible without asking Org & Membership", func(t *testing.T) {
 		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
 		definitions := &fakeDefinitionClient{}
 		svc.Definitions = definitions
@@ -862,8 +862,8 @@ func TestTaskService_Reassign(t *testing.T) {
 		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
 
 		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
-		require.NoError(t, err, "an unresolvable node must not block the reassignment")
-		require.Len(t, temporal.signals, 1)
+		require.ErrorIs(t, err, port.ErrAssigneeIneligible)
+		assert.Empty(t, temporal.signals, "a node the plan does not know must not be reassigned unchecked")
 	})
 
 	t.Run("a confirmed-unavailable replacement blocks the reassignment", func(t *testing.T) {

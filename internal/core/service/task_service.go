@@ -383,8 +383,7 @@ func (s *TaskService) checkReassignEligibility(ctx context.Context, inst *domain
 	}
 	level, ok := requiredLevelForTask(plan, task)
 	if !ok {
-		s.logger().Warn("reassign eligibility: no matching stage in compiled plan, skipping check", map[string]any{"task_id": task.ID})
-		return nil
+		return fmt.Errorf("task %s has no stage in its compiled plan: %w", task.ID, port.ErrAssigneeIneligible)
 	}
 	eligible, err := s.Eligibility.CheckEligibility(ctx, inst.TenantID, newUserID, task.DepartmentID, level)
 	if err != nil {
