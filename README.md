@@ -3,7 +3,7 @@
 The runtime control plane of the BCBP Workflow Engine: it starts, tracks and drives workflow instances to completion on Temporal, and dispatches tasks to human assignees and connectors.
 
 **Repository:** `github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service`  
-**Module:** Go 1.26.9 · private module · three containerised binaries not yet deployed to any live environment
+**Module:** Go 1.26.10 · private module · three containerised binaries not yet deployed to any live environment
 
 ---
 

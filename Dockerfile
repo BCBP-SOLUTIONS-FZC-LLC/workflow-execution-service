@@ -20,7 +20,7 @@
 # `make pin-base-images` — it preserves each FROM line's own `AS <stage>`
 # regardless of how many stages share a base image.
 
-FROM golang:1.26-alpine@sha256:c95332c2af86b6d89b91bd0500f4b9529ccbd090a0d1855c6d1ceaa142ae8615 AS builder
+FROM golang:1.26-alpine@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca AS builder
 
 ARG BUILD_VERSION=dev
 ARG TARGETARCH=amd64
