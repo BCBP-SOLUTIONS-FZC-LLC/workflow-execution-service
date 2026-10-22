@@ -2,7 +2,6 @@ package service_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -296,34 +295,6 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		assert.True(t, assignments.byID[a.ID].IsActive)
 	})
 
-	t.Run("liveness stub error fails open for the whole call, matching self-service semantics", func(t *testing.T) {
-		svc, instances, tasks, assignments, temporal := newWorkflowClientHarness()
-		svc.IAM = &fakeIAMClient{err: errors.New("iam client: user-status endpoint contract not yet confirmed")}
-
-		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
-		instanceID := uuid.New()
-		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
-		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, RecordVersion: 1}
-		tasks.byID[task.ID] = task
-		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
-		assignments.byID[a.ID] = a
-
-		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
-		require.NoError(t, err, "an unresolved liveness check must not block the reassignment")
-		assert.Equal(t, 1, count)
-		require.Len(t, temporal.signals, 1)
-	})
-
-	t.Run("a confirmed-unavailable new delegate blocks the whole call", func(t *testing.T) {
-		svc, _, _, assignments, _ := newWorkflowClientHarness()
-		svc.IAM = &fakeIAMClient{status: port.UserStatus{IsDeleted: true}}
-		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
-
-		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
-		assert.ErrorIs(t, err, port.ErrAssigneeUnavailable)
-		assert.Zero(t, count)
-		assert.Empty(t, assignments.byID, "must not even list/attempt assignments once the new delegate is confirmed unavailable")
-	})
 }
 
 func TestWorkflowClient_CancelByDelegate(t *testing.T) {

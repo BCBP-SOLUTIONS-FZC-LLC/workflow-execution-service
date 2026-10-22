@@ -784,17 +784,6 @@ func warnsWithCause(l *fakeLogger, cause string) int {
 	return n
 }
 
-// --- IAMClient ---
-
-type fakeIAMClient struct {
-	status port.UserStatus
-	err    error
-}
-
-func (c *fakeIAMClient) GetUserStatus(_ context.Context, _, _ uuid.UUID) (port.UserStatus, error) {
-	return c.status, c.err
-}
-
 // --- EventValidator ---
 
 // realValidator constructs the production JSON-schema validator so tests

@@ -35,8 +35,6 @@ var (
 
 	ErrTaskNotHumanActionable = errors.New("task is connector-typed and has no human assignee to act on")
 
-	ErrAssigneeUnavailable = errors.New("assignee is no longer available (deleted or out-of-office)")
-
 	ErrTaskNotConnectorTyped = errors.New("task is not connector-typed")
 
 	ErrNoAutomationPrincipal = errors.New("tenant has no automation principal")

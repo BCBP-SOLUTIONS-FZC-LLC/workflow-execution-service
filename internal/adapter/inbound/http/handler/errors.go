@@ -56,7 +56,6 @@ const (
 	CodeForceBackNoSavedBranch  ErrCode = "FORCE_BACK_NO_SAVED_BRANCH"
 	CodeOverrideMapInvalid      ErrCode = "OVERRIDE_MAP_INVALID"
 	CodeTaskNotHumanActionable  ErrCode = "TASK_NOT_HUMAN_ACTIONABLE"
-	CodeAssigneeUnavailable     ErrCode = "ASSIGNEE_UNAVAILABLE"
 	CodeTaskNotConnectorTyped   ErrCode = "TASK_NOT_CONNECTOR_TYPED"
 	CodeNoAutomationPrincipal   ErrCode = "NO_AUTOMATION_PRINCIPAL"
 )
@@ -95,7 +94,6 @@ var codeTitles = map[ErrCode]string{
 	CodeForceBackNoSavedBranch:  "Force Back No Saved Branch",
 	CodeOverrideMapInvalid:      "Override Map Invalid",
 	CodeTaskNotHumanActionable:  "Task Not Human Actionable",
-	CodeAssigneeUnavailable:     "Assignee Unavailable",
 	CodeTaskNotConnectorTyped:   "Task Not Connector Typed",
 	CodeNoAutomationPrincipal:   "No Automation Principal",
 }
@@ -136,7 +134,6 @@ var problemTypes = map[ErrCode]string{
 	CodeForceBackNoSavedBranch:  errBase + "force-back-no-saved-branch",
 	CodeOverrideMapInvalid:      errBase + "override-map-invalid",
 	CodeTaskNotHumanActionable:  errBase + "task-not-human-actionable",
-	CodeAssigneeUnavailable:     errBase + "assignee-unavailable",
 	CodeTaskNotConnectorTyped:   errBase + "task-not-connector-typed",
 	CodeNoAutomationPrincipal:   errBase + "no-automation-principal",
 }
@@ -314,8 +311,6 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusUnprocessableEntity, CodeAssigneeIneligible, err.Error()
 	case errors.Is(err, port.ErrTaskNotHumanActionable):
 		return http.StatusConflict, CodeTaskNotHumanActionable, err.Error()
-	case errors.Is(err, port.ErrAssigneeUnavailable):
-		return http.StatusConflict, CodeAssigneeUnavailable, err.Error()
 	case errors.Is(err, port.ErrTaskNotConnectorTyped):
 		return http.StatusConflict, CodeTaskNotConnectorTyped, err.Error()
 	case errors.Is(err, port.ErrNoAutomationPrincipal):

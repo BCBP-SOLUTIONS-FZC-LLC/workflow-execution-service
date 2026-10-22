@@ -47,6 +47,7 @@ func TestCompat(t *testing.T) {
 	t.Run("a two-stage template runs to completion", func(t *testing.T) { e.roundTrip(t) })
 	t.Run("a template calling a published library module runs through the module", func(t *testing.T) { e.libraryCall(t) })
 	t.Run("an assignee the membership read refuses blocks a start", func(t *testing.T) { e.eligibility(t) })
+	t.Run("a task action by a user the membership read refuses is blocked", func(t *testing.T) { e.actionEligibility(t) })
 	t.Run("a connector stage runs through the connector worker with Definition's alias", func(t *testing.T) { e.connectorRoundTrip(t) })
 	t.Run("archive waits for live instances", func(t *testing.T) { e.archiveGuard(t) })
 	t.Run("a revoked membership invalidates the version and pauses the user's work", func(t *testing.T) { e.revocation(t) })
@@ -550,5 +551,33 @@ func (e *env) eligibility(t *testing.T) {
 	e.setEligible(t, true)
 	if a := e.startInstance(t, tn, p.versionID); a.status != http.StatusCreated {
 		t.Fatalf("start with an eligible assignee = %d %s, want 201", a.status, a.body)
+	}
+}
+
+func (e *env) actionEligibility(t *testing.T) {
+	tn := newTenant()
+	assignee := newUser()
+	_, _, tk := e.running(t, tn, assignee, uuid.New())
+	t.Cleanup(func() { e.setMembership(t, true, false) })
+	complete := func() answer {
+		return e.executionAs(t, tn, assignee, "").do(http.MethodPost, "/api/v1/tasks/"+tk.ID.String()+"/complete", map[string]any{
+			"result_json":    json.RawMessage(`{"decision":"approved"}`),
+			"record_version": tk.RecordVersion,
+		})
+	}
+
+	e.setMembership(t, false, false)
+	if a := complete(); a.status != http.StatusUnprocessableEntity || a.code(t) != "ASSIGNEE_INELIGIBLE" {
+		t.Fatalf("complete by a user Org & Membership refuses = %d %s, want 422 ASSIGNEE_INELIGIBLE", a.status, a.body)
+	}
+
+	e.setMembership(t, true, true)
+	if a := complete(); a.status != http.StatusServiceUnavailable || a.code(t) != "UPSTREAM_UNAVAILABLE" {
+		t.Fatalf("complete while Org & Membership cannot check = %d %s, want 503 UPSTREAM_UNAVAILABLE", a.status, a.body)
+	}
+
+	e.setMembership(t, true, false)
+	if a := complete(); a.status != http.StatusAccepted {
+		t.Fatalf("complete by an eligible user = %d %s, want 202", a.status, a.body)
 	}
 }

@@ -21,7 +21,6 @@ type WorkflowClient struct {
 	Tasks       port.TaskRepository
 	Assignments port.TaskAssignmentRepository
 	Temporal    port.TemporalClient
-	IAM         port.IAMClient
 	Eligibility port.EligibilityChecker
 	Definitions port.DefinitionServiceClient
 	Log         port.Logger
@@ -53,10 +52,6 @@ func matchingAssignments(assignments []*domain.TaskAssignment, delegationID *uui
 }
 
 func (s *WorkflowClient) ReassignDelegate(ctx context.Context, in port.ReassignDelegateInput) (int, error) {
-	if err := checkUserLiveWith(ctx, s.IAM, s.logger(), in.TenantID, in.NewDelegateID); err != nil {
-		return 0, err
-	}
-
 	active, err := s.Assignments.ListActiveByUser(ctx, in.TenantID, in.OldDelegateID)
 	if err != nil {
 		return 0, err

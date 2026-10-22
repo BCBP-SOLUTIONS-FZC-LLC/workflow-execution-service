@@ -3,7 +3,6 @@ package service_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -215,6 +214,26 @@ func newReadyTask(tenantID, instanceID uuid.UUID) *domain.Task {
 	}
 }
 
+func TestTaskService_ClaimByIneligibleUser(t *testing.T) {
+	svc, instances, tasks, assignments, _, _ := newTaskServiceHarness()
+	tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+	svc.Definitions = &fakeDefinitionClient{resp: publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "approver"}))}
+	svc.Eligibility = &fakeEligibilityChecker{check: func(_ context.Context, _, _, _ uuid.UUID, level string) (bool, error) {
+		return level != "approver", nil
+	}}
+	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID}
+	task := newReadyTask(tenantID, instanceID)
+	task.AssigneeMode = "all"
+	tasks.byID[task.ID] = task
+	userID := uuid.New()
+	a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+	assignments.byID[a.ID] = a
+
+	_, err := svc.Claim(context.Background(), tenantID, task.ID, userID, task.RecordVersion)
+	require.ErrorIs(t, err, port.ErrAssigneeIneligible)
+	assert.False(t, assignments.byID[a.ID].IsLead)
+}
+
 func TestTaskService_Claim(t *testing.T) {
 	t.Run("success sets lead on a multi-assignee task", func(t *testing.T) {
 		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
@@ -394,44 +413,45 @@ func TestTaskService_Complete(t *testing.T) {
 		assert.ErrorIs(t, err, port.ErrTaskNotHumanActionable)
 	})
 
-	t.Run("assignee unavailable is rejected", func(t *testing.T) {
-		instances := newFakeInstanceRepo()
-		tasks := newFakeTaskRepo()
-		assignments := newFakeAssignmentRepo()
-		tenantID, instanceID := uuid.New(), uuid.New()
-		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID}
+	t.Run("an acting user Org & Membership refuses is rejected", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		definitions := &fakeDefinitionClient{resp: publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))}
+		svc.Definitions = definitions
+		userID := uuid.New()
+		var asked []string
+		svc.Eligibility = &fakeEligibilityChecker{check: func(_ context.Context, tenant, user, dept uuid.UUID, level string) (bool, error) {
+			asked = append(asked, tenant.String()+"/"+user.String()+"/"+dept.String()+"/"+level)
+			return false, nil
+		}}
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, Status: domain.InstanceStatusRunning}
 		task := newReadyTask(tenantID, instanceID)
 		tasks.byID[task.ID] = task
-		userID := uuid.New()
 		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
-		svc := &service.TaskService{
-			Instances: instances, Tasks: tasks, Assignments: assignments,
-			Temporal: &fakeTemporalClient{}, IAM: &fakeIAMClient{status: port.UserStatus{IsDeleted: true}},
-		}
 
 		_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)
-		assert.ErrorIs(t, err, port.ErrAssigneeUnavailable)
+		require.ErrorIs(t, err, port.ErrAssigneeIneligible)
+		assert.Equal(t, []string{tenantID.String() + "/" + userID.String() + "/" + task.DepartmentID.String() + "/reviewer"}, asked)
+		assert.Empty(t, temporal.signals)
 	})
 
-	t.Run("IAM check failure fails open", func(t *testing.T) {
-		instances := newFakeInstanceRepo()
-		tasks := newFakeTaskRepo()
-		assignments := newFakeAssignmentRepo()
-		tenantID, instanceID := uuid.New(), uuid.New()
-		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning}
+	t.Run("a failed eligibility read refuses the action", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		svc.Definitions = &fakeDefinitionClient{resp: publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))}
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
+			return false, assert.AnError
+		}}
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, Status: domain.InstanceStatusRunning}
 		task := newReadyTask(tenantID, instanceID)
 		tasks.byID[task.ID] = task
 		userID := uuid.New()
 		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
-		log := &fakeLogger{}
-		svc := &service.TaskService{
-			Instances: instances, Tasks: tasks, Assignments: assignments,
-			Temporal: &fakeTemporalClient{}, IAM: &fakeIAMClient{err: errors.New("boom")}, Log: log,
-		}
 
 		_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)
-		assert.NoError(t, err, "an IAM check failure must fail open, not block the action")
-		assert.NotEmpty(t, log.warnCalls)
+		require.ErrorIs(t, err, assert.AnError)
+		assert.NotErrorIs(t, err, port.ErrAssigneeIneligible, "a failed read is never an ineligible user")
+		assert.Empty(t, temporal.signals)
 	})
 
 	t.Run("multi-assignee lead may complete", func(t *testing.T) {
@@ -866,37 +886,6 @@ func TestTaskService_Reassign(t *testing.T) {
 		assert.Empty(t, temporal.signals, "a node the plan does not know must not be reassigned unchecked")
 	})
 
-	t.Run("a confirmed-unavailable replacement blocks the reassignment", func(t *testing.T) {
-		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
-		svc.IAM = &fakeIAMClient{status: port.UserStatus{IsOOO: true}}
-
-		tenantID, instanceID := uuid.New(), uuid.New()
-		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
-		task := newReadyTask(tenantID, instanceID)
-		tasks.byID[task.ID] = task
-		oldUserID := uuid.New()
-		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
-
-		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
-		assert.ErrorIs(t, err, port.ErrAssigneeUnavailable)
-		assert.Empty(t, temporal.signals)
-	})
-
-	t.Run("liveness stub error fails open, matching self-service checkUserLive semantics", func(t *testing.T) {
-		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
-		svc.IAM = &fakeIAMClient{err: errors.New("iam client: user-status endpoint contract not yet confirmed")}
-
-		tenantID, instanceID := uuid.New(), uuid.New()
-		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
-		task := newReadyTask(tenantID, instanceID)
-		tasks.byID[task.ID] = task
-		oldUserID := uuid.New()
-		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
-
-		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
-		require.NoError(t, err, "an unresolved liveness check must not block the reassignment")
-		require.Len(t, temporal.signals, 1)
-	})
 }
 
 func TestTaskService_OverrideAssignee(t *testing.T) {

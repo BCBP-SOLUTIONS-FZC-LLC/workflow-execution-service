@@ -20,7 +20,6 @@ type TaskService struct {
 	Assignments port.TaskAssignmentRepository
 	Overrides   port.AssigneeOverrideRepository
 	Temporal    port.TemporalClient
-	IAM         port.IAMClient
 	Eligibility port.EligibilityChecker
 	Definitions port.DefinitionServiceClient
 	Log         port.Logger
@@ -142,23 +141,15 @@ func (s *TaskService) ActiveByUser(ctx context.Context, tenantID, userID uuid.UU
 	return port.PageResult[*port.ActiveUserTask]{Items: items, NextCursor: encodeNextCursor(next)}, nil
 }
 
-func (s *TaskService) checkUserLive(ctx context.Context, tenantID, userID uuid.UUID) error {
-	return checkUserLiveWith(ctx, s.IAM, s.logger(), tenantID, userID)
-}
-
-func checkUserLiveWith(ctx context.Context, iam port.IAMClient, log port.Logger, tenantID, userID uuid.UUID) error {
-	if iam == nil {
+func (s *TaskService) checkActorEligible(ctx context.Context, tenantID uuid.UUID, task *domain.Task, userID uuid.UUID) error {
+	if s.Eligibility == nil || s.Definitions == nil {
 		return nil
 	}
-	status, err := iam.GetUserStatus(ctx, tenantID, userID)
+	inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
 	if err != nil {
-		log.Warn("live user-status check failed, proceeding fail-open", map[string]any{"user_id": userID, "error": err.Error()})
-		return nil //nolint:nilerr // fail-open by design: a failed live check is logged and the action proceeds
+		return wrapInstanceErr(err)
 	}
-	if status.IsDeleted || status.IsOOO {
-		return port.ErrAssigneeUnavailable
-	}
-	return nil
+	return s.checkEligible(ctx, inst, task, userID)
 }
 
 func checkHumanActionable(task *domain.Task) error {
@@ -209,9 +200,6 @@ func (s *TaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.U
 	if err := checkTaskActive(task); err != nil {
 		return nil, err
 	}
-	if err := s.checkUserLive(ctx, tenantID, userID); err != nil {
-		return nil, err
-	}
 
 	assignments, err := s.Assignments.ListActiveByTask(ctx, tenantID, taskID)
 	if err != nil {
@@ -228,6 +216,9 @@ func (s *TaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.U
 	}
 	if target == nil {
 		return nil, port.ErrNotAssignee
+	}
+	if err := s.checkActorEligible(ctx, tenantID, task, userID); err != nil {
+		return nil, err
 	}
 
 	if _, err := s.Assignments.SetLead(ctx, tenantID, taskID, target.ID, recordVersion); err != nil {
@@ -358,10 +349,7 @@ func (s *TaskService) Reassign(ctx context.Context, tenantID, taskID, actorUserI
 }
 
 func (s *TaskService) sendReassignSignal(ctx context.Context, inst *domain.Instance, task *domain.Task, oldUserID, newUserID, actorUserID uuid.UUID, recordVersion int64) error {
-	if err := s.checkReassignEligibility(ctx, inst, task, newUserID); err != nil {
-		return err
-	}
-	if err := s.checkUserLive(ctx, inst.TenantID, newUserID); err != nil {
+	if err := s.checkEligible(ctx, inst, task, newUserID); err != nil {
 		return err
 	}
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, port.SignalInstanceReassign, reassignSignalWire{
@@ -373,7 +361,7 @@ func (s *TaskService) sendReassignSignal(ctx context.Context, inst *domain.Insta
 	return nil
 }
 
-func (s *TaskService) checkReassignEligibility(ctx context.Context, inst *domain.Instance, task *domain.Task, newUserID uuid.UUID) error {
+func (s *TaskService) checkEligible(ctx context.Context, inst *domain.Instance, task *domain.Task, userID uuid.UUID) error {
 	if s.Eligibility == nil || s.Definitions == nil {
 		return nil
 	}
@@ -385,9 +373,9 @@ func (s *TaskService) checkReassignEligibility(ctx context.Context, inst *domain
 	if !ok {
 		return fmt.Errorf("task %s has no stage in its compiled plan: %w", task.ID, port.ErrAssigneeIneligible)
 	}
-	eligible, err := s.Eligibility.CheckEligibility(ctx, inst.TenantID, newUserID, task.DepartmentID, level)
+	eligible, err := s.Eligibility.CheckEligibility(ctx, inst.TenantID, userID, task.DepartmentID, level)
 	if err != nil {
-		return fmt.Errorf("check reassign eligibility: %w", err)
+		return fmt.Errorf("check eligibility: %w", err)
 	}
 	if !eligible {
 		return port.ErrAssigneeIneligible
@@ -412,7 +400,7 @@ func (s *TaskService) precheckTaskAction(ctx context.Context, tenantID, taskID, 
 	if _, err := s.currentAssignee(ctx, tenantID, task, userID); err != nil {
 		return nil, err
 	}
-	if err := s.checkUserLive(ctx, tenantID, userID); err != nil {
+	if err := s.checkActorEligible(ctx, tenantID, task, userID); err != nil {
 		return nil, err
 	}
 	return task, nil

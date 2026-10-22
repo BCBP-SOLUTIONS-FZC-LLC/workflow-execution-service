@@ -73,9 +73,6 @@ type Config struct {
 	EligibilityBaseURL       string
 	EligibilityClientTimeout time.Duration
 
-	IAMBaseURL       string
-	IAMClientTimeout time.Duration
-
 	TokenServiceBaseURL       string
 	TokenServiceClientTimeout time.Duration
 
@@ -225,9 +222,6 @@ func Load() (*Config, error) {
 		EligibilityBaseURL:       getEnvOrDefault("ELIGIBILITY_BASE_URL", ""),
 		EligibilityClientTimeout: envDuration("ELIGIBILITY_CLIENT_TIMEOUT", 5*time.Second),
 
-		IAMBaseURL:       getEnvOrDefault("IAM_BASE_URL", ""),
-		IAMClientTimeout: envDuration("IAM_CLIENT_TIMEOUT", 5*time.Second),
-
 		TokenServiceBaseURL:       getEnvOrDefault("TOKEN_SERVICE_BASE_URL", ""),
 		TokenServiceClientTimeout: envDuration("TOKEN_SERVICE_CLIENT_TIMEOUT", 5*time.Second),
 
@@ -368,9 +362,6 @@ func (c *Config) validate() error {
 	}
 	if c.TokenServiceClientTimeout <= 0 {
 		return fmt.Errorf("TOKEN_SERVICE_CLIENT_TIMEOUT must be > 0")
-	}
-	if c.IAMClientTimeout <= 0 {
-		return fmt.Errorf("IAM_CLIENT_TIMEOUT must be > 0")
 	}
 	if c.WorkflowCacheSize < 0 {
 		return fmt.Errorf("WORKFLOW_CACHE_SIZE must be >= 0")

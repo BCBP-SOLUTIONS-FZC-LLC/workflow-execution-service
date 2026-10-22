@@ -2254,6 +2254,10 @@ paths:
         Returns 409 RECORD_VERSION_CONFLICT if the supplied record_version is stale.
         Returns 409 CLAIM_NOT_APPLICABLE if the task's assignee_mode is single — claim exists
         only to establish a lead among multiple assignees (assignee_mode=all).
+        The calling user's eligibility for the task's department and its stage's required level
+        is read from Org & Membership before the signal: 422 ASSIGNEE_INELIGIBLE when the read
+        answers ineligible (a suspended, removed or demoted member) or the node has no stage in
+        the compiled plan, 503 UPSTREAM_UNAVAILABLE when the read or the compiled plan fails.
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
         - $ref: "#/components/parameters/UserIdHeader"
@@ -2345,6 +2349,19 @@ paths:
                     detail: "Idempotency-Key reused with a different request body"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
                     code: "IDEMPOTENCY_KEY_REPLAY"
+        "422":
+          description: The calling user is not eligible for this task.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/assignee-ineligible"
+                title: "Assignee Ineligible"
+                status: 422
+                detail: "assignee is not eligible for this node"
+                instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
+                code: "ASSIGNEE_INELIGIBLE"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "415":
@@ -2364,6 +2381,10 @@ paths:
         Sets completed_at and result_json on the assignment. If all active assignments for
         the task are now complete, the task status transitions to COMPLETED and a
         task-complete signal is sent to Temporal (which then advances the workflow).
+        The calling user's eligibility for the task's department and its stage's required level
+        is read from Org & Membership before the signal: 422 ASSIGNEE_INELIGIBLE when the read
+        answers ineligible (a suspended, removed or demoted member) or the node has no stage in
+        the compiled plan, 503 UPSTREAM_UNAVAILABLE when the read or the compiled plan fails.
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
         - $ref: "#/components/parameters/UserIdHeader"
@@ -2441,6 +2462,19 @@ paths:
                     detail: "Idempotency-Key reused with a different request body"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/complete"
                     code: "IDEMPOTENCY_KEY_REPLAY"
+        "422":
+          description: The calling user is not eligible for this task.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/assignee-ineligible"
+                title: "Assignee Ineligible"
+                status: 422
+                detail: "assignee is not eligible for this node"
+                instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/complete"
+                code: "ASSIGNEE_INELIGIBLE"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "415":
@@ -2462,6 +2496,10 @@ paths:
         force-back does: the previous step's department runs again and creates a new
         task for it. The response returns the deferred task itself. A task with no
         completed step before it answers 409 INVALID_TASK_STATE.
+        The calling user's eligibility for the task's department and its stage's required level
+        is read from Org & Membership before the signal: 422 ASSIGNEE_INELIGIBLE when the read
+        answers ineligible (a suspended, removed or demoted member) or the node has no stage in
+        the compiled plan, 503 UPSTREAM_UNAVAILABLE when the read or the compiled plan fails.
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
         - $ref: "#/components/parameters/UserIdHeader"
@@ -2532,6 +2570,19 @@ paths:
                     detail: "Idempotency-Key reused with a different request body"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/defer"
                     code: "IDEMPOTENCY_KEY_REPLAY"
+        "422":
+          description: The calling user is not eligible for this task.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/assignee-ineligible"
+                title: "Assignee Ineligible"
+                status: 422
+                detail: "assignee is not eligible for this node"
+                instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/defer"
+                code: "ASSIGNEE_INELIGIBLE"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "415":
@@ -2654,6 +2705,19 @@ paths:
                     detail: "Idempotency-Key reused with a different request body"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
                     code: "IDEMPOTENCY_KEY_REPLAY"
+        "422":
+          description: The new assignee is not eligible for this task's node.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/assignee-ineligible"
+                title: "Assignee Ineligible"
+                status: 422
+                detail: "assignee is not eligible for this node"
+                instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
+                code: "ASSIGNEE_INELIGIBLE"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "415":

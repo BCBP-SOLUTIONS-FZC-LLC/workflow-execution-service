@@ -265,7 +265,12 @@ func (e *env) startMembershipStub(t *testing.T) {
 
 func (e *env) setEligible(t *testing.T, eligible bool) {
 	t.Helper()
-	body, _ := json.Marshal(map[string]bool{"eligible": eligible})
+	e.setMembership(t, eligible, false)
+}
+
+func (e *env) setMembership(t *testing.T, eligible, unavailable bool) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]bool{"eligible": eligible, "unavailable": unavailable})
 	resp, err := http.Post(e.membershipURL+"/control", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("membership stub control: %v", err)
