@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- `workflow-models/v2` is `v2.1.0`, the stable release of `v2.1.0-rc.3` (same code).
 - Connector alias calls carry the caller identity and no department grant, per IAM's header contract: the stream entry carries the automation principal's `principal_id` and `principal_sub` from the read made at enqueue, and the worker sends `x-tenant-id`, `x-user-id` (the `principal_sub`) and the lane department as `x-workflow-department-id`; the bare department UUID in `x-departments` is gone. `workflow-connectors/v2` is pinned to its PR #10 head (`dea3ed1`) until `v2.2.0` is tagged (LLD rev 1.115).
 - The chart follows the identity subsystem's admission model: the API's NetworkPolicy allows egress to Org & Membership and the Token Service in `iam` on 8080 (they were reachable only through the port 443 rule, so both reads were blocked), and the route-level `SecurityPolicy` sets `mergeType: StrategicMerge` (`ingress.securityPolicy.mergeType`). Chart tests prove both (LLD rev 1.114).
 - A schema-registry framed inbound event (the Delegation Service's `DelegationStarted` and `DelegationEnded`) is decoded with the platform library's decode-only codec, as in the Definition Service; the decoder it depended on was never configured, so every framed event answered `502 EVENT_DECODE_FAILED`. No registry call is made, so the role needs no registry permission (LLD rev 1.113).
