@@ -42,8 +42,8 @@ github.com/AzureAD/microsoft-authentication-extensions-for-go/cache v0.1.1 h1:WJ
 github.com/AzureAD/microsoft-authentication-extensions-for-go/cache v0.1.1/go.mod h1:tCcJZ0uHAmvjsVYzEFivsRTN00oz5BEsRgQHu5JZ9WE=
 github.com/AzureAD/microsoft-authentication-library-for-go v1.7.2 h1:RHK7bS+HQMslb1sZpAokUt+zTVmue0hKSs2C791hhzU=
 github.com/AzureAD/microsoft-authentication-library-for-go v1.7.2/go.mod h1:HKpQxkWaGLJ+D/5H8QRpyQXA1eKjxkFlOMwck5+33Jk=
-github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2 v2.1.0 h1:huBNqORFe6asW7HflkA7AApuZuPY/DABYmHxO8RIoVk=
-github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2 v2.1.0/go.mod h1:Wb1VB+D6NH9y+Wllv2NBzGFswbQNuaOVrgy1tbn2GGQ=
+github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2 v2.2.1 h1:rm9YNKkOuM5tNUz7xtQgCHePewuaV4EvFxO6rgtSnW0=
+github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2 v2.2.1/go.mod h1:mXTSMp07tXlrhnKnHhj9wwdzLY7ft0xVFNgtEbnWdaE=
 github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon v1.6.0 h1:Ndc1BpY/BOQxq7T4DlRZ3JRaQhlgYpzqIBG8eBst9rs=
 github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon v1.6.0/go.mod h1:ayGo5mxluZ+JrXj7ZhZ7FHeWsklL4eEk4onO8LCYVpQ=
 github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2 v2.0.1 h1:slrOE29/H7JGwrwNK3fmR4Z6roOiHfipKCdH56zhXHk=
