@@ -1,0 +1,559 @@
+package service_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
+)
+
+func newTenantLifecycleHarness() (*service.TenantLifecycleReconciler, *fakeInstanceRepo, *fakeTaskRepo, *fakeAssignmentRepo, *fakeActiveTaskQueueRepo, *fakeOutbox, *fakeTemporalClient) {
+	instances := newFakeInstanceRepo()
+	tasks := newFakeTaskRepo()
+	assignments := newFakeAssignmentRepo()
+	queues := newFakeActiveTaskQueueRepo()
+	outbox := &fakeOutbox{}
+	temporal := &fakeTemporalClient{}
+	svc := &service.TenantLifecycleReconciler{
+		Instances: instances, Tasks: tasks, Assignments: assignments, Queues: queues,
+		Outbox: outbox, Transactor: fakeTransactor{}, Temporal: temporal, Validator: realValidator(),
+	}
+	return svc, instances, tasks, assignments, queues, outbox, temporal
+}
+
+func TestTenantLifecycleReconciler_Apply_StatusTransitions(t *testing.T) {
+	t.Run("offboarded terminates every non-terminal instance", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, outbox, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+
+		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
+		paused := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusPaused, TemporalWorkflowID: "tenant:paused", RecordVersion: 1}
+		completed := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusCompleted, TemporalWorkflowID: "tenant:done", RecordVersion: 1}
+		instances.byID[running.ID] = running
+		instances.byID[paused.ID] = paused
+		instances.byID[completed.ID] = completed
+
+		activeTask := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: running.ID, Status: domain.TaskStatusReady, RecordVersion: 1}
+		tasks.byID[activeTask.ID] = activeTask
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: activeTask.ID, UserID: uuid.New(), IsActive: true}
+		assignments.byID[a.ID] = a
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"})
+		require.NoError(t, err)
+
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[running.ID].Status)
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[paused.ID].Status)
+		assert.Equal(t, domain.InstanceStatusCompleted, instances.byID[completed.ID].Status, "an already-terminal instance must be left untouched")
+		assert.Equal(t, domain.TaskStatusFailed, tasks.byID[activeTask.ID].Status)
+		assert.False(t, assignments.byID[a.ID].IsActive)
+		assert.Len(t, outbox.enqueued, 2)
+		require.NotEmpty(t, temporal.terminate)
+	})
+
+	t.Run("transition to active resumes tenant-state-paused instances", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		paused := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusPaused, TemporalWorkflowID: "tenant:paused", RecordVersion: 1}
+		instances.byID[paused.ID] = paused
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "suspended"})
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1)
+		assert.Equal(t, port.SignalInstanceResume, temporal.signals[0].SignalName)
+
+		b, err := json.Marshal(temporal.signals[0].Payload)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"Initiator":"`+domain.InitiatorTenantState+`"`, "the signal must carry tenant_state as its initiator, not fall back to admin")
+	})
+
+	t.Run("transition to suspended pauses every RUNNING instance", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
+		instances.byID[running.ID] = running
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"})
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1)
+		assert.Equal(t, port.SignalInstancePause, temporal.signals[0].SignalName)
+
+		b, err := json.Marshal(temporal.signals[0].Payload)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"Initiator":"`+domain.InitiatorTenantState+`"`, "the signal must carry tenant_state as its initiator, not fall back to admin")
+	})
+
+	// Regression coverage for the out-of-order race: these sweeps must not
+	// pre-filter on the status the signal expects. Two conflicting
+	// TenantStateChanged deliveries serialize under RecencyGuard, but the
+	// first one's effect is written asynchronously by the workflow's own
+	// activity — so the second can still read the pre-transition status here.
+	// Skipping on that stale read left the instance stranded with no further
+	// event to undo it. The workflow's own signalPreconditions/canResume is
+	// the gate instead, exactly as OOOAvailabilityReconciler was fixed to do.
+	t.Run("transition to active still signals a RUNNING instance whose pause has not landed yet", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		stillRunning := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
+		instances.byID[stillRunning.ID] = stillRunning
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "suspended"})
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1, "the resume must be sent regardless of the status this sweep happens to read")
+		assert.Equal(t, port.SignalInstanceResume, temporal.signals[0].SignalName)
+	})
+
+	t.Run("transition to suspended still signals a PAUSED instance whose resume has not landed yet", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		stillPaused := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusPaused, TemporalWorkflowID: "tenant:paused", RecordVersion: 1}
+		instances.byID[stillPaused.ID] = stillPaused
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"})
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1, "the pause must be sent regardless of the status this sweep happens to read")
+		assert.Equal(t, port.SignalInstancePause, temporal.signals[0].SignalName)
+	})
+
+	t.Run("a DEGRADED instance is swept too, and rejected at the workflow's own signal gate", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		degraded := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusDegraded, TemporalWorkflowID: "tenant:degraded", RecordVersion: 1}
+		instances.byID[degraded.ID] = degraded
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"})
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1, "DEGRADED is non-terminal, so it is selected; validateSignal rejects the pause on the workflow side (LLD §7.2 test #5)")
+	})
+
+	t.Run("status unchanged is a no-op", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
+		instances.byID[running.ID] = running
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "active"})
+		require.NoError(t, err)
+		assert.Empty(t, temporal.signals)
+	})
+
+	t.Run("a status-transition failure propagates from Apply", func(t *testing.T) {
+		svc, instances, _, _, _, _, _ := newTenantLifecycleHarness()
+		instances.listErr = assert.AnError
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "suspended", PreviousStatus: "active"})
+		assert.Error(t, err)
+	})
+
+	t.Run("a signal failure during the tenant-wide sweep is logged and returned", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		log := &fakeLogger{}
+		svc.Log = log
+		temporal.signalFunc = func(context.Context, string, uuid.UUID, string, any) error { return assert.AnError }
+		tenantID := uuid.New()
+		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
+		instances.byID[running.ID] = running
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"})
+		require.ErrorIs(t, err, assert.AnError)
+		assert.NotEmpty(t, log.warnCalls)
+	})
+
+	t.Run("pagination merges every page of a tenant-wide sweep", func(t *testing.T) {
+		svc, instances, _, _, _, _, _ := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
+		instances.byID[running.ID] = running
+		instances.nextCursor = &port.Cursor{CreatedAt: running.CreatedAt, ID: running.ID}
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"})
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, instances.listByTenantCalls, 2, "a non-nil cursor on the first page must trigger a second ListByTenant call")
+	})
+}
+
+func TestTenantLifecycleReconciler_Apply_PlanChange(t *testing.T) {
+	t.Run("upgrade to enterprise registers the isolated queue", func(t *testing.T) {
+		svc, _, _, _, queues, _, _ := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "active", Plan: "enterprise", PreviousPlan: "standard"})
+		require.NoError(t, err)
+		_, ok := queues.byName["wf-queue-"+tenantID.String()]
+		assert.True(t, ok)
+	})
+
+	t.Run("downgrade stops routing to the isolated queue and keeps its row", func(t *testing.T) {
+		svc, _, _, _, queues, _, _ := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		queueName := "wf-queue-" + tenantID.String()
+		queues.byName[queueName] = &domain.ActiveTaskQueue{TenantID: tenantID, QueueName: queueName, Routable: true}
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "active", Plan: "standard", PreviousPlan: "enterprise"})
+		require.NoError(t, err)
+		queue, ok := queues.byName[queueName]
+		require.True(t, ok, "the row stays so the worker keeps polling the instances still on it")
+		assert.False(t, queue.Routable)
+	})
+
+	t.Run("downgrade does not wait for running instances and never strands them", func(t *testing.T) {
+		svc, instances, _, _, queues, _, _ := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		queueName := "wf-queue-" + tenantID.String()
+		queues.byName[queueName] = &domain.ActiveTaskQueue{TenantID: tenantID, QueueName: queueName, Routable: true}
+		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TaskQueue: queueName}
+		instances.byID[running.ID] = running
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "active", Plan: "standard", PreviousPlan: "enterprise"})
+		require.NoError(t, err)
+		queue, ok := queues.byName[queueName]
+		require.True(t, ok)
+		assert.False(t, queue.Routable, "new instances stop starting on it at once")
+	})
+
+	t.Run("upgrading again makes the queue routable", func(t *testing.T) {
+		svc, _, _, _, queues, _, _ := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		queueName := "wf-queue-" + tenantID.String()
+		queues.byName[queueName] = &domain.ActiveTaskQueue{TenantID: tenantID, QueueName: queueName, Routable: false}
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "active", Plan: "enterprise", PreviousPlan: "standard"})
+		require.NoError(t, err)
+		assert.True(t, queues.byName[queueName].Routable)
+	})
+
+	t.Run("a downgrade for a tenant that never had a queue is a no-op", func(t *testing.T) {
+		svc, _, _, _, queues, _, _ := newTenantLifecycleHarness()
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "active", PreviousStatus: "active", Plan: "standard", PreviousPlan: "enterprise"})
+		require.NoError(t, err)
+		assert.Empty(t, queues.byName)
+	})
+
+	t.Run("plan unchanged is a no-op", func(t *testing.T) {
+		svc, _, _, _, queues, _, _ := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "active", Plan: "standard", PreviousPlan: "standard"})
+		require.NoError(t, err)
+		assert.Empty(t, queues.byName)
+	})
+
+	t.Run("a Register failure propagates from Apply", func(t *testing.T) {
+		svc, _, _, _, queues, _, _ := newTenantLifecycleHarness()
+		queues.registerErr = assert.AnError
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "active", PreviousStatus: "active", Plan: "enterprise", PreviousPlan: "standard"})
+		assert.Error(t, err)
+	})
+
+	t.Run("a StopRouting failure propagates from Apply", func(t *testing.T) {
+		svc, _, _, _, queues, _, _ := newTenantLifecycleHarness()
+		queues.stopRoutingErr = assert.AnError
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "active", PreviousStatus: "active", Plan: "standard", PreviousPlan: "enterprise"})
+		assert.Error(t, err)
+	})
+}
+
+func TestTenantLifecycleReconciler_Offboard_Termination(t *testing.T) {
+	t.Run("an UpdateStatus failure is returned so the event is redelivered, after every other instance was terminated", func(t *testing.T) {
+		svc, instances, _, _, _, _, _ := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		first := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:first", RecordVersion: 1}
+		second := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:second", RecordVersion: 1}
+		instances.byID[first.ID] = first
+		instances.byID[second.ID] = second
+		instances.updateErrFor = map[uuid.UUID]error{first.ID: assert.AnError}
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"})
+		require.ErrorIs(t, err, assert.AnError)
+		assert.Equal(t, domain.InstanceStatusRunning, instances.byID[first.ID].Status, "the failed instance stays non-terminal so the redelivery finds it")
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[second.ID].Status, "one failing instance must not stop the rest")
+	})
+
+	t.Run("an instance with more tasks than one page has every open task failed", func(t *testing.T) {
+		svc, instances, tasks, _, _, _, _ := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
+		instances.byID[running.ID] = running
+		createdAt := time.Now().UTC()
+		for i := 0; i < 150; i++ {
+			task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: running.ID, Status: domain.TaskStatusReady, RecordVersion: 1, CreatedAt: createdAt}
+			tasks.byID[task.ID] = task
+		}
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"})
+		require.NoError(t, err)
+		open := 0
+		for _, task := range tasks.byID {
+			if task.Status != domain.TaskStatusFailed {
+				open++
+			}
+		}
+		assert.Zero(t, open, "every open task of a terminated instance must be failed")
+	})
+
+	t.Run("both closes of an execution name its run", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:subject:key", TemporalRunID: "run-3", RecordVersion: 1}
+		instances.byID[inst.ID] = inst
+
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
+
+		calls := temporal.terminateCalls()
+		require.Len(t, calls, 2)
+		for _, c := range calls {
+			assert.Equal(t, "run-3", c.RunID)
+		}
+	})
+
+	t.Run("a TerminateWorkflow failure is returned, writes nothing for that instance and the rest are terminated", func(t *testing.T) {
+		svc, instances, tasks, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		stuck := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:stuck", RecordVersion: 1}
+		other := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:other", RecordVersion: 1}
+		instances.byID[stuck.ID] = stuck
+		instances.byID[other.ID] = other
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: stuck.ID, Status: domain.TaskStatusReady, RecordVersion: 1}
+		tasks.byID[task.ID] = task
+		temporal.terminateFunc = func(_ context.Context, id, _, _ string) error {
+			if id == "tenant:stuck" {
+				return assert.AnError
+			}
+			return nil
+		}
+
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"})
+		require.ErrorIs(t, err, assert.AnError)
+		assert.Equal(t, domain.InstanceStatusRunning, instances.byID[stuck.ID].Status, "the redelivery must still find it")
+		assert.Equal(t, domain.TaskStatusReady, tasks.byID[task.ID].Status)
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[other.ID].Status)
+	})
+
+	t.Run("an instance written to while its execution was being closed is still terminated", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		busy := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:busy", RecordVersion: 1}
+		instances.byID[busy.ID] = busy
+		temporal.terminateFunc = func(context.Context, string, string, string) error {
+			written := *instances.byID[busy.ID]
+			written.RecordVersion++
+			instances.byID[busy.ID] = &written
+			return nil
+		}
+
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[busy.ID].Status)
+	})
+
+	t.Run("an execution created after the first close and before the write is closed by the second", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
+		instances.byID[running.ID] = running
+		live := map[string]bool{}
+		calls := 0
+		temporal.terminateFunc = func(_ context.Context, id, _, _ string) error {
+			calls++
+			delete(live, id)
+			if calls == 1 {
+				live[id] = true
+			}
+			return nil
+		}
+
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
+		assert.Empty(t, live)
+	})
+
+	t.Run("a failure to close the execution again after the write is logged and the termination stands", func(t *testing.T) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		log := &fakeLogger{}
+		svc.Log = log
+		tenantID := uuid.New()
+		running := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:running", RecordVersion: 1}
+		instances.byID[running.ID] = running
+		calls := 0
+		temporal.terminateFunc = func(context.Context, string, string, string) error {
+			calls++
+			if calls == 2 {
+				return assert.AnError
+			}
+			return nil
+		}
+
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
+		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[running.ID].Status)
+		assert.NotEmpty(t, log.warnCalls)
+	})
+
+	t.Run("an allInstancesByStatus failure during offboard propagates from Apply", func(t *testing.T) {
+		svc, instances, _, _, _, _, _ := newTenantLifecycleHarness()
+		instances.listErr = assert.AnError
+		err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "offboarded", PreviousStatus: "active"})
+		assert.Error(t, err)
+	})
+}
+
+func TestTenantLifecycleReconciler_StatusMapping(t *testing.T) {
+	pausedInstance := func(tenantID uuid.UUID, instances *fakeInstanceRepo) {
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusPaused, TemporalWorkflowID: "tenant:paused", RecordVersion: 1}
+		instances.byID[inst.ID] = inst
+	}
+
+	cases := []struct {
+		name       string
+		previous   string
+		status     string
+		wantSignal string
+	}{
+		{"active to past_due never pauses", "active", "past_due", port.SignalInstanceResume},
+		{"trial to active never pauses", "trial", "active", port.SignalInstanceResume},
+		{"active to trial never pauses", "active", "trial", port.SignalInstanceResume},
+		{"past_due to active never pauses", "past_due", "active", port.SignalInstanceResume},
+		{"active to suspended pauses", "active", "suspended", port.SignalInstancePause},
+		{"active to cancelled pauses", "active", "cancelled", port.SignalInstancePause},
+		{"trial to trial_expired pauses", "trial", "trial_expired", port.SignalInstancePause},
+		{"past_due to suspended pauses", "past_due", "suspended", port.SignalInstancePause},
+		{"suspended to past_due resumes", "suspended", "past_due", port.SignalInstanceResume},
+		{"trial_expired to trial resumes", "trial_expired", "trial", port.SignalInstanceResume},
+		{"cancelled to active resumes", "cancelled", "active", port.SignalInstanceResume},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+			tenantID := uuid.New()
+			pausedInstance(tenantID, instances)
+
+			require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: tc.status, PreviousStatus: tc.previous}))
+
+			if tc.wantSignal == "" {
+				assert.Empty(t, temporal.signals)
+				return
+			}
+			require.Len(t, temporal.signals, 1)
+			assert.Equal(t, tc.wantSignal, temporal.signals[0].SignalName)
+		})
+	}
+}
+
+func TestTenantLifecycleReconciler_ASkippedIntermediateStatusCannotStrandAPausedInstance(t *testing.T) {
+	svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+	tenantID := uuid.New()
+	inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:one", RecordVersion: 1}
+	instances.byID[inst.ID] = inst
+
+	require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"}))
+	require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "active", PreviousStatus: "past_due"}))
+
+	require.Len(t, temporal.signals, 2)
+	assert.Equal(t, port.SignalInstancePause, temporal.signals[0].SignalName)
+	assert.Equal(t, port.SignalInstanceResume, temporal.signals[1].SignalName, "the move to active resumes although the suspended-to-past_due event never arrived")
+}
+
+func TestTenantLifecycleReconciler_AnUnknownOrEmptyPreviousStatusStillAppliesTheNewStatus(t *testing.T) {
+	for _, tc := range []struct{ previous, status, want string }{
+		{"", "active", port.SignalInstanceResume},
+		{"", "suspended", port.SignalInstancePause},
+		{"mystery", "past_due", port.SignalInstanceResume},
+	} {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusPaused, TemporalWorkflowID: "tenant:one", RecordVersion: 1}
+		instances.byID[inst.ID] = inst
+
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: tc.status, PreviousStatus: tc.previous}))
+		require.Len(t, temporal.signals, 1)
+		assert.Equal(t, tc.want, temporal.signals[0].SignalName)
+	}
+}
+
+func TestTenantLifecycleReconciler_AFailedPauseOrResumeSignalIsReturnedSoTheEventIsRedelivered(t *testing.T) {
+	for _, tc := range []struct{ name, status, previous string }{
+		{"resume", "active", "suspended"},
+		{"pause", "suspended", "active"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+			tenantID := uuid.New()
+			for _, wfID := range []string{"tenant:a", "tenant:b"} {
+				inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: wfID, RecordVersion: 1}
+				instances.byID[inst.ID] = inst
+			}
+			temporal.signalFunc = func(_ context.Context, wfID string, _ uuid.UUID, _ string, _ any) error {
+				if wfID == "tenant:a" {
+					return errors.New("temporal unavailable")
+				}
+				return nil
+			}
+
+			err := svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: tc.status, PreviousStatus: tc.previous})
+			require.Error(t, err, "one instance was not signalled, so the event must not be acknowledged")
+			assert.Len(t, temporal.signals, 2, "every instance is still attempted")
+		})
+	}
+}
+
+func TestTenantLifecycleReconciler_ASignalToAWorkflowThatNoLongerExistsIsNotAnError(t *testing.T) {
+	svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+	tenantID := uuid.New()
+	inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:gone", RecordVersion: 1}
+	instances.byID[inst.ID] = inst
+	temporal.signalFunc = func(context.Context, string, uuid.UUID, string, any) error {
+		return fmt.Errorf("signal workflow: %w", port.ErrWorkflowNotFound)
+	}
+
+	require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active"}))
+}
+
+func TestTenantLifecycleReconciler_OffboardingRecordsTheTenantForThePurge(t *testing.T) {
+	now := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	newRecording := func() (*service.TenantLifecycleReconciler, *fakeRetention, *fakeTemporalClient, *fakeInstanceRepo) {
+		svc, instances, _, _, _, _, temporal := newTenantLifecycleHarness()
+		ret := &fakeRetention{}
+		svc.Retention = ret
+		svc.HistoryRetention = 24 * time.Hour
+		svc.Now = func() time.Time { return now }
+		return svc, ret, temporal, instances
+	}
+
+	t.Run("an offboarded tenant is recorded with the purge date after the retention period", func(t *testing.T) {
+		svc, ret, _, _ := newRecording()
+		tenantID := uuid.New()
+
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
+
+		require.Len(t, ret.recorded, 1)
+		assert.Equal(t, recordedOffboard{tenantID, now, now.Add(24 * time.Hour)}, ret.recorded[0])
+	})
+
+	t.Run("a tenant whose instances could not all be terminated is not recorded yet", func(t *testing.T) {
+		svc, ret, temporal, instances := newRecording()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:x", RecordVersion: 1}
+		instances.byID[inst.ID] = inst
+		temporal.terminateFunc = func(context.Context, string, string, string) error { return assert.AnError }
+
+		require.Error(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active"}))
+		assert.Empty(t, ret.recorded)
+	})
+
+	t.Run("other status changes record nothing", func(t *testing.T) {
+		svc, ret, _, _ := newRecording()
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "suspended", PreviousStatus: "active"}))
+		assert.Empty(t, ret.recorded)
+	})
+
+	t.Run("a failure to record is returned so the event is redelivered", func(t *testing.T) {
+		svc, ret, _, _ := newRecording()
+		ret.recordErr = assert.AnError
+		require.Error(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "offboarded", PreviousStatus: "active"}))
+	})
+}

@@ -1,0 +1,823 @@
+// Package service_test provides hand-rolled fakes for every port
+// InstanceService/TaskService/WorkflowClient/ArchiveGuard/UserTaskPauser/the
+// internal-event reconcilers depend on — mirroring test/unit/handler/
+// testhelper_test.go's own func-field-per-method convention (no mockgen at
+// this layer, matching this repo's established style).
+package service_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+)
+
+// --- InstanceRepository ---
+
+type fakeInstanceRepo struct {
+	byID              map[uuid.UUID]*domain.Instance
+	createErr         error
+	getErr            error
+	updateErr         error
+	updateErrFor      map[uuid.UUID]error
+	listErr           error
+	countErr          error
+	countResult       int64
+	updateNodeErr     error
+	nextCursor        *port.Cursor
+	lastPageAfter     *port.Cursor
+	listByTenantCalls int
+	lastFilter        port.InstanceListFilter
+	runIDErr          error
+	liveErr           error
+	scopeTasks        *fakeTaskRepo
+	scopeAssignments  *fakeAssignmentRepo
+}
+
+func newFakeInstanceRepo(instances ...*domain.Instance) *fakeInstanceRepo {
+	m := make(map[uuid.UUID]*domain.Instance, len(instances))
+	for _, i := range instances {
+		m[i.ID] = i
+	}
+	return &fakeInstanceRepo{byID: m}
+}
+
+func (r *fakeInstanceRepo) Create(_ context.Context, inst *domain.Instance) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
+	if _, exists := r.byID[inst.ID]; exists {
+		return domain.ErrAlreadyExists
+	}
+	for _, existing := range r.byID {
+		// Mirrors uq_workflow_instance_business_key: the triple, over non-terminal
+		// instances only. DEGRADED still holds its key.
+		if existing.TenantID == inst.TenantID && existing.SubjectID == inst.SubjectID &&
+			existing.BusinessKey == inst.BusinessKey &&
+			existing.Status != domain.InstanceStatusCompleted && existing.Status != domain.InstanceStatusTerminated && existing.Status != domain.InstanceStatusFailed {
+			return domain.ErrDuplicateBusinessKey
+		}
+	}
+	inst.RecordVersion = 1
+	inst.CreatedAt = time.Now().UTC()
+	inst.UpdatedAt = inst.CreatedAt
+	stored := *inst
+	r.byID[inst.ID] = &stored
+	return nil
+}
+
+func (r *fakeInstanceRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domain.Instance, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	inst, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return inst, nil
+}
+
+func (r *fakeInstanceRepo) GetLiveByBusinessKey(_ context.Context, tenantID uuid.UUID, subjectID, businessKey string) (*domain.Instance, error) {
+	if r.liveErr != nil {
+		return nil, r.liveErr
+	}
+	for _, inst := range r.byID {
+		if inst.TenantID == tenantID && inst.SubjectID == subjectID && inst.BusinessKey == businessKey && !isTerminalForTest(inst.Status) {
+			return inst, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (r *fakeInstanceRepo) RecordRunID(_ context.Context, _, id uuid.UUID, runID string) error {
+	if r.runIDErr != nil {
+		return r.runIDErr
+	}
+	inst, ok := r.byID[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	inst.TemporalRunID = runID
+	return nil
+}
+
+func isTerminalForTest(s domain.InstanceStatus) bool {
+	return s == domain.InstanceStatusCompleted || s == domain.InstanceStatusTerminated || s == domain.InstanceStatusFailed
+}
+
+func (r *fakeInstanceRepo) UpdateStatus(_ context.Context, _, id uuid.UUID, status domain.InstanceStatus, recordVersion int64) (*domain.Instance, error) {
+	if r.updateErr != nil {
+		return nil, r.updateErr
+	}
+	if err := r.updateErrFor[id]; err != nil {
+		return nil, err
+	}
+	inst, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	if inst.RecordVersion != recordVersion {
+		return nil, domain.ErrRecordVersionConflict
+	}
+	inst.Status = status
+	inst.RecordVersion++
+	if status == domain.InstanceStatusCompleted || status == domain.InstanceStatusTerminated || status == domain.InstanceStatusFailed {
+		now := time.Now().UTC()
+		inst.CompletedAt = &now
+	}
+	return inst, nil
+}
+
+func containsInstanceStatus(statuses []domain.InstanceStatus, want domain.InstanceStatus) bool {
+	for _, s := range statuses {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *fakeInstanceRepo) ListByTenant(_ context.Context, tenantID uuid.UUID, filter port.InstanceListFilter, page port.PageRequest) ([]*domain.Instance, *port.Cursor, error) {
+	if r.listErr != nil {
+		return nil, nil, r.listErr
+	}
+	r.lastPageAfter = page.After
+	r.listByTenantCalls++
+	r.lastFilter = filter
+	var out []*domain.Instance
+	for _, inst := range r.byID {
+		if inst.TenantID != tenantID {
+			continue
+		}
+		if filter.Status != nil && inst.Status != *filter.Status {
+			continue
+		}
+		if len(filter.Statuses) > 0 && !containsInstanceStatus(filter.Statuses, inst.Status) {
+			continue
+		}
+		if filter.WorkflowVersionID != nil && inst.WorkflowVersionID != *filter.WorkflowVersionID {
+			continue
+		}
+		if filter.InstanceID != nil && inst.ID != *filter.InstanceID {
+			continue
+		}
+		if filter.Scope != nil && !r.visibleInScope(inst.ID, *filter.Scope) {
+			continue
+		}
+		out = append(out, inst)
+	}
+	// nextCursor is consumed on its first use — a real second page would
+	// return distinct rows and eventually a nil cursor; this fake has no
+	// notion of "already returned" rows, so returning the same non-nil
+	// cursor forever would spin allNonTerminalInstances's pagination loop.
+	cursor := r.nextCursor
+	r.nextCursor = nil
+	return out, cursor, nil
+}
+
+func (r *fakeInstanceRepo) linkScope(tasks *fakeTaskRepo, assignments *fakeAssignmentRepo) {
+	r.scopeTasks = tasks
+	r.scopeAssignments = assignments
+}
+
+func (r *fakeInstanceRepo) visibleInScope(instanceID uuid.UUID, scope port.ScopeFilter) bool {
+	if r.scopeTasks == nil || r.scopeAssignments == nil {
+		return false
+	}
+	for _, t := range r.scopeTasks.byID {
+		if t.WorkflowInstanceID != instanceID {
+			continue
+		}
+		for _, d := range scope.DepartmentIDs {
+			if d == t.DepartmentID {
+				return true
+			}
+		}
+		for _, a := range r.scopeAssignments.byID {
+			if a.TaskID == t.ID && a.UserID == scope.CallerUserID && a.IsActive {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (r *fakeInstanceRepo) UpdateCurrentNodeKeys(_ context.Context, _, id uuid.UUID, keys []string, recordVersion int64) (*domain.Instance, error) {
+	if r.updateNodeErr != nil {
+		return nil, r.updateNodeErr
+	}
+	inst, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	inst.CurrentNodeKeys = keys
+	inst.RecordVersion++
+	return inst, nil
+}
+
+func (r *fakeInstanceRepo) CountActiveByWorkflow(_ context.Context, _, _ uuid.UUID) (int64, error) {
+	return r.countResult, r.countErr
+}
+
+// --- TaskRepository ---
+
+type fakeTaskRepo struct {
+	byID            map[uuid.UUID]*domain.Task
+	createErr       error
+	updateStatusErr error
+	listErr         error
+	lastFilter      port.TaskListFilter
+}
+
+func newFakeTaskRepo(tasks ...*domain.Task) *fakeTaskRepo {
+	m := make(map[uuid.UUID]*domain.Task, len(tasks))
+	for _, t := range tasks {
+		m[t.ID] = t
+	}
+	return &fakeTaskRepo{byID: m}
+}
+
+func (r *fakeTaskRepo) Create(_ context.Context, task *domain.Task) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
+	task.RecordVersion = 1
+	r.byID[task.ID] = task
+	return nil
+}
+
+func (r *fakeTaskRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domain.Task, error) {
+	task, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return task, nil
+}
+
+func (r *fakeTaskRepo) UpdateStatus(_ context.Context, _, id uuid.UUID, status domain.TaskStatus, recordVersion int64) (*domain.Task, error) {
+	if r.updateStatusErr != nil {
+		return nil, r.updateStatusErr
+	}
+	task, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	if task.RecordVersion != recordVersion {
+		return nil, domain.ErrRecordVersionConflict
+	}
+	task.Status = status
+	task.RecordVersion++
+	return task, nil
+}
+
+func (r *fakeTaskRepo) ListByInstance(_ context.Context, _, instanceID uuid.UUID, page port.PageRequest) ([]*domain.Task, *port.Cursor, error) {
+	if r.listErr != nil {
+		return nil, nil, r.listErr
+	}
+	var all []*domain.Task
+	for _, t := range r.byID {
+		if t.WorkflowInstanceID == instanceID {
+			all = append(all, t)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return taskNewerThan(all[i], all[j]) })
+	limit := page.Limit
+	switch {
+	case limit <= 0:
+		limit = 25
+	case limit > 100:
+		limit = 100
+	}
+	var out []*domain.Task
+	for _, t := range all {
+		if page.After != nil && !taskOlderThanCursor(t, page.After) {
+			continue
+		}
+		out = append(out, t)
+	}
+	if len(out) <= limit {
+		return out, nil, nil
+	}
+	out = out[:limit]
+	last := out[len(out)-1]
+	return out, &port.Cursor{CreatedAt: last.CreatedAt, ID: last.ID}, nil
+}
+
+func taskNewerThan(a, b *domain.Task) bool {
+	if !a.CreatedAt.Equal(b.CreatedAt) {
+		return a.CreatedAt.After(b.CreatedAt)
+	}
+	return a.ID.String() > b.ID.String()
+}
+
+func taskOlderThanCursor(t *domain.Task, c *port.Cursor) bool {
+	if !t.CreatedAt.Equal(c.CreatedAt) {
+		return t.CreatedAt.Before(c.CreatedAt)
+	}
+	return t.ID.String() < c.ID.String()
+}
+
+func (r *fakeTaskRepo) ListByTenant(_ context.Context, tenantID uuid.UUID, filter port.TaskListFilter, _ port.PageRequest) ([]*domain.Task, *port.Cursor, error) {
+	r.lastFilter = filter
+	if r.listErr != nil {
+		return nil, nil, r.listErr
+	}
+	var out []*domain.Task
+	for _, t := range r.byID {
+		if t.TenantID != tenantID {
+			continue
+		}
+		if filter.Status != nil && t.Status != *filter.Status {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out, nil, nil
+}
+
+func (r *fakeTaskRepo) GetByInstanceAndNode(_ context.Context, _, instanceID uuid.UUID, nodeKey string) (*domain.Task, error) {
+	for _, t := range r.byID {
+		if t.WorkflowInstanceID == instanceID && t.NodeKey == nodeKey {
+			return t, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (r *fakeTaskRepo) BumpRecordVersion(_ context.Context, _, id uuid.UUID, recordVersion int64) (*domain.Task, error) {
+	task, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	if task.RecordVersion != recordVersion {
+		return nil, domain.ErrRecordVersionConflict
+	}
+	task.RecordVersion++
+	return task, nil
+}
+
+// --- TaskAssignmentRepository ---
+
+type fakeAssignmentRepo struct {
+	byID                         map[uuid.UUID]*domain.TaskAssignment
+	createErr                    error
+	vacateErr                    error
+	vacateAllErr                 error
+	listActiveByUserErr          error
+	listActiveByTaskErr          error
+	listActiveByUserPaginatedErr error
+	setLeadErr                   error
+}
+
+func newFakeAssignmentRepo(assignments ...*domain.TaskAssignment) *fakeAssignmentRepo {
+	m := make(map[uuid.UUID]*domain.TaskAssignment, len(assignments))
+	for _, a := range assignments {
+		m[a.ID] = a
+	}
+	return &fakeAssignmentRepo{byID: m}
+}
+
+func (r *fakeAssignmentRepo) Create(_ context.Context, a *domain.TaskAssignment) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
+	// Mirrors uq_workflow_task_assignment_active (task_id, user_id) WHERE
+	// is_active. Without this the fake accepts a second active row for a pair
+	// the database rejects, which is precisely the case a caller has to handle.
+	for _, existing := range r.byID {
+		if existing.IsActive && existing.TaskID == a.TaskID && existing.UserID == a.UserID {
+			return domain.ErrDuplicateActiveAssignment
+		}
+	}
+	a.IsActive = true
+	r.byID[a.ID] = a
+	return nil
+}
+
+func (r *fakeAssignmentRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domain.TaskAssignment, error) {
+	a, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return a, nil
+}
+
+func (r *fakeAssignmentRepo) ListActiveByTask(_ context.Context, _, taskID uuid.UUID) ([]*domain.TaskAssignment, error) {
+	if r.listActiveByTaskErr != nil {
+		return nil, r.listActiveByTaskErr
+	}
+	var out []*domain.TaskAssignment
+	for _, a := range r.byID {
+		if a.TaskID == taskID && a.IsActive {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeAssignmentRepo) ListActiveByUser(_ context.Context, _, userID uuid.UUID) ([]*domain.TaskAssignment, error) {
+	if r.listActiveByUserErr != nil {
+		return nil, r.listActiveByUserErr
+	}
+	var out []*domain.TaskAssignment
+	for _, a := range r.byID {
+		if a.UserID == userID && a.IsActive {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeAssignmentRepo) ListActiveByUserPaginated(_ context.Context, _, userID uuid.UUID, _ port.PageRequest) ([]port.ActiveUserTaskRow, *port.Cursor, error) {
+	if r.listActiveByUserPaginatedErr != nil {
+		return nil, nil, r.listActiveByUserPaginatedErr
+	}
+	var out []port.ActiveUserTaskRow
+	for _, a := range r.byID {
+		if a.UserID == userID && a.IsActive {
+			out = append(out, port.ActiveUserTaskRow{TaskID: a.TaskID, UserID: a.UserID})
+		}
+	}
+	return out, nil, nil
+}
+
+func (r *fakeAssignmentRepo) Vacate(_ context.Context, _, id uuid.UUID) (*domain.TaskAssignment, error) {
+	if r.vacateErr != nil {
+		return nil, r.vacateErr
+	}
+	a, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	a.IsActive = false
+	return a, nil
+}
+
+func (r *fakeAssignmentRepo) VacateAllActiveByUser(_ context.Context, _, userID uuid.UUID) ([]*domain.TaskAssignment, error) {
+	if r.vacateAllErr != nil {
+		return nil, r.vacateAllErr
+	}
+	var out []*domain.TaskAssignment
+	for _, a := range r.byID {
+		if a.UserID == userID && a.IsActive {
+			a.IsActive = false
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeAssignmentRepo) Complete(_ context.Context, _, id uuid.UUID, resultJSON json.RawMessage, _ int64) (*domain.TaskAssignment, error) {
+	a, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	a.IsActive = false
+	a.ResultJSON = resultJSON
+	return a, nil
+}
+
+func (r *fakeAssignmentRepo) SetLead(_ context.Context, _, _, id uuid.UUID, _ int64) (*domain.TaskAssignment, error) {
+	if r.setLeadErr != nil {
+		return nil, r.setLeadErr
+	}
+	a, ok := r.byID[id]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	a.IsLead = true
+	return a, nil
+}
+
+// --- AssigneeOverrideRepository ---
+
+type fakeAssigneeOverrideRepo struct {
+	created   []*domain.AssigneeOverride
+	createErr error
+	listErr   error
+}
+
+func (r *fakeAssigneeOverrideRepo) Create(_ context.Context, o *domain.AssigneeOverride) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
+	o.CreatedAt = time.Now().UTC()
+	r.created = append(r.created, o)
+	return nil
+}
+
+func (r *fakeAssigneeOverrideRepo) ListByInstance(_ context.Context, _, _ uuid.UUID) ([]*domain.AssigneeOverride, error) {
+	return r.created, r.listErr
+}
+
+// --- ActiveTaskQueueRepository ---
+
+type fakeActiveTaskQueueRepo struct {
+	byName         map[string]*domain.ActiveTaskQueue
+	registerErr    error
+	stopRoutingErr error
+}
+
+func newFakeActiveTaskQueueRepo() *fakeActiveTaskQueueRepo {
+	return &fakeActiveTaskQueueRepo{byName: map[string]*domain.ActiveTaskQueue{}}
+}
+
+func (r *fakeActiveTaskQueueRepo) ListActive(_ context.Context) ([]*domain.ActiveTaskQueue, error) {
+	var out []*domain.ActiveTaskQueue
+	for _, q := range r.byName {
+		out = append(out, q)
+	}
+	return out, nil
+}
+
+func (r *fakeActiveTaskQueueRepo) GetByQueueName(_ context.Context, queueName string) (*domain.ActiveTaskQueue, error) {
+	q, ok := r.byName[queueName]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return q, nil
+}
+
+func (r *fakeActiveTaskQueueRepo) Register(_ context.Context, tenantID uuid.UUID, queueName string) (*domain.ActiveTaskQueue, error) {
+	if r.registerErr != nil {
+		return nil, r.registerErr
+	}
+	if existing, ok := r.byName[queueName]; ok {
+		existing.Routable = true
+		return existing, nil
+	}
+	q := &domain.ActiveTaskQueue{ID: uuid.New(), TenantID: tenantID, QueueName: queueName, Routable: true, RegisteredAt: time.Now().UTC()}
+	r.byName[queueName] = q
+	return q, nil
+}
+
+func (r *fakeActiveTaskQueueRepo) StopRouting(_ context.Context, queueName string) error {
+	if r.stopRoutingErr != nil {
+		return r.stopRoutingErr
+	}
+	if q, ok := r.byName[queueName]; ok {
+		q.Routable = false
+	}
+	return nil
+}
+
+// --- OutboxRepository ---
+
+type fakeOutbox struct {
+	enqueued   []events.Envelope[json.RawMessage]
+	enqueueErr error
+	records    []*domain.OutboxEventRecord
+	listErr    error
+}
+
+func (o *fakeOutbox) Enqueue(_ context.Context, env events.Envelope[json.RawMessage]) error {
+	if o.enqueueErr != nil {
+		return o.enqueueErr
+	}
+	o.enqueued = append(o.enqueued, env)
+	return nil
+}
+
+func (o *fakeOutbox) ListByInstance(_ context.Context, _, _ uuid.UUID, _ port.PageRequest) ([]*domain.OutboxEventRecord, *port.Cursor, error) {
+	return o.records, nil, o.listErr
+}
+
+func (o *fakeOutbox) ExistsForTask(_ context.Context, _ string, _ uuid.UUID) (bool, error) {
+	return false, nil
+}
+
+// --- Transactor ---
+
+// fakeTransactor just runs fn directly against the given ctx — these tests
+// have no real transaction/connection to acquire (same pattern
+// internal/adapter/outbound/temporal's own tests already use).
+type fakeTransactor struct{}
+
+func (fakeTransactor) RunInTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func (fakeTransactor) RunInTxWithRetry(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+// --- TemporalClient ---
+
+type fakeTemporalClient struct {
+	startFunc     func(ctx context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error)
+	signalFunc    func(ctx context.Context, temporalWorkflowID string, instanceID uuid.UUID, signalName string, payload any) error
+	terminateFunc func(ctx context.Context, temporalWorkflowID, runID, reason string) error
+	queryFunc     func(ctx context.Context, temporalWorkflowID, queryType string, out any) error
+
+	signals   []signalCall
+	terminate []terminateCall
+}
+
+type signalCall struct {
+	TemporalWorkflowID string
+	InstanceID         uuid.UUID
+	SignalName         string
+	Payload            any
+}
+
+type terminateCall struct {
+	TemporalWorkflowID string
+	RunID              string
+	Reason             string
+}
+
+func (c *fakeTemporalClient) terminateCalls() []terminateCall {
+	return c.terminate
+}
+
+func (c *fakeTemporalClient) StartWorkflow(ctx context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
+	if c.startFunc != nil {
+		return c.startFunc(ctx, in)
+	}
+	return port.StartWorkflowOutput{TemporalWorkflowID: in.TemporalWorkflowID, TemporalRunID: "run-1"}, nil
+}
+
+func (c *fakeTemporalClient) SignalWorkflow(ctx context.Context, temporalWorkflowID string, instanceID uuid.UUID, signalName string, payload any) error {
+	c.signals = append(c.signals, signalCall{TemporalWorkflowID: temporalWorkflowID, InstanceID: instanceID, SignalName: signalName, Payload: payload})
+	if c.signalFunc != nil {
+		return c.signalFunc(ctx, temporalWorkflowID, instanceID, signalName, payload)
+	}
+	return nil
+}
+
+func (c *fakeTemporalClient) TerminateWorkflow(ctx context.Context, temporalWorkflowID, runID, reason string) error {
+	c.terminate = append(c.terminate, terminateCall{TemporalWorkflowID: temporalWorkflowID, RunID: runID, Reason: reason})
+	if c.terminateFunc != nil {
+		return c.terminateFunc(ctx, temporalWorkflowID, runID, reason)
+	}
+	return nil
+}
+
+func (c *fakeTemporalClient) QueryWorkflow(ctx context.Context, temporalWorkflowID, queryType string, out any) error {
+	if c.queryFunc != nil {
+		return c.queryFunc(ctx, temporalWorkflowID, queryType, out)
+	}
+	return nil
+}
+
+// --- DefinitionServiceClient ---
+
+type fakeDefinitionClient struct {
+	resp *port.CompiledWorkflow
+	err  error
+}
+
+func (c *fakeDefinitionClient) GetCompiledWorkflow(_ context.Context, _, _ uuid.UUID) (*port.CompiledWorkflow, error) {
+	return c.resp, c.err
+}
+
+// --- EligibilityChecker ---
+
+type fakeEligibilityChecker struct {
+	check      func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error)
+	batchCheck func(context.Context, uuid.UUID, []port.EligibilityCheckRequest) ([]port.EligibilityResult, error)
+}
+
+func (f *fakeEligibilityChecker) CheckEligibility(ctx context.Context, tenantID, newUserID, departmentID uuid.UUID, requiredLevel string) (bool, error) {
+	if f.check != nil {
+		return f.check(ctx, tenantID, newUserID, departmentID, requiredLevel)
+	}
+	return true, nil
+}
+
+func (f *fakeEligibilityChecker) CheckEligibilityBatch(ctx context.Context, tenantID uuid.UUID, requests []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
+	if f.batchCheck != nil {
+		return f.batchCheck(ctx, tenantID, requests)
+	}
+	results := make([]port.EligibilityResult, len(requests))
+	for i := range results {
+		results[i] = port.EligibilityResult{Eligible: true}
+	}
+	return results, nil
+}
+
+// --- CacheStore ---
+
+type fakeCacheStore struct {
+	values   map[string]string
+	getErr   error
+	setErr   error
+	setCalls []string
+}
+
+func newFakeCacheStore() *fakeCacheStore {
+	return &fakeCacheStore{values: map[string]string{}}
+}
+
+func (c *fakeCacheStore) Get(_ context.Context, key string) (string, error) {
+	if c.getErr != nil {
+		return "", c.getErr
+	}
+	return c.values[key], nil
+}
+
+func (c *fakeCacheStore) Set(_ context.Context, key, value string, _ time.Duration) error {
+	if c.setErr != nil {
+		return c.setErr
+	}
+	c.setCalls = append(c.setCalls, key)
+	c.values[key] = value
+	return nil
+}
+
+func (c *fakeCacheStore) Del(_ context.Context, keys ...string) error {
+	for _, k := range keys {
+		delete(c.values, k)
+	}
+	return nil
+}
+
+func (c *fakeCacheStore) SetNX(_ context.Context, key, value string, _ time.Duration) (bool, error) {
+	if _, ok := c.values[key]; ok {
+		return false, nil
+	}
+	c.values[key] = value
+	return true, nil
+}
+
+func (c *fakeCacheStore) Ping(_ context.Context) error { return nil }
+
+// --- Logger ---
+
+// fakeLogger records every call — used to exercise each service's own
+// "s.Log != nil" branch, which leaving Log unset (the noopLogger fallback
+// path every other test in this package already exercises) never reaches.
+type fakeLogger struct {
+	warnCalls  []string
+	warnFields []map[string]any
+	errorCalls []string
+}
+
+func (l *fakeLogger) Debug(string, map[string]any) {}
+func (l *fakeLogger) Info(string, map[string]any)  {}
+func (l *fakeLogger) Warn(msg string, fields map[string]any) {
+	l.warnCalls = append(l.warnCalls, msg)
+	l.warnFields = append(l.warnFields, fields)
+}
+func (l *fakeLogger) Error(msg string, _ map[string]any) {
+	l.errorCalls = append(l.errorCalls, msg)
+}
+
+// warnsWithCause counts the Warns whose "error" field contains cause.
+func warnsWithCause(l *fakeLogger, cause string) int {
+	n := 0
+	for _, f := range l.warnFields {
+		if e, ok := f["error"].(string); ok && strings.Contains(e, cause) {
+			n++
+		}
+	}
+	return n
+}
+
+// --- EventValidator ---
+
+// realValidator constructs the production JSON-schema validator so tests
+// that DO build a real outbound event payload assert against the actual
+// contract, not just against repo/outbox state — noopValidator alone missed
+// exactly this: workflow.task.created shipped "assignee_user_ids": null for
+// a whole class of tasks because no test ever ran the real schema check
+// against a constructed payload. No *testing.T needed: construction is
+// deterministic against the embedded schemas, so a failure here means the
+// build itself is broken, not this particular test case.
+func realValidator() port.EventValidator {
+	v, err := eventbus.NewSchemaValidator()
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+// failingValidator always rejects — exercises BuildEnvelope's own error
+// path from a caller's perspective without needing a real JSON Schema.
+type failingValidator struct{}
+
+var errValidationFailed = errors.New("validation failed")
+
+func (failingValidator) Validate(context.Context, string, json.RawMessage) error {
+	return errValidationFailed
+}
+
+// fakePrincipals resolves every tenant to one automation principal, or fails.
+type fakePrincipals struct {
+	principal uuid.UUID
+	err       error
+}
+
+func (f fakePrincipals) AutomationPrincipal(context.Context, uuid.UUID) (port.AutomationPrincipal, error) {
+	return port.AutomationPrincipal{ID: f.principal, Subject: "sub-" + f.principal.String()}, f.err
+}

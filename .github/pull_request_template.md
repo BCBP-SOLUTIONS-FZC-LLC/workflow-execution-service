@@ -11,7 +11,7 @@ Provide a clear description of the changes.
 - [ ] Test
 - [ ] Breaking change
 - [ ] New migration
-- [ ] Proto contract change (`api/proto/`)
+- [ ] Internal API contract change (`api/internal-openapi.yaml` or `api/contracts/`)
 
 ---
 
@@ -35,9 +35,10 @@ Provide a clear description of the changes.
 - [ ] No secrets or DSNs hardcoded
 
 ### Code Generation
-- [ ] No changes to proto, sqlc queries, or port interfaces
+- [ ] No changes to the internal API spec, sqlc queries, or port interfaces
 - OR:
-- [ ] `make generate` re-run after changing `.proto` or `db/queries/*.sql` — `buf lint` clean, sqlc output committed nowhere (gitignored)
+- [ ] `make generate` re-run after changing `db/queries/*.sql` — sqlc output committed nowhere (gitignored)
+- [ ] `make contract-breaking` passes after changing `api/internal-openapi.yaml`, and the Definition Service's copy is refreshed
 - [ ] `make mock` re-run after changing `internal/core/port/*.go` interfaces
 
 ### Database / Migrations
@@ -49,10 +50,11 @@ Provide a clear description of the changes.
 - [ ] RLS `FORCE`-enabled and covered by a negative-path test (`test/integration/postgres`) if a new tenant-scoped table was added
 - [ ] Verified the migration applies cleanly (`make migrate` against `make docker-up` Postgres)
 
-### Temporal / Workflow (once `internal/workflow` has real code)
+### Temporal / Workflow
 - [ ] Workflow code contains no non-deterministic calls (`time.Now()`, `rand`, unguarded goroutines, direct I/O) outside Activities
 - [ ] New Activities are idempotent and safe to retry
 - [ ] `internal/workflow` still imports only `domain` + `port` — no `adapter/` import
+- [ ] Any change to interpretation of already-shipped DSL data (not just its shape) added a new changeID to `version.go` + a before/after fixture pair under `test/workflow/replay/` (see that directory's README) — or this PR's description explicitly states why no semantic change occurred
 
 ### Security
 - [ ] No secrets or DSNs hardcoded

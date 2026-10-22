@@ -1,0 +1,41 @@
+# Replay fixtures
+
+Every `getVersion` call site in `internal/workflow/version.go` needs a matching
+recorded workflow history here, replayed via `worker.NewWorkflowReplayerWithOptions` +
+`ReplayWorkflowHistoryFromJSONFile`, before the interpreter change that added
+that call site merges. See `initial_interpreter_test.go` for the pattern to copy.
+
+## Regenerating a fixture
+
+`gen/main.go` runs `Execute` for real against a local Temporal dev server, then the
+`temporal` CLI exports its history to JSON:
+
+```bash
+temporal server start-dev --headless --port 17233 --ui-port 0 --db-filename /tmp/replay-gen.db &
+go run ./test/workflow/replay/gen
+temporal workflow show --address localhost:17233 --workflow-id initial-interpreter-fixture \
+  --output json > test/workflow/replay/testdata/initial_interpreter.json
+# stop the dev server (fg + Ctrl-C, or: pkill -f "temporal server start-dev.*17233")
+```
+
+`gen/main.go` takes the scenario as its first argument (`initial-interpreter`, the default,
+or `degraded-pause`); export `degraded-pause` with `--workflow-id degraded-pause-fixture` to
+`testdata/degraded_pause.json`. The `degraded-pause` history was recorded before the
+interpreter kept a pause across `DEGRADED`, so it is the old-history guard for that change.
+`degraded-pause-held` is the same scenario recorded after it (marker `pause-survives-degraded`
+present, the park ends `PAUSED`), exported with `--workflow-id degraded-pause-held-fixture` to
+`testdata/degraded_pause_held.json`.
+
+`gen/main.go` is never run by CI — only when adding or regenerating a fixture. It takes the scenario name as its argument (`initial-interpreter`, `degraded-pause`, `degraded-pause-held`) and each scenario is its own function; add one per new fixture rather than a generic flag, the "3+ consumers before generalizing" threshold this repo already uses elsewhere.
+
+`replayer.RegisterWorkflow(wfengine.Execute)` registers the workflow under Go's
+default derived type name (`"Execute"`). Whatever name `gen/main.go`'s worker
+registers under must match every fixture's recorded `WorkflowType.Name` — if
+`cmd/worker`'s eventual real registration (a separate Tier-1 task) ever moves to
+`RegisterWorkflowWithOptions` with a custom name, every existing fixture and every
+replay test's `RegisterWorkflow` call move together.
+
+There is no CI check enforcing that a semantics-affecting `internal/workflow` change
+adds a new changeID + fixture pair — see the PR template's Temporal/Workflow section
+and `validate-quality.yml`'s changeID check for the (lightweight, acknowledgment-based)
+enforcement that does exist.

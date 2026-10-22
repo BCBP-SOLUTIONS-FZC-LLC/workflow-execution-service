@@ -1,0 +1,112 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events/mock"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/glue"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pglogger"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkey"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
+)
+
+const lockPoolMaxConns = 4
+
+func newAppPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgcommon.Pool, error) {
+	pool, err := pgcommon.NewPool(ctx, pgcommon.Config{
+		DSN:                cfg.DatabaseURL,
+		MaxConns:           cfg.PGMaxConns,
+		MinConns:           cfg.PGMinConns,
+		PGBouncerMode:      cfg.PGBouncerMode,
+		SlowQueryThreshold: time.Duration(cfg.PGSlowQueryThresholdMS) * time.Millisecond,
+		GUCProvider:        pgcommon.GUCSetFromContext,
+		Logger:             pglogger.New(log),
+		Tracer:             gincommon.NewSpanTracer(cfg.OTELServiceName),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("app db pool: %w", err)
+	}
+	return pool, nil
+}
+
+func newRelayPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgcommon.Pool, error) {
+	pool, err := pgcommon.NewPool(ctx, pgcommon.Config{
+		DSN:           cfg.OutboxRelayDSN(),
+		MaxConns:      cfg.PGMaxConns,
+		MinConns:      cfg.PGMinConns,
+		PGBouncerMode: cfg.PGBouncerMode,
+		Logger:        pglogger.New(log),
+		Tracer:        gincommon.NewSpanTracer(cfg.OTELServiceName),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("outbox relay db pool: %w", err)
+	}
+	return pool, nil
+}
+
+func newLockPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgcommon.Pool, error) {
+	pool, err := pgcommon.NewPool(ctx, pgcommon.Config{
+		DSN:           cfg.LockDSN(),
+		MaxConns:      lockPoolMaxConns,
+		MinConns:      0,
+		PGBouncerMode: cfg.PGBouncerMode && cfg.LockDatabaseURL == "",
+		Logger:        pglogger.New(log),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("lock db pool: %w", err)
+	}
+	return pool, nil
+}
+
+func newCacheStore(ctx context.Context, cfg *config.Config) (port.CacheStore, *redis.Client, error) {
+	client := redis.NewClient(&redis.Options{
+		Addr:         cfg.ValkeyAddr,
+		Password:     cfg.ValkeyPassword,
+		DialTimeout:  cfg.ValkeyDialTimeout,
+		ReadTimeout:  cfg.ValkeyReadTimeout,
+		WriteTimeout: cfg.ValkeyWriteTimeout,
+	})
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, nil, fmt.Errorf("valkey ping: %w", err)
+	}
+	return valkey.NewCache(client), client, nil
+}
+
+func newGlueCodec(ctx context.Context, cfg *config.Config) (*glue.Codec, error) {
+	var awsCfg aws.Config
+	var err error
+	if !cfg.AWSUseStub {
+		awsCfg, err = awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
+		if err != nil {
+			return nil, fmt.Errorf("load aws config for glue: %w", err)
+		}
+	}
+	return glue.NewCodec(awsCfg, cfg.GlueRegistryName, cfg.AWSUseStub, cfg.AWSEndpointURL, cfg.GlueSchemaCacheTTL), nil
+}
+
+func newPublisher(cfg *config.Config, log port.Logger, codec events.Codec) (events.Publisher, error) {
+	if cfg.AWSUseStub {
+		return &mock.Publisher{}, nil
+	}
+	pub, err := events.NewSNSPublisher(events.SNSConfig{
+		TopicARN:    cfg.SNSTopicARN,
+		Region:      cfg.AWSRegion,
+		EndpointURL: cfg.AWSEndpointURL,
+		Logger:      log,
+	}, events.WithCodec(codec))
+	if err != nil {
+		return nil, fmt.Errorf("sns publisher: %w", err)
+	}
+	return pub, nil
+}

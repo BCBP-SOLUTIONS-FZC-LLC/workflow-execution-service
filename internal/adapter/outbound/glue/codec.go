@@ -1,0 +1,160 @@
+package glue
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+	"unicode"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/glue"
+	"github.com/aws/aws-sdk-go-v2/service/glue/types"
+	"github.com/google/uuid"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
+)
+
+var _ events.Codec = (*Codec)(nil)
+
+const (
+	glueHeaderVersion byte = 0x03
+	glueNoCompression byte = 0x00
+	glueHeaderSize         = 18
+)
+
+type schemaVersionGetter interface {
+	GetSchemaVersion(ctx context.Context, params *glue.GetSchemaVersionInput, optFns ...func(*glue.Options)) (*glue.GetSchemaVersionOutput, error)
+}
+
+type cacheEntry struct {
+	versionID string
+	expiresAt time.Time
+}
+
+type Codec struct {
+	client       schemaVersionGetter
+	registryName string
+	useStub      bool
+	cache        map[string]cacheEntry
+	mu           sync.RWMutex
+	cacheTTL     time.Duration
+}
+
+func NewCodec(cfg aws.Config, registryName string, useStub bool, customEndpoint string, cacheTTL time.Duration) *Codec {
+	var client *glue.Client
+	if !useStub {
+		client = glue.NewFromConfig(cfg, func(o *glue.Options) {
+			if customEndpoint != "" {
+				o.BaseEndpoint = aws.String(customEndpoint)
+			}
+		})
+	}
+	if cacheTTL <= 0 {
+		cacheTTL = 5 * time.Minute
+	}
+	return &Codec{
+		client:       client,
+		registryName: registryName,
+		useStub:      useStub,
+		cache:        make(map[string]cacheEntry),
+		cacheTTL:     cacheTTL,
+	}
+}
+
+func (c *Codec) Encode(ctx context.Context, schemaName string, payload json.RawMessage) ([]byte, string, error) {
+	if c.useStub {
+		return payload, "", nil
+	}
+	versionID, err := c.getSchemaVersionID(ctx, schemaName)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve schema version id: %w", err)
+	}
+	encoded, err := prependGlueHeader(versionID, payload)
+	if err != nil {
+		return nil, "", err
+	}
+	return encoded, versionID, nil
+}
+
+func (c *Codec) Decode(_ context.Context, _ string, encoded []byte) (json.RawMessage, error) {
+	if len(encoded) < glueHeaderSize {
+		return nil, fmt.Errorf("glue codec: encoded payload is %d bytes — shorter than the %d-byte Glue header", len(encoded), glueHeaderSize)
+	}
+	if encoded[0] != glueHeaderVersion {
+		return nil, fmt.Errorf("glue codec: unexpected header version byte 0x%02x — want 0x%02x", encoded[0], glueHeaderVersion)
+	}
+	return json.RawMessage(encoded[glueHeaderSize:]), nil
+}
+
+func prependGlueHeader(versionID string, payload []byte) ([]byte, error) {
+	id, err := uuid.Parse(versionID)
+	if err != nil {
+		return nil, fmt.Errorf("parse schema version uuid %q: %w", versionID, err)
+	}
+	out := make([]byte, glueHeaderSize+len(payload))
+	out[0] = glueHeaderVersion
+	out[1] = glueNoCompression
+	copy(out[2:glueHeaderSize], id[:])
+	copy(out[glueHeaderSize:], payload)
+	return out, nil
+}
+
+func registrySchemaName(eventType string) string {
+	var b strings.Builder
+	for i, r := range eventType {
+		if unicode.IsUpper(r) {
+			if i > 0 {
+				b.WriteByte('_')
+			}
+			b.WriteRune(unicode.ToLower(r))
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func (c *Codec) getSchemaVersionID(ctx context.Context, schemaName string) (string, error) {
+	schemaName = registrySchemaName(schemaName)
+
+	c.mu.RLock()
+	entry, ok := c.cache[schemaName]
+	c.mu.RUnlock()
+	if ok && time.Now().Before(entry.expiresAt) {
+		return entry.versionID, nil
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	entry, ok = c.cache[schemaName]
+	if ok && time.Now().Before(entry.expiresAt) {
+		return entry.versionID, nil
+	}
+
+	input := &glue.GetSchemaVersionInput{
+		SchemaId: &types.SchemaId{
+			SchemaName:   aws.String(schemaName),
+			RegistryName: aws.String(c.registryName),
+		},
+		SchemaVersionNumber: &types.SchemaVersionNumber{
+			LatestVersion: true,
+		},
+	}
+
+	result, err := c.client.GetSchemaVersion(ctx, input)
+	if err != nil {
+		return "", fmt.Errorf("glue GetSchemaVersion: %w", err)
+	}
+	if result.SchemaVersionId == nil {
+		return "", errors.New("glue returned nil schema version id")
+	}
+
+	versionID := *result.SchemaVersionId
+	c.cache[schemaName] = cacheEntry{versionID: versionID, expiresAt: time.Now().Add(c.cacheTTL)}
+	return versionID, nil
+}

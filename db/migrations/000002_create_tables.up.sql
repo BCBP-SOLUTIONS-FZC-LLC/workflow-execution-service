@@ -23,7 +23,7 @@ CREATE TABLE workflow_instance (
 );
 
 -- One row per dispatched stage/task (prep/review/approve, unrecognized-Type
--- passthrough, call_pool admin-stub) (LLD §4.3).
+-- passthrough, call_pool admin-stub, connector) (LLD §4.3).
 CREATE TABLE workflow_task (
     id                    UUID                 PRIMARY KEY,
     tenant_id             UUID                 NOT NULL,
@@ -34,6 +34,17 @@ CREATE TABLE workflow_task (
     status                workflow_task_status NOT NULL,
     record_version        BIGINT               NOT NULL DEFAULT 1 CHECK (record_version > 0),
     assignee_mode         TEXT                 NOT NULL,  -- 'single' | 'all'
+    -- The interpreter's own per-NodeKey taskVisits counter at creation time
+    -- (internal/workflow/stage.go) — 1 for a node's first visit, 2+ for a
+    -- legitimate revisit (force-back, an exclusive-gateway back-edge).
+    -- Threaded back onto the completion signal so the interpreter can tell
+    -- a stale, leftover signal from an earlier visit apart from the current
+    -- one's own resolution.
+    visit_count           BIGINT               NOT NULL DEFAULT 0 CHECK (visit_count >= 0),
+    -- Connector name for a connector-typed task (design/LLD/workflow_connectors.md
+    -- §5.2) — a real column, not extras_json, for the same query-efficiency
+    -- reason department_id is already a real column.
+    connector_type        TEXT,
     extras_json           JSONB,
     deferred_from_task_id UUID                 REFERENCES workflow_task(id) ON DELETE RESTRICT,
     due_at                TIMESTAMPTZ,
@@ -61,13 +72,16 @@ CREATE TABLE workflow_task_assignment (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Registry of currently-active tenant-isolated Temporal task queues (LLD §4.6).
+-- Registry of tenant-isolated Temporal task queues (LLD §4.6). A row is never
+-- deleted: Workers poll every row, and routable says whether new instances
+-- start on the queue.
 -- No RLS (see 000004_enable_rls) — Workers need to read every currently-active
 -- queue across every tenant in one query.
 CREATE TABLE active_task_queues (
     id             UUID         PRIMARY KEY,
     tenant_id      UUID         NOT NULL,
     queue_name     TEXT         NOT NULL UNIQUE,
+    routable       BOOLEAN      NOT NULL DEFAULT true,
     registered_at  TIMESTAMPTZ  NOT NULL,
     updated_at     TIMESTAMPTZ  NOT NULL
 );
@@ -81,19 +95,6 @@ CREATE TABLE processed_event (
     event_type   TEXT,
     processed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (event_id, consumer)
-);
-
--- Per-user Data Encryption Keys backing crypto-shredding for content-risk jsonb
--- fields (LLD §4.12, §9.6). One row per (tenant_id, user_id), created lazily.
-CREATE TABLE workflow_data_keys (
-    tenant_id    UUID        NOT NULL,
-    user_id      UUID        NOT NULL,
-    wrapped_dek  BYTEA       NOT NULL,
-    kms_key_id   TEXT        NOT NULL,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    revoked_at   TIMESTAMPTZ,
-    PRIMARY KEY (tenant_id, user_id)
 );
 
 -- Node-override's own audit record (LLD §4.13, §5.4). Insert-only, immutable:

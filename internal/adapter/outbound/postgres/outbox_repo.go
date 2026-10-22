@@ -1,0 +1,89 @@
+package postgres
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"time"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/outbox"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
+	"github.com/google/uuid"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres/db"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+)
+
+var _ port.OutboxRepository = (*OutboxRepo)(nil)
+
+type OutboxRepo struct {
+	pool *pgcommon.Pool
+}
+
+func NewOutboxRepo(pool *pgcommon.Pool) *OutboxRepo {
+	return &OutboxRepo{pool: pool}
+}
+
+func (r *OutboxRepo) Enqueue(ctx context.Context, env events.Envelope[json.RawMessage]) error {
+	tx, ok := txFromContext(ctx)
+	if !ok {
+		return errors.New("outbox: Enqueue must be called inside a transaction — use Transactor.RunInTx")
+	}
+	return mapErr(outbox.Enqueue(ctx, tx, env))
+}
+
+func (r *OutboxRepo) ExistsForTask(ctx context.Context, eventType string, taskID uuid.UUID) (bool, error) {
+	var exists bool
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		var err error
+		exists, err = db.New(dbtx).OutboxEventExistsForTask(ctx, db.OutboxEventExistsForTaskParams{
+			EventType: eventType,
+			TaskID:    taskID.String(),
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		return nil
+	})
+	return exists, err
+}
+
+func (r *OutboxRepo) ListByInstance(
+	ctx context.Context,
+	tenantID, instanceID uuid.UUID,
+	page port.PageRequest,
+) ([]*domain.OutboxEventRecord, *port.Cursor, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	limit := clampLimit(page.Limit)
+
+	params := db.ListOutboxEventsByInstanceParams{
+		TenantID:           tenantID.String(),
+		WorkflowInstanceID: instanceID.String(),
+		PageLimit:          clampInt32(limit + 1),
+	}
+	if page.After != nil {
+		params.CursorCreatedAt = toPgtypeTimestamptz(&page.After.CreatedAt)
+		params.CursorID = toPgtypeUUID(&page.After.ID)
+	}
+
+	var records []*domain.OutboxEventRecord
+	var next *port.Cursor
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		rows, err := db.New(dbtx).ListOutboxEventsByInstance(ctx, params)
+		if err != nil {
+			return mapErr(err)
+		}
+		trimmed, cursor := paginate(rows, limit, func(row db.OutboxEvent) (time.Time, uuid.UUID) {
+			return row.CreatedAt, row.ID
+		})
+		next = cursor
+		records = make([]*domain.OutboxEventRecord, len(trimmed))
+		for i, row := range trimmed {
+			records[i] = outboxEventRecordFromDB(row)
+		}
+		return nil
+	})
+	return records, next, err
+}

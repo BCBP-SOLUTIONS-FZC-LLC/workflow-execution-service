@@ -1,0 +1,946 @@
+openapi: "3.0.3"
+info:
+  title: Workflow Execution Service — internal API
+  version: "1.0.0"
+  description: >
+    Service-to-service endpoints under /api/v1/internal. They are not routed by
+    the public gateway and carry no gateway identity headers: the caller
+    presents x-internal-token, and the tenant comes from the request (a query
+    parameter, the body or the event envelope), not from x-tenant-id. This
+    document is the authority for these endpoints. A service that calls them
+    keeps a byte-identical copy and tests its requests against it (execution
+    LLD §5.3).
+
+servers:
+  - url: http://localhost:8080
+    description: Local dev server
+
+security:
+  - InternalServiceAuth: []
+
+tags:
+  - name: Internal (Definition)
+    description: >
+      Service-to-service endpoints called by the Definition Service: the
+      archive guard and the pause of a removed member's tasks.
+  - name: Internal (WorkflowClient)
+    description: >
+      Service-to-service endpoints called by the IAM Org & Membership service,
+      not routed through the gateway.
+  - name: Internal (Events)
+    description: >
+      Service-to-service ingestion endpoint called by the shared Workflow-Events
+      Consumer, not routed through the gateway.
+  - name: Internal (ConnectorTaskService)
+    description: >
+      Service-to-service endpoints called by cmd/connector-worker to resolve a
+      connector-typed task, not routed through the gateway. connector-worker
+      never touches the Temporal SDK directly (workflow-connectors LLD §6.1
+      Decision #2) — this is its only path to signal task resolution.
+
+components:
+  securitySchemes:
+    InternalServiceAuth:
+      type: apiKey
+      in: header
+      name: x-internal-token
+      description: >
+        Service-to-service credential for the internal route group (RequireInternalToken,
+        INTERNAL_API_TOKEN) — the same convention Definition Service already ships. These
+        routes are NOT exposed through the Envoy public gateway and do NOT carry gateway
+        identity headers; they are restricted to in-mesh callers by a Kubernetes
+        NetworkPolicy AND authenticated by this shared secret — defense-in-depth, not either
+        control alone (§9.2). The tenant context for these routes is taken from the request
+        payload, not from x-tenant-id.
+
+  parameters:
+    CursorQuery:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: >
+        Opaque keyset cursor encoding the previous page's last (created_at|occurred_at, id)
+        pair (§5.9). Omit for the first page. An unparseable or tampered cursor returns 400
+        BAD_REQUEST rather than silently restarting.
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: >
+        Optional client-supplied key for safe retry of this request. A replay with the same
+        key and an identical request body returns the original cached response. A replay with
+        the same key and a different body returns 409 IDEMPOTENCY_KEY_REPLAY.
+
+    LimitQuery:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+      description: >
+        Page size. Values above 100 are clamped, not rejected; values <= 0 are rejected
+        (§5.9).
+
+    TaskIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Workflow task UUID.
+
+  schemas:
+    EventEnvelope:
+      type: object
+      description: >
+        The platform-events envelope forwarded verbatim by the shared Workflow-Events
+        Consumer to the category routes under /internal/events — matches the shape published
+        to SNS (the EventEnvelope schema of api/asyncapi.yaml), except payload is
+        opaque here since the consumer forwards any subscribed event type without
+        deserializing it.
+      required: [id, type, subject, source, tenant_id, time, specversion]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID v7 message id (consumer dedup key, paired with the consumer name).
+        type:
+          type: string
+          description: >
+            Dotted-lowercase or PascalCase wire type, dispatched by the switch in
+            internal_events.go (§6.2). One of: DelegationStarted, DelegationEnded,
+            TenantStateChanged, UserDeleted, UserAvailabilityChanged. Any other
+            value is accepted and ignored with 200.
+          example: "DelegationStarted"
+        subject:
+          type: string
+          description: Producer-defined subject path for the affected resource.
+        source:
+          type: string
+          description: Producer service name.
+        tenant_id:
+          type: string
+          format: uuid
+        time:
+          type: string
+          format: date-time
+        specversion:
+          type: string
+          example: "1"
+        trace_id:
+          type: string
+          nullable: true
+        correlation_id:
+          type: string
+          nullable: true
+        actor:
+          type: string
+          nullable: true
+          description: User or service identity that caused the event (a user UUID or service account name).
+        ip_address:
+          type: string
+          nullable: true
+          description: Client IP at the time the event was triggered. Absent for background/system events.
+        user_agent:
+          type: string
+          nullable: true
+          description: HTTP User-Agent header value from the request that triggered the event. Absent for background/system events.
+        dataschema:
+          type: string
+          nullable: true
+          description: >
+            Schema registry version identifier for the encoded payload (platform-events'
+            Envelope[T].SchemaID, JSON tag `dataschema`). Absent for the NoopCodec (dev/test).
+        data:
+          type: object
+          additionalProperties: true
+          description: Producer-defined payload, dispatched by type (§6.2).
+
+    ProblemDetails:
+      type: object
+      required: [type, title, status, detail, instance, code]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: >
+            URI reference identifying the problem type.
+            Format: https://errors.bcbp.io/execution/{kebab-code}
+          example: "https://errors.bcbp.io/execution/task-concurrency-violation"
+        title:
+          type: string
+          description: Short, human-readable problem title (invariant per error type).
+          example: "Task Concurrency Violation"
+        status:
+          type: integer
+          description: HTTP status code.
+          example: 409
+        detail:
+          type: string
+          description: Human-readable explanation of this specific occurrence.
+          example: "task record_version mismatch; refresh and retry"
+        instance:
+          type: string
+          format: uri-reference
+          description: URI reference identifying the specific request that produced the error.
+          example: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
+        code:
+          type: string
+          description: >
+            Machine-readable error code (stable across releases). One of:
+            BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_ASSIGNEE, NOT_AUTHORIZED_FOR_RESOURCE,
+            TENANT_MISMATCH, INSTANCE_NOT_FOUND, TASK_NOT_FOUND,
+            TARGET_NODE_NOT_FOUND, OVERRIDE_NO_OP, DUPLICATE_BUSINESS_KEY,
+            VERSION_NOT_PUBLISHED, VERSION_INVALID,
+            RECORD_VERSION_CONFLICT, INSTANCE_ALREADY_TERMINAL, INVALID_INSTANCE_STATE,
+            TASK_ALREADY_CLAIMED, CLAIM_NOT_APPLICABLE, INVALID_TASK_STATE,
+            FORCE_BACK_NO_SAVED_BRANCH, NODE_ALREADY_RESOLVED, IDEMPOTENCY_KEY_REPLAY,
+            ASSIGNEE_INELIGIBLE, OVERRIDE_MAP_INVALID, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE,
+            UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, INTERNAL_ERROR.
+          example: "RECORD_VERSION_CONFLICT"
+        trace_id:
+          type: string
+          description: The OpenTelemetry trace id of the request, equal to the X-Trace-ID response header.
+        request_id:
+          type: string
+          description: The request id, equal to the X-Request-ID response header.
+        invalid_params:
+          type: array
+          description: >
+            Present on validation errors carrying more than one offending field/node — one entry
+            per violation (e.g. ASSIGNEE_INELIGIBLE's bulk node-eligibility failures, §5.5).
+            Absent (omitted entirely, not null) on every other error.
+          items:
+            type: object
+            required: [name, reason]
+            properties:
+              name:
+                type: string
+                description: Name of the invalid field, query/path parameter, or node key.
+                example: "review_finance"
+              reason:
+                type: string
+                description: Human-readable explanation of why this entry is invalid.
+                example: "user no longer holds required_level=SENIOR in department_id=9b1c...finance"
+              code:
+                type: string
+                description: Optional machine-readable sub-code for this specific violation.
+
+  responses:
+    Unauthorized:
+      description: Missing or wrong x-internal-token.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/unauthorized"
+            title: "Unauthorized"
+            status: 401
+            detail: "missing or invalid x-internal-token header"
+            instance: "/api/v1/internal/workflows/delegate-impact"
+            code: "UNAUTHORIZED"
+
+    BadRequest:
+      description: Malformed JSON body or missing required fields.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/bad-request"
+            title: "Bad Request"
+            status: 400
+            detail: "field 'version' is required"
+            instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
+            code: "BAD_REQUEST"
+
+    IdempotencyKeyReplay:
+      description: >
+        The supplied Idempotency-Key header was previously used with a different request
+        body. Replays with an identical body return the original cached response instead.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/idempotency-key-replay"
+            title: "Idempotency Key Replay"
+            status: 409
+            detail: "Idempotency-Key reused with a different request body"
+            instance: "/api/v1/instances"
+            code: "IDEMPOTENCY_KEY_REPLAY"
+
+    InternalError:
+      description: Unhandled server error.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/internal-error"
+            title: "Internal Server Error"
+            status: 500
+            detail: "an unexpected error occurred"
+            instance: "/api/v1/instances"
+            code: "INTERNAL_ERROR"
+
+    EventDecodeFailed:
+      description: >
+        EVENT_DECODE_FAILED. The envelope carries a dataschema (schema-registry payload) whose
+        data is not a base64 schema-registry frame of a plain JSON payload. A retryable
+        infrastructure problem, never a malformed client payload, so the consumer retries it
+        and does not route it to its DLQ.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+
+    PayloadTooLarge:
+      description: Request body exceeds the 10 MB limit (§5.10, §9.3 — same cap Definition Service applies).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/payload-too-large"
+            title: "Payload Too Large"
+            status: 413
+            detail: "request body exceeds 10 MB limit"
+            instance: "/api/v1/instances"
+            code: "PAYLOAD_TOO_LARGE"
+
+    ServiceUnavailable:
+      description: An upstream dependency (Temporal or Definition Service) is unavailable.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/temporal-unavailable"
+            title: "Service Unavailable"
+            status: 503
+            detail: "Temporal cluster is unreachable; retry after a short delay"
+            instance: "/api/v1/instances"
+            code: "UPSTREAM_UNAVAILABLE"
+
+    UnsupportedMediaType:
+      description: Request Content-Type is not application/json.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
+          example:
+            type: "https://errors.bcbp.io/execution/unsupported-media-type"
+            title: "Unsupported Media Type"
+            status: 415
+            detail: "request body must be application/json"
+            instance: "/api/v1/instances"
+            code: "UNSUPPORTED_MEDIA_TYPE"
+
+paths:
+  /api/v1/internal/workflows/{workflow_id}/active-instances:
+    get:
+      operationId: getActiveInstances
+      tags: [Internal (Definition)]
+      summary: Count a workflow's unfinished instances
+      description: >
+        The Definition Service's archive guard: it refuses to archive a
+        workflow while this reports an instance RUNNING or PAUSED. Writes
+        nothing.
+      parameters:
+        - in: path
+          name: workflow_id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: tenant_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Whether the workflow has an unfinished instance, and how many.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [has_active, count]
+                properties:
+                  has_active: { type: boolean }
+                  count:      { type: integer, format: int32, minimum: 0 }
+              example: { has_active: true, count: 2 }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/internal/users/{user_id}/pause-tasks:
+    post:
+      operationId: pauseUserTasks
+      tags: [Internal (Definition)]
+      summary: Pause every running instance holding a task of a removed member
+      description: >
+        Called by the Definition Service when a membership revocation
+        invalidates a published version the user is a default assignee of.
+        Each RUNNING instance with an active assignment for the user is sent a
+        pause signal with initiator safety_net; a failure to signal one
+        instance is logged and skipped, so a retry is safe.
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id]
+              properties:
+                tenant_id: { type: string, format: uuid }
+      responses:
+        "204":
+          description: The pause signals were sent. No body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/internal/events/delegation:
+    post:
+      operationId: ingestDelegationEvent
+      tags: [Internal (Events)]
+      summary: Ingest DelegationStarted / DelegationEnded directly
+      description: >
+        Service-to-service ingest of an envelope forwarded by the shared Workflow-Events Consumer (§6.1); sets the RLS GUC from the tenant_id, is idempotent per envelope id, and is scoped to
+        DelegationStarted/DelegationEnded. A type outside this category
+        (should the consumer ever send one) is accepted and ignored with 200,
+        same as the catch-all's unrecognized-type behavior.
+      security:
+        - InternalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventEnvelope" }
+      responses:
+        "200":
+          description: Event processed, an idempotent no-op, or an out-of-category type accepted and ignored. No response body.
+        "400":
+          description: Malformed envelope or payload — non-retryable, the consumer routes to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          description: Transient processing failure. The consumer redelivers with backoff until its receive threshold (MAX_RECEIVE_COUNT, four handling attempts) dead-letters the message on the fifth receive.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "502":
+          $ref: "#/components/responses/EventDecodeFailed"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/internal/events/user-profile:
+    post:
+      operationId: ingestUserProfileEvent
+      tags: [Internal (Events)]
+      summary: Ingest UserDeleted / UserAvailabilityChanged directly
+      description: >
+        Service-to-service ingest of an envelope forwarded by the shared Workflow-Events Consumer (§6.1); sets the RLS GUC from the tenant_id, is idempotent per envelope id, and is scoped to
+        UserDeleted/UserAvailabilityChanged. A type outside this category
+        is accepted and ignored with 200.
+      security:
+        - InternalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventEnvelope" }
+      responses:
+        "200":
+          description: Event processed, an idempotent no-op, or an out-of-category type accepted and ignored. No response body.
+        "400":
+          description: Malformed envelope or payload — non-retryable, the consumer routes to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          description: Transient processing failure. The consumer redelivers with backoff until its receive threshold (MAX_RECEIVE_COUNT, four handling attempts) dead-letters the message on the fifth receive.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "502":
+          $ref: "#/components/responses/EventDecodeFailed"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/internal/events/tenant:
+    post:
+      operationId: ingestTenantEvent
+      tags: [Internal (Events)]
+      summary: Ingest TenantStateChanged directly
+      description: >
+        Service-to-service ingest of an envelope forwarded by the shared Workflow-Events Consumer (§6.1); sets the RLS GUC from the tenant_id, is idempotent per envelope id, and is scoped to
+        TenantStateChanged. A type outside this category is accepted and
+        ignored with 200.
+      security:
+        - InternalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventEnvelope" }
+      responses:
+        "200":
+          description: Event processed, an idempotent no-op, or an out-of-category type accepted and ignored. No response body.
+        "400":
+          description: Malformed envelope or payload — non-retryable, the consumer routes to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          description: Transient processing failure. The consumer redelivers with backoff until its receive threshold (MAX_RECEIVE_COUNT, four handling attempts) dead-letters the message on the fifth receive.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "502":
+          $ref: "#/components/responses/EventDecodeFailed"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/internal/events/workflow-task:
+    post:
+      operationId: ingestWorkflowTaskEvent
+      tags: [Internal (Events)]
+      summary: Ingest WorkflowTaskCreated directly
+      description: >
+        Service-to-service ingest of an envelope forwarded by the shared Workflow-Events Consumer (§6.1); sets the RLS GUC from the tenant_id, is idempotent per envelope id, and is scoped to
+        WorkflowTaskCreated. A type outside this category is accepted and
+        ignored with 200.
+      security:
+        - InternalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventEnvelope" }
+      responses:
+        "200":
+          description: Event processed, an idempotent no-op, or an out-of-category type accepted and ignored. No response body.
+        "400":
+          description: Malformed envelope or payload — non-retryable, the consumer routes to its DLQ.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          description: Transient processing failure. The consumer redelivers with backoff until its receive threshold (MAX_RECEIVE_COUNT, four handling attempts) dead-letters the message on the fifth receive.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "502":
+          $ref: "#/components/responses/EventDecodeFailed"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/internal/workflows/delegate-impact:
+    get:
+      operationId: getDelegateImpact
+      tags: [Internal (WorkflowClient)]
+      summary: Preview the blast radius of an in-flight or proposed delegation (internal)
+      description: >
+        Internal, service-to-service endpoint called by the IAM service (not routed through
+        the gateway; no x-tenant-id / x-user-id headers). Returns how many active workflow
+        instances have at least one READY/IN_PROGRESS assignment currently held by
+        delegate_user_id, and the affected workflow instance IDs. Used by IAM to preview
+        the impact of ending or creating a delegation before committing to it.
+      security:
+        - InternalServiceAuth: []
+      parameters:
+        - name: tenant_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Tenant UUID to scope the impact query to.
+        - name: delegate_user_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the delegate user whose active assignments to inspect.
+        - name: delegation_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Optional delegation UUID to scope the query to a single delegation.
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: Delegation impact summary. workflow_ids is a keyset-paginated preview (§5.9); reassigned_count is the true total, a cheap COUNT independent of the page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reassigned_count, workflow_ids]
+                properties:
+                  reassigned_count:
+                    type: integer
+                    description: Number of active assignments currently held by delegate_user_id.
+                    example: 3
+                  workflow_ids:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
+                    description: UUIDs of the distinct workflow instances affected.
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    description: Opaque cursor for the next page of workflow_ids; omitted/null on the final page.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller's service identity is not authorized for the requested tenant_id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/tenant-mismatch"
+                title: "Tenant Mismatch"
+                status: 403
+                detail: "caller's service identity is not authorized for this tenant_id"
+                instance: "/api/v1/internal/workflows/delegate-impact"
+                code: "TENANT_MISMATCH"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/internal/workflows/reassign-delegate:
+    post:
+      operationId: reassignDelegateWorkflows
+      tags: [Internal (WorkflowClient)]
+      summary: Bulk-reassign a delegate's active assignments to a new delegate (internal)
+      description: >
+        Internal, service-to-service endpoint called by the IAM service (not routed through
+        the gateway; no x-tenant-id / x-user-id headers) when a delegation is superseded or
+        transferred. Vacates old_delegate_id's active READY/IN_PROGRESS assignments and
+        creates equivalent assignments for new_delegate_id, scoped to tenant_id (and
+        optionally to a single delegation_id).
+      security:
+        - InternalServiceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, old_delegate_id, new_delegate_id]
+              properties:
+                tenant_id:
+                  type: string
+                  format: uuid
+                  description: Tenant UUID to scope the reassignment to.
+                old_delegate_id:
+                  type: string
+                  format: uuid
+                  description: UUID of the delegate whose active assignments are being superseded.
+                new_delegate_id:
+                  type: string
+                  format: uuid
+                  description: UUID of the delegate to receive the reassigned assignments.
+                delegation_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: Optional delegation UUID to scope the reassignment to a single delegation.
+      responses:
+        "200":
+          description: Reassignment completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reassigned]
+                properties:
+                  reassigned:
+                    type: integer
+                    description: Number of assignments reassigned from old_delegate_id to new_delegate_id.
+                    example: 3
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller's service identity is not authorized for the requested tenant_id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/tenant-mismatch"
+                title: "Tenant Mismatch"
+                status: 403
+                detail: "caller's service identity is not authorized for this tenant_id"
+                instance: "/api/v1/internal/workflows/reassign-delegate"
+                code: "TENANT_MISMATCH"
+        "409":
+          $ref: "#/components/responses/IdempotencyKeyReplay"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/internal/workflows/cancel-by-delegate:
+    post:
+      operationId: cancelByDelegate
+      tags: [Internal (WorkflowClient)]
+      summary: Bulk-cancel a delegate's active assignments (internal)
+      description: >
+        Internal, service-to-service endpoint called by the IAM service (not routed through
+        the gateway; no x-tenant-id / x-user-id headers) when a delegation ends without a
+        replacement delegate. Vacates delegate_user_id's active READY/IN_PROGRESS assignments
+        for the given tenant (and optionally a single delegation_id) without creating
+        replacement assignments; the assignments revert to the compiled plan's default assignee.
+      security:
+        - InternalServiceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, delegate_user_id]
+              properties:
+                tenant_id:
+                  type: string
+                  format: uuid
+                  description: Tenant UUID to scope the cancellation to.
+                delegate_user_id:
+                  type: string
+                  format: uuid
+                  description: UUID of the delegate whose active assignments are being vacated.
+                delegation_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: Optional delegation UUID to scope the cancellation to a single delegation.
+      responses:
+        "200":
+          description: Cancellation completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cancelled]
+                properties:
+                  cancelled:
+                    type: integer
+                    description: Number of assignments vacated for delegate_user_id.
+                    example: 3
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller's service identity is not authorized for the requested tenant_id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+              example:
+                type: "https://errors.bcbp.io/execution/tenant-mismatch"
+                title: "Tenant Mismatch"
+                status: 403
+                detail: "caller's service identity is not authorized for this tenant_id"
+                instance: "/api/v1/internal/workflows/cancel-by-delegate"
+                code: "TENANT_MISMATCH"
+        "409":
+          $ref: "#/components/responses/IdempotencyKeyReplay"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/internal/connector-tasks/{id}/complete:
+    post:
+      operationId: completeConnectorTask
+      tags: [Internal (ConnectorTaskService)]
+      summary: Resolve a connector-typed task as completed (internal)
+      description: >
+        Internal, service-to-service endpoint called by cmd/connector-worker once a
+        connector-typed task's action has finished successfully. No idempotency-key
+        wrapper: connector-worker's own retry model is Stream-redelivery-driven, not
+        header-driven, and ConnectorTaskService carries its own state+dedup idempotency
+        guard. No record_version in the body — a connector task has exactly one
+        legitimate resolver (the worker that dispatched it), never a concurrent human
+        racing it, so the service reads the task's current record_version itself.
+        The body names no actor: the service records the tenant's automation principal,
+        resolved from IAM, and answers 409 when the tenant has none.
+      security:
+        - InternalServiceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id]
+              properties:
+                tenant_id:
+                  type: string
+                  format: uuid
+                  description: Tenant UUID the task belongs to.
+                output:
+                  type: object
+                  additionalProperties: true
+                  description: Connector output values, mapped onto the compiled stage's io_mapping.outputs before the stage-transition signal is sent.
+      responses:
+        "204":
+          description: Task resolved as completed; the stage-transition signal has been sent.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Task not found for the given tenant_id.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "409":
+          description: Task is not connector-typed, or is no longer in a resolvable state.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/internal/connector-tasks/{id}/fail:
+    post:
+      operationId: failConnectorTask
+      tags: [Internal (ConnectorTaskService)]
+      summary: Resolve a connector-typed task as failed (internal)
+      description: >
+        Internal, service-to-service endpoint called by cmd/connector-worker once a
+        connector-typed task's action has failed. Sends a stage-fail signal carrying
+        error_class; the human /tasks/:id/complete path explicitly rejects
+        connector-typed tasks (checkHumanActionable), so this is the only resolution
+        path for a failed connector task. Same no-idempotency-wrapper,
+        no-record_version rationale as the complete endpoint above.
+      security:
+        - InternalServiceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, error_class]
+              properties:
+                tenant_id:
+                  type: string
+                  format: uuid
+                  description: Tenant UUID the task belongs to.
+                error_class:
+                  type: string
+                  description: Connector-defined error classification, carried onto the stage-fail signal.
+                  example: "upstream_timeout"
+                output:
+                  type: object
+                  additionalProperties: true
+                  description: >
+                    The connector's output map, returned with the failure when the connector
+                    produced one (a send-email call always carries deliveryOutcome, a rest-call
+                    status of 300 or more carries status, headers and body). Written to the
+                    failure log; not part of the stage-fail signal.
+      responses:
+        "204":
+          description: Task resolved as failed; the stage-fail signal has been sent.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Task not found for the given tenant_id.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "409":
+          description: Task is not connector-typed, or is no longer in a resolvable state.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"

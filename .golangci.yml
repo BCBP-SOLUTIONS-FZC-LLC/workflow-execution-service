@@ -16,6 +16,14 @@ linters:
     - misspell
     - unconvert
     - unparam
+    - bodyclose
+    - noctx
+    - nilerr
+    - gosec
+    - contextcheck
+    - gocritic
+    - nolintlint
+    - sqlclosecheck
   settings:
     revive:
       rules:
@@ -24,22 +32,37 @@ linters:
         - name: error-strings
         - name: error-naming
         - name: if-return
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     wrapcheck:
       ignore-package-globs:
         - github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/*
 
   exclusions:
     paths:
-      - gen/
       - platform-libs/
       - internal/adapter/outbound/postgres/db/
       - internal/core/port/mocks/
-      - test/integration/
     rules:
       - path: _test\.go
         linters:
           - wrapcheck
           - unparam
+          - noctx
+          - gosec
+          - contextcheck
+          - bodyclose
+      - path: ^test/
+        linters:
+          - noctx
+          - gosec
+          - contextcheck
+          - bodyclose
+      - path: ^test/workflow/replay/gen/
+        text: exitAfterDefer
+        linters:
+          - gocritic
       - path: internal/
         text: "exported: "
         linters:
@@ -50,7 +73,6 @@ formatters:
     - goimports
   exclusions:
     paths:
-      - gen/
       - platform-libs/
       - internal/adapter/outbound/postgres/db/
       - internal/core/port/mocks/

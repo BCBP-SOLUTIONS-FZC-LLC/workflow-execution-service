@@ -1,0 +1,347 @@
+# Prometheus alerting rules for the execution-service application.
+#
+# Static, non-Helm-templated copy of deploy/helm/templates/prometheusrule.yaml,
+# for tooling that consumes plain rule files directly (e.g. a Prometheus
+# --rule-files directory) rather than the PrometheusRule CRD. Keep the two
+# in sync. job labels here assume the canonical release name convention
+# (release name == chart name, so the fullname helper resolves to literally
+# "workflow-execution-service") — adjust if deployed under a different
+# release name.
+#
+# Every metric referenced below is either this service's own or provided automatically by
+# the shared platform-gincommon/platform-pgcommon libraries once wired at
+# a composition root — verified against the LLD and against
+# definition_service's own equivalent metric names, not assumed from prose.
+#
+# Labels on HTTP metrics (from platform-gincommon):
+#   job          — "workflow-execution-service-api" | "workflow-execution-service-worker"
+#   method       — the HTTP verb
+#   route        — the route template (e.g. /api/v1/workflows/:id)
+#   error_class  — the error class, when the request failed
+#   status_class — "2xx" | "4xx" | "5xx" (there is no raw "status" label)
+
+groups:
+  - name: workflow_execution_service_availability
+    rules:
+      - alert: ExecutionServiceAPIDown
+        expr: absent(up{job="workflow-execution-service-api"} == 1)
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          runbook: "workflow-execution-service/api-down"
+          summary: execution-service API has no healthy instances
+          description: >-
+            No execution-service API pods have been scraped as healthy for 2 minutes.
+            Check pod readiness: kubectl get pods -l app.kubernetes.io/component=api
+
+      - alert: ExecutionServiceAPIReplicasMissing
+        expr: sum(up{job="workflow-execution-service-api"}) < 2
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          runbook: "workflow-execution-service/api-down"
+          summary: execution-service API running below minimum replica count
+          description: "Current healthy count: {{ $value }}. The PDB requires minAvailable:1 — a further disruption could take the API to zero."
+
+      - alert: ExecutionServiceWorkerDown
+        expr: absent(up{job="workflow-execution-service-worker"} == 1)
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          runbook: "workflow-execution-service/worker-down"
+          summary: execution-service Worker has no healthy instances
+          description: >-
+            No execution-service Worker pods have been scraped as healthy for 2 minutes —
+            no Temporal task queues are being polled.
+            Check pod readiness: kubectl get pods -l app.kubernetes.io/component=worker
+
+      - alert: ExecutionServiceWorkerReplicasMissing
+        expr: sum(up{job="workflow-execution-service-worker"}) < 2
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          runbook: "workflow-execution-service/worker-down"
+          summary: execution-service Worker running below minimum replica count
+          description: "Current healthy count: {{ $value }}."
+
+  - name: workflow_execution_service_errors
+    rules:
+      - alert: ExecutionServiceHighErrorRate
+        expr: |
+          sum(rate(platform_http_requests_total{job="workflow-execution-service-api", status_class="5xx"}[5m]))
+            /
+          sum(rate(platform_http_requests_total{job="workflow-execution-service-api"}[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          runbook: "workflow-execution-service/high-error-rate"
+          summary: execution-service API 5xx error rate above 5%
+          description: "{{ $value | humanizePercentage }} of requests are returning 5xx errors over the last 5 minutes."
+
+      - alert: ExecutionServiceCriticalErrorRate
+        expr: |
+          sum(rate(platform_http_requests_total{job="workflow-execution-service-api", status_class="5xx"}[5m]))
+            /
+          sum(rate(platform_http_requests_total{job="workflow-execution-service-api"}[5m]))
+          > 0.20
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          runbook: "workflow-execution-service/high-error-rate"
+          summary: execution-service API 5xx error rate above 20%
+          description: "{{ $value | humanizePercentage }} of requests are returning 5xx errors. Escalate immediately."
+
+  - name: workflow_execution_service_latency
+    rules:
+      - alert: ExecutionServiceHighLatency
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (
+              rate(platform_http_request_duration_seconds_bucket{job="workflow-execution-service-api"}[5m])
+            )
+          ) > 2.0
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          runbook: "workflow-execution-service/high-latency"
+          summary: execution-service API p99 latency above 2s
+          description: "p99 request duration is {{ $value | humanizeDuration }}."
+
+  - name: workflow_execution_service_definition_calls
+    rules:
+      # One rule for the active-instances and pause-tasks calls (LLD §5.3),
+      # evaluated per route so the summary names the failing one.
+      - alert: ExecutionServiceDefinitionCallsHighErrorRate
+        expr: |
+          sum by (route) (rate(platform_http_requests_total{job="workflow-execution-service-api", route=~"/api/v1/internal/workflows/:workflow_id/active-instances|/api/v1/internal/users/:user_id/pause-tasks", status_class="5xx"}[5m]))
+            /
+          sum by (route) (rate(platform_http_requests_total{job="workflow-execution-service-api", route=~"/api/v1/internal/workflows/:workflow_id/active-instances|/api/v1/internal/users/:user_id/pause-tasks"}[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          runbook: "workflow-execution-service/definition-calls"
+          summary: "execution-service Definition Service call error rate above 5%: {{ $labels.route }}"
+          description: "The Definition Service depends on these calls (LLD §5.3, §9.2) — check Postgres/Temporal-frontend health and recent deployments."
+
+  - name: workflow_execution_service_panics
+    rules:
+      - alert: ExecutionServiceHTTPPanic
+        expr: increase(platform_http_panics_total{job="workflow-execution-service-api"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          runbook: "workflow-execution-service/panic"
+          summary: An execution-service API HTTP handler panicked
+          description: "platform_http_panics_total increased — recovered by platform-gincommon's middleware. Check logs for the stack trace immediately."
+
+
+  - name: workflow_execution_service_database
+    rules:
+      - alert: ExecutionServiceAPIDBErrorRate
+        expr: |
+          sum(rate(platform_db_queries_total{job="workflow-execution-service-api", outcome="error"}[5m]))
+            /
+          sum(rate(platform_db_queries_total{job="workflow-execution-service-api"}[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          runbook: "workflow-execution-service/db-errors"
+          summary: Elevated Postgres query error rate (API)
+          description: "{{ $value | humanizePercentage }} of queries are erroring over the last 5 minutes. Check Postgres/PgBouncer health."
+
+      - alert: ExecutionServiceWorkerDBErrorRate
+        expr: |
+          sum(rate(platform_db_queries_total{job="workflow-execution-service-worker", outcome="error"}[5m]))
+            /
+          sum(rate(platform_db_queries_total{job="workflow-execution-service-worker"}[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          runbook: "workflow-execution-service/db-errors"
+          summary: Elevated Postgres query error rate (Worker)
+          description: "{{ $value | humanizePercentage }} of queries are erroring over the last 5 minutes. Check Postgres/PgBouncer health."
+
+  - name: workflow_execution_service_lld
+    rules:
+      - alert: InstanceDegraded
+        expr: increase(workflow_execution_service_instance_degraded_total[5m]) > 0
+        labels:
+          severity: page
+        annotations:
+          runbook: "workflow-execution-service/instance-degraded"
+          summary: "Instance entered DEGRADED"
+          description: "A parallel-branch failure parked an instance needing admin force-forward/force-back resolution (LLD §3.3, §7.6)."
+
+      - alert: OutboxDeadLettered
+        expr: increase(platform_dlq_messages_total{operation="outbox_publish"}[5m]) > 0
+        labels:
+          severity: page
+        annotations:
+          runbook: "workflow-execution-service/outbox"
+          summary: "Outbound event dead-lettered for {{ $labels.event_type }}"
+          description: "An event failed all publish retries; operable via the outbox runner's DLQ replay (LLD §6.6, §7.6)."
+
+      - alert: TenantPurgeFailing
+        expr: increase(workflow_execution_service_tenant_purge_failures_total[26h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          runbook: "workflow-execution-service/tenant-purge"
+          summary: "A tenant data purge keeps failing"
+          description: "An offboarded tenant's rows could not be fully deleted after its retention period; the sweep retries on its next run (LLD §4.13)."
+
+      - alert: InboundEventIngestErrors
+        expr: rate(workflow_execution_service_internal_events_ingest_total{result="error"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          runbook: "workflow-execution-service/event-ingest"
+          summary: "Sustained internal event ingest errors"
+          description: "Mirrors the outbound outbox dead-letter pattern for inbound events (LLD §6.1, §7.6)."
+
+      - alert: SharedWorkflowEventsConsumerOutage
+        expr: time() - workflow_execution_service_internal_events_last_received_timestamp{event_type=~"DelegationStarted|TenantStateChanged"} > 900
+        labels:
+          severity: page
+        annotations:
+          runbook: "workflow-execution-service/consumer-outage"
+          summary: "No {{ $labels.event_type }} events received in 15 minutes"
+          description: "A live event type going quiet for 15 minutes is a consumer-side stall, not a legitimately idle tenant (LLD §10.2, §7.6)."
+
+      - alert: RLSViolation
+        expr: increase(workflow_execution_service_rls_violations_total{violation_type=~"missing_or_invalid_guc|cross_tenant_access"}[5m]) > 0
+        labels:
+          severity: page
+        annotations:
+          runbook: "workflow-execution-service/rls"
+          summary: "RLS violation recorded: {{ $labels.violation_type }}"
+          description: "Same severity as Definition Service's own RLSMissingGUC/RLSCrossTenantAccess alerts (LLD §9.2, §9.5, §7.6)."
+
+      - alert: TaskSignalSLOBreach
+        expr: histogram_quantile(0.99, sum by (le) (rate(workflow_execution_service_task_signal_duration_seconds_bucket[5m]))) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          runbook: "workflow-execution-service/slo-breach"
+          summary: "workflow_execution_service_task_signal_duration_seconds p99 > 300ms"
+          description: "Sustained breach of the claim/complete/defer SLO (LLD §10.3, §7.6)."
+
+      - alert: InstantiationSLOBreach
+        expr: histogram_quantile(0.99, sum by (le) (rate(workflow_execution_service_instance_start_duration_seconds_bucket[5m]))) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          runbook: "workflow-execution-service/slo-breach"
+          summary: "workflow_execution_service_instance_start_duration_seconds p99 > 1s"
+          description: "Sustained breach of the POST /instances SLO (LLD §10.3, §7.6)."
+
+      - alert: DelegationRerouteSLOBreach
+        expr: histogram_quantile(0.99, sum by (le) (rate(workflow_execution_service_delegation_reroute_duration_seconds_bucket[5m]))) > 4
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          runbook: "workflow-execution-service/slo-breach"
+          summary: "workflow_execution_service_delegation_reroute_duration_seconds p99 > 4s"
+          description: "Sustained breach of the DelegationStarted reroute SLO — investigate the eligibility-check batch cost (LLD §6.7, §7.6)."
+
+      - alert: WorkflowReplayFailure
+        expr: increase(workflow_execution_service_workflow_replay_failures_total[5m]) > 0
+        labels:
+          severity: page
+        annotations:
+          runbook: "workflow-execution-service/replay-failure"
+          summary: "Temporal replay failure for {{ $labels.workflow_type }}"
+          description: "Temporal non-determinism is fatal to the affected workflow execution — the highest-severity Worker failure mode (LLD §7.6)."
+
+      - alert: DegradedBacklogStale
+        expr: workflow_execution_service_instance_degraded_oldest_age_seconds > 86400
+        labels:
+          severity: warning
+        annotations:
+          runbook: "workflow-execution-service/instance-degraded"
+          summary: "DEGRADED instance untouched for over a day"
+          description: "workflow_execution_service_instance_degraded_total only fires once on entry; this catches an instance nobody has actioned (LLD §7.6)."
+
+      - alert: WorkerQueuePollingStalled
+        expr: time() - workflow_execution_service_worker_queue_last_poll_timestamp > 300
+        labels:
+          severity: page
+        annotations:
+          runbook: "workflow-execution-service/queue-polling"
+          summary: "Queue {{ $labels.queue }} has not been polled in 5 minutes"
+          description: "A Worker silently failing to poll one tenant-isolated queue is invisible to the aggregate workflow_execution_service_worker_active_queues gauge alone (LLD §7.6)."
+
+      - alert: InstancesOnUnpolledQueue
+        expr: |
+          max by (queue) (workflow_execution_service_instances_by_queue) > 0
+          unless on (queue)
+          max by (queue) (workflow_execution_service_worker_queue_last_poll_timestamp > time() - 300)
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          runbook: "workflow-execution-service/queue-polling"
+          summary: "Queue {{ $labels.queue }} has instances and no Worker polling it"
+          description: "A Worker that could not start the worker for a queue only logs, so its instances wait with no task and no other signal (LLD §3.2, §7.6)."
+
+      - alert: UpstreamDependencyErrors
+        expr: rate(workflow_execution_service_upstream_dependency_errors_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          runbook: "workflow-execution-service/upstream-dependency"
+          summary: "Sustained errors calling {{ $labels.dependency }}"
+          description: "Separates a compiled-plan read or IAM-eligibility outage from Execution's own generic 5xx rate (LLD §7.6)."
+
+      - alert: CompiledPlanCacheMissRatioHigh
+        expr: workflow_execution_service_wf_cache_misses_total / (workflow_execution_service_wf_cache_hits_total + workflow_execution_service_wf_cache_misses_total) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          runbook: "workflow-execution-service/plan-cache"
+          summary: "Compiled-plan cache miss ratio above 10%"
+          description: "Execution's own equivalent of a cache-health alert Definition Service already ships (LLD §7.6)."
+
+      - alert: OutboxRelayWedged
+        # 10 minutes is the LLD's own worked example (well above the 5s poll
+        # cadence), not an invented number (LLD §7.6).
+        expr: platform_outbox_oldest_pending_age > 600
+        labels:
+          severity: page
+        annotations:
+          runbook: "workflow-execution-service/outbox"
+          summary: "Outbox relay has not published in 10 minutes"
+          description: "A relay that stops running entirely produces zero attempts and zero dead-letters, so nothing else in this catalogue would catch it (LLD §7.6)."

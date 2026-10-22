@@ -1,0 +1,206 @@
+package workflow
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	wf "go.temporal.io/sdk/workflow"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/enums"
+)
+
+var errStageAbandoned = errors.New("workflow: stage abandoned")
+
+func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, stage *dsl.StageDef) (domain.NodeKey, string, error) {
+	nodeKey := domain.NodeKey(dsl.NodeKey(deptID, stage))
+
+	switch stage.Type {
+	case string(enums.StageTypeSendTask):
+		msgName := stage.Extras["message"]
+		in.msgBuf.Send(ctx, msgName, nodeKey)
+		in.history.Push(nodeKey)
+		return nodeKey, "", nil
+
+	case string(enums.StageTypeReceiveTask):
+		if getVersion(ctx, receiveRecordsNodeChangeID) != wf.DefaultVersion {
+			if err := updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
+				InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{nodeKey},
+			}); err != nil {
+				return nodeKey, "", err
+			}
+		}
+		in.receive(ctx, nodeKey, stage.Extras["message"])
+		in.history.Push(nodeKey)
+		return nodeKey, "", nil
+
+	default:
+		if stage.EngineNote != "" {
+			wf.GetLogger(ctx).Warn("dispatching stage with engine note", "node_key", string(nodeKey), "engine_note", stage.EngineNote)
+		}
+		return in.runTaskStage(ctx, plan, deptID, stage, nodeKey)
+	}
+}
+
+func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, stage *dsl.StageDef, nodeKey domain.NodeKey) (domain.NodeKey, string, error) {
+	compiledNode, err := json.Marshal(stage)
+	if err != nil {
+		return nodeKey, "", fmt.Errorf("workflow: marshaling stage %q: %w", nodeKey, err)
+	}
+	in.taskVisits[nodeKey]++
+
+	var iamDeptID string
+	if dept := findDepartment(plan, deptID); dept != nil {
+		iamDeptID = dept.IAMDepartmentID
+	}
+
+	out, err := createTask(ctx, port.CreateTaskInput{
+		InstanceID:      in.instanceID,
+		TenantID:        in.tenantID,
+		NodeKey:         nodeKey,
+		CompiledNode:    compiledNode,
+		ContextJSON:     in.contextJSON,
+		OverrideMap:     in.overrideMap,
+		VisitCount:      in.taskVisits[nodeKey],
+		IAMDepartmentID: iamDeptID,
+	})
+	if err != nil {
+		if abandonedMidActivity(ctx) {
+			return nodeKey, "", errStageAbandoned
+		}
+		return nodeKey, "", err
+	}
+	if err := updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
+		InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{nodeKey},
+	}); err != nil {
+		if abandonedMidActivity(ctx) {
+			in.supersedeAbandoned(ctx, out.TaskID)
+			return nodeKey, "", errStageAbandoned
+		}
+		return nodeKey, "", err
+	}
+
+	visit := int64(0)
+	if getVersion(ctx, nodeVisitKeyChangeID) != wf.DefaultVersion {
+		visit = in.taskVisits[nodeKey]
+	}
+	visitKey := nodeVisitKey{Node: nodeKey, Visit: visit}
+	resolveCh := wf.NewBufferedChannel(ctx, 1)
+	if buffered, ok := in.pendingSignals[visitKey]; ok {
+		delete(in.pendingSignals, visitKey)
+		resolveCh.Send(ctx, buffered)
+	}
+	in.pending[visitKey] = resolveCh
+	defer delete(in.pending, visitKey)
+
+	sel := wf.NewSelector(ctx)
+	var resolved, abandoned bool
+	var sig stageTransitionSignal
+	sel.AddReceive(resolveCh, func(c wf.ReceiveChannel, more bool) {
+		c.Receive(ctx, &sig)
+		resolved = true
+	})
+	if getVersion(ctx, taskStageCancelChangeID) != wf.DefaultVersion {
+		sel.AddReceive(ctx.Done(), func(c wf.ReceiveChannel, more bool) {
+			abandoned = true
+		})
+	}
+
+	var fired *boundaryFire
+	cancelBoundaries := registerTaskBoundaries(ctx, sel, in, string(nodeKey), stage.BoundaryTimer, stage.BoundaryMessage, func(f boundaryFire) {
+		fired = &f
+	})
+	cancelSLA := addSLATimers(ctx, sel, slaTimerParams{
+		TenantID: in.tenantID, InstanceID: in.instanceID, TaskID: out.TaskID, NodeKey: nodeKey,
+		DueDate: stage.DueDate, FollowUpDate: stage.FollowUpDate,
+	})
+
+	for !resolved && fired == nil && !abandoned {
+		sel.Select(ctx)
+	}
+	cancelSLA()
+
+	if abandoned {
+		cancelBoundaries()
+		in.supersedeAbandoned(ctx, out.TaskID)
+		return nodeKey, "", errStageAbandoned
+	}
+
+	if fired != nil {
+		cancelBoundaries()
+		if fired.Interrupting {
+			delete(in.pending, visitKey)
+			_ = updateTaskStatus(ctx, port.UpdateTaskStatusInput{
+				TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusSuperseded,
+			})
+			return in.runFiredPath(ctx, plan, fired)
+		}
+		in.spawnFiredPath(ctx, plan, fired)
+		resolveCh.Receive(ctx, &sig)
+	} else {
+		cancelBoundaries()
+	}
+
+	return in.resolveTaskStage(ctx, nodeKey, out, sig)
+}
+
+func abandonedMidActivity(ctx wf.Context) bool {
+	return ctx.Err() != nil && getVersion(ctx, abandonedMidActivityChangeID) != wf.DefaultVersion
+}
+
+func (in *interpreter) supersedeAbandoned(ctx wf.Context, taskID string) {
+	if in.routing || getVersion(ctx, abandonedTaskSupersededChangeID) == wf.DefaultVersion {
+		return
+	}
+	dctx, _ := wf.NewDisconnectedContext(ctx)
+	_ = updateTaskStatus(dctx, port.UpdateTaskStatusInput{
+		TaskID: taskID, TenantID: in.tenantID, Status: domain.TaskStatusSuperseded,
+	})
+}
+
+type stageFailedError struct {
+	NodeKey domain.NodeKey
+	Reason  string
+}
+
+func (e *stageFailedError) Error() string {
+	return fmt.Sprintf("workflow: stage %q failed: %s", e.NodeKey, e.Reason)
+}
+
+func (in *interpreter) resolveTaskStage(
+	ctx wf.Context, nodeKey domain.NodeKey, out port.CreateTaskOutput, sig stageTransitionSignal,
+) (domain.NodeKey, string, error) {
+	if getVersion(ctx, stageFailChangeID) != wf.DefaultVersion && sig.Failed {
+		if err := updateTaskStatus(ctx, port.UpdateTaskStatusInput{
+			TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusFailed, RecordVersion: sig.RecordVersion,
+			ErrorClass: sig.Reason,
+		}); err != nil {
+			return nodeKey, "", err
+		}
+		return nodeKey, "", &stageFailedError{NodeKey: nodeKey, Reason: sig.Reason}
+	}
+
+	completion, err := completeAssignment(ctx, port.CompleteAssignmentInput{
+		TaskID: out.TaskID, UserID: sig.UserID, TenantID: in.tenantID, ResultJSON: sig.ResultJSON, RecordVersion: sig.RecordVersion,
+	})
+	if err != nil {
+		return nodeKey, "", err
+	}
+	if getVersion(ctx, taskCompletedStatusChangeID) != wf.DefaultVersion && completion.AllDone {
+		if err := updateTaskStatus(ctx, port.UpdateTaskStatusInput{
+			TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusCompleted,
+		}); err != nil {
+			return nodeKey, "", err
+		}
+	}
+	if getVersion(ctx, taskResultVariablesChangeID) != wf.DefaultVersion {
+		if err := in.mergeResult(sig.ResultJSON); err != nil {
+			return nodeKey, "", err
+		}
+	}
+	in.history.Push(nodeKey)
+	return nodeKey, sig.ResultJSON, nil
+}

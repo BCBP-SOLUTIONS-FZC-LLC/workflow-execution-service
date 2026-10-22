@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DelegationEndedInbound",
+  "type": "object",
+  "required": [
+    "delegation_id",
+    "delegator_id",
+    "delegate_id",
+    "ended_reason"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "delegation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "delegator_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "delegate_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "ended_reason": {
+      "type": "string",
+      "enum": [
+        "expired",
+        "cancelled",
+        "delegate_removed"
+      ]
+    }
+  }
+}

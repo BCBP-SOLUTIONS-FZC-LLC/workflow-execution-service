@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a defect in execution-service (gRPC API, Temporal workflow/Activities, database adapter, outbox relay, CI)
+about: Report a defect in execution-service (HTTP API, Temporal workflow/Activities, database adapter, outbox relay, CI)
 title: '[BUG] '
 labels: bug
 assignees: ''
@@ -22,8 +22,8 @@ A clear description of the bug.
 - [ ] Production
 
 ## Affected area
-- [ ] gRPC inbound (`CheckActiveInstances` / `PauseUserTasks`)
-- [ ] gRPC outbound (`GetCompiledWorkflow` client to Definition Service)
+- [ ] Internal API served to the Definition Service (active-instances / pause-tasks)
+- [ ] Definition Service client (the compiled-plan read)
 - [ ] Temporal workflow function / Activities (`internal/workflow`)
 - [ ] Database / migrations (`workflow_execution` schema, RLS)
 - [ ] Outbox relay
@@ -39,7 +39,7 @@ A clear description of the bug.
 What you expected to happen.
 
 ## Actual behaviour
-What actually happened. Include error messages, gRPC status codes, log output, or stack traces.
+What actually happened. Include error messages, HTTP status codes and problem bodies, log output, or stack traces.
 
 ```
 paste relevant log output or error here
@@ -47,7 +47,7 @@ paste relevant log output or error here
 
 ## Minimal reproduction
 ```go
-// paste the smallest snippet or grpcurl command that triggers the bug
+// paste the smallest snippet or curl command that triggers the bug
 ```
 
 ## Additional context

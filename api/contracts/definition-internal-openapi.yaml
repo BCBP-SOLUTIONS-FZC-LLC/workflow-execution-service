@@ -1,0 +1,388 @@
+openapi: "3.0.3"
+info:
+  title: Workflow Definition Service — internal API
+  version: "1.0.0"
+  description: >
+    Service-to-service endpoints under /api/v1/internal. They are not routed by
+    the public gateway and carry no gateway identity headers: the caller
+    presents x-internal-token, and the tenant comes from the request (a query
+    parameter or the payload), not from x-tenant-id. This document is the
+    authority for these endpoints. A service that calls them keeps a
+    byte-identical copy and tests its requests against it (definition LLD §3.4).
+servers:
+  - url: http://localhost:8080
+    description: Local dev server
+security:
+  - InternalServiceAuth: []
+components:
+
+  securitySchemes:
+    InternalServiceAuth:
+      type: apiKey
+      in: header
+      name: x-internal-token
+      description: >
+        This service's INTERNAL_API_TOKEN, compared in constant time. Each caller
+        holds it under its own name for this target: DEFINITION_SERVICE_TOKEN in
+        the Execution Service and in event_consumer. Kubernetes NetworkPolicy
+        admits only those callers. A missing or wrong token is 401 with a
+        ProblemDetails body. With no token configured (local dev) the check is off.
+
+  schemas:
+
+    CompiledPlan:
+      type: object
+      description: >
+        A workflow version and its stored compiled plan, read by the Execution
+        Service at instance start, by its plan cache and by the Temporal
+        GetCompiledPlan activity. Every status is returned; the caller refuses a
+        version that is not PUBLISHED or not valid.
+      required: [workflow_id, version_id, version_number, status, is_valid, compiled_plan]
+      properties:
+        workflow_id:    { type: string, format: uuid }
+        version_id:     { type: string, format: uuid }
+        version_number: { type: integer, format: int32, nullable: true, description: Null for a DRAFT. }
+        status:         { type: string, enum: [DRAFT, PUBLISHED, ARCHIVED] }
+        is_valid:       { type: boolean }
+        compiled_plan:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: >
+            The stored dsl.CompiledCollaboration (workflow-models LLD §2.1), its
+            calls not expanded; its schema_version is the DSL schema major
+            version. Null for a version with no stored plan, a DRAFT.
+      example:
+        workflow_id: "8fa88cde-824c-47bc-836b-665cd42c2222"
+        version_id: "11abcc22-0000-7000-8000-000000000001"
+        version_number: 3
+        status: PUBLISHED
+        is_valid: true
+        compiled_plan: { main_plan: "Bid-No-Bid Review", plans: [], schema_version: 1 }
+
+    ConnectorRestAlias:
+      type: object
+      required: [alias, method, baseURL, pathTemplate, timeout]
+      properties:
+        alias:        { type: string }
+        method:       { type: string }
+        baseURL:      { type: string }
+        pathTemplate: { type: string }
+        timeout:
+          type: integer
+          format: int64
+          description: >
+            Nanoseconds — a raw Go time.Duration, not a formatted string and not
+            the milliseconds the write request takes as timeoutMs.
+
+    EventEnvelope:
+      type: object
+      description: >
+        A domain-event envelope forwarded by the shared workflow-events consumer to the internal
+        ingest endpoint. Mirrors the platform-events envelope. The tenant context is carried in
+        tenant_id (the RLS GUC is set from this field), and id is the idempotency anchor.
+      required: [id, type, tenant_id, data]
+      properties:
+        id:        { type: string, format: uuid, description: "Unique event id; logged for correlation. Redelivery is absorbed by handler idempotency, not by a dedup registry." }
+        type:      { type: string, example: DepartmentMembershipRevoked, description: "Event type used for dispatch. Unknown types are accepted and ignored." }
+        tenant_id: { type: string, format: uuid, description: "Tenant the event applies to; used to set the RLS GUC." }
+        time:      { type: string, format: date-time, description: "When the event was produced. A revocation leaves alone every default assignee added after this time, so a redelivered or reordered event cannot invalidate a version published after the user was added back. Absent means no such filter. An offboarding event takes it as the start of the tenant's retention period; absent means the time of receipt." }
+        dataschema: { type: string, nullable: true, description: "Schema registry version identifier for the encoded payload (platform-events Envelope SchemaID). Present when the producer encodes through a schema registry; then data is a base64 string of the registry-framed JSON payload. Absent for plain JSON." }
+        data:
+          description: "Type-specific payload (e.g. user_id, department_id, role). CloudEvents data field. An object for plain JSON, or a base64 string of a schema-registry frame when dataschema is present."
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: string }
+      example:
+        id: "f0a11222-3844-42bc-938b-665cd42c9999"
+        type: "DepartmentMembershipRevoked"
+        tenant_id: "7ca648b2-b432-4744-884c-35fd556a310c"
+        data:
+          user_id: "3fa18cde-7244-47ac-986c-665cd42caaaa"
+          department_id: "0198c0a2-5b1e-7c3d-8a11-2f4e6d9b7a10"
+          role: "reviewer"
+
+    ProblemDetails:
+      type: object
+      required: [type, title, status, detail, instance, code]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: A URI reference that identifies the problem type.
+        title:
+          type: string
+          description: A short, human-readable summary of the problem type.
+        status:
+          type: integer
+          description: The HTTP status code generated by the origin server for this occurrence of the problem.
+        detail:
+          type: string
+          description: A human-readable explanation specific to this occurrence of the problem.
+        instance:
+          type: string
+          description: A URI reference that identifies the specific occurrence of the problem.
+        code:
+          type: string
+          description: Service-specific error code for programmatic handling.
+        trace_id:
+          type: string
+          description: The OpenTelemetry trace id of the request, equal to the X-Trace-ID response header.
+        request_id:
+          type: string
+          description: The request id, equal to the X-Request-ID response header.
+        invalid_params:
+          type: array
+          description: Details about specific fields that failed validation.
+          items:
+            type: object
+            required: [name, reason]
+            properties:
+              name:
+                type: string
+              reason:
+                type: string
+              code:
+                type: string
+      example:
+        type: "https://api.workflow.platform/errors/not-found"
+        title: "Resource Not Found"
+        status: 404
+        detail: "Workflow not found or tenant boundary breached."
+        instance: "/workflows/8fa88cde-824c-47bc-836b-665cd42c2222"
+        code: "NOT_FOUND"
+
+  responses:
+
+    BadRequest:
+      description: A path or query parameter is missing or malformed.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+
+    Unauthorized:
+      description: Missing or wrong x-internal-token.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+
+    NotFound:
+      description: No such resource for this tenant.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+
+    PayloadTooLarge:
+      description: The request body exceeds the 10 MB limit. Not retryable.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+
+    InternalError:
+      description: Unexpected server error.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+          example:
+            type: "https://api.workflow.platform/errors/internal-error"
+            title: "Internal Server Error"
+            status: 500
+            detail: "An unexpected error occurred. Please retry or contact support if the issue persists."
+            instance: "/workflows"
+            code: "INTERNAL_ERROR"
+
+paths:
+
+  /api/v1/internal/workflow-versions/{version_id}/compiled-plan:
+    get:
+      operationId: getCompiledPlan
+      summary: Read a workflow version and its stored compiled plan
+      description: >
+        Served from a fail-open Valkey cache keyed by tenant and version, then
+        Postgres under the tenant's RLS scope. Writes nothing.
+      tags: [Internal]
+      parameters:
+        - in: path
+          name: version_id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: tenant_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The version and its plan.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompiledPlan' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "500": { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/internal/events:
+    post:
+      operationId: ingestInternalEvent
+      summary: Ingest a forwarded domain-event envelope
+      description: >
+        Service-to-service ingest endpoint called by the shared workflow-events consumer (which
+        consumes the SQS queues, e.g. membership-workflow-q). Accepts a single event envelope, sets the
+        RLS GUC from the envelope tenant_id, and dispatches by type — currently
+        DepartmentMembershipRevoked and MembershipRevoked → template invalidation (see LLD §7.4), and
+        TenantMembershipsPurged and TenantStateChanged with a status of offboarded → the tenant is
+        recorded for the purge of its templates and credentials (LLD §7.4.4, §7.4.6); any other
+        TenantStateChanged status is acknowledged and ignored. An envelope with a dataschema has its schema-registry framed payload decoded first. Idempotent: a repeated
+        envelope id returns 2xx with no side effects. This route is internal-only — it is not
+        exposed on the public Envoy gateway and carries no gateway identity headers.
+      tags: [Internal]
+      security:
+        - InternalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EventEnvelope' }
+      responses:
+        "200":
+          description: Event processed, or ignored when its type is not one this service handles. The body is empty. A redelivered envelope id is reprocessed and converges on the same state.
+        "400":
+          description: Malformed envelope or payload (non-retryable — the consumer routes to its DLQ).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+        "401":
+          description: Missing or invalid internal service credential.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+        "413": { $ref: '#/components/responses/PayloadTooLarge' }
+        "500":
+          description: Transient processing failure (DB/transaction). The consumer retries and eventually DLQs.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+        "502":
+          description: >
+            EVENT_DECODE_FAILED. The envelope carries a dataschema whose payload could not be
+            decoded: not a base64 string, an unreadable registry frame, a compressed or non-JSON
+            frame. Retryable, so the consumer retries it and does not route it to its DLQ as a
+            malformed event.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+
+  /api/v1/internal/connector-aliases:
+    get:
+      operationId: listConnectorAliases
+      summary: List every connector alias
+      description: >
+        The connector worker calls this at start-up and on each refresh tick to
+        build its alias registry. An alias added or edited after a worker
+        starts becomes visible on that worker's next refresh.
+      tags: [Internal]
+      security:
+        - InternalServiceAuth: []
+      responses:
+        "200":
+          description: The full alias registry.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version: { type: integer, example: 1 }
+                  restCall:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConnectorRestAlias' }
+        "401":
+          description: Missing or invalid internal service credential.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+        "500": { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/internal/connector-aliases/rest:
+    post:
+      operationId: writeConnectorRestAlias
+      summary: Create or update a REST-call connector alias
+      tags: [Internal]
+      security:
+        - InternalServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [alias, method, baseURL, pathTemplate]
+              properties:
+                alias:        { type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9_-]+$' }
+                method:       { type: string, description: HTTP method. }
+                baseURL:
+                  type: string
+                  description: >
+                    Must be http(s) and its host must appear in the configured
+                    internal-host allowlist. Dispatch sends the caller's real
+                    internal service token and department headers to this host,
+                    so an unlisted one is rejected rather than trusted. The
+                    check is fail-closed: with no allowlist configured, every
+                    baseURL is rejected. Credentials embedded in the URL
+                    (user:password@) are rejected outright. An allowlist entry
+                    that names a port (`host:8443`) matches that port only; an
+                    entry without a port matches any port.
+                pathTemplate:
+                  type: string
+                  maxLength: 2048
+                  description: >
+                    Must start with `/`, and must not start with `//` or contain
+                    `..`, `@`, a backslash, whitespace or control characters.
+                timeoutMs:
+                  type: integer
+                  format: int64
+                  maximum: 60000
+                  description: Request timeout in milliseconds, at most 60000. Non-positive or omitted defaults to 5000ms.
+      responses:
+        "204": { description: Alias written. No response body. }
+        "400":
+          description: >
+            Missing required field, or a domain validation failure — an invalid
+            alias, method or pathTemplate, a timeoutMs over the limit, or a
+            baseURL whose scheme, credentials, host or port the allowlist rejects.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+        "401":
+          description: Missing or invalid internal service credential.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+        "413": { $ref: '#/components/responses/PayloadTooLarge' }
+        "500": { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/internal/connector-aliases/rest/{alias}:
+    delete:
+      operationId: deleteConnectorRestAlias
+      summary: Delete a REST-call connector alias
+      tags: [Internal]
+      security:
+        - InternalServiceAuth: []
+      parameters:
+        - in: path
+          name: alias
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: "Alias deleted. No response body." }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "401":
+          description: Missing or invalid internal service credential.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+        "500": { $ref: '#/components/responses/InternalError' }
+
+tags:
+  - name: Internal
+    description: Service-to-service endpoints, not routed by the public gateway.

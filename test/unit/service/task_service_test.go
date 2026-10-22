@@ -1,0 +1,1056 @@
+package service_test
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
+)
+
+func newTaskServiceHarness() (*service.TaskService, *fakeInstanceRepo, *fakeTaskRepo, *fakeAssignmentRepo, *fakeAssigneeOverrideRepo, *fakeTemporalClient) {
+	instances := newFakeInstanceRepo()
+	tasks := newFakeTaskRepo()
+	assignments := newFakeAssignmentRepo()
+	overrides := &fakeAssigneeOverrideRepo{}
+	temporal := &fakeTemporalClient{}
+
+	svc := &service.TaskService{
+		Instances:   instances,
+		Tasks:       tasks,
+		Assignments: assignments,
+		Overrides:   overrides,
+		Temporal:    temporal,
+	}
+	return svc, instances, tasks, assignments, overrides, temporal
+}
+
+func TestTaskService_List(t *testing.T) {
+	svc, _, tasks, _, _, _ := newTaskServiceHarness()
+	tenantID := uuid.New()
+	ready := &domain.Task{ID: uuid.New(), TenantID: tenantID, Status: domain.TaskStatusReady}
+	completed := &domain.Task{ID: uuid.New(), TenantID: tenantID, Status: domain.TaskStatusCompleted}
+	tasks.byID[ready.ID] = ready
+	tasks.byID[completed.ID] = completed
+
+	status := port.TaskStatusCompleted
+	res, err := svc.List(context.Background(), tenantID, port.ReadScope{IsAdmin: true}, port.TaskFilter{Status: &status}, port.Page{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, res.Items, 1)
+	assert.Equal(t, completed.ID, res.Items[0].ID)
+
+	t.Run("repo error propagates", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tasks.listErr = assert.AnError
+		_, err := svc.List(context.Background(), uuid.New(), port.ReadScope{IsAdmin: true}, port.TaskFilter{}, port.Page{Limit: 10})
+		assert.Error(t, err)
+	})
+
+	t.Run("admin caller leaves the repo filter unscoped", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		_, err := svc.List(context.Background(), uuid.New(), port.ReadScope{IsAdmin: true}, port.TaskFilter{}, port.Page{Limit: 10})
+		require.NoError(t, err)
+		assert.Nil(t, tasks.lastFilter.Scope)
+	})
+
+	t.Run("non-admin caller's departments and identity reach the repo filter", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		callerUserID := uuid.New()
+		deptA, deptB := uuid.New(), uuid.New()
+		scope := port.ReadScope{
+			CallerUserID: callerUserID,
+			Departments:  []port.DepartmentRole{{DepartmentID: deptA, Role: "member"}, {DepartmentID: deptB, Role: "lead"}},
+		}
+		_, err := svc.List(context.Background(), uuid.New(), scope, port.TaskFilter{}, port.Page{Limit: 10})
+		require.NoError(t, err)
+		require.NotNil(t, tasks.lastFilter.Scope)
+		assert.Equal(t, callerUserID, tasks.lastFilter.Scope.CallerUserID)
+		assert.ElementsMatch(t, []uuid.UUID{deptA, deptB}, tasks.lastFilter.Scope.DepartmentIDs)
+	})
+}
+
+func TestTaskService_Get(t *testing.T) {
+	svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+	tenantID := uuid.New()
+	task := &domain.Task{ID: uuid.New(), TenantID: tenantID, DepartmentID: uuid.New(), Status: domain.TaskStatusReady}
+	tasks.byID[task.ID] = task
+
+	t.Run("not found", func(t *testing.T) {
+		_, _, err := svc.Get(context.Background(), tenantID, uuid.New(), port.ReadScope{IsAdmin: true})
+		assert.ErrorIs(t, err, port.ErrTaskNotFound)
+	})
+
+	t.Run("admin bypasses scope", func(t *testing.T) {
+		got, _, err := svc.Get(context.Background(), tenantID, task.ID, port.ReadScope{IsAdmin: true})
+		require.NoError(t, err)
+		assert.Equal(t, task.ID, got.ID)
+	})
+
+	t.Run("unrelated caller rejected", func(t *testing.T) {
+		_, _, err := svc.Get(context.Background(), tenantID, task.ID, port.ReadScope{CallerUserID: uuid.New()})
+		assert.ErrorIs(t, err, port.ErrNotAuthorizedForRead)
+	})
+
+	t.Run("department match authorized", func(t *testing.T) {
+		got, _, err := svc.Get(context.Background(), tenantID, task.ID, port.ReadScope{
+			Departments: []port.DepartmentRole{{DepartmentID: task.DepartmentID, Role: "approver"}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, task.ID, got.ID)
+	})
+
+	t.Run("department match authorized among multiple unrelated departments", func(t *testing.T) {
+		got, _, err := svc.Get(context.Background(), tenantID, task.ID, port.ReadScope{
+			Departments: []port.DepartmentRole{
+				{DepartmentID: uuid.New(), Role: "reviewer"},
+				{DepartmentID: task.DepartmentID, Role: "member"},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, task.ID, got.ID)
+	})
+
+	t.Run("non-matching department rejected", func(t *testing.T) {
+		_, _, err := svc.Get(context.Background(), tenantID, task.ID, port.ReadScope{
+			Departments: []port.DepartmentRole{{DepartmentID: uuid.New(), Role: "approver"}},
+		})
+		assert.ErrorIs(t, err, port.ErrNotAuthorizedForRead)
+	})
+
+	t.Run("active assignee authorized", func(t *testing.T) {
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+		got, gotAssignments, err := svc.Get(context.Background(), tenantID, task.ID, port.ReadScope{CallerUserID: userID})
+		require.NoError(t, err)
+		assert.Equal(t, task.ID, got.ID)
+		assert.Len(t, gotAssignments, 1)
+	})
+
+	t.Run("ListActiveByTask error propagates", func(t *testing.T) {
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID}
+		tasks.byID[task.ID] = task
+		assignments.listActiveByTaskErr = assert.AnError
+
+		_, _, err := svc.Get(context.Background(), tenantID, task.ID, port.ReadScope{IsAdmin: true})
+		assert.Error(t, err)
+	})
+}
+
+func TestTaskService_GetByNode(t *testing.T) {
+	svc, _, tasks, _, _, _ := newTaskServiceHarness()
+	tenantID, instanceID := uuid.New(), uuid.New()
+	task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review"}
+	tasks.byID[task.ID] = task
+
+	got, err := svc.GetByNode(context.Background(), tenantID, instanceID, "finance/review")
+	require.NoError(t, err)
+	assert.Equal(t, task.ID, got.ID)
+
+	_, err = svc.GetByNode(context.Background(), tenantID, instanceID, "finance/does-not-exist")
+	assert.ErrorIs(t, err, port.ErrTaskNotFound)
+}
+
+func TestTaskService_GetByNode_CarriesTheRequiredLevelFromThePlan(t *testing.T) {
+	svc, instances, tasks, _, _, _ := newTaskServiceHarness()
+	definitions := &fakeDefinitionClient{}
+	svc.Definitions = definitions
+	tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+	definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "approver"}))
+	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID}
+	task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review"}
+	tasks.byID[task.ID] = task
+
+	got, err := svc.GetByNode(context.Background(), tenantID, instanceID, "finance/review")
+
+	require.NoError(t, err)
+	assert.Equal(t, "approver", got.RequiredLevel, "node override asks Org & Membership for the level the plan names")
+}
+
+func TestTaskService_GetByNode_AnUnreadablePlanIsAnError(t *testing.T) {
+	svc, instances, tasks, _, _, _ := newTaskServiceHarness()
+	svc.Definitions = &fakeDefinitionClient{err: assert.AnError}
+	tenantID, instanceID := uuid.New(), uuid.New()
+	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: uuid.New()}
+	task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review"}
+	tasks.byID[task.ID] = task
+
+	_, err := svc.GetByNode(context.Background(), tenantID, instanceID, "finance/review")
+
+	require.ErrorIs(t, err, assert.AnError)
+}
+
+func TestTaskService_ActiveByUser(t *testing.T) {
+	svc, _, _, assignments, _, _ := newTaskServiceHarness()
+	tenantID, userID := uuid.New(), uuid.New()
+	taskID := uuid.New()
+	assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: taskID, UserID: userID, IsActive: true}
+
+	res, err := svc.ActiveByUser(context.Background(), tenantID, userID, port.Page{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, res.Items, 1)
+	assert.Equal(t, taskID, res.Items[0].TaskID)
+
+	t.Run("repo error propagates", func(t *testing.T) {
+		svc, _, _, assignments, _, _ := newTaskServiceHarness()
+		assignments.listActiveByUserPaginatedErr = assert.AnError
+		_, err := svc.ActiveByUser(context.Background(), uuid.New(), uuid.New(), port.Page{Limit: 10})
+		assert.Error(t, err)
+	})
+}
+
+func newReadyTask(tenantID, instanceID uuid.UUID) *domain.Task {
+	return &domain.Task{
+		ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review",
+		Status: domain.TaskStatusReady, AssigneeMode: "single", RecordVersion: 1,
+	}
+}
+
+func TestTaskService_ClaimByIneligibleUser(t *testing.T) {
+	svc, instances, tasks, assignments, _, _ := newTaskServiceHarness()
+	tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+	svc.Definitions = &fakeDefinitionClient{resp: publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "approver"}))}
+	svc.Eligibility = &fakeEligibilityChecker{check: func(_ context.Context, _, _, _ uuid.UUID, level string) (bool, error) {
+		return level != "approver", nil
+	}}
+	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID}
+	task := newReadyTask(tenantID, instanceID)
+	task.AssigneeMode = "all"
+	tasks.byID[task.ID] = task
+	userID := uuid.New()
+	a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+	assignments.byID[a.ID] = a
+
+	_, err := svc.Claim(context.Background(), tenantID, task.ID, userID, task.RecordVersion)
+	require.ErrorIs(t, err, port.ErrAssigneeIneligible)
+	assert.False(t, assignments.byID[a.ID].IsLead)
+}
+
+func TestTaskService_Claim(t *testing.T) {
+	t.Run("success sets lead on a multi-assignee task", func(t *testing.T) {
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		task.AssigneeMode = "all"
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+		assignments.byID[a.ID] = a
+
+		got, err := svc.Claim(context.Background(), tenantID, task.ID, userID, task.RecordVersion)
+		require.NoError(t, err)
+		assert.Equal(t, task.ID, got.ID)
+		assert.True(t, assignments.byID[a.ID].IsLead)
+	})
+
+	t.Run("not applicable for single-assignee task", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		tasks.byID[task.ID] = task
+
+		_, err := svc.Claim(context.Background(), tenantID, task.ID, uuid.New(), task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrClaimNotApplicable)
+	})
+
+	t.Run("already claimed by another lead", func(t *testing.T) {
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		task.AssigneeMode = "all"
+		tasks.byID[task.ID] = task
+		lead := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: uuid.New(), IsActive: true, IsLead: true}
+		assignments.byID[lead.ID] = lead
+
+		_, err := svc.Claim(context.Background(), tenantID, task.ID, uuid.New(), task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrTaskAlreadyClaimed)
+	})
+
+	t.Run("caller is not an assignee", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		task.AssigneeMode = "all"
+		tasks.byID[task.ID] = task
+
+		_, err := svc.Claim(context.Background(), tenantID, task.ID, uuid.New(), task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrNotAssignee)
+	})
+
+	t.Run("record version conflict", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		task.AssigneeMode = "all"
+		tasks.byID[task.ID] = task
+
+		_, err := svc.Claim(context.Background(), tenantID, task.ID, uuid.New(), 99)
+		assert.ErrorIs(t, err, port.ErrRecordVersionConflict)
+	})
+
+	t.Run("connector-typed task is rejected", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		task.AssigneeMode = "all"
+		connectorType := "send-email"
+		task.ConnectorType = &connectorType
+		tasks.byID[task.ID] = task
+
+		_, err := svc.Claim(context.Background(), tenantID, task.ID, uuid.New(), task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrTaskNotHumanActionable)
+	})
+
+	t.Run("ListActiveByTask error propagates", func(t *testing.T) {
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		task.AssigneeMode = "all"
+		tasks.byID[task.ID] = task
+		assignments.listActiveByTaskErr = assert.AnError
+
+		_, err := svc.Claim(context.Background(), tenantID, task.ID, uuid.New(), task.RecordVersion)
+		assert.Error(t, err)
+	})
+
+	t.Run("SetLead error propagates", func(t *testing.T) {
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		task.AssigneeMode = "all"
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+		assignments.setLeadErr = assert.AnError
+
+		_, err := svc.Claim(context.Background(), tenantID, task.ID, userID, task.RecordVersion)
+		assert.Error(t, err)
+	})
+}
+
+func TestTaskService_Complete_RefusesAnInstanceThatIsNotRunning(t *testing.T) {
+	for _, status := range []domain.InstanceStatus{domain.InstanceStatusPaused, domain.InstanceStatusCompleted, domain.InstanceStatusTerminated, domain.InstanceStatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+			tenantID, instanceID := uuid.New(), uuid.New()
+			instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: status}
+			task := newReadyTask(tenantID, instanceID)
+			tasks.byID[task.ID] = task
+			userID := uuid.New()
+			assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+			_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)
+			assert.ErrorIs(t, err, port.ErrInvalidInstanceState, "a completion the workflow would drop must not be acknowledged")
+			assert.Empty(t, temporal.signals)
+		})
+	}
+}
+
+func TestTaskService_Complete_AcceptsADegradedInstance(t *testing.T) {
+	svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+	tenantID, instanceID := uuid.New(), uuid.New()
+	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusDegraded}
+	task := newReadyTask(tenantID, instanceID)
+	tasks.byID[task.ID] = task
+	userID := uuid.New()
+	assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+	_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)
+	require.NoError(t, err)
+	assert.Len(t, temporal.signals, 1)
+}
+
+func TestTaskService_Complete(t *testing.T) {
+	t.Run("success signals stage-transition with the right node parts", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		inst := &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
+		instances.byID[instanceID] = inst
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+		_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{"decision":"approve"}`), task.RecordVersion)
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1)
+		assert.Equal(t, "stage-transition", temporal.signals[0].SignalName)
+		assert.Equal(t, "tenant:biz", temporal.signals[0].TemporalWorkflowID)
+		b, err := json.Marshal(temporal.signals[0].Payload)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"DeptID":"finance"`)
+		assert.Contains(t, string(b), `"NodeID":"review"`)
+	})
+
+	t.Run("caller not the assignee is rejected", func(t *testing.T) {
+		svc, instances, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+
+		_, err := svc.Complete(context.Background(), tenantID, task.ID, uuid.New(), json.RawMessage(`{}`), task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrNotAssignee)
+	})
+
+	t.Run("connector-typed task is rejected", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		connectorType := "send-email"
+		task.ConnectorType = &connectorType
+		tasks.byID[task.ID] = task
+
+		_, err := svc.Complete(context.Background(), tenantID, task.ID, uuid.New(), json.RawMessage(`{}`), task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrTaskNotHumanActionable)
+	})
+
+	t.Run("an acting user Org & Membership refuses is rejected", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		definitions := &fakeDefinitionClient{resp: publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))}
+		svc.Definitions = definitions
+		userID := uuid.New()
+		var asked []string
+		svc.Eligibility = &fakeEligibilityChecker{check: func(_ context.Context, tenant, user, dept uuid.UUID, level string) (bool, error) {
+			asked = append(asked, tenant.String()+"/"+user.String()+"/"+dept.String()+"/"+level)
+			return false, nil
+		}}
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, Status: domain.InstanceStatusRunning}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+		_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)
+		require.ErrorIs(t, err, port.ErrAssigneeIneligible)
+		assert.Equal(t, []string{tenantID.String() + "/" + userID.String() + "/" + task.DepartmentID.String() + "/reviewer"}, asked)
+		assert.Empty(t, temporal.signals)
+	})
+
+	t.Run("a failed eligibility read refuses the action", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		svc.Definitions = &fakeDefinitionClient{resp: publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))}
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
+			return false, assert.AnError
+		}}
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, Status: domain.InstanceStatusRunning}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+		_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)
+		require.ErrorIs(t, err, assert.AnError)
+		assert.NotErrorIs(t, err, port.ErrAssigneeIneligible, "a failed read is never an ineligible user")
+		assert.Empty(t, temporal.signals)
+	})
+
+	t.Run("multi-assignee lead may complete", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
+		task := newReadyTask(tenantID, instanceID)
+		task.AssigneeMode = "all"
+		tasks.byID[task.ID] = task
+		leadID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: leadID, IsActive: true, IsLead: true}
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: uuid.New(), IsActive: true}
+
+		_, err := svc.Complete(context.Background(), tenantID, task.ID, leadID, json.RawMessage(`{}`), task.RecordVersion)
+		require.NoError(t, err)
+		assert.Len(t, temporal.signals, 1)
+	})
+
+	t.Run("multi-assignee non-lead caller is rejected", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
+		task := newReadyTask(tenantID, instanceID)
+		task.AssigneeMode = "all"
+		tasks.byID[task.ID] = task
+		leadID, nonLeadID := uuid.New(), uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: leadID, IsActive: true, IsLead: true}
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: nonLeadID, IsActive: true}
+
+		_, err := svc.Complete(context.Background(), tenantID, task.ID, nonLeadID, json.RawMessage(`{}`), task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrNotAssignee)
+	})
+
+	t.Run("multi-assignee with no lead yet is rejected", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
+		task := newReadyTask(tenantID, instanceID)
+		task.AssigneeMode = "all"
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+		_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrNotAssignee)
+	})
+
+	t.Run("Instances.GetByID error propagates", func(t *testing.T) {
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+		_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)
+		assert.Error(t, err, "the instance was never seeded, so Instances.GetByID must fail")
+	})
+
+	t.Run("SignalWorkflow failure is wrapped and returned", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+		temporal.signalFunc = func(context.Context, string, uuid.UUID, string, any) error { return assert.AnError }
+
+		_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)
+		assert.Error(t, err)
+	})
+}
+
+func TestTaskService_Defer(t *testing.T) {
+	t.Run("success signals stage-defer", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:biz"}
+		done := newReadyTask(tenantID, instanceID)
+		done.Status = domain.TaskStatusCompleted
+		tasks.byID[done.ID] = done
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+		_, err := svc.Defer(context.Background(), tenantID, task.ID, userID, "not my department", task.RecordVersion)
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1)
+		assert.Equal(t, "stage-defer", temporal.signals[0].SignalName)
+	})
+
+	t.Run("no completed step to go back to is refused", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+		_, err := svc.Defer(context.Background(), tenantID, task.ID, userID, "reason", task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrInvalidTaskState)
+		assert.Empty(t, temporal.signals)
+	})
+
+	t.Run("failures reading the instance, its tasks, or signalling are returned", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			setup func(*fakeInstanceRepo, *fakeTaskRepo, *fakeTemporalClient, uuid.UUID, uuid.UUID)
+		}{
+			{"instance missing", func(i *fakeInstanceRepo, _ *fakeTaskRepo, _ *fakeTemporalClient, _, id uuid.UUID) { delete(i.byID, id) }},
+			{"task listing fails", func(_ *fakeInstanceRepo, t *fakeTaskRepo, _ *fakeTemporalClient, _, _ uuid.UUID) {
+				t.listErr = assert.AnError
+			}},
+			{"signal fails", func(_ *fakeInstanceRepo, t *fakeTaskRepo, tc *fakeTemporalClient, tenant, id uuid.UUID) {
+				done := newReadyTask(tenant, id)
+				done.Status = domain.TaskStatusCompleted
+				t.byID[done.ID] = done
+				tc.signalFunc = func(context.Context, string, uuid.UUID, string, any) error { return assert.AnError }
+			}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+				tenantID, instanceID := uuid.New(), uuid.New()
+				instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:biz"}
+				task := newReadyTask(tenantID, instanceID)
+				tasks.byID[task.ID] = task
+				userID := uuid.New()
+				assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+				tc.setup(instances, tasks, temporal, tenantID, instanceID)
+
+				_, err := svc.Defer(context.Background(), tenantID, task.ID, userID, "reason", task.RecordVersion)
+				assert.Error(t, err)
+			})
+		}
+	})
+
+	t.Run("an instance that is not running is refused", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusPaused, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+		_, err := svc.Defer(context.Background(), tenantID, task.ID, userID, "reason", task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrInvalidInstanceState)
+		assert.Empty(t, temporal.signals)
+	})
+
+	t.Run("connector-typed task is rejected", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		connectorType := "send-email"
+		task.ConnectorType = &connectorType
+		tasks.byID[task.ID] = task
+
+		_, err := svc.Defer(context.Background(), tenantID, task.ID, uuid.New(), "reason", task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrTaskNotHumanActionable)
+	})
+
+	t.Run("record version conflict", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		tasks.byID[task.ID] = task
+
+		_, err := svc.Defer(context.Background(), tenantID, task.ID, uuid.New(), "reason", 99)
+		assert.ErrorIs(t, err, port.ErrRecordVersionConflict)
+	})
+
+	t.Run("invalid state", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		task.Status = domain.TaskStatusCompleted
+		tasks.byID[task.ID] = task
+
+		_, err := svc.Defer(context.Background(), tenantID, task.ID, uuid.New(), "reason", task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrInvalidTaskState)
+	})
+
+	t.Run("caller not the assignee is rejected", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		tasks.byID[task.ID] = task
+
+		_, err := svc.Defer(context.Background(), tenantID, task.ID, uuid.New(), "reason", task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrNotAssignee)
+	})
+
+	t.Run("Instances.GetByID error propagates", func(t *testing.T) {
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+		_, err := svc.Defer(context.Background(), tenantID, task.ID, userID, "reason", task.RecordVersion)
+		assert.Error(t, err)
+	})
+
+	t.Run("SignalWorkflow failure is wrapped and returned", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+		temporal.signalFunc = func(context.Context, string, uuid.UUID, string, any) error { return assert.AnError }
+
+		_, err := svc.Defer(context.Background(), tenantID, task.ID, userID, "reason", task.RecordVersion)
+		assert.Error(t, err)
+	})
+}
+
+func TestTaskService_Reassign(t *testing.T) {
+	t.Run("success signals instance-reassign", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+		newUserID := uuid.New()
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), newUserID, task.RecordVersion)
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1)
+		assert.Equal(t, port.SignalInstanceReassign, temporal.signals[0].SignalName)
+		b, err := json.Marshal(temporal.signals[0].Payload)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), oldUserID.String())
+		assert.Contains(t, string(b), newUserID.String())
+	})
+
+	t.Run("connector-typed task is rejected", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		connectorType := "send-email"
+		task.ConnectorType = &connectorType
+		tasks.byID[task.ID] = task
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrTaskNotHumanActionable)
+	})
+
+	t.Run("record version conflict", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		tasks.byID[task.ID] = task
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), 99)
+		assert.ErrorIs(t, err, port.ErrRecordVersionConflict)
+	})
+
+	t.Run("invalid state", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		task.Status = domain.TaskStatusCompleted
+		tasks.byID[task.ID] = task
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrInvalidTaskState)
+	})
+
+	t.Run("no-op reassignment to the same user is rejected", func(t *testing.T) {
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), userID, task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrOverrideNoOp)
+	})
+
+	t.Run("ListActiveByTask error propagates", func(t *testing.T) {
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID := uuid.New()
+		task := newReadyTask(tenantID, uuid.New())
+		tasks.byID[task.ID] = task
+		assignments.listActiveByTaskErr = assert.AnError
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		assert.Error(t, err)
+	})
+
+	t.Run("Instances.GetByID error propagates", func(t *testing.T) {
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		assert.Error(t, err)
+	})
+
+	t.Run("SignalWorkflow failure is wrapped and returned", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+		temporal.signalFunc = func(context.Context, string, uuid.UUID, string, any) error { return assert.AnError }
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		assert.Error(t, err)
+	})
+
+	// Regression tests for the eligibility/liveness gap found reviewing this
+	// path: unlike OverrideAssignee (checked in its HTTP handler), plain
+	// Reassign never checked the replacement assignee at all.
+	t.Run("eligible replacement succeeds", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		definitions := &fakeDefinitionClient{}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) { return true, nil }}
+
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1)
+	})
+
+	t.Run("ineligible replacement is rejected", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		definitions := &fakeDefinitionClient{}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) { return false, nil }}
+
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		assert.ErrorIs(t, err, port.ErrAssigneeIneligible)
+		assert.Empty(t, temporal.signals, "an ineligible replacement must never reach the workflow signal")
+	})
+
+	t.Run("eligibility service error propagates, not silently swallowed", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		definitions := &fakeDefinitionClient{}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
+			return false, assert.AnError
+		}}
+
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		assert.Error(t, err)
+		assert.Empty(t, temporal.signals, "an unresolved eligibility check must never reach the workflow signal")
+	})
+
+	t.Run("compiled-plan fetch error propagates from the eligibility check", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		definitions := &fakeDefinitionClient{err: assert.AnError}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{}
+		log := &fakeLogger{}
+		svc.Log = log
+
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		assert.Error(t, err)
+		assert.Empty(t, temporal.signals)
+		require.Len(t, log.warnFields, 1, "the handler's 503 detail is fixed, so the cause must be logged")
+		assert.Equal(t, assert.AnError.Error(), log.warnFields[0]["error"])
+	})
+
+	t.Run("node not found in compiled plan is ineligible without asking Org & Membership", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		definitions := &fakeDefinitionClient{}
+		svc.Definitions = definitions
+		svc.Eligibility = &fakeEligibilityChecker{check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
+			t.Fatal("CheckEligibility must not be called when the node has no matching compiled-plan stage")
+			return false, nil
+		}}
+
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		// The compiled plan has no stage at all, so requiredLevelForTask can't
+		// resolve a role for newReadyTask's "finance/review" node.
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t))
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		oldUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldUserID, IsActive: true}
+
+		_, err := svc.Reassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), task.RecordVersion)
+		require.ErrorIs(t, err, port.ErrAssigneeIneligible)
+		assert.Empty(t, temporal.signals, "a node the plan does not know must not be reassigned unchecked")
+	})
+
+}
+
+func TestTaskService_OverrideAssignee(t *testing.T) {
+	t.Run("success persists the audit row and grafts the task's record_version", func(t *testing.T) {
+		svc, _, tasks, assignments, overrides, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		task := newReadyTask(tenantID, instanceID)
+		task.RecordVersion = 4
+		tasks.byID[task.ID] = task
+		previousUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: previousUserID, IsActive: true}
+		newUserID := uuid.New()
+
+		got, err := svc.OverrideAssignee(context.Background(), port.AssigneeOverrideInput{
+			TenantID: tenantID, InstanceID: instanceID, NodeKey: "finance/review",
+			NewUserID: newUserID, Reason: "on leave", ActorUserID: uuid.New(), RecordVersion: 4,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, previousUserID, got.PreviousUserID)
+		assert.Equal(t, newUserID, got.NewUserID)
+		assert.Equal(t, int64(4), got.RecordVersion)
+		assert.Len(t, overrides.created, 1)
+	})
+
+	t.Run("already resolved node is rejected", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		task := newReadyTask(tenantID, instanceID)
+		task.Status = domain.TaskStatusCompleted
+		tasks.byID[task.ID] = task
+
+		_, err := svc.OverrideAssignee(context.Background(), port.AssigneeOverrideInput{
+			TenantID: tenantID, InstanceID: instanceID, NodeKey: "finance/review", NewUserID: uuid.New(), RecordVersion: task.RecordVersion,
+		})
+		assert.ErrorIs(t, err, port.ErrNodeAlreadyResolved)
+	})
+
+	t.Run("stale record_version is rejected", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+
+		_, err := svc.OverrideAssignee(context.Background(), port.AssigneeOverrideInput{
+			TenantID: tenantID, InstanceID: instanceID, NodeKey: "finance/review", NewUserID: uuid.New(), RecordVersion: 99,
+		})
+		assert.ErrorIs(t, err, port.ErrRecordVersionConflict)
+	})
+
+	t.Run("overriding to the same user is a no-op", func(t *testing.T) {
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+
+		_, err := svc.OverrideAssignee(context.Background(), port.AssigneeOverrideInput{
+			TenantID: tenantID, InstanceID: instanceID, NodeKey: "finance/review", NewUserID: userID, RecordVersion: task.RecordVersion,
+		})
+		assert.ErrorIs(t, err, port.ErrOverrideNoOp)
+	})
+
+	t.Run("node not found", func(t *testing.T) {
+		svc, _, _, _, _, _ := newTaskServiceHarness()
+		_, err := svc.OverrideAssignee(context.Background(), port.AssigneeOverrideInput{
+			TenantID: uuid.New(), InstanceID: uuid.New(), NodeKey: "finance/does-not-exist", NewUserID: uuid.New(),
+		})
+		assert.ErrorIs(t, err, port.ErrTaskNotFound)
+	})
+
+	t.Run("connector-typed task is rejected", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		task := newReadyTask(tenantID, instanceID)
+		connectorType := "send-email"
+		task.ConnectorType = &connectorType
+		tasks.byID[task.ID] = task
+
+		_, err := svc.OverrideAssignee(context.Background(), port.AssigneeOverrideInput{
+			TenantID: tenantID, InstanceID: instanceID, NodeKey: "finance/review", NewUserID: uuid.New(), RecordVersion: task.RecordVersion,
+		})
+		assert.ErrorIs(t, err, port.ErrTaskNotHumanActionable)
+	})
+
+	t.Run("ListActiveByTask error propagates", func(t *testing.T) {
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		assignments.listActiveByTaskErr = assert.AnError
+
+		_, err := svc.OverrideAssignee(context.Background(), port.AssigneeOverrideInput{
+			TenantID: tenantID, InstanceID: instanceID, NodeKey: "finance/review", NewUserID: uuid.New(), RecordVersion: task.RecordVersion,
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("no active assignee is rejected", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+
+		_, err := svc.OverrideAssignee(context.Background(), port.AssigneeOverrideInput{
+			TenantID: tenantID, InstanceID: instanceID, NodeKey: "finance/review", NewUserID: uuid.New(), RecordVersion: task.RecordVersion,
+		})
+		assert.ErrorIs(t, err, port.ErrNotAssignee)
+	})
+
+	t.Run("Overrides.Create error propagates", func(t *testing.T) {
+		svc, _, tasks, assignments, overrides, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		previousUserID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: previousUserID, IsActive: true}
+		overrides.createErr = assert.AnError
+
+		_, err := svc.OverrideAssignee(context.Background(), port.AssigneeOverrideInput{
+			TenantID: tenantID, InstanceID: instanceID, NodeKey: "finance/review", NewUserID: uuid.New(), RecordVersion: task.RecordVersion,
+		})
+		assert.Error(t, err)
+	})
+}
+
+func TestTaskService_SignalReassign(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		svc, instances, tasks, _, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+
+		err := svc.SignalReassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), uuid.New(), task.RecordVersion)
+		require.NoError(t, err)
+		require.Len(t, temporal.signals, 1)
+		assert.Equal(t, port.SignalInstanceReassign, temporal.signals[0].SignalName)
+	})
+
+	t.Run("Tasks.GetByID error propagates", func(t *testing.T) {
+		svc, _, _, _, _, _ := newTaskServiceHarness()
+		err := svc.SignalReassign(context.Background(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), 1)
+		assert.Error(t, err)
+	})
+
+	t.Run("Instances.GetByID error propagates", func(t *testing.T) {
+		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+
+		err := svc.SignalReassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), uuid.New(), task.RecordVersion)
+		assert.Error(t, err)
+	})
+
+	t.Run("SignalWorkflow failure is wrapped and returned", func(t *testing.T) {
+		svc, instances, tasks, _, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		temporal.signalFunc = func(context.Context, string, uuid.UUID, string, any) error { return assert.AnError }
+
+		err := svc.SignalReassign(context.Background(), tenantID, task.ID, uuid.New(), uuid.New(), uuid.New(), task.RecordVersion)
+		assert.Error(t, err)
+	})
+}

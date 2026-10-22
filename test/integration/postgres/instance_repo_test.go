@@ -1,0 +1,449 @@
+//go:build integration
+
+package postgres_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
+)
+
+func newInstance(tenantID uuid.UUID, createdAt time.Time) *domain.Instance {
+	id := uuid.New()
+	return &domain.Instance{
+		ID:                 id,
+		TenantID:           tenantID,
+		WorkflowID:         uuid.New(),
+		WorkflowVersionID:  uuid.New(),
+		SubjectID:          "subj-" + id.String(),
+		BusinessKey:        "bk-" + id.String(),
+		TemporalWorkflowID: "wf-" + id.String(),
+		Status:             domain.InstanceStatusRunning,
+		CurrentNodeKeys:    []string{"review"},
+		TaskQueue:          "wf-queue-default",
+		StartedByUserID:    uuid.New(),
+		StartedAt:          &createdAt,
+	}
+}
+
+// seedInstanceAt inserts inst then back-dates created_at directly (as
+// superuser) so list-pagination tests get deterministic, well-spaced
+// ordering instead of relying on now()'s clock resolution.
+func seedInstanceAt(
+	t *testing.T,
+	superPool interface {
+		WithConn(context.Context, func(context.Context, *pgxpool.Conn) error) error
+	},
+	ctx context.Context,
+	id uuid.UUID,
+	createdAt time.Time,
+) {
+	t.Helper()
+	require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+		_, err := conn.Exec(ctx, `UPDATE workflow_instance SET created_at = $2 WHERE id = $1`, id, createdAt)
+		return err
+	}))
+}
+
+func TestInstanceRepo_CreateAndGetByID(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	tenantB := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+
+	require.NoError(t, repo.Create(ctx, inst))
+	assert.Equal(t, int64(1), inst.RecordVersion)
+
+	t.Run("same tenant can read it back", func(t *testing.T) {
+		got, err := repo.GetByID(ctx, tenantA, inst.ID)
+		require.NoError(t, err)
+		assert.Equal(t, inst.BusinessKey, got.BusinessKey)
+	})
+
+	t.Run("cross tenant sees not found", func(t *testing.T) {
+		_, err := repo.GetByID(ctx, tenantB, inst.ID)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+
+	t.Run("the same subject and business key for an active instance is rejected", func(t *testing.T) {
+		dup := newInstance(tenantA, time.Now().UTC())
+		dup.SubjectID = inst.SubjectID
+		dup.BusinessKey = inst.BusinessKey
+		err := repo.Create(ctx, dup)
+		assert.ErrorIs(t, err, domain.ErrDuplicateBusinessKey)
+	})
+
+	t.Run("the same business key under a different subject is accepted", func(t *testing.T) {
+		other := newInstance(tenantA, time.Now().UTC())
+		other.BusinessKey = inst.BusinessKey
+		require.NoError(t, repo.Create(ctx, other),
+			"one subject's key must not reserve that key across every other subject")
+	})
+
+	t.Run("one subject holds several concurrent instances", func(t *testing.T) {
+		second := newInstance(tenantA, time.Now().UTC())
+		second.SubjectID = inst.SubjectID
+		require.NoError(t, repo.Create(ctx, second),
+			"a subject whose entity runs several workflows at once must be expressible")
+	})
+}
+
+func TestInstanceRepo_UpdateStatus(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, repo.Create(ctx, inst))
+
+	t.Run("correct record_version succeeds and bumps it", func(t *testing.T) {
+		updated, err := repo.UpdateStatus(ctx, tenantA, inst.ID, domain.InstanceStatusPaused, inst.RecordVersion)
+		require.NoError(t, err)
+		assert.Equal(t, domain.InstanceStatusPaused, updated.Status)
+		assert.Equal(t, inst.RecordVersion+1, updated.RecordVersion)
+		assert.Nil(t, updated.CompletedAt, "a non-terminal transition must not set completed_at")
+	})
+
+	t.Run("stale record_version returns a conflict, not not-found", func(t *testing.T) {
+		_, err := repo.UpdateStatus(ctx, tenantA, inst.ID, domain.InstanceStatusCompleted, inst.RecordVersion)
+		assert.ErrorIs(t, err, domain.ErrRecordVersionConflict)
+	})
+
+	t.Run("nonexistent id returns not-found", func(t *testing.T) {
+		_, err := repo.UpdateStatus(ctx, tenantA, uuid.New(), domain.InstanceStatusPaused, 1)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+}
+
+func TestInstanceRepo_UpdateStatus_SetsCompletedAtOnlyForTerminalStatuses(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	for _, status := range []domain.InstanceStatus{
+		domain.InstanceStatusCompleted, domain.InstanceStatusTerminated, domain.InstanceStatusFailed,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			tenantA := uuid.New()
+			inst := newInstance(tenantA, time.Now().UTC())
+			require.NoError(t, repo.Create(ctx, inst))
+
+			updated, err := repo.UpdateStatus(ctx, tenantA, inst.ID, status, inst.RecordVersion)
+			require.NoError(t, err)
+			require.NotNil(t, updated.CompletedAt)
+			assert.WithinDuration(t, time.Now().UTC(), *updated.CompletedAt, 5*time.Second)
+		})
+	}
+}
+
+func TestInstanceRepo_Create_PersistsContextJSONAndOverrideMap(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	inst.ContextJSON = []byte(`{"tender_id":"TND-2026-04471"}`)
+	inst.OverrideMap = []byte(`{"review_finance":"4da18bde-7244-47ac-986c-665cd42caaaa"}`)
+	require.NoError(t, repo.Create(ctx, inst))
+
+	got, err := repo.GetByID(ctx, tenantA, inst.ID)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"tender_id":"TND-2026-04471"}`, string(got.ContextJSON))
+	assert.JSONEq(t, `{"review_finance":"4da18bde-7244-47ac-986c-665cd42caaaa"}`, string(got.OverrideMap))
+}
+
+func TestInstanceRepo_UpdateStatus_InvalidEnumSurfacesError(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, repo.Create(ctx, inst))
+
+	_, err := repo.UpdateStatus(ctx, tenantA, inst.ID, domain.InstanceStatus("NOT_A_REAL_STATUS"), inst.RecordVersion)
+	assert.Error(t, err)
+}
+
+func TestInstanceRepo_UpdateCurrentNodeKeys(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, repo.Create(ctx, inst))
+
+	t.Run("correct record_version succeeds, bumps it, and replaces current_node_keys", func(t *testing.T) {
+		updated, err := repo.UpdateCurrentNodeKeys(ctx, tenantA, inst.ID, []string{"approve", "ops"}, inst.RecordVersion)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"approve", "ops"}, updated.CurrentNodeKeys)
+		assert.Equal(t, inst.RecordVersion+1, updated.RecordVersion)
+	})
+
+	t.Run("stale record_version returns a conflict, not not-found", func(t *testing.T) {
+		_, err := repo.UpdateCurrentNodeKeys(ctx, tenantA, inst.ID, []string{"stale"}, inst.RecordVersion)
+		assert.ErrorIs(t, err, domain.ErrRecordVersionConflict)
+	})
+
+	t.Run("nonexistent id returns not-found", func(t *testing.T) {
+		_, err := repo.UpdateCurrentNodeKeys(ctx, tenantA, uuid.New(), []string{"x"}, 1)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+}
+
+func TestInstanceRepo_ListByTenant_KeysetPagination(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	base := time.Now().UTC().Add(-time.Hour)
+
+	var seeded []uuid.UUID
+	for i := 0; i < 5; i++ {
+		inst := newInstance(tenantA, base)
+		require.NoError(t, repo.Create(ctx, inst))
+		seedInstanceAt(t, superPool, ctx, inst.ID, base.Add(time.Duration(i)*time.Minute))
+		seeded = append(seeded, inst.ID)
+	}
+	var collected []uuid.UUID
+	var cursor *port.Cursor
+	for {
+		page, next, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{}, port.PageRequest{After: cursor, Limit: 2})
+		require.NoError(t, err)
+		for _, inst := range page {
+			collected = append(collected, inst.ID)
+		}
+		if next == nil {
+			break
+		}
+		cursor = next
+	}
+
+	require.Len(t, collected, 5)
+	for i, id := range collected {
+		assert.Equal(t, seeded[4-i], id, "page order mismatch at position %d", i)
+	}
+
+	t.Run("concurrent insert of a newer row doesn't shift an already-fetched page", func(t *testing.T) {
+		firstPage, next, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{}, port.PageRequest{Limit: 2})
+		require.NoError(t, err)
+		require.Len(t, firstPage, 2)
+		require.NotNil(t, next)
+
+		fresh := newInstance(tenantA, time.Now().UTC())
+		require.NoError(t, repo.Create(ctx, fresh))
+		seedInstanceAt(t, superPool, ctx, fresh.ID, base.Add(10*time.Minute))
+
+		secondPage, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{}, port.PageRequest{After: next, Limit: 2})
+		require.NoError(t, err)
+		for _, inst := range secondPage {
+			assert.NotEqual(t, fresh.ID, inst.ID, "the newer concurrently-inserted row must not leak into an older page")
+			for _, already := range firstPage {
+				assert.NotEqual(t, already.ID, inst.ID, "second page must not repeat a row from the first page")
+			}
+		}
+	})
+}
+
+func TestInstanceRepo_ListByTenant_Filters(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	versionA, versionB := uuid.New(), uuid.New()
+
+	running := newInstance(tenantA, time.Now().UTC())
+	running.WorkflowVersionID = versionA
+	require.NoError(t, repo.Create(ctx, running))
+
+	paused := newInstance(tenantA, time.Now().UTC())
+	paused.WorkflowVersionID = versionB
+	require.NoError(t, repo.Create(ctx, paused))
+	_, err := repo.UpdateStatus(ctx, tenantA, paused.ID, domain.InstanceStatusPaused, paused.RecordVersion)
+	require.NoError(t, err)
+
+	t.Run("status filter", func(t *testing.T) {
+		status := domain.InstanceStatusPaused
+		items, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{Status: &status}, port.PageRequest{Limit: 10})
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		assert.Equal(t, paused.ID, items[0].ID)
+	})
+
+	t.Run("workflow_version_id filter", func(t *testing.T) {
+		items, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{WorkflowVersionID: &versionA}, port.PageRequest{Limit: 10})
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		assert.Equal(t, running.ID, items[0].ID)
+	})
+
+	t.Run("started_after/started_before filters", func(t *testing.T) {
+		cutoff := time.Now().UTC().Add(-time.Minute)
+		items, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{StartedAfter: &cutoff}, port.PageRequest{Limit: 10})
+		require.NoError(t, err)
+		assert.Len(t, items, 2, "both instances started after the cutoff")
+
+		future := time.Now().UTC().Add(time.Hour)
+		items, _, err = repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{StartedBefore: &future}, port.PageRequest{Limit: 10})
+		require.NoError(t, err)
+		assert.Len(t, items, 2, "both instances started before a future cutoff")
+	})
+
+	t.Run("scope filter restricts to instances with an in-scope task", func(t *testing.T) {
+		taskRepo := postgres.NewTaskRepo(appPool)
+		assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
+
+		runningTask := newTask(tenantA, running.ID)
+		require.NoError(t, taskRepo.Create(ctx, runningTask))
+
+		assignee := uuid.New()
+		pausedTask := newTask(tenantA, paused.ID)
+		require.NoError(t, taskRepo.Create(ctx, pausedTask))
+		require.NoError(t, assignmentRepo.Create(ctx, &domain.TaskAssignment{
+			ID: uuid.New(), TenantID: tenantA, TaskID: pausedTask.ID, UserID: assignee,
+		}))
+
+		t.Run("caller's own department sees only the instance with that department's task", func(t *testing.T) {
+			items, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{
+				Scope: &port.ScopeFilter{DepartmentIDs: []uuid.UUID{runningTask.DepartmentID}, CallerUserID: uuid.New()},
+			}, port.PageRequest{Limit: 10})
+			require.NoError(t, err)
+			require.Len(t, items, 1)
+			assert.Equal(t, running.ID, items[0].ID)
+		})
+
+		t.Run("caller with an active assignment sees that instance even outside their departments", func(t *testing.T) {
+			items, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{
+				Scope: &port.ScopeFilter{DepartmentIDs: []uuid.UUID{uuid.New()}, CallerUserID: assignee},
+			}, port.PageRequest{Limit: 10})
+			require.NoError(t, err)
+			require.Len(t, items, 1)
+			assert.Equal(t, paused.ID, items[0].ID)
+		})
+
+		t.Run("caller with no matching department or assignment sees nothing", func(t *testing.T) {
+			items, _, err := repo.ListByTenant(ctx, tenantA, port.InstanceListFilter{
+				Scope: &port.ScopeFilter{DepartmentIDs: []uuid.UUID{uuid.New()}, CallerUserID: uuid.New()},
+			}, port.PageRequest{Limit: 10})
+			require.NoError(t, err)
+			assert.Empty(t, items)
+		})
+	})
+}
+
+func TestInstanceRepo_CountActiveByWorkflow(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA := uuid.New()
+	workflowID := uuid.New()
+
+	active := newInstance(tenantA, time.Now().UTC())
+	active.WorkflowID = workflowID
+	require.NoError(t, repo.Create(ctx, active))
+
+	completed := newInstance(tenantA, time.Now().UTC())
+	completed.WorkflowID = workflowID
+	require.NoError(t, repo.Create(ctx, completed))
+	_, err := repo.UpdateStatus(ctx, tenantA, completed.ID, domain.InstanceStatusCompleted, completed.RecordVersion)
+	require.NoError(t, err)
+
+	otherWorkflow := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, repo.Create(ctx, otherWorkflow))
+
+	count, err := repo.CountActiveByWorkflow(ctx, tenantA, workflowID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count, "only the RUNNING instance of this workflow_id counts, not the COMPLETED one or a different workflow_id")
+}
+
+func TestInstanceRepo_GetLiveByBusinessKey(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA, tenantB := uuid.New(), uuid.New()
+	live := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, repo.Create(ctx, live))
+
+	t.Run("a live instance is found by its subject and business key", func(t *testing.T) {
+		got, err := repo.GetLiveByBusinessKey(ctx, tenantA, live.SubjectID, live.BusinessKey)
+		require.NoError(t, err)
+		assert.Equal(t, live.ID, got.ID)
+	})
+
+	t.Run("another tenant does not see it", func(t *testing.T) {
+		_, err := repo.GetLiveByBusinessKey(ctx, tenantB, live.SubjectID, live.BusinessKey)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+
+	t.Run("the same key under another subject is not it", func(t *testing.T) {
+		_, err := repo.GetLiveByBusinessKey(ctx, tenantA, "another-subject", live.BusinessKey)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+
+	t.Run("a terminal instance holds no key", func(t *testing.T) {
+		_, err := repo.UpdateStatus(ctx, tenantA, live.ID, domain.InstanceStatusTerminated, live.RecordVersion)
+		require.NoError(t, err)
+		_, err = repo.GetLiveByBusinessKey(ctx, tenantA, live.SubjectID, live.BusinessKey)
+		assert.ErrorIs(t, err, domain.ErrNotFound)
+	})
+}
+
+func TestInstanceRepo_RecordRunID(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewInstanceRepo(appPool)
+	ctx := context.Background()
+
+	tenantA, tenantB := uuid.New(), uuid.New()
+	inst := newInstance(tenantA, time.Now().UTC())
+	require.NoError(t, repo.Create(ctx, inst))
+
+	t.Run("the run id is stored and the record version is left alone", func(t *testing.T) {
+		require.NoError(t, repo.RecordRunID(ctx, tenantA, inst.ID, "run-1"))
+		got, err := repo.GetByID(ctx, tenantA, inst.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "run-1", got.TemporalRunID)
+		assert.Equal(t, inst.RecordVersion, got.RecordVersion)
+	})
+
+	t.Run("an unknown instance is not found", func(t *testing.T) {
+		assert.ErrorIs(t, repo.RecordRunID(ctx, tenantA, uuid.New(), "run-2"), domain.ErrNotFound)
+	})
+
+	t.Run("another tenant cannot write it", func(t *testing.T) {
+		assert.ErrorIs(t, repo.RecordRunID(ctx, tenantB, inst.ID, "run-3"), domain.ErrNotFound)
+		got, err := repo.GetByID(ctx, tenantA, inst.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "run-1", got.TemporalRunID)
+	})
+}

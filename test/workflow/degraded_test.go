@@ -1,0 +1,467 @@
+package workflow_test
+
+import (
+	"testing"
+
+	"github.com/google/uuid"
+	"go.temporal.io/sdk/temporal"
+	"go.temporal.io/sdk/testsuite"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
+)
+
+func parallelCollaboration() *dsl.CompiledCollaboration {
+	return &dsl.CompiledCollaboration{
+		MainPlan: "main",
+		Plans: []*dsl.CompiledPlan{
+			{
+				Name: "main",
+				Departments: []dsl.DepartmentDef{
+					{ID: "warehouse", Stages: []dsl.StageDef{{Type: "prep", Activity: "pack_order"}}},
+					{ID: "billing", Stages: []dsl.StageDef{{Type: "prep", Activity: "charge_card"}}},
+				},
+				Execution: dsl.ExecutionPlan{
+					Steps: []dsl.ExecutionStep{
+						{Parallel: []dsl.ParallelBranch{
+							{DeptID: "warehouse", Steps: []dsl.ExecutionStep{{Sequential: []string{"warehouse"}}}},
+							{DeptID: "billing", Steps: []dsl.ExecutionStep{{Sequential: []string{"billing"}}}},
+						}},
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestExecute_ParallelBranchFailureDegradesThenForceForwardResolves(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := parallelCollaboration()
+	registerFakeActivities(env, collab, &activityHooks{createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+		if in.NodeKey == "billing/prep" {
+			return port.CreateTaskOutput{}, temporal.NewApplicationError("card declined", "ValidationError")
+		}
+		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+	}})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
+		})
+	}, tick)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
+		})
+	}, 10*tick)
+
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+	})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	var out wfengine.ExecuteOutput
+	if err := env.GetWorkflowResult(&out); err != nil {
+		t.Fatalf("GetWorkflowResult error: %v", err)
+	}
+	if out.Status != domain.InstanceStatusCompleted {
+		t.Errorf("Status = %v, want COMPLETED", out.Status)
+	}
+}
+
+func TestExecute_DegradedFailedBranchUsesRealIAMDepartmentID(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	billingIAMDeptID := "018e1f2a-0000-7000-8000-000000000099"
+	collab := &dsl.CompiledCollaboration{
+		MainPlan: "main",
+		Plans: []*dsl.CompiledPlan{{
+			Name: "main",
+			Departments: []dsl.DepartmentDef{
+				{ID: "warehouse", Stages: []dsl.StageDef{{Type: "prep", Activity: "pack_order"}}},
+				{ID: "billing", IAMDepartmentID: billingIAMDeptID, Stages: []dsl.StageDef{{Type: "prep", Activity: "charge_card"}}},
+			},
+			Execution: dsl.ExecutionPlan{Steps: []dsl.ExecutionStep{
+				{Parallel: []dsl.ParallelBranch{
+					{DeptID: "warehouse", Steps: []dsl.ExecutionStep{{Sequential: []string{"warehouse"}}}},
+					{DeptID: "billing", Steps: []dsl.ExecutionStep{{Sequential: []string{"billing"}}}},
+				}},
+			}},
+		}},
+	}
+
+	var gotDepartmentID uuid.UUID
+	registerFakeActivities(env, collab, &activityHooks{
+		createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			if in.NodeKey == "billing/prep" {
+				return port.CreateTaskOutput{}, temporal.NewApplicationError("card declined", "ValidationError")
+			}
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		},
+		updateInstanceStatus: func(in port.UpdateInstanceStatusInput) {
+			if len(in.FailedBranches) > 0 {
+				gotDepartmentID = in.FailedBranches[0].DepartmentID
+			}
+		},
+	})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
+		})
+	}, tick)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
+		})
+	}, 10*tick)
+
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+	})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	want, err := uuid.Parse(billingIAMDeptID)
+	if err != nil {
+		t.Fatalf("parse billingIAMDeptID: %v", err)
+	}
+	if gotDepartmentID != want {
+		t.Errorf("FailedBranches[0].DepartmentID = %v, want %v (the real IAMDepartmentID)", gotDepartmentID, want)
+	}
+}
+
+func TestExecute_ParallelBranchFailureDegradesThenForceBackRespawns(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := parallelCollaboration()
+	firstAttempt := true
+	billingCreateTaskCalls := 0
+	registerFakeActivities(env, collab, &activityHooks{createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+		if in.NodeKey != "billing/prep" {
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		}
+		billingCreateTaskCalls++
+		if firstAttempt {
+			firstAttempt = false
+			return port.CreateTaskOutput{}, temporal.NewApplicationError("card declined", "ValidationError")
+		}
+		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+	}})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
+		})
+	}, tick)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetDeptID: "billing", RecordVersion: 1,
+		})
+	}, 10*tick)
+
+	// The respawned attempt is billing/prep's second visit (the first,
+	// failed CreateTask call never reached the pending-signal registration
+	// at all, since runTaskStage returns before that point on activity
+	// error) — VisitCount: 2 matches taskVisits after the respawn.
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "billing", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
+		})
+	}, 20*tick)
+
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+	})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	var out wfengine.ExecuteOutput
+	if err := env.GetWorkflowResult(&out); err != nil {
+		t.Fatalf("GetWorkflowResult error: %v", err)
+	}
+	if billingCreateTaskCalls != 2 {
+		t.Errorf("billing CreateTaskActivity calls = %d, want 2 (initial failure + respawn) — a respawn that never actually re-runs the department would pass this test's Status assertion alone", billingCreateTaskCalls)
+	}
+	if out.Status != domain.InstanceStatusCompleted {
+		t.Errorf("Status = %v, want COMPLETED", out.Status)
+	}
+}
+
+// multiDeptBranchCollaboration is parallelCollaboration's shape but with
+// billing's Parallel branch running TWO departments in sequence
+// ("billing_charge" then "billing_invoice") rather than one — the shape
+// respawnBranch (degraded.go) exists to resume correctly: fb.DeptID (the
+// branch's own stable identity, "billing_charge") is not necessarily the
+// department that actually needs resuming.
+func multiDeptBranchCollaboration() *dsl.CompiledCollaboration {
+	return &dsl.CompiledCollaboration{
+		MainPlan: "main",
+		Plans: []*dsl.CompiledPlan{
+			{
+				Name: "main",
+				Departments: []dsl.DepartmentDef{
+					{ID: "warehouse", Stages: []dsl.StageDef{{Type: "prep", Activity: "pack_order"}}},
+					{ID: "billing_charge", Stages: []dsl.StageDef{{Type: "prep", Activity: "charge_card"}}},
+					{ID: "billing_invoice", Stages: []dsl.StageDef{{Type: "prep", Activity: "send_invoice"}}},
+				},
+				Execution: dsl.ExecutionPlan{
+					Steps: []dsl.ExecutionStep{
+						{Parallel: []dsl.ParallelBranch{
+							{DeptID: "warehouse", Steps: []dsl.ExecutionStep{{Sequential: []string{"warehouse"}}}},
+							{DeptID: "billing_charge", Steps: []dsl.ExecutionStep{{Sequential: []string{"billing_charge", "billing_invoice"}}}},
+						}},
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestExecute_ParallelBranchRespawnResumesPastLastCompletedDeptNotFromScratch
+// is regression coverage for a bug where DEGRADED respawn always resumed via
+// fb.DeptID (the branch's own stable identity) treated as a bare
+// DepartmentDef — for a branch running more than one department in sequence,
+// this either errored respawn outright (a non-department DeptID) or silently
+// re-ran the WRONG/already-completed department while never actually
+// retrying the one that failed. billing_charge succeeds, billing_invoice
+// fails, force-back must resume billing_invoice — not re-run billing_charge.
+func TestExecute_ParallelBranchRespawnResumesPastLastCompletedDeptNotFromScratch(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := multiDeptBranchCollaboration()
+	transition := func(dept string, visit int64) {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: dept, ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: visit,
+		})
+	}
+	chargeCalls, invoiceCalls := 0, 0
+	firstInvoiceAttempt := true
+	registerFakeActivities(env, collab, &activityHooks{
+		createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			switch in.NodeKey {
+			case "warehouse/prep":
+				transition("warehouse", 1)
+			case "billing_charge/prep":
+				chargeCalls++
+				transition("billing_charge", 1)
+			case "billing_invoice/prep":
+				invoiceCalls++
+				if firstInvoiceAttempt {
+					firstInvoiceAttempt = false
+					return port.CreateTaskOutput{}, temporal.NewApplicationError("invoice service down", "ValidationError")
+				}
+				transition("billing_invoice", 2)
+			}
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		},
+		updateInstanceStatus: func(in port.UpdateInstanceStatusInput) {
+			if in.Status == domain.InstanceStatusDegraded {
+				env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
+					AdminUserID: "admin-1", TargetDeptID: "billing_charge", RecordVersion: 1,
+				})
+			}
+		},
+	})
+
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+	})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	var out wfengine.ExecuteOutput
+	if err := env.GetWorkflowResult(&out); err != nil {
+		t.Fatalf("GetWorkflowResult error: %v", err)
+	}
+	if chargeCalls != 1 {
+		t.Errorf("billing_charge CreateTaskActivity calls = %d, want exactly 1 — respawn must not re-run the already-completed department", chargeCalls)
+	}
+	if invoiceCalls != 2 {
+		t.Errorf("billing_invoice CreateTaskActivity calls = %d, want 2 (initial failure + respawn) — respawn must actually retry the department that failed", invoiceCalls)
+	}
+	if out.Status != domain.InstanceStatusCompleted {
+		t.Errorf("Status = %v, want COMPLETED", out.Status)
+	}
+}
+
+// TestExecute_ActiveParallelForceForwardSupersedesOneBranch closes the T1.1
+// gap: instance-force-forward's LLD §3.1 precondition is "RUNNING or
+// DEGRADED", not DEGRADED-only — force-forward must resolve a still-active
+// Parallel branch (neither branch has failed, the instance never enters
+// DEGRADED at all) exactly like it already does for a failed one. billing is
+// force-forwarded away and never signalled to complete; only warehouse's own
+// completion is needed for the instance to finish.
+func TestExecute_ActiveParallelForceForwardSupersedesOneBranch(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := parallelCollaboration()
+	var recordedOldNodeKeys []string
+	forceRouteCalls := 0
+	sawDegraded := false
+	registerFakeActivities(env, collab, &activityHooks{
+		recordForceRoute: func(in port.RecordForceRouteInput) {
+			forceRouteCalls++
+			for _, k := range in.OldNodeKeys {
+				recordedOldNodeKeys = append(recordedOldNodeKeys, string(k))
+			}
+		},
+		updateInstanceStatus: func(in port.UpdateInstanceStatusInput) {
+			if in.Status == domain.InstanceStatusDegraded {
+				sawDegraded = true
+			}
+		},
+	})
+
+	// Fires while both warehouse and billing are still pending (neither has
+	// settled) — the gap this test closes, not DEGRADED's own force-forward.
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
+		})
+	}, 5*tick)
+
+	// Deliberately never signal billing/prep's completion — if the
+	// implementation fell back to the old drop-and-log behavior, this test
+	// would hang until the test environment's default execution timeout,
+	// not merely fail an assertion.
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
+		})
+	}, 10*tick)
+
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+	})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	var out wfengine.ExecuteOutput
+	if err := env.GetWorkflowResult(&out); err != nil {
+		t.Fatalf("GetWorkflowResult error: %v", err)
+	}
+	if out.Status != domain.InstanceStatusCompleted {
+		t.Errorf("Status = %v, want COMPLETED", out.Status)
+	}
+	if sawDegraded {
+		t.Error("instance entered DEGRADED; force-forward on a still-active branch must resolve without ever degrading")
+	}
+	if forceRouteCalls != 1 {
+		t.Errorf("RecordForceRouteActivity calls = %d, want 1", forceRouteCalls)
+	}
+	if len(recordedOldNodeKeys) != 1 || recordedOldNodeKeys[0] != "billing/prep" {
+		t.Errorf("RecordForceRouteActivity's OldNodeKeys = %v, want exactly [billing/prep]", recordedOldNodeKeys)
+	}
+}
+
+func TestExecute_ActiveParallelForceForwardDuplicateSignalIsNoOp(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := parallelCollaboration()
+	forceRouteCalls := 0
+	registerFakeActivities(env, collab, &activityHooks{
+		recordForceRoute: func(port.RecordForceRouteInput) { forceRouteCalls++ },
+	})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
+		})
+	}, 5*tick)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
+		})
+	}, 6*tick)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
+		})
+	}, 10*tick)
+
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+	})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	var out wfengine.ExecuteOutput
+	if err := env.GetWorkflowResult(&out); err != nil {
+		t.Fatalf("GetWorkflowResult error: %v", err)
+	}
+	if out.Status != domain.InstanceStatusCompleted {
+		t.Errorf("Status = %v, want COMPLETED", out.Status)
+	}
+	if forceRouteCalls != 1 {
+		t.Errorf("RecordForceRouteActivity calls = %d, want exactly 1 (duplicate force-forward must be dropped)", forceRouteCalls)
+	}
+}
+
+func TestExecute_DEGRADEDRejectsInstancePause(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := parallelCollaboration()
+	registerFakeActivities(env, collab, &activityHooks{createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+		if in.NodeKey == "billing/prep" {
+			return port.CreateTaskOutput{}, temporal.NewApplicationError("card declined", "ValidationError")
+		}
+		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+	}})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
+		})
+	}, tick)
+
+	// Arrives while DEGRADED: instance-pause requires RUNNING, so this must
+	// be rejected at signal validation before it ever reaches the park
+	// loop's Selector (which registers no case for it at all).
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-pause:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
+	}, 5*tick)
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
+		})
+	}, 10*tick)
+
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+	})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
+	}
+	var out wfengine.ExecuteOutput
+	if err := env.GetWorkflowResult(&out); err != nil {
+		t.Fatalf("GetWorkflowResult error: %v", err)
+	}
+	if out.Status != domain.InstanceStatusCompleted {
+		t.Errorf("Status = %v, want COMPLETED (instance-pause must not have parked the instance)", out.Status)
+	}
+}
