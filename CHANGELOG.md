@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The compat job checks out the Workflow-Events Consumer at `main` (`compat_consumer_ref`), now that its branch is merged.
 - `platform-events/v2` is `v2.2.1` (consumer-side dead-letter fixes, Go 1.26.10; no API change).
 - `workflow-models/v2` is `v2.1.0`, the stable release of `v2.1.0-rc.3` (same code).
 - Connector alias calls carry the caller identity and no department grant, per IAM's header contract: the stream entry carries the automation principal's `principal_id` and `principal_sub` from the read made at enqueue, and the worker sends `x-tenant-id`, `x-user-id` (the `principal_sub`) and the lane department as `x-workflow-department-id`; the bare department UUID in `x-departments` is gone. `workflow-connectors/v2` is `v2.2.0`, which carries the caller identity (LLD rev 1.115).
