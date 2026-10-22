@@ -150,6 +150,8 @@ Tests fail when a router operation is missing from its spec or the reverse, and 
 
 Three images from one multi-stage `Dockerfile` (`server`, `worker`, `connector-worker`), base images pinned by digest (`make pin-base-images`). The Helm chart in `deploy/helm` has one Deployment per binary, each with its own PDB and NetworkPolicy, HPAs for the API and the worker, a migration job, and an optional `ServiceMonitor` and `PrometheusRule`. `deploy/monitoring` holds the static twins for clusters without the Prometheus Operator. `make helm-lint` renders the chart and validates it with `kubeconform`; a test checks that every Deployment sets the variables its binary requires.
 
+The release runs in `workflow-app`, inside the Istio mesh with mTLS: Org & Membership and the Token Service admit Workflow callers by that namespace. The API's NetworkPolicy allows egress to both in `iam` on 8080, and the route-level `SecurityPolicy` sets `mergeType: StrategicMerge` (Envoy Gateway 1.8 or later) so it keeps the gateway's JWT validation and authorisation filter; on an older gateway, keep it disabled.
+
 Roll one process back with `kubectl rollout undo deployment/<name>`, not `helm rollback`, which reverts the whole release. mTLS between pods is the service mesh's job; the NetworkPolicies are L3/L4 defence in depth.
 
 ---

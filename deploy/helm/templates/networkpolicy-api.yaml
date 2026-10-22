@@ -92,6 +92,20 @@ spec:
             matchLabels:
               {{- toYaml .podSelector.matchLabels | nindent 14 }}
     {{- end }}
+    {{- range .Values.networkPolicy.apiIamEgressTargets }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .podSelector.matchLabels | nindent 14 }}
+          namespaceSelector:
+            matchLabels:
+              {{- toYaml .namespaceSelector.matchLabels | nindent 14 }}
+      ports:
+        {{- range .ports }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
     {{- with .Values.networkPolicy.additionalEgressRules }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

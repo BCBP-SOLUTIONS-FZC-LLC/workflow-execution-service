@@ -17,6 +17,9 @@ spec:
     group: gateway.networking.k8s.io
     kind: HTTPRoute
     name: {{ include "workflow-execution-service.apiFullname" . }}
+  {{- with .Values.ingress.securityPolicy.mergeType }}
+  mergeType: {{ . }}
+  {{- end }}
   cors:
     allowOrigins:
       {{- range .Values.ingress.securityPolicy.cors.allowOrigins }}

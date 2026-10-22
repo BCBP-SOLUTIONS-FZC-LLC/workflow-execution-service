@@ -125,6 +125,10 @@ ingress:
 
   securityPolicy:
     enabled: false
+    # Merges this route policy with the Gateway-level SecurityPolicy (Envoy Gateway
+    # v1.8+). Unset, the route policy replaces the gateway's, dropping its JWT
+    # validation and the authorisation filter that writes the identity headers.
+    mergeType: StrategicMerge
     cors:
       enabled: false
       allowOrigins: []
@@ -275,6 +279,23 @@ networkPolicy:
     - podSelector:
         matchLabels:
           app.kubernetes.io/name: workflow-definition-service
+  # The API's reads of Org & Membership (eligibility) and the Token Service (the
+  # automation principal), in the iam namespace on their ports.
+  apiIamEgressTargets:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: iam-org-membership
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: iam
+      ports: [8080]
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: iam-token-service
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: iam
+      ports: [8080]
   metricsIngress:
     enabled: true
     namespaceSelector:
