@@ -72,16 +72,20 @@ func (h *Handler) handleWorkflowTaskCreated(c *gin.Context, env events.Envelope[
 	}
 
 	ctx := guCtx(c.Request.Context(), env.TenantID)
+	var principal port.AutomationPrincipal
 	if h.principals != nil {
-		if _, err := h.principals.AutomationPrincipal(ctx, tenantID); err != nil {
+		resolved, err := h.principals.AutomationPrincipal(ctx, tenantID)
+		if err != nil {
 			h.reconcilerError(c, eventType, err)
 			return
 		}
+		principal = resolved
 	}
 	if err := h.connectorEvents.PublishTaskCreated(ctx, port.ConnectorTaskCreatedEvent{
 		EventID: eventID, TenantID: tenantID, InstanceID: instanceID, TaskID: taskID,
 		NodeKey: p.NodeKey, DepartmentID: departmentID, ConnectorType: *p.ConnectorType,
 		ResolvedInputs: p.ResolvedInputs, OutputMapping: p.OutputMapping,
+		PrincipalID: principal.ID, PrincipalSub: principal.Subject,
 	}); err != nil {
 		h.reconcilerError(c, eventType, err)
 		return

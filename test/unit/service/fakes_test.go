@@ -818,6 +818,6 @@ type fakePrincipals struct {
 	err       error
 }
 
-func (f fakePrincipals) AutomationPrincipal(context.Context, uuid.UUID) (uuid.UUID, error) {
-	return f.principal, f.err
+func (f fakePrincipals) AutomationPrincipal(context.Context, uuid.UUID) (port.AutomationPrincipal, error) {
+	return port.AutomationPrincipal{ID: f.principal, Subject: "sub-" + f.principal.String()}, f.err
 }

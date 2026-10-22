@@ -382,8 +382,9 @@ func (e *env) tenantRevocation(t *testing.T) {
 }
 
 type partnerCall struct {
-	method, path, token, departments string
-	body                             map[string]any
+	method, path, token, tenant, user, lane string
+	departments                             []string
+	body                                    map[string]any
 }
 
 func (e *env) connectorRoundTrip(t *testing.T) {
@@ -392,7 +393,11 @@ func (e *env) connectorRoundTrip(t *testing.T) {
 
 	calls := make(chan partnerCall, 4)
 	partner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c := partnerCall{method: r.Method, path: r.URL.Path, token: r.Header.Get("x-internal-token"), departments: r.Header.Get("x-departments")}
+		c := partnerCall{
+			method: r.Method, path: r.URL.Path, token: r.Header.Get("x-internal-token"),
+			tenant: r.Header.Get("x-tenant-id"), user: r.Header.Get("x-user-id"), lane: r.Header.Get("x-workflow-department-id"),
+			departments: r.Header.Values("x-departments"),
+		}
 		_ = json.NewDecoder(r.Body).Decode(&c.body)
 		calls <- c
 		w.Header().Set("Content-Type", "application/json")
@@ -433,8 +438,14 @@ func (e *env) connectorRoundTrip(t *testing.T) {
 		if c.token != executionToken {
 			t.Errorf("partner call x-internal-token = %q, want the worker's internal token", c.token)
 		}
-		if !strings.Contains(c.departments, department.String()) {
-			t.Errorf("partner call x-departments = %q, want it to name the stage's department %s", c.departments, department)
+		if c.tenant != tn.id.String() || c.user != automationPrincipal.Subject {
+			t.Errorf("partner call identity = tenant %q user %q, want the job's tenant %s and the automation principal's subject %s", c.tenant, c.user, tn.id, automationPrincipal.Subject)
+		}
+		if c.lane != department.String() {
+			t.Errorf("partner call x-workflow-department-id = %q, want the stage's lane department %s", c.lane, department)
+		}
+		if len(c.departments) != 0 {
+			t.Errorf("partner call x-departments = %q, want none: the automation principal holds no department role", c.departments)
 		}
 		if c.body["id"] != "42" {
 			t.Errorf("partner call body = %v, want the order variable", c.body)

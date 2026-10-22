@@ -84,6 +84,7 @@ type dispatchJob struct {
 	tenantID       uuid.UUID
 	taskID         uuid.UUID
 	departmentID   uuid.UUID
+	principalSub   string
 	connectorType  string
 	resolvedInputs map[string]any
 }
@@ -108,7 +109,7 @@ func parseDispatchJob(entry valkeystream.Entry) (dispatchJob, error) {
 		}
 	}
 	return dispatchJob{
-		tenantID: tenantID, taskID: taskID, departmentID: departmentID,
+		tenantID: tenantID, taskID: taskID, departmentID: departmentID, principalSub: entry.Fields["principal_sub"],
 		connectorType: entry.Fields["connector_type"], resolvedInputs: resolvedInputs,
 	}, nil
 }
@@ -195,8 +196,9 @@ func execute(ctx context.Context, d *deps, pool *typePool, job dispatchJob, wlog
 		return dispatchOutcome{ErrorClass: classifyError(err)}
 	}
 
-	execCtx = connectors.WithDepartments(execCtx, []string{job.departmentID.String()})
 	execCtx = connectors.WithTenant(execCtx, job.tenantID.String())
+	execCtx = connectors.WithActor(execCtx, job.principalSub)
+	execCtx = connectors.WithLaneDepartment(execCtx, job.departmentID.String())
 	execCtx = pgcommon.WithGUCSet(execCtx, pgdomain.GUCSet{TenantID: job.tenantID.String()})
 
 	method := aliasMethod(job.connectorType, input, d.currentAliases())

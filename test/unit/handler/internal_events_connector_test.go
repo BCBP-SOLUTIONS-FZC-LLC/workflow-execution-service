@@ -29,16 +29,16 @@ func (f *fakeConnectorEventPublisher) PublishTaskCreated(ctx context.Context, ev
 }
 
 type fakePrincipalResolver struct {
-	principal uuid.UUID
+	principal port.AutomationPrincipal
 	err       error
 }
 
-func (f fakePrincipalResolver) AutomationPrincipal(context.Context, uuid.UUID) (uuid.UUID, error) {
+func (f fakePrincipalResolver) AutomationPrincipal(context.Context, uuid.UUID) (port.AutomationPrincipal, error) {
 	return f.principal, f.err
 }
 
 func newConnectorEventsHandler(fakes *eventsFakes, publisher port.ConnectorEventPublisher) *handler.Handler {
-	return newConnectorEventsHandlerWith(fakes, publisher, fakePrincipalResolver{principal: uuid.New()})
+	return newConnectorEventsHandlerWith(fakes, publisher, fakePrincipalResolver{principal: port.AutomationPrincipal{ID: uuid.New(), Subject: "principal-sub"}})
 }
 
 func newConnectorEventsHandlerWith(fakes *eventsFakes, publisher port.ConnectorEventPublisher, principals port.AutomationPrincipalResolver) *handler.Handler {
@@ -80,6 +80,21 @@ func TestHandleWorkflowTaskCreated_ConnectorTyped_Publishes(t *testing.T) {
 	assert.Equal(t, testTaskID, publisher.published[0].TaskID)
 	assert.Equal(t, "storage", publisher.published[0].ConnectorType)
 	assert.Equal(t, "b1", publisher.published[0].ResolvedInputs["bucket"])
+}
+
+func TestHandleWorkflowTaskCreated_TheEntryCarriesTheAutomationPrincipal(t *testing.T) {
+	fakes := newEventsFakes()
+	publisher := &fakeConnectorEventPublisher{}
+	principal := port.AutomationPrincipal{ID: uuid.New(), Subject: "kc-sub-of-the-principal"}
+	router := newInternalRouter(newConnectorEventsHandlerWith(fakes, publisher, fakePrincipalResolver{principal: principal}))
+
+	connectorType := "rest-call"
+	w := postEvent(router, envelope("WorkflowTaskCreated", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType)))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, publisher.published, 1)
+	assert.Equal(t, principal.ID, publisher.published[0].PrincipalID)
+	assert.Equal(t, principal.Subject, publisher.published[0].PrincipalSub, "the worker names the principal on an alias call without resolving it itself")
 }
 
 func TestHandleWorkflowTaskCreated_NonConnector_SkipsPublish(t *testing.T) {

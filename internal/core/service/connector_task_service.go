@@ -144,7 +144,8 @@ func (s *ConnectorTaskService) automationPrincipal(ctx context.Context, tenantID
 	if s.Principals == nil {
 		return uuid.Nil, port.ErrNoAutomationPrincipal
 	}
-	return s.Principals.AutomationPrincipal(ctx, tenantID)
+	p, err := s.Principals.AutomationPrincipal(ctx, tenantID)
+	return p.ID, err
 }
 
 const automationReasonTag = "automation"

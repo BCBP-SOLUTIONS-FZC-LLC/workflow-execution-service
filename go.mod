@@ -6,7 +6,7 @@ require (
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2 v2.1.0
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon v1.6.0
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2 v2.0.1
-	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2 v2.1.0
+	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2 v2.1.1-0.20261022052224-dea3ed18d9a1
 	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2 v2.1.0-rc.3
 	github.com/aws/aws-sdk-go-v2 v1.47.3
 	github.com/aws/aws-sdk-go-v2/config v1.33.6

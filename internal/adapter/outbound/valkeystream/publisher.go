@@ -43,6 +43,8 @@ func (p *EventPublisher) PublishTaskCreated(ctx context.Context, event port.Conn
 		"connector_type":  event.ConnectorType,
 		"resolved_inputs": string(resolvedInputs),
 		"output_mapping":  string(outputMapping),
+		"principal_id":    event.PrincipalID.String(),
+		"principal_sub":   event.PrincipalSub,
 	})
 	if err != nil {
 		return fmt.Errorf("valkeystream: publish task-created: %w", err)

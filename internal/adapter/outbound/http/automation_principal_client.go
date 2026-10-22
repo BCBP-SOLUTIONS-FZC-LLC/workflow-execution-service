@@ -30,8 +30,8 @@ type AutomationPrincipalClient struct {
 }
 
 type cachedPrincipal struct {
-	id      uuid.UUID
-	expires time.Time
+	principal port.AutomationPrincipal
+	expires   time.Time
 }
 
 func NewAutomationPrincipalClient(baseURL string, timeout, cacheTTL time.Duration) *AutomationPrincipalClient {
@@ -43,18 +43,18 @@ func NewAutomationPrincipalClient(baseURL string, timeout, cacheTTL time.Duratio
 	}
 }
 
-func (c *AutomationPrincipalClient) AutomationPrincipal(ctx context.Context, tenantID uuid.UUID) (uuid.UUID, error) {
+func (c *AutomationPrincipalClient) AutomationPrincipal(ctx context.Context, tenantID uuid.UUID) (port.AutomationPrincipal, error) {
 	if c.baseURL == "" {
-		return uuid.Nil, fmt.Errorf("token service not configured: %w", port.ErrNoAutomationPrincipal)
+		return port.AutomationPrincipal{}, fmt.Errorf("token service not configured: %w", port.ErrNoAutomationPrincipal)
 	}
-	if id, ok := c.cached(tenantID); ok {
-		return id, nil
+	if p, ok := c.cached(tenantID); ok {
+		return p, nil
 	}
 
 	url := fmt.Sprintf("%s/api/v1/internal/tenants/%s/service-accounts/platform-automation", c.baseURL, tenantID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("build token service request: %w", err)
+		return port.AutomationPrincipal{}, fmt.Errorf("build token service request: %w", err)
 	}
 	req.Header.Set("x-user-id", iamSystemUserID)
 	req.Header.Set("x-tenant-id", tenantID.String())
@@ -62,45 +62,50 @@ func (c *AutomationPrincipalClient) AutomationPrincipal(ctx context.Context, ten
 	gincommon.InjectTraceContext(ctx, req.Header)
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("%w: token service: %v", ErrUpstreamUnavailable, err)
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service: %v", ErrUpstreamUnavailable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
-		return uuid.Nil, port.ErrNoAutomationPrincipal
+		return port.AutomationPrincipal{}, port.ErrNoAutomationPrincipal
 	case resp.StatusCode != http.StatusOK:
-		return uuid.Nil, fmt.Errorf("%w: token service answered %d", ErrUpstreamUnavailable, resp.StatusCode)
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered %d", ErrUpstreamUnavailable, resp.StatusCode)
 	}
 
 	var body struct {
-		PrincipalID uuid.UUID `json:"principal_id"`
-		Status      string    `json:"status"`
+		PrincipalID  uuid.UUID `json:"principal_id"`
+		PrincipalSub string    `json:"principal_sub"`
+		Status       string    `json:"status"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil || body.PrincipalID == uuid.Nil {
-		return uuid.Nil, fmt.Errorf("%w: token service answered without a principal_id", ErrUpstreamUnavailable)
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered without a principal_id", ErrUpstreamUnavailable)
 	}
 
 	if body.Status != "active" {
-		return uuid.Nil, port.ErrNoAutomationPrincipal
+		return port.AutomationPrincipal{}, port.ErrNoAutomationPrincipal
+	}
+	if body.PrincipalSub == "" {
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered without a principal_sub", ErrUpstreamUnavailable)
 	}
 
-	c.remember(tenantID, body.PrincipalID)
-	return body.PrincipalID, nil
+	principal := port.AutomationPrincipal{ID: body.PrincipalID, Subject: body.PrincipalSub}
+	c.remember(tenantID, principal)
+	return principal, nil
 }
 
-func (c *AutomationPrincipalClient) cached(tenantID uuid.UUID) (uuid.UUID, bool) {
+func (c *AutomationPrincipalClient) cached(tenantID uuid.UUID) (port.AutomationPrincipal, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.known[tenantID]
 	if !ok || time.Now().After(entry.expires) {
-		return uuid.Nil, false
+		return port.AutomationPrincipal{}, false
 	}
-	return entry.id, true
+	return entry.principal, true
 }
 
-func (c *AutomationPrincipalClient) remember(tenantID, principalID uuid.UUID) {
+func (c *AutomationPrincipalClient) remember(tenantID uuid.UUID, principal port.AutomationPrincipal) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.known[tenantID] = cachedPrincipal{id: principalID, expires: time.Now().Add(c.ttl)}
+	c.known[tenantID] = cachedPrincipal{principal: principal, expires: time.Now().Add(c.ttl)}
 }

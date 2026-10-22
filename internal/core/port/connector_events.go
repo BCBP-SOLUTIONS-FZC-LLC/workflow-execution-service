@@ -22,4 +22,6 @@ type ConnectorTaskCreatedEvent struct {
 	ConnectorType  string
 	ResolvedInputs map[string]any
 	OutputMapping  []dsl.IOVar
+	PrincipalID    uuid.UUID
+	PrincipalSub   string
 }

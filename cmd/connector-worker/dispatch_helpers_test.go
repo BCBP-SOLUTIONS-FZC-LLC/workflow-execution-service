@@ -147,6 +147,8 @@ type contextCapturingConnector struct {
 	typ         string
 	tenant      string
 	tenantFound bool
+	actor       string
+	lane        string
 	departments []string
 }
 
@@ -154,19 +156,23 @@ func (c *contextCapturingConnector) Type() string { return c.typ }
 
 func (c *contextCapturingConnector) Execute(ctx context.Context, _ map[string]any) (map[string]any, error) {
 	c.tenant, c.tenantFound = connectors.TenantFromContext(ctx)
+	c.actor, _ = connectors.ActorFromContext(ctx)
+	c.lane, _ = connectors.LaneDepartmentFromContext(ctx)
 	c.departments, _ = connectors.DepartmentsFromContext(ctx)
 	return map[string]any{}, nil
 }
 
-func TestExecute_CarriesTheJobsTenantAndDepartment(t *testing.T) {
+func TestExecute_CarriesTheJobsTenantPrincipalAndLaneDepartment(t *testing.T) {
 	conn := &contextCapturingConnector{typ: "capture"}
 	pool := &typePool{connectorType: conn.typ, sem: make(chan struct{}, 1), timeout: time.Second, connector: conn}
-	job := dispatchJob{tenantID: uuid.New(), taskID: uuid.New(), departmentID: uuid.New(), connectorType: conn.typ}
+	job := dispatchJob{tenantID: uuid.New(), taskID: uuid.New(), departmentID: uuid.New(), principalSub: "principal-sub", connectorType: conn.typ}
 
 	outcome := execute(context.Background(), &deps{retry: testBounds}, pool, job, noopLogger{})
 
 	require.Empty(t, outcome.ErrorClass)
 	assert.True(t, conn.tenantFound)
 	assert.Equal(t, job.tenantID.String(), conn.tenant)
-	assert.Equal(t, []string{job.departmentID.String()}, conn.departments)
+	assert.Equal(t, "principal-sub", conn.actor)
+	assert.Equal(t, job.departmentID.String(), conn.lane)
+	assert.Empty(t, conn.departments, "no department grant is set for a connector call")
 }

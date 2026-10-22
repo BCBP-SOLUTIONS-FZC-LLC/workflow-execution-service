@@ -55,8 +55,8 @@ const e2eConnectorActorUserID = "99999999-9999-4999-8999-999999999999"
 // e2ePrincipals resolves every tenant to the one automation principal.
 type e2ePrincipals struct{}
 
-func (e2ePrincipals) AutomationPrincipal(context.Context, uuid.UUID) (uuid.UUID, error) {
-	return uuid.MustParse(e2eConnectorActorUserID), nil
+func (e2ePrincipals) AutomationPrincipal(context.Context, uuid.UUID) (port.AutomationPrincipal, error) {
+	return port.AutomationPrincipal{ID: uuid.MustParse(e2eConnectorActorUserID), Subject: "e2e-principal-sub"}, nil
 }
 
 type e2eDefinitionClient struct {
@@ -200,9 +200,10 @@ func e2eBuildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, valkey
 
 	h := handler.New(handler.Services{
 		Tasks: taskService, Instances: instanceService, Eligibility: eligibility,
-		ProcessedEvents: processedEvents,
-		ConnectorTasks:  connectorTaskService,
-		ConnectorEvents: connectorEvents,
+		ProcessedEvents:      processedEvents,
+		ConnectorTasks:       connectorTaskService,
+		ConnectorEvents:      connectorEvents,
+		AutomationPrincipals: e2ePrincipals{},
 	})
 	return httpadapter.NewRouter(httpadapter.RouterConfig{
 		GinConfig:        gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"},
@@ -322,10 +323,14 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 
 	// target is the real HTTP endpoint the rest-call connector dispatches
 	// to, standing in for another platform service's internal API.
-	var gotToken, gotDepartments string
+	var gotToken, gotTenant, gotUser, gotLane string
+	var gotDepartments []string
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotToken = r.Header.Get("x-internal-token")
-		gotDepartments = r.Header.Get("x-departments")
+		gotTenant = r.Header.Get("x-tenant-id")
+		gotUser = r.Header.Get("x-user-id")
+		gotLane = r.Header.Get("x-workflow-department-id")
+		gotDepartments = r.Header.Values("x-departments")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -462,8 +467,14 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 	if gotToken != e2eInternalToken {
 		t.Errorf("rest-call dispatch's x-internal-token = %q, want %q", gotToken, e2eInternalToken)
 	}
-	if gotDepartments != departmentIAMID.String() {
-		t.Errorf("rest-call dispatch's x-departments = %q, want %q", gotDepartments, departmentIAMID.String())
+	if gotUser != "e2e-principal-sub" || gotTenant == "" {
+		t.Errorf("rest-call dispatch's identity = tenant %q user %q, want the job's tenant and the automation principal's subject", gotTenant, gotUser)
+	}
+	if gotLane != departmentIAMID.String() {
+		t.Errorf("rest-call dispatch's x-workflow-department-id = %q, want %q", gotLane, departmentIAMID.String())
+	}
+	if len(gotDepartments) != 0 {
+		t.Errorf("rest-call dispatch's x-departments = %q, want none", gotDepartments)
 	}
 }
 

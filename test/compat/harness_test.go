@@ -89,11 +89,14 @@ type definitionDB struct {
 
 // automationPrincipal stands in for the Token Service: every tenant's
 // connector tasks run as one principal.
-var automationPrincipal = uuid.MustParse("99999999-9999-4999-8999-999999999999")
+var automationPrincipal = port.AutomationPrincipal{
+	ID:      uuid.MustParse("99999999-9999-4999-8999-999999999999"),
+	Subject: "f3c1a2b4-0000-4000-8000-00000000a7a7",
+}
 
 type onePrincipal struct{}
 
-func (onePrincipal) AutomationPrincipal(context.Context, uuid.UUID) (uuid.UUID, error) {
+func (onePrincipal) AutomationPrincipal(context.Context, uuid.UUID) (port.AutomationPrincipal, error) {
 	return automationPrincipal, nil
 }
 

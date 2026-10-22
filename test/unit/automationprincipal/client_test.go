@@ -38,7 +38,7 @@ func tokenService(t *testing.T, hits *atomic.Int32, status int) *httptest.Server
 			}
 			_, _ = w.Write([]byte(`{"principal_id":"` + principalA.String() + `","principal_sub":"7f3c","status":"active"}`))
 		case "/api/v1/internal/tenants/" + tenantB.String() + "/service-accounts/platform-automation":
-			_, _ = w.Write([]byte(`{"principal_id":"` + principalB.String() + `","status":"active"}`))
+			_, _ = w.Write([]byte(`{"principal_id":"` + principalB.String() + `","principal_sub":"9b2d","status":"active"}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -55,7 +55,7 @@ func TestAutomationPrincipal_ReturnsThePrincipalID(t *testing.T) {
 	got, err := c.AutomationPrincipal(context.Background(), tenantA)
 
 	require.NoError(t, err)
-	assert.Equal(t, principalA, got, "the stable principal_id is the actor, never the re-mint-sensitive sub")
+	assert.Equal(t, port.AutomationPrincipal{ID: principalA, Subject: "7f3c"}, got, "the stable principal_id is the recorded actor; the sub is what a connector call names")
 }
 
 func TestAutomationPrincipal_AnswerIsCachedPerTenant(t *testing.T) {
@@ -66,11 +66,11 @@ func TestAutomationPrincipal_AnswerIsCachedPerTenant(t *testing.T) {
 	for range 3 {
 		got, err := c.AutomationPrincipal(context.Background(), tenantA)
 		require.NoError(t, err)
-		assert.Equal(t, principalA, got)
+		assert.Equal(t, principalA, got.ID)
 	}
 	other, err := c.AutomationPrincipal(context.Background(), tenantB)
 	require.NoError(t, err)
-	assert.Equal(t, principalB, other, "another tenant is not served tenant A's principal")
+	assert.Equal(t, principalB, other.ID, "another tenant is not served tenant A's principal")
 	assert.EqualValues(t, 2, hits.Load(), "one read per tenant inside the cache lifetime")
 }
 
