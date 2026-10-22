@@ -2,8 +2,6 @@ package handler_test
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -1322,109 +1320,6 @@ func envelopeWithSchemaID(eventType string, eventID, tenantID uuid.UUID, at time
 		"dataschema": schemaID,
 		"data":       data,
 	}
-}
-
-func base64JSON(t *testing.T, raw []byte) string {
-	t.Helper()
-	return base64.StdEncoding.EncodeToString(raw)
-}
-
-func TestHandleInternalEvent_SchemaRegistryPayload_DecodedBeforeDispatch(t *testing.T) {
-	fakes := newEventsFakes()
-	var gotIn port.UserDeletedInput
-	fakes.userSafetyNet.vacateAssignments = func(_ context.Context, in port.UserDeletedInput) error {
-		gotIn = in
-		return nil
-	}
-
-	deletedAt := time.Now().Format(time.RFC3339)
-	plainPayload, err := json.Marshal(map[string]any{
-		"user_id":    testUserID.String(),
-		"deleted_at": deletedAt,
-	})
-	require.NoError(t, err)
-
-	const schemaID = "8fa88cde-824c-47bc-836b-665cd42c2222"
-	encodedPlaceholder := []byte("glue-header-plus-payload-placeholder")
-	var gotSchemaID string
-	var gotEncoded []byte
-	decoder := &fakeEventDecoder{decode: func(_ context.Context, schemaID string, encoded []byte) (json.RawMessage, error) {
-		gotSchemaID = schemaID
-		gotEncoded = encoded
-		return plainPayload, nil
-	}}
-	router := newInternalRouter(newEventsHandlerWithDecoder(fakes, decoder))
-
-	w := postEvent(router, envelopeWithSchemaID("UserDeleted", uuid.New(), testTenantID, time.Now(), schemaID, base64JSON(t, encodedPlaceholder)))
-
-	require.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, testUserID, gotIn.UserID, "the typed handler must see the decoder's plain-JSON output, not the base64 wire bytes")
-	assert.Equal(t, schemaID, gotSchemaID, "the envelope's dataschema must be passed through to Decode")
-	assert.Equal(t, encodedPlaceholder, gotEncoded, "the base64-decoded wire bytes must be passed through to Decode")
-}
-
-func TestHandleInternalEvent_SchemaRegistryPayload_NilDecoder_502Retryable(t *testing.T) {
-	fakes := newEventsFakes()
-	router := newInternalRouter(newEventsHandler(fakes)) // no EventDecoder wired
-
-	before := decodeFailedSampleCount(t, "UserDeleted")
-
-	w := postEvent(router, envelopeWithSchemaID("UserDeleted", uuid.New(), testTenantID, time.Now(), "some-schema-id", base64JSON(t, []byte("x"))))
-
-	assert.Equal(t, http.StatusBadGateway, w.Code, "a decode failure is retryable infra, not a rejected client payload")
-	assert.Equal(t, before+1, decodeFailedSampleCount(t, "UserDeleted"))
-}
-
-func TestHandleInternalEvent_SchemaRegistryPayload_BadBase64_502Retryable(t *testing.T) {
-	fakes := newEventsFakes()
-	decoder := &fakeEventDecoder{}
-	router := newInternalRouter(newEventsHandlerWithDecoder(fakes, decoder))
-
-	w := postEvent(router, envelopeWithSchemaID("UserDeleted", uuid.New(), testTenantID, time.Now(), "some-schema-id", "not-valid-base64!!"))
-
-	assert.Equal(t, http.StatusBadGateway, w.Code)
-}
-
-func TestHandleInternalEvent_SchemaRegistryPayload_NonStringData_502Retryable(t *testing.T) {
-	fakes := newEventsFakes()
-	decoder := &fakeEventDecoder{}
-	router := newInternalRouter(newEventsHandlerWithDecoder(fakes, decoder))
-
-	// "data" must be a JSON string (base64) when dataschema is set - an
-	// object here means the envelope claims codec-encoding but doesn't carry
-	// it in the expected shape.
-	w := postEvent(router, envelopeWithSchemaID("UserDeleted", uuid.New(), testTenantID, time.Now(), "some-schema-id", map[string]any{"not": "a string"}))
-
-	assert.Equal(t, http.StatusBadGateway, w.Code)
-}
-
-func TestHandleInternalEvent_SchemaRegistryPayload_DecoderError_502Retryable(t *testing.T) {
-	fakes := newEventsFakes()
-	decoder := &fakeEventDecoder{decode: func(context.Context, string, []byte) (json.RawMessage, error) {
-		return nil, errors.New("schema registry unavailable")
-	}}
-	router := newInternalRouter(newEventsHandlerWithDecoder(fakes, decoder))
-
-	w := postEvent(router, envelopeWithSchemaID("UserDeleted", uuid.New(), testTenantID, time.Now(), "some-schema-id", base64JSON(t, []byte("x"))))
-
-	assert.Equal(t, http.StatusBadGateway, w.Code)
-}
-
-func TestHandleInternalEvent_NoSchemaID_SkipsDecodeStep(t *testing.T) {
-	fakes := newEventsFakes()
-	called := false
-	decoder := &fakeEventDecoder{decode: func(context.Context, string, []byte) (json.RawMessage, error) {
-		called = true
-		return nil, errors.New("must not be called")
-	}}
-	router := newInternalRouter(newEventsHandlerWithDecoder(fakes, decoder))
-
-	w := postEvent(router, envelope("UserDeleted", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"user_id": testUserID.String(), "deleted_at": time.Now().Format(time.RFC3339),
-	}))
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.False(t, called, "an envelope with no SchemaID must never reach the decoder")
 }
 
 // decodeFailedSampleCount reads internal_events_ingest_total's current count

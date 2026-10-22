@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- A schema-registry framed inbound event (the Delegation Service's `DelegationStarted` and `DelegationEnded`) is decoded with the platform library's decode-only codec, as in the Definition Service; the decoder it depended on was never configured, so every framed event answered `502 EVENT_DECODE_FAILED`. No registry call is made, so the role needs no registry permission (LLD rev 1.113).
 - A claim, a completion and a defer read Org & Membership's assignee eligibility read (I-19) for the acting user, the task's department and its stage's required level: `eligible: false` answers `422 ASSIGNEE_INELIGIBLE`, a failed read `503 UPSTREAM_UNAVAILABLE`. The user-status check that never had an upstream and let every action through is removed with `IAM_BASE_URL`, `IAM_CLIENT_TIMEOUT` and the `ASSIGNEE_UNAVAILABLE` code; out of office no longer refuses an action. The public specification lists the `422` on claim, complete, defer and reassign (LLD rev 1.112).
 - A delegation reroute, reversal and delegate reassignment read eligibility once per distinct department and level of the affected tasks, and give each task its pair's answer, where they read once per task (LLD rev 1.111; the LLD already stated one read per pair).
 - The module requires Go 1.26.10: `govulncheck` reports GO-2026-6809 (`crypto/x509`) on 1.26.9; the base image digest follows.

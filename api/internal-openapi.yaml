@@ -297,8 +297,8 @@ components:
 
     EventDecodeFailed:
       description: >
-        EVENT_DECODE_FAILED. The envelope carries a dataschema (schema-registry payload) that
-        could not be decoded: a missing decoder or a schema-registry failure. A retryable
+        EVENT_DECODE_FAILED. The envelope carries a dataschema (schema-registry payload) whose
+        data is not a base64 schema-registry frame of a plain JSON payload. A retryable
         infrastructure problem, never a malformed client payload, so the consumer retries it
         and does not route it to its DLQ.
       content:

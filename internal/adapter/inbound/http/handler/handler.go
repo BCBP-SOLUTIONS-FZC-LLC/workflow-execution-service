@@ -42,7 +42,6 @@ type Handler struct {
 	tenantLifecycle port.TenantLifecycleReconciler
 	userSafetyNet   port.UserSafetyNetReconciler
 	oooAvailability port.OOOAvailabilityReconciler
-	eventDecoder    port.EventDecoder
 	connectorTasks  port.ConnectorTaskService
 	connectorEvents port.ConnectorEventPublisher
 	principals      port.AutomationPrincipalResolver
@@ -65,7 +64,6 @@ type Services struct {
 	TenantLifecycle      port.TenantLifecycleReconciler
 	UserSafetyNet        port.UserSafetyNetReconciler
 	OOOAvailability      port.OOOAvailabilityReconciler
-	EventDecoder         port.EventDecoder
 	ConnectorTasks       port.ConnectorTaskService
 	ConnectorEvents      port.ConnectorEventPublisher
 	AutomationPrincipals port.AutomationPrincipalResolver
@@ -93,7 +91,6 @@ func New(s Services) *Handler {
 		tenantLifecycle: s.TenantLifecycle,
 		userSafetyNet:   s.UserSafetyNet,
 		oooAvailability: s.OOOAvailability,
-		eventDecoder:    s.EventDecoder,
 		connectorTasks:  s.ConnectorTasks,
 		connectorEvents: s.ConnectorEvents,
 		principals:      s.AutomationPrincipals,

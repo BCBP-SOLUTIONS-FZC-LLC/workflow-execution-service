@@ -196,11 +196,6 @@ func (h *Handler) decodeFailed(c *gin.Context, eventType, detail string) {
 }
 
 func (h *Handler) decodeSchemaRegistryPayload(c *gin.Context, env events.Envelope[json.RawMessage]) (json.RawMessage, bool) {
-	if h.eventDecoder == nil {
-		h.decodeFailed(c, env.Type, "event carries a schema id but no event decoder is configured")
-		return nil, false
-	}
-
 	var b64 string
 	if err := json.Unmarshal(env.Payload, &b64); err != nil {
 		h.decodeFailed(c, env.Type, "schema-registry payload is not a base64 JSON string")
@@ -212,7 +207,7 @@ func (h *Handler) decodeSchemaRegistryPayload(c *gin.Context, env events.Envelop
 		return nil, false
 	}
 
-	decoded, err := h.eventDecoder.Decode(c.Request.Context(), env.SchemaID, raw)
+	decoded, err := events.GlueDecodeCodec{}.Decode(c.Request.Context(), env.SchemaID, raw)
 	if err != nil {
 		h.decodeFailed(c, env.Type, "schema-registry payload decode failed")
 		return nil, false

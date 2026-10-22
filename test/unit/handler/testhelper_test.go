@@ -483,22 +483,6 @@ func (f *fakeTenantLifecycleReconciler) Apply(ctx context.Context, in port.Tenan
 
 var _ port.TenantLifecycleReconciler = (*fakeTenantLifecycleReconciler)(nil)
 
-// fakeEventDecoder is the hand-rolled fake for port.EventDecoder, used to
-// exercise HandleInternalEvent's schema-registry decode step without a real
-// events.Codec.
-type fakeEventDecoder struct {
-	decode func(context.Context, string, []byte) (json.RawMessage, error)
-}
-
-func (f *fakeEventDecoder) Decode(ctx context.Context, schemaID string, encoded []byte) (json.RawMessage, error) {
-	if f.decode != nil {
-		return f.decode(ctx, schemaID, encoded)
-	}
-	return json.RawMessage(encoded), nil
-}
-
-var _ port.EventDecoder = (*fakeEventDecoder)(nil)
-
 // fakeLogger records nothing by default; tests that care about a specific
 // log call inject their own func fields.
 type fakeLogger struct {
@@ -627,19 +611,6 @@ func newEventsHandlerWithProcessedEvents(f *eventsFakes, processedEvents port.Pr
 		TenantLifecycle: f.tenantLifecycle,
 		UserSafetyNet:   f.userSafetyNet,
 		OOOAvailability: f.oooAvailability,
-		Log:             f.log,
-	})
-}
-
-func newEventsHandlerWithDecoder(f *eventsFakes, decoder port.EventDecoder) *handler.Handler {
-	return handler.New(handler.Services{
-		ProcessedEvents: f.processedEvents,
-		Recency:         f.recency,
-		Delegation:      f.delegation,
-		TenantLifecycle: f.tenantLifecycle,
-		UserSafetyNet:   f.userSafetyNet,
-		OOOAvailability: f.oooAvailability,
-		EventDecoder:    decoder,
 		Log:             f.log,
 	})
 }
