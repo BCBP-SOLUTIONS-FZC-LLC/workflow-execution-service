@@ -386,6 +386,7 @@ docker-build-connector-worker:
 ## docker-lint: Lint Dockerfile with Hadolint (run 'make tools' to install)
 docker-lint:
 	$(HADOLINT) --config .hadolint.yaml Dockerfile
+	@scripts/dockerfile-credentials-check.sh
 
 ## docker-trivy: Scan source and dependencies for HIGH/CRITICAL CVEs (run 'make tools' to install)
 docker-trivy:

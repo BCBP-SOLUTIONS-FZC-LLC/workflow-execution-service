@@ -35,13 +35,13 @@ WORKDIR /build
 # git required for private module access
 RUN apk add --no-cache git ca-certificates
 
+COPY go.mod go.sum* ./
 RUN --mount=type=secret,id=go_private_token \
+    trap 'rm -f ~/.git-credentials ~/.gitconfig' EXIT && \
     git config --global credential.helper store && \
     echo "https://x-access-token:$(cat /run/secrets/go_private_token)@github.com" > ~/.git-credentials && \
-    chmod 600 ~/.git-credentials
-
-COPY go.mod go.sum* ./
-RUN go mod download && go mod verify
+    chmod 600 ~/.git-credentials && \
+    go mod download && go mod verify
 
 COPY . .
 
