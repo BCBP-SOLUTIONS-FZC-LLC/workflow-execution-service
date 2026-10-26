@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Fails when a Dockerfile RUN that writes ~/.git-credentials does not remove it in the same
-# RUN, or when a workflow reads or exports a registry build cache: both leave the private-module token
-# in a layer that anyone who can read the cache can recover.
+# Fails when the private-module token can stay in an image layer or a build cache:
+#   - a Dockerfile RUN that reads a build secret or writes git credentials must remove them in
+#     that RUN with `trap '... rm -f ~/.git-credentials ...' EXIT`, which runs wherever the RUN ends;
+#   - a RUN written as a heredoc is refused, since its body is not scanned;
+#   - a workflow must not read or export a registry build cache, which carries builder layers.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -9,15 +11,26 @@ dockerfile="${DOCKERFILE:-$root/Dockerfile}"
 workflows="${WORKFLOWS_DIR:-$root/.github/workflows}"
 status=0
 
+instructions="$(grep -v '^[[:space:]]*#' "$dockerfile" | sed -e ':a' -e '/\\$/N; s/\\\n//; ta')"
+
 while IFS= read -r instruction; do
-  if [[ "$instruction" == *".git-credentials"* && "$instruction" != *"rm -f"*".git-credentials"* ]]; then
-    echo "✗ $(basename "$dockerfile"): a RUN writes .git-credentials and does not remove it in the same RUN" >&2
+  [[ "$instruction" == RUN\ * ]] || continue
+  if [[ "$instruction" =~ ^RUN[[:space:]]+(--[^[:space:]]+[[:space:]]+)*\<\< ]]; then
+    echo "✗ $(basename "$dockerfile"): a heredoc RUN is not scanned; write the RUN on one logical line" >&2
+    status=1
+    continue
+  fi
+  touches_credentials=0
+  case "$instruction" in
+    *"/run/secrets/"* | *".git-credentials"* | *".netrc"* | *"insteadOf"*) touches_credentials=1 ;;
+  esac
+  if [[ $touches_credentials -eq 1 ]] && ! [[ "$instruction" =~ trap\ \'[^\']*rm\ -f[^\']*\.git-credentials[^\']*\'\ EXIT ]]; then
+    echo "✗ $(basename "$dockerfile"): a RUN uses a build secret or writes credentials and does not end with trap '... rm -f ~/.git-credentials ...' EXIT" >&2
     status=1
   fi
-done < <(awk '/^RUN /{if (line) print line; line=$0; next} line && /^[[:space:]]/{line=line $0; next} {if (line) print line; line=""} END{if (line) print line}' \
-  <(sed -e ':a' -e '/\\$/N; s/\\\n//; ta' "$dockerfile"))
+done <<<"$instructions"
 
-if [[ -d "$workflows" ]] && grep -rnE 'type=registry,ref=.*buildcache' "$workflows" >&2; then
+if [[ -d "$workflows" ]] && grep -rn 'type=registry' "$workflows" >&2; then
   echo "✗ a workflow uses a registry build cache; builder layers would carry the token" >&2
   status=1
 fi

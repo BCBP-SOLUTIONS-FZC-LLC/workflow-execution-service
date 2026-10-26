@@ -85,6 +85,9 @@ jobs:
           dockerfile: Dockerfile
           config: .hadolint.yaml
 
+      - name: Check that no credential stays in a layer or a registry cache
+        run: scripts/dockerfile-credentials-check.sh
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Build server image
