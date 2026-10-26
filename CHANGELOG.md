@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- `START_REFUSED_STATUSES` defaults to `suspended,trial_expired,cancelled`, in the service, the chart and `.env.example`: `POST /instances` answers `409 TENANT_NOT_ACTIVE` for a tenant whose instances are paused, as well as for an offboarded one. LLD §5.5, rev 1.116.
 - The NetworkPolicies select the platform namespace `observability` for the Prometheus scrape (it was `monitoring`, while the gateway rule already selected `gateway`), and the prometheus-adapter rule names it; a chart test holds both selectors.
 - The Dockerfile writes, uses and removes the private-module credential in one `RUN`, and `make docker-lint` and the CI image job run `scripts/dockerfile-credentials-check.sh`. Earlier builder layers cached by CI held `GO_PRIVATE_TOKEN`, so it needs rotating.
 - The compat job checks out the Workflow-Events Consumer at `main` (`compat_consumer_ref`), now that its branch is merged.

@@ -209,8 +209,8 @@ env:
   workflowCacheSize: "0"
   # Tenant statuses (comma-separated) for which POST /instances answers 409 TENANT_NOT_ACTIVE:
   # trial, active, past_due, cancelled, suspended, trial_expired, offboarded. An offboarded tenant
-  # is always refused; empty refuses nothing else.
-  startRefusedStatuses: ""
+  # is always refused; empty falls back to the paused statuses below.
+  startRefusedStatuses: "suspended,trial_expired,cancelled"
   # The tenant data purge (LLD §4.13): an offboarded tenant's instances, tasks and connector rows
   # are deleted this long after it left. The audit trail keeps its own retention.
   tenantPurgeEnabled: "true"

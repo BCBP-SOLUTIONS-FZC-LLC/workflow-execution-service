@@ -206,7 +206,7 @@ func Load() (*Config, error) {
 		OutboxRetention:            envDuration("OUTBOX_RETENTION", 7*365*24*time.Hour),
 		TenantPurgeEnabled:         envBool("TENANT_PURGE_ENABLED", true),
 		TenantHistoryRetention:     envDuration("TENANT_HISTORY_RETENTION", 7*365*24*time.Hour),
-		StartRefusedStatuses:       envCSVLower("START_REFUSED_STATUSES"),
+		StartRefusedStatuses:       csvLower(getEnvOrDefault("START_REFUSED_STATUSES", "suspended,trial_expired,cancelled")),
 		ProcessedEventRetention:    envDuration("PROCESSED_EVENT_RETENTION", 7*24*time.Hour),
 		RetentionSweepInterval:     envDuration("RETENTION_SWEEP_INTERVAL", 24*time.Hour),
 		RetentionSweepBatch:        envInt("RETENTION_SWEEP_BATCH", 1000),
@@ -489,9 +489,9 @@ func (c *Config) MigrationDSN() string {
 
 var knownTenantStatuses = []string{"trial", "active", "past_due", "cancelled", "suspended", "trial_expired", "offboarded"}
 
-func envCSVLower(key string) []string {
+func csvLower(list string) []string {
 	var out []string
-	for _, part := range strings.Split(os.Getenv(key), ",") {
+	for _, part := range strings.Split(list, ",") {
 		if v := strings.ToLower(strings.TrimSpace(part)); v != "" {
 			out = append(out, v)
 		}

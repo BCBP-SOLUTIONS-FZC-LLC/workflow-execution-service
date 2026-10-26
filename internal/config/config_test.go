@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -402,14 +403,15 @@ func TestLoad_TenantPurgeCanBeSwitchedOffAndTuned(t *testing.T) {
 	}
 }
 
-func TestLoad_StartRefusedStatusesDefaultToNone(t *testing.T) {
+func TestLoad_StartRefusedStatusesDefaultToThePausedStatuses(t *testing.T) {
 	setValidEnv(t)
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if len(cfg.StartRefusedStatuses) != 0 {
-		t.Errorf("StartRefusedStatuses = %v, want none: refusing a start is a decision, not a default", cfg.StartRefusedStatuses)
+	want := []string{"suspended", "trial_expired", "cancelled"}
+	if !slices.Equal(cfg.StartRefusedStatuses, want) {
+		t.Errorf("StartRefusedStatuses = %v, want %v: no instance starts while the tenant's instances are paused", cfg.StartRefusedStatuses, want)
 	}
 }
 

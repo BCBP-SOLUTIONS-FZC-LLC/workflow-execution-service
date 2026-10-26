@@ -136,7 +136,7 @@ Tests fail when a router operation is missing from its spec or the reverse, and 
 
 ## Configuration
 
-`.env.example` lists every variable, including the ones with a product decision behind them: `START_REFUSED_STATUSES` (tenant statuses whose instance starts are refused, empty by default), the tenant purge settings (`TENANT_PURGE_ENABLED`, `TENANT_HISTORY_RETENTION`), `WORKFLOW_CACHE_SIZE` (sizing) and `LOCK_DATABASE_URL`; the chart also sets `GOMEMLIMIT` per process. `APP_ENV` is one of `local`, `dev`, `test`, `staging`, `prod`; outside `dev` and `local` each binary refuses to start without the settings it needs:
+`.env.example` lists every variable, including the ones with a product decision behind them: `START_REFUSED_STATUSES` (tenant statuses whose instance starts are refused: `suspended`, `trial_expired` and `cancelled` by default), the tenant purge settings (`TENANT_PURGE_ENABLED`, `TENANT_HISTORY_RETENTION`), `WORKFLOW_CACHE_SIZE` (sizing) and `LOCK_DATABASE_URL`; the chart also sets `GOMEMLIMIT` per process. `APP_ENV` is one of `local`, `dev`, `test`, `staging`, `prod`; outside `dev` and `local` each binary refuses to start without the settings it needs:
 
 | Binary | Required outside dev |
 | --- | --- |
