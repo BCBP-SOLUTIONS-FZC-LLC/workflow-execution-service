@@ -72,7 +72,7 @@ channels:
           name: membership-workflow-q
           fifoQueue: false
           redrivePolicy:
-            deadLetterQueue: { name: membership-workflow-dlq }
+            deadLetterQueue: { name: membership-workflow-q-dlq }
             maxReceiveCount: 5
     messages:
       TenantStateChanged: { $ref: '#/components/messages/TenantStateChangedInbound' }
@@ -87,7 +87,7 @@ channels:
           name: user-wf-q
           fifoQueue: false
           redrivePolicy:
-            deadLetterQueue: { name: user-wf-dlq }
+            deadLetterQueue: { name: user-wf-q-dlq }
             maxReceiveCount: 5
     messages:
       UserDeleted:              { $ref: '#/components/messages/UserDeletedInbound' }

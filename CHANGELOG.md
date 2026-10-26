@@ -65,6 +65,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - A plan that cannot be read is logged once, with its cause and version, by the shared plan cache; callers log only what they skip. `cmd/connector-worker` drops its `INTERNAL_API_TOKEN` check, which `config.Load` already makes outside dev.
 - Node keys and the human-task rule come from workflow-models' `dsl.NodeKey` and `StageDef.CreatesHumanTask`, which Definition's node read uses too. The key format is unchanged, so no Temporal version gate is needed.
 - The images build for `TARGETARCH` (default `amd64`), carry OCI labels in each final stage and are built with `-buildvcs=false`.
+- `docs/swagger/openapi.yaml` documents the probes where the service serves them, `/healthz` and `/readyz` at the root, with the real readiness bodies (`db`, `cache` or `temporal` named on a `503`), and no longer lists `/api/v1/metrics`, which is served on the metrics listener. The parity test compared the public spec to the routes with these three paths filtered out of the spec; it compares them now.
+- `api/asyncapi.yaml` names the dead-letter queues of the membership and user queues `membership-workflow-q-dlq` and `user-wf-q-dlq`, as IAM's specs and the consumer's topology do, and a test holds every SQS binding to `<queue>-dlq`.
 
 ### Fixed
 

@@ -25,7 +25,7 @@ const (
 	pathParamSyntax = `\{([^}]+)\}`
 )
 
-var operationalRoutes = map[string]bool{"/healthz": true, "/readyz": true, "/asyncapi": true}
+var operationalRoutes = map[string]bool{"/asyncapi": true}
 
 func specOperations(t *testing.T, path string) []string {
 	t.Helper()
@@ -60,20 +60,8 @@ func routerOperations(t *testing.T, internal bool) []string {
 	return ops
 }
 
-func withoutOperational(ops []string) []string {
-	var out []string
-	for _, op := range ops {
-		_, path, _ := strings.Cut(op, " ")
-		if path == apiPrefix+"/healthz" || path == apiPrefix+"/readyz" || path == apiPrefix+"/metrics" {
-			continue
-		}
-		out = append(out, op)
-	}
-	return out
-}
-
 func TestPublicOpenAPIMatchesRoutes(t *testing.T) {
-	assert.Equal(t, withoutOperational(specOperations(t, publicSpecPath)), routerOperations(t, false),
+	assert.Equal(t, specOperations(t, publicSpecPath), routerOperations(t, false),
 		"docs/swagger/openapi.yaml and the public routes must list the same operations")
 }
 
@@ -125,4 +113,36 @@ func TestAsyncAPIOutboundMessagesMatchProducedEvents(t *testing.T) {
 	produced := append([]string(nil), domain.OutboundEventTypes()...)
 	sort.Strings(produced)
 	assert.Equal(t, produced, outbound, "api/asyncapi.yaml must document exactly the event types the service produces")
+}
+
+func TestAsyncAPIDeadLetterQueuesAreNamedAfterTheirQueue(t *testing.T) {
+	raw, err := os.ReadFile(asyncAPISpec)
+	require.NoError(t, err)
+	var doc struct {
+		Channels map[string]struct {
+			Bindings struct {
+				SQS *struct {
+					Queue struct {
+						Name          string `yaml:"name"`
+						RedrivePolicy struct {
+							DeadLetterQueue struct {
+								Name string `yaml:"name"`
+							} `yaml:"deadLetterQueue"`
+						} `yaml:"redrivePolicy"`
+					} `yaml:"queue"`
+				} `yaml:"sqs"`
+			} `yaml:"bindings"`
+		} `yaml:"channels"`
+	}
+	require.NoError(t, yaml.Unmarshal(raw, &doc))
+	checked := 0
+	for channel, c := range doc.Channels {
+		if c.Bindings.SQS == nil {
+			continue
+		}
+		q := c.Bindings.SQS.Queue
+		assert.Equal(t, q.Name+"-dlq", q.RedrivePolicy.DeadLetterQueue.Name, "channel %s: the dead-letter queue is named <queue>-dlq in IAM's specs and the consumer's topology", channel)
+		checked++
+	}
+	assert.NotZero(t, checked)
 }
