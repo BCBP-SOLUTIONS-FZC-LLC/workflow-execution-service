@@ -10,6 +10,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The NetworkPolicies select the platform namespace `observability` for the Prometheus scrape (it was `monitoring`, while the gateway rule already selected `gateway`), and the prometheus-adapter rule names it; a chart test holds both selectors.
+- The Dockerfile writes, uses and removes the private-module credential in one `RUN`, and `make docker-lint` runs `scripts/dockerfile-credentials-check.sh`. Earlier builder layers cached by CI held `GO_PRIVATE_TOKEN`, so it needs rotating.
 - The compat job checks out the Workflow-Events Consumer at `main` (`compat_consumer_ref`), now that its branch is merged.
 - `platform-events/v2` is `v2.2.1` (consumer-side dead-letter fixes, Go 1.26.10; no API change).
 - `workflow-models/v2` is `v2.1.0`, the stable release of `v2.1.0-rc.3` (same code).

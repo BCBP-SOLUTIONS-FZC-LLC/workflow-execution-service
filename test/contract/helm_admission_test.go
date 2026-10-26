@@ -28,3 +28,16 @@ func TestHelmSecurityPolicy_MergesWithTheGatewayPolicy(t *testing.T) {
 
 	assert.Contains(t, out, "mergeType: StrategicMerge", "a route policy without mergeType replaces the gateway's JWT and authorisation filter")
 }
+
+func TestHelmNetworkPolicy_ScrapeAndGatewayUseThePlatformNamespaces(t *testing.T) {
+	for _, tmpl := range []string{"networkpolicy-api.yaml", "networkpolicy-worker.yaml", "networkpolicy-connector-worker.yaml"} {
+		out, err := helmRender(t, "-s", "templates/"+tmpl, "--set", "connectorWorker.enabled=true", "--set-string", "connectorWorker.docsBucket=docs", "--set-string", "connectorWorker.openBaoAddr=http://openbao.invalid:8200")
+		require.NoError(t, err, out)
+
+		assert.Regexp(t, `kubernetes\.io/metadata\.name: observability\n`, out, "%s: Prometheus runs in the observability namespace", tmpl)
+		assert.NotRegexp(t, `kubernetes\.io/metadata\.name: monitoring\n`, out, "%s: the monitoring namespace was renamed observability", tmpl)
+	}
+	out, err := helmRender(t, "-s", "templates/networkpolicy-api.yaml")
+	require.NoError(t, err, out)
+	assert.Regexp(t, `kubernetes\.io/metadata\.name: gateway\n`, out, "Envoy Gateway's data plane runs in the gateway namespace")
+}

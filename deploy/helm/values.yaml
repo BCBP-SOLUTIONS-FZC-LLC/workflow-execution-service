@@ -300,7 +300,7 @@ networkPolicy:
     enabled: true
     namespaceSelector:
       matchLabels:
-        kubernetes.io/metadata.name: monitoring
+        kubernetes.io/metadata.name: observability
     podSelector:
       matchLabels:
         app.kubernetes.io/name: prometheus
