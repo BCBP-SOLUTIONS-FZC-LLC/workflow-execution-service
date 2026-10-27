@@ -11,6 +11,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
 type deferWire struct {
@@ -99,6 +100,55 @@ func TestExecute_DeferSendsTheInstanceOneStepBack(t *testing.T) {
 	}
 	if forceRoutes != 0 {
 		t.Errorf("RecordForceRoute called %d times, want none: no admin routed anything", forceRoutes)
+	}
+}
+
+// A defer closes every task the run it ends had open, including one a
+// non-interrupting timer path started beside the deferred task.
+func TestExecute_DeferClosesATaskItsBoundaryPathOpened(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := twoDeptCollaboration()
+	plan := collab.Plans[0]
+	plan.Departments = append(plan.Departments,
+		dsl.DepartmentDef{ID: "esc", Stages: []dsl.StageDef{{Type: "prep", Activity: "escalate"}}})
+	plan.Departments[1].Stages[0].BoundaryTimer = &dsl.BoundaryTimer{
+		Duration: (3 * tick).String(), TargetDept: "esc",
+	}
+
+	var mu sync.Mutex
+	superseded := map[string]bool{}
+	registerFakeActivities(env, collab, &activityHooks{
+		updateTaskStatus: func(in port.UpdateTaskStatusInput) error {
+			mu.Lock()
+			defer mu.Unlock()
+			if in.Status == domain.TaskStatusSuperseded {
+				superseded[in.TaskID] = true
+			}
+			return nil
+		},
+	})
+
+	transitionAt(env, tick, "deptA", 1)
+	env.RegisterDelayedCallback(func() {
+		env.UpdateWorkflow("stage-defer:instance-1", "defer-1", &updateAnswer{}, deferWire{
+			DeptID: "deptB", FromStage: "prep", UserID: "user-1", RecordVersion: 1,
+			TaskID: "deptB/prep", AssignmentID: "assign-1",
+		})
+	}, 5*tick)
+	transitionAt(env, 10*tick, "deptA", 2)
+	transitionAt(env, 12*tick, "deptB", 2)
+
+	out := finish(t, env, "instance-1")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if out.Status != domain.InstanceStatusCompleted {
+		t.Errorf("Status = %v, want COMPLETED", out.Status)
+	}
+	if !superseded["esc/prep"] {
+		t.Errorf("superseded tasks = %v, want esc/prep: the timer path's task outlived the defer", superseded)
 	}
 }
 

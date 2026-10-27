@@ -275,3 +275,56 @@ func TestExecute_BoundaryAfterAForceRouteStillSupersedesItsOpenTasks(t *testing.
 		t.Errorf("the open task's status = %q, want SUPERSEDED (writes: %v)", got, run.statuses)
 	}
 }
+
+// A force-forward to a step found only on a boundary path runs the rest of
+// that path from the step, then ends the path as the boundary would have.
+func TestExecute_ForceForwardIntoABoundaryPathRunsTheRestOfThePath(t *testing.T) {
+	path := []dsl.ExecutionStep{{Sequential: []string{"esc1", "esc2"}}, {Sequential: []string{"esc3"}}}
+	escs := []dsl.DepartmentDef{dept("esc1"), dept("esc2"), dept("esc3"), dept("after")}
+
+	for name, tc := range map[string]struct {
+		depts []dsl.DepartmentDef
+		steps []dsl.ExecutionStep
+	}{
+		"on a task": {
+			depts: func() []dsl.DepartmentDef {
+				review := dept("review")
+				review.Stages[0].BoundaryTimer = &dsl.BoundaryTimer{Duration: "1h", Interrupting: true, TargetDept: "esc1", Steps: path}
+				return append([]dsl.DepartmentDef{review}, escs...)
+			}(),
+			steps: []dsl.ExecutionStep{{Sequential: []string{"review", "after"}}},
+		},
+		"on a call": {
+			depts: append([]dsl.DepartmentDef{dept("review")}, escs...),
+			steps: []dsl.ExecutionStep{
+				{SubWorkflow: &dsl.SubWorkflowStep{
+					NodeID: "sub1", Name: "sub",
+					Plan:       dsl.ExecutionPlan{Steps: []dsl.ExecutionStep{{Sequential: []string{"review"}}}},
+					TimerPaths: []dsl.TimerPath{{Duration: "1h", Interrupting: true, TargetDept: "esc1", Steps: path}},
+				}},
+				{Sequential: []string{"after"}},
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			signals := map[time.Duration]any{
+				tick:      adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "esc2/esc2_task", RecordVersion: 1},
+				5 * tick:  done("esc2"),
+				10 * tick: done("esc3"),
+			}
+			names := map[time.Duration]string{tick: "instance-force-forward", 5 * tick: "stage-transition", 10 * tick: "stage-transition"}
+
+			run := runPathPlan(t, tc.depts, tc.steps, signals, names)
+
+			if run.err != nil || run.out.Status != domain.InstanceStatusCompleted {
+				t.Fatalf("status %v, error %v; want COMPLETED", run.out.Status, run.err)
+			}
+			if !contains(run.created, "esc3/esc3_task") {
+				t.Errorf("tasks %v, want esc3: the path goes on after the step the admin chose", run.created)
+			}
+			if contains(run.created, "esc1/esc1_task") || contains(run.created, "after/after_task") {
+				t.Errorf("tasks %v: a step before the target, or after the path's end, ran", run.created)
+			}
+		})
+	}
+}

@@ -234,3 +234,104 @@ func TestExecute_ASignalForAClosingParkDoesNotBlockLaterSignals(t *testing.T) {
 		t.Fatalf("workflow returned error: %v", err)
 	}
 }
+
+// A force-back aimed at a failed branch of the inner fork runs that branch
+// again, and the instance completes once it does.
+func TestExecute_ForceBackInANestedParallelRespawnsTheInnerBranch(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	var mu sync.Mutex
+	b2Calls := 0
+	registerFakeActivities(env, nestedParallelCollaboration(), &activityHooks{createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if in.NodeKey == "b2/prep" {
+			b2Calls++
+			if b2Calls == 1 {
+				return port.CreateTaskOutput{}, temporal.NewApplicationError("card declined", "ValidationError")
+			}
+		}
+		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+	}})
+
+	at := func(d time.Duration, dept string, visit int64) {
+		env.RegisterDelayedCallback(func() {
+			env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+				DeptID: dept, ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: visit,
+			})
+		}, d)
+	}
+	at(tick, "a", 1)
+	at(tick, "b1", 1)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetNodeKey: "b2/prep", RecordVersion: 1,
+		})
+	}, 10*tick)
+	at(20*tick, "b2", 2)
+
+	out := finish(t, env, "instance-1")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if out.Status != domain.InstanceStatusCompleted || b2Calls != 2 {
+		t.Errorf("status %v, b2 task attempts %d; want COMPLETED after a second attempt", out.Status, b2Calls)
+	}
+}
+
+// A force-back while every branch of both forks is open sends the instance
+// to the step before the outer fork; once it completes again, the branches
+// go on and the instance completes.
+func TestExecute_ForceBackWhileANestedParallelIsOpenReturnsBeforeTheFork(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := nestedParallelCollaboration()
+	plan := collab.Plans[0]
+	plan.Departments = append(plan.Departments, dsl.DepartmentDef{ID: "intake", Stages: []dsl.StageDef{{Type: "prep", Activity: "work"}}})
+	plan.Execution.Steps = append([]dsl.ExecutionStep{{Sequential: []string{"intake"}}}, plan.Execution.Steps...)
+
+	var mu sync.Mutex
+	created := map[domain.NodeKey]int{}
+	registerFakeActivities(env, collab, &activityHooks{createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		created[in.NodeKey]++
+		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+	}})
+
+	at := func(d time.Duration, dept string, visit int64) {
+		env.RegisterDelayedCallback(func() {
+			env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+				DeptID: dept, ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: visit,
+			})
+		}, d)
+	}
+	at(tick, "intake", 1)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetNodeKey: "intake/prep", RecordVersion: 1,
+		})
+	}, 5*tick)
+	at(10*tick, "intake", 2)
+	at(15*tick, "a", 1)
+	at(20*tick, "b1", 1)
+	at(25*tick, "b2", 1)
+
+	out := finish(t, env, "instance-1")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if out.Status != domain.InstanceStatusCompleted {
+		t.Errorf("Status = %v, want COMPLETED", out.Status)
+	}
+	if created["intake/prep"] != 2 {
+		t.Errorf("tasks created = %v, want intake twice: before the forks and after the force-back", created)
+	}
+	for _, k := range []domain.NodeKey{"a/prep", "b1/prep", "b2/prep"} {
+		if created[k] != 1 {
+			t.Errorf("tasks created = %v, want %s once: an open branch keeps its task through the force-back", created, k)
+		}
+	}
+}

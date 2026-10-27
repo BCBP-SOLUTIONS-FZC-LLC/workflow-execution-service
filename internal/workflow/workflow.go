@@ -85,8 +85,7 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 }
 
 func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin, baseAdmin wf.Channel) (stepOutcome, error) {
-	original := plan.Execution.Steps
-	steps := original
+	steps := plan.Execution.Steps
 	for {
 		runCtx, cancelRun := wf.WithCancel(ctx)
 		doneCh := wf.NewChannel(ctx)
@@ -113,7 +112,7 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 		})
 		sel.Select(ctx)
 		abandonedNodes := in.currentPendingNodes()
-		in.routing = envelope.Kind != ""
+		in.routing = envelope.Kind != "" && !envelope.Signal.FromDefer
 		cancelRun()
 
 		if done {
@@ -127,7 +126,7 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 
 		case SignalInstanceForceFwd:
 			in.recordAndRedirect(ctx, abandonedNodes, sig.TargetNodeKey, domain.ForceRouteDirectionForward, sig)
-			steps = redirectSteps(original, deptFromNodeKey(sig.TargetNodeKey))
+			steps = redirectSteps(plan, deptFromNodeKey(sig.TargetNodeKey))
 
 		case SignalInstanceForceBack:
 			target, popped, ok := in.history.PopOne()
@@ -138,7 +137,7 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 			}
 			in.msgBuf.ResetSpan(popped)
 			in.recordAndRedirect(ctx, abandonedNodes, target, domain.ForceRouteDirectionBack, sig)
-			steps = redirectSteps(original, deptFromNodeKey(target))
+			steps = redirectSteps(plan, deptFromNodeKey(target))
 		}
 		in.routing = false
 	}
@@ -161,11 +160,72 @@ func (in *interpreter) recordForceRouteAudit(ctx wf.Context, oldNodeKeys []domai
 	})
 }
 
-func redirectSteps(original []dsl.ExecutionStep, deptID string) []dsl.ExecutionStep {
-	if cont, ok := findRedirectTarget(original, deptID); ok {
+func redirectSteps(plan *dsl.CompiledPlan, deptID string) []dsl.ExecutionStep {
+	if cont, ok := findRedirectTarget(plan.Execution.Steps, deptID); ok {
 		return cont
 	}
+	for _, path := range boundaryPaths(plan) {
+		if cont, ok := findRedirectTarget(path, deptID); ok {
+			return cont
+		}
+	}
 	return []dsl.ExecutionStep{{Sequential: []string{deptID}}}
+}
+
+func boundaryPaths(plan *dsl.CompiledPlan) [][]dsl.ExecutionStep {
+	var stagePaths [][]dsl.ExecutionStep
+	for i := range plan.Departments {
+		for j := range plan.Departments[i].Stages {
+			stage := &plan.Departments[i].Stages[j]
+			if stage.BoundaryTimer != nil {
+				stagePaths = append(stagePaths, stage.BoundaryTimer.Steps)
+			}
+			if stage.BoundaryMessage != nil {
+				stagePaths = append(stagePaths, stage.BoundaryMessage.Steps)
+			}
+		}
+	}
+	paths := callPaths(plan.Execution.Steps)
+	for _, p := range stagePaths {
+		paths = append(paths, p)
+		paths = append(paths, callPaths(p)...)
+	}
+	return paths
+}
+
+func callPaths(steps []dsl.ExecutionStep) [][]dsl.ExecutionStep {
+	var paths [][]dsl.ExecutionStep
+	for i := range steps {
+		for _, b := range steps[i].Parallel {
+			paths = append(paths, callPaths(b.Steps)...)
+		}
+		for _, b := range steps[i].Exclusive {
+			paths = append(paths, callPaths(b.Steps)...)
+		}
+		if sw := steps[i].SubWorkflow; sw != nil {
+			own := subWorkflowPaths(sw)
+			paths = append(paths, own...)
+			paths = append(paths, callPaths(sw.Plan.Steps)...)
+			for _, p := range own {
+				paths = append(paths, callPaths(p)...)
+			}
+		}
+	}
+	return paths
+}
+
+func subWorkflowPaths(sw *dsl.SubWorkflowStep) [][]dsl.ExecutionStep {
+	paths := make([][]dsl.ExecutionStep, 0, len(sw.ErrorPaths)+len(sw.TimerPaths)+len(sw.MessagePaths))
+	for _, p := range sw.ErrorPaths {
+		paths = append(paths, p.Steps)
+	}
+	for _, p := range sw.TimerPaths {
+		paths = append(paths, p.Steps)
+	}
+	for _, p := range sw.MessagePaths {
+		paths = append(paths, p.Steps)
+	}
+	return paths
 }
 
 func findRedirectTarget(steps []dsl.ExecutionStep, deptID string) ([]dsl.ExecutionStep, bool) {

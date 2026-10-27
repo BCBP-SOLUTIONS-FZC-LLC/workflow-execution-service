@@ -1038,7 +1038,7 @@ func TestRedirectStepsSequential(t *testing.T) {
 		{Sequential: []string{"intake", "review"}},
 		{Sequential: []string{"shipping"}},
 	}
-	got := redirectSteps(original, "review")
+	got := redirectSteps(planOf(original), "review")
 	want := []dsl.ExecutionStep{
 		{Sequential: []string{"review"}},
 		{Sequential: []string{"shipping"}},
@@ -1061,7 +1061,7 @@ func TestRedirectStepsParallelBranch(t *testing.T) {
 		}},
 		{Sequential: []string{"shipping"}},
 	}
-	got := redirectSteps(original, "deptA")
+	got := redirectSteps(planOf(original), "deptA")
 	want := []dsl.ExecutionStep{
 		{Sequential: []string{"deptA"}},
 		{Sequential: []string{"shipping"}},
@@ -1081,7 +1081,7 @@ func TestRedirectStepsExclusiveBranch(t *testing.T) {
 		}},
 		{Sequential: []string{"shipping"}},
 	}
-	got := redirectSteps(original, "rework")
+	got := redirectSteps(planOf(original), "rework")
 	want := []dsl.ExecutionStep{
 		{Sequential: []string{"rework"}},
 		{Sequential: []string{"shipping"}},
@@ -1103,7 +1103,7 @@ func TestRedirectStepsSubWorkflowNested(t *testing.T) {
 		}},
 		{Sequential: []string{"shipping"}},
 	}
-	got := redirectSteps(original, "resolve")
+	got := redirectSteps(planOf(original), "resolve")
 	want := []dsl.ExecutionStep{
 		{Sequential: []string{"resolve"}},
 		{Sequential: []string{"shipping"}},
@@ -1119,7 +1119,7 @@ func TestRedirectStepsNotFoundFallsBackToIsolation(t *testing.T) {
 	original := []dsl.ExecutionStep{
 		{Sequential: []string{"A"}},
 	}
-	got := redirectSteps(original, "does-not-exist")
+	got := redirectSteps(planOf(original), "does-not-exist")
 	want := []dsl.ExecutionStep{{Sequential: []string{"does-not-exist"}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("redirectSteps() = %+v, want %+v", got, want)
@@ -1142,7 +1142,7 @@ func TestRedirectSteps_IntoAnExclusiveBranchsSteps(t *testing.T) {
 		"B": {{Sequential: []string{"B"}}, {Sequential: []string{"C"}}, {Sequential: []string{"D"}}},
 		"C": {{Sequential: []string{"C"}}, {Sequential: []string{"D"}}},
 	} {
-		if got := redirectSteps(original, target); !reflect.DeepEqual(got, want) {
+		if got := redirectSteps(planOf(original), target); !reflect.DeepEqual(got, want) {
 			t.Errorf("redirectSteps to %s = %+v, want %+v", target, got, want)
 		}
 	}
@@ -1161,7 +1161,11 @@ func TestRedirectSteps_IntoAGatewayLedParallelBranch(t *testing.T) {
 		{Sequential: []string{"Close"}},
 	}
 	want := []dsl.ExecutionStep{{Sequential: []string{"Ops"}}, {Sequential: []string{"Close"}}}
-	if got := redirectSteps(original, "Ops"); !reflect.DeepEqual(got, want) {
+	if got := redirectSteps(planOf(original), "Ops"); !reflect.DeepEqual(got, want) {
 		t.Errorf("redirectSteps to Ops = %+v, want %+v", got, want)
 	}
+}
+
+func planOf(steps []dsl.ExecutionStep) *dsl.CompiledPlan {
+	return &dsl.CompiledPlan{Execution: dsl.ExecutionPlan{Steps: steps}}
 }

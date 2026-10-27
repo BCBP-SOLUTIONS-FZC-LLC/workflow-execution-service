@@ -10,6 +10,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- A defer supersedes every other task the run it ends held open, such as one a non-interrupting boundary path started; they were left open (LLD rev 1.126).
+- A force-forward or force-back to a department found only on a boundary path runs the rest of that path from it, instead of that department alone (LLD rev 1.126).
+- Tests pin a force-back inside a nested parallel step, both for a failed inner branch and while every branch is open.
 - Each `DEGRADED` park has its own state: administrator signals reach the park holding their department, the stored status lists every open park's failed branches, and only the last park to close writes `RUNNING` or `PAUSED`. Two parks open at once had shared one status and one signal channel (LLD rev 1.125).
 - A connector callback for a paused instance is accepted and the workflow holds the result until the instance resumes, where it was refused and dead-lettered after the worker's retries. A pause that arrives while a `DEGRADED` park's end writes `RUNNING` is applied after that write. Only the workflow's own refusal of a defer is `409 INVALID_TASK_STATE`; any other failure inside the Update is a `500` (LLD rev 1.124).
 - `POST /tasks/{id}/defer` waits for the workflow: it is a Temporal Update whose validator refuses a defer the workflow cannot apply (`409 INVALID_TASK_STATE` with the reason) and answers `200` with the task now DEFERRED, where it answered `202` and the workflow could drop it. The `stage-defer` signal is gone (LLD rev 1.123).
