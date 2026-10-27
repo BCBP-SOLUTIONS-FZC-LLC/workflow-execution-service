@@ -176,7 +176,7 @@ func newApp(cfg *config.Config) (*app, error) {
 
 	definitions := outboundhttp.NewDefinitionClient(cfg.DefinitionServiceURL, cfg.DefinitionServiceToken, cfg.DefinitionClientTimeout)
 
-	eligibility := outboundhttp.NewEligibilityClient(cfg.EligibilityBaseURL, cfg.EligibilityClientTimeout)
+	eligibility := outboundhttp.NewEligibilityClient(cfg.EligibilityBaseURL, cfg.EligibilityClientTimeout).WithLogger(log)
 	principals := outboundhttp.NewAutomationPrincipalClient(cfg.TokenServiceBaseURL, cfg.TokenServiceClientTimeout, automationPrincipalCacheTTL)
 
 	instances := postgres.NewInstanceRepo(appPool)

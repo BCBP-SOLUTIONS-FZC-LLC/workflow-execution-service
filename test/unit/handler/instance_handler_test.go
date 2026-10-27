@@ -30,6 +30,7 @@ func asAdmin(r *http.Request) *http.Request {
 
 type problemBody struct {
 	Code          string `json:"code"`
+	Detail        string `json:"detail"`
 	InvalidParams []struct {
 		Name   string `json:"name"`
 		Reason string `json:"reason"`
@@ -216,6 +217,7 @@ func TestStartInstance_AssigneeIneligible_PopulatesInvalidParams(t *testing.T) {
 	var body problemBody
 	decodeJSON(t, w.Body, &body)
 	assert.Equal(t, "ASSIGNEE_INELIGIBLE", body.Code)
+	assert.Contains(t, body.Detail, "default assignees", "a start is refused for its default assignees")
 	require.Len(t, body.InvalidParams, 2)
 	assert.Equal(t, "finance/review", body.InvalidParams[0].Name)
 	assert.Equal(t, "legal/review", body.InvalidParams[1].Name)

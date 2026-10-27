@@ -12,7 +12,7 @@ import (
 func TestAssigneeIneligibleError(t *testing.T) {
 	err := &port.AssigneeIneligibleError{Nodes: []string{"finance/review"}}
 
-	assert.Equal(t, port.ErrAssigneeIneligible.Error(), err.Error())
+	assert.Contains(t, err.Error(), "default assignees", "a start is refused for its default assignees; a task action uses the sentinel's own text")
 	assert.ErrorIs(t, err, port.ErrAssigneeIneligible)
 	assert.True(t, errors.Is(err, port.ErrAssigneeIneligible))
 }

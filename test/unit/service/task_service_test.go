@@ -431,6 +431,7 @@ func TestTaskService_Complete(t *testing.T) {
 
 		_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)
 		require.ErrorIs(t, err, port.ErrAssigneeIneligible)
+		assert.NotContains(t, err.Error(), "default assignee", "a task action is refused for the acting user, not for a default assignee")
 		assert.Equal(t, []string{tenantID.String() + "/" + userID.String() + "/" + task.DepartmentID.String() + "/reviewer"}, asked)
 		assert.Empty(t, temporal.signals)
 	})

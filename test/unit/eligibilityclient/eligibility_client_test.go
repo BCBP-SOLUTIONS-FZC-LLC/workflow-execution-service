@@ -382,3 +382,50 @@ func TestCheckEligibility_ALevelThatIsNotARoleLevelIsIneligibleWithoutACall(t *t
 	assert.True(t, results[1].Eligible)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "only the reviewer request reached the service")
 }
+
+type recordedLog struct {
+	msg    string
+	fields map[string]any
+}
+
+type recordingLogger struct{ infos []recordedLog }
+
+func (l *recordingLogger) Info(msg string, fields map[string]any) {
+	l.infos = append(l.infos, recordedLog{msg, fields})
+}
+func (*recordingLogger) Debug(string, map[string]any) {}
+func (*recordingLogger) Warn(string, map[string]any)  {}
+func (*recordingLogger) Error(string, map[string]any) {}
+
+func TestCheckEligibility_ARefusalIsLoggedWithItsReason(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantLogs int
+	}{
+		{name: "a refusal names its reason", body: `{"eligible":false,"reason":"not_in_department"}`, wantLogs: 1},
+		{name: "an eligible answer logs nothing", body: `{"eligible":true}`, wantLogs: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+			log := &recordingLogger{}
+			client := httpadapter.NewEligibilityClient(srv.URL, 5*time.Second).WithLogger(log)
+			tenantID, userID, deptID := uuid.New(), uuid.New(), uuid.New()
+
+			_, err := client.CheckEligibility(context.Background(), tenantID, userID, deptID, "reviewer")
+
+			require.NoError(t, err)
+			require.Len(t, log.infos, tt.wantLogs)
+			if tt.wantLogs == 1 {
+				assert.Equal(t, map[string]any{
+					"tenant_id": tenantID.String(), "user_id": userID.String(), "department_id": deptID.String(),
+					"required_level": "reviewer", "reason": "not_in_department",
+				}, log.infos[0].fields)
+			}
+		})
+	}
+}

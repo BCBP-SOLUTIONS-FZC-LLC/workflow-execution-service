@@ -30,6 +30,7 @@ var _ port.EligibilityChecker = (*EligibilityClient)(nil)
 type EligibilityClient struct {
 	baseURL string
 	client  *http.Client
+	log     port.Logger
 }
 
 func NewEligibilityClient(baseURL string, timeout time.Duration) *EligibilityClient {
@@ -37,6 +38,11 @@ func NewEligibilityClient(baseURL string, timeout time.Duration) *EligibilityCli
 		baseURL: strings.TrimRight(baseURL, "/"),
 		client:  &http.Client{Timeout: timeout},
 	}
+}
+
+func (c *EligibilityClient) WithLogger(log port.Logger) *EligibilityClient {
+	c.log = log
+	return c
 }
 
 const systemPrincipal = "iam-system"
@@ -77,9 +83,15 @@ func (c *EligibilityClient) CheckEligibility(
 
 	var lastErr error
 	for attempt := 1; attempt <= maxEligibilityAttempts; attempt++ {
-		eligible, retryable, err := c.tryCheckEligibility(ctx, rawURL, tenantID)
+		answer, retryable, err := c.tryCheckEligibility(ctx, rawURL, tenantID)
 		if err == nil {
-			return eligible, nil
+			if !answer.eligible && c.log != nil {
+				c.log.Info("assignee refused by membership eligibility", map[string]any{
+					"tenant_id": tenantID.String(), "user_id": newUserID.String(), "department_id": departmentID.String(),
+					"required_level": requiredLevel, "reason": answer.reason,
+				})
+			}
+			return answer.eligible, nil
 		}
 		lastErr = err
 		if attempt == maxEligibilityAttempts || !retryable {
@@ -94,14 +106,19 @@ func (c *EligibilityClient) CheckEligibility(
 	return false, lastErr
 }
 
+type eligibilityAnswer struct {
+	eligible bool
+	reason   string
+}
+
 func (c *EligibilityClient) tryCheckEligibility(
 	ctx context.Context,
 	rawURL string,
 	tenantID uuid.UUID,
-) (eligible, retryable bool, err error) {
+) (answer eligibilityAnswer, retryable bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return false, false, fmt.Errorf("build eligibility request: %w", err)
+		return eligibilityAnswer{}, false, fmt.Errorf("build eligibility request: %w", err)
 	}
 	req.Header.Set("x-user-id", systemPrincipal)
 	req.Header.Set("x-tenant-roles", systemPrincipal)
@@ -110,27 +127,28 @@ func (c *EligibilityClient) tryCheckEligibility(
 	gincommon.InjectTraceContext(ctx, req.Header)
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return false, true, fmt.Errorf("%w: eligibility check: %w", ErrUpstreamUnavailable, err)
+		return eligibilityAnswer{}, true, fmt.Errorf("%w: eligibility check: %w", ErrUpstreamUnavailable, err)
 	}
 	defer resp.Body.Close() //nolint:errcheck // a failed close of a response body is not actionable
 
 	switch {
 	case resp.StatusCode >= 500:
-		return false, true, fmt.Errorf("%w: eligibility endpoint returned %d", ErrUpstreamUnavailable, resp.StatusCode)
+		return eligibilityAnswer{}, true, fmt.Errorf("%w: eligibility endpoint returned %d", ErrUpstreamUnavailable, resp.StatusCode)
 	case resp.StatusCode != http.StatusOK:
-		return false, false, fmt.Errorf("%w: eligibility endpoint returned %d", ErrUpstreamUnavailable, resp.StatusCode)
+		return eligibilityAnswer{}, false, fmt.Errorf("%w: eligibility endpoint returned %d", ErrUpstreamUnavailable, resp.StatusCode)
 	}
 
 	var out struct {
-		Eligible *bool `json:"eligible"`
+		Eligible *bool  `json:"eligible"`
+		Reason   string `json:"reason"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return false, false, fmt.Errorf("%w: decode eligibility response: %w", ErrUpstreamUnavailable, err)
+		return eligibilityAnswer{}, false, fmt.Errorf("%w: decode eligibility response: %w", ErrUpstreamUnavailable, err)
 	}
 	if out.Eligible == nil {
-		return false, false, fmt.Errorf("%w: eligibility response missing \"eligible\" field", ErrUpstreamUnavailable)
+		return eligibilityAnswer{}, false, fmt.Errorf("%w: eligibility response missing \"eligible\" field", ErrUpstreamUnavailable)
 	}
-	return *out.Eligible, false, nil
+	return eligibilityAnswer{eligible: *out.Eligible, reason: out.Reason}, false, nil
 }
 
 func retryBackoff(attempt int) time.Duration {

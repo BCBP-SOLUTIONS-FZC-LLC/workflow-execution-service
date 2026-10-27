@@ -31,7 +31,7 @@ var (
 	ErrNotWaiting              = errors.New("instance is not waiting there")
 	ErrOverrideMapInvalid      = errors.New("override_map references an unknown node key or invalid value")
 
-	ErrAssigneeIneligible = errors.New("one or more default assignees no longer satisfy their node's eligibility requirement")
+	ErrAssigneeIneligible = errors.New("the user does not satisfy the task's department and role level")
 
 	ErrTaskNotHumanActionable = errors.New("task is connector-typed and has no human assignee to act on")
 
@@ -45,7 +45,7 @@ type AssigneeIneligibleError struct {
 }
 
 func (e *AssigneeIneligibleError) Error() string {
-	return ErrAssigneeIneligible.Error()
+	return "one or more default assignees no longer satisfy their node's eligibility requirement"
 }
 
 func (e *AssigneeIneligibleError) Unwrap() error {
