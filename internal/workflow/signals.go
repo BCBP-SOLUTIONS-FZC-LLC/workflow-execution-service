@@ -236,6 +236,9 @@ func (in *interpreter) handleStageFail(ctx wf.Context, sig stageFailSignal) {
 
 func (in *interpreter) routeAdminSignal(ctx wf.Context, kind string, sig adminSignal) {
 	envelope := adminSignalEnvelope{Kind: kind, Signal: sig}
+	if in.routeToParks(ctx, envelope) {
+		return
+	}
 	if in.parallelDepth > 0 {
 		in.admin.Send(ctx, envelope)
 	} else {

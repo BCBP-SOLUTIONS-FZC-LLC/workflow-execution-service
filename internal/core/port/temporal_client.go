@@ -36,10 +36,7 @@ type StartWorkflowOutput struct {
 	TemporalRunID      string
 }
 
-const (
-	UpdateRefusedErrorType   = "UpdateRefused"
-	VersionConflictErrorType = "VersionConflict"
-)
+const UpdateRefusedErrorType = "UpdateRefused"
 
 type TemporalClient interface {
 	StartWorkflow(ctx context.Context, in StartWorkflowInput) (StartWorkflowOutput, error)

@@ -73,6 +73,7 @@ type interpreter struct {
 	pauseHeld          bool
 	pauseSignal        adminSignal
 	degradedKeepsPause bool
+	parks              []*park
 
 	parallelDepth int
 }

@@ -108,21 +108,81 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 	return in.enterDegraded(ctx, plan, preFork, completed, failed, admin)
 }
 
-func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, preFork domain.NodeKey, completed []completedBranch, failed []failedBranch, admin wf.Channel) (stepOutcome, error) {
-	in.degradedKeepsPause = getVersion(ctx, pauseSurvivesDegradedChangeID) != wf.DefaultVersion
-	in.status = domain.InstanceStatusDegraded
-	failedBranches := make([]domain.FailedBranch, len(failed))
-	for i, fb := range failed {
+type park struct {
+	ch       wf.Channel
+	depts    map[string]bool
+	branches []domain.FailedBranch
+}
+
+const parkTerminate = "park-terminate"
+
+func (in *interpreter) openPark(ctx wf.Context, plan *dsl.CompiledPlan, failed []failedBranch) *park {
+	if len(in.parks) == 0 {
+		in.degradedKeepsPause = getVersion(ctx, pauseSurvivesDegradedChangeID) != wf.DefaultVersion
+	}
+	p := &park{ch: wf.NewChannel(ctx), depts: map[string]bool{}}
+	for _, fb := range failed {
 		var iamDeptID string
 		if dept := findDepartment(plan, fb.DeptID); dept != nil {
 			iamDeptID = dept.IAMDepartmentID
 		}
-		failedBranches[i] = domain.FailedBranch{DepartmentID: deptUUID(iamDeptID), LastNodeKey: string(fb.LastCompletedNode)}
+		p.depts[fb.DeptID] = true
+		p.branches = append(p.branches, domain.FailedBranch{DepartmentID: deptUUID(iamDeptID), LastNodeKey: string(fb.LastCompletedNode)})
 	}
-	if err := updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
-		InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusDegraded,
-		FailedBranches: failedBranches,
-	}); err != nil {
+	in.parks = append(in.parks, p)
+	in.status = domain.InstanceStatusDegraded
+	return p
+}
+
+func (in *interpreter) closePark(p *park) {
+	in.parks = slices.DeleteFunc(in.parks, func(q *park) bool { return q == p })
+	if len(in.parks) == 0 {
+		in.degradedKeepsPause = false
+	}
+}
+
+func (in *interpreter) writeDegraded(ctx wf.Context) error {
+	var branches []domain.FailedBranch
+	for _, p := range in.parks {
+		branches = append(branches, p.branches...)
+	}
+	return updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
+		InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusDegraded, FailedBranches: branches,
+	})
+}
+
+func (in *interpreter) routeToParks(ctx wf.Context, envelope adminSignalEnvelope) bool {
+	if len(in.parks) == 0 {
+		return false
+	}
+	switch envelope.Kind {
+	case SignalInstanceCancel:
+		in.parks[0].ch.Send(ctx, envelope)
+		for _, p := range in.parks[1:] {
+			p.ch.Send(ctx, adminSignalEnvelope{Kind: parkTerminate})
+		}
+		return true
+	case SignalInstanceForceFwd, SignalInstanceForceBack:
+		target := envelope.Signal.TargetDeptID
+		if target == "" {
+			target = deptFromNodeKey(envelope.Signal.TargetNodeKey)
+		}
+		for _, p := range in.parks {
+			if p.depts[target] {
+				p.ch.Send(ctx, envelope)
+				return true
+			}
+		}
+		in.parks[len(in.parks)-1].ch.Send(ctx, envelope)
+		return true
+	}
+	return false
+}
+
+func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, preFork domain.NodeKey, completed []completedBranch, failed []failedBranch, admin wf.Channel) (stepOutcome, error) {
+	p := in.openPark(ctx, plan, failed)
+	if err := in.writeDegraded(ctx); err != nil {
+		in.closePark(p)
 		return stepOutcome{}, err
 	}
 
@@ -134,7 +194,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 		var terminated bool
 		var cancelErr error
 
-		sel.AddReceive(admin, func(c wf.ReceiveChannel, more bool) {
+		sel.AddReceive(p.ch, func(c wf.ReceiveChannel, more bool) {
 			var envelope adminSignalEnvelope
 			c.Receive(ctx, &envelope)
 			sig := envelope.Signal
@@ -143,6 +203,9 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 			case SignalInstanceCancel:
 				terminated = true
 				cancelErr = in.cancelInstanceOnSignal(ctx, sig)
+
+			case parkTerminate:
+				terminated = true
 
 			case SignalInstanceForceFwd:
 				var cb completedBranch
@@ -171,6 +234,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 					fb.Steps = out.Steps
 				}
 				failed = append(failed, fb)
+				p.depts[fb.DeptID] = true
 			} else {
 				completed = append(completed, completedBranch{DeptID: out.DeptID, LastNode: out.LastNode})
 			}
@@ -178,26 +242,36 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 
 		sel.Select(ctx)
 		if terminated {
+			in.closePark(p)
 			return stepOutcome{Terminated: true}, cancelErr
 		}
 	}
 
+	if len(in.parks) > 1 {
+		in.closePark(p)
+		if err := in.writeDegraded(ctx); err != nil {
+			return stepOutcome{}, err
+		}
+		return stepOutcome{LastNode: preFork}, nil
+	}
 	keepsPause := in.degradedKeepsPause
 	if keepsPause && in.pauseHeld {
+		in.closePark(p)
 		in.leaveParkPaused(ctx)
 		return stepOutcome{LastNode: preFork}, nil
 	}
 	if err := updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusRunning,
 	}); err != nil {
-		in.degradedKeepsPause = false
+		in.closePark(p)
 		return stepOutcome{}, err
 	}
 	if keepsPause && in.pauseHeld {
+		in.closePark(p)
 		in.leaveParkPaused(ctx)
 		return stepOutcome{LastNode: preFork}, nil
 	}
-	in.degradedKeepsPause = false
+	in.closePark(p)
 	in.pauseHeld = false
 	in.status = domain.InstanceStatusRunning
 	return stepOutcome{LastNode: preFork}, nil

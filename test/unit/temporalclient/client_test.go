@@ -296,7 +296,6 @@ func TestUpdateWorkflow_OnlyTheWorkflowsOwnRefusalIsARefusal(t *testing.T) {
 		wantNot error
 	}{
 		{name: "the workflow refuses", err: temporal.NewNonRetryableApplicationError("defer refused: no step", port.UpdateRefusedErrorType, nil), wantIs: port.ErrUpdateRefused},
-		{name: "a stale record version", err: temporal.NewNonRetryableApplicationError("lost the race", port.VersionConflictErrorType, nil), wantIs: port.ErrRecordVersionConflict, wantNot: port.ErrUpdateRefused},
 		{name: "any other handler failure", err: temporal.NewApplicationError("defer task: db down", "", nil), wantNot: port.ErrUpdateRefused},
 	}
 	for _, tt := range tests {
