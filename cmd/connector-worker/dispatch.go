@@ -238,10 +238,12 @@ func resolveSecrets(ctx context.Context, reader *openbao.Reader, job dispatchJob
 		out[k] = v
 	}
 	for _, field := range def.Inputs {
-		if !field.IsSecretRef() {
-			continue
+		if field.IsSecretRef() {
+			delete(out, field.Name)
 		}
-		delete(out, field.Name)
+	}
+	provider, _ := job.resolvedInputs["provider"].(string)
+	for _, field := range def.SecretFields(provider) {
 		value, err := reader.Read(ctx, ownSecretPath(job, field.Name), field.Name)
 		if errors.Is(err, openbao.ErrSecretNotFound) {
 			continue

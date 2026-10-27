@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The connector worker reads only the secret fields of the task's provider from OpenBao (`workflow-connectors` `v2.3.0-rc.1`, `Definition.SecretFields`), two for `storage` on `aws-s3` where it read six (LLD rev 1.121). The pin moves to `v2.3.0` when that tag is cut.
 - Public request bodies are read exactly: field names match with case at every depth, every unknown field is named in `invalid_params` (up to twenty), and a bind failure's detail no longer repeats the decoder's text. A path no route serves answers a `404` problem with the new code `NOT_FOUND`; the AsyncAPI endpoint's failure is a `500` problem without the file error (LLD rev 1.120).
 - Behind a pooler (`PG_BOUNCER_MODE=true`) the migrate command refuses to run without `MIGRATION_DATABASE_URL`, also with an existing Secret; the migration job receives `PG_BOUNCER_MODE` (LLD rev 1.119).
 - `RETENTION_SWEEP_INTERVAL` is a chart value (`env.retentionSweepInterval`, whole hours), and the purge-failure alert looks back over it plus two hours.

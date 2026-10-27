@@ -6,7 +6,7 @@ require (
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2 v2.2.1
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon v1.6.0
 	github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2 v2.0.1
-	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2 v2.2.0
+	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2 v2.3.0-rc.1
 	github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2 v2.1.0
 	github.com/aws/aws-sdk-go-v2 v1.47.3
 	github.com/aws/aws-sdk-go-v2/config v1.33.6
@@ -17,6 +17,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.52.1
 	github.com/getkin/kin-openapi v0.149.0
 	github.com/gin-gonic/gin v1.12.0
+	github.com/go-playground/validator/v10 v10.30.2
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/joho/godotenv v1.5.1
@@ -102,7 +103,6 @@ require (
 	github.com/go-openapi/jsonpointer v1.0.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-playground/validator/v10 v10.30.2 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect

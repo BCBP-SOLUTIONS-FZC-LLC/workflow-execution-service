@@ -216,6 +216,21 @@ func TestDispatch_ReadsTheTenantsStoredCredentialFromItsOwnPaths(t *testing.T) {
 	}
 }
 
+// The worker reads only the secret fields of the task's provider: two for
+// storage on aws-s3, never another provider's credentials.
+func TestDispatch_ReadsOnlyTheChosenProvidersSecretFields(t *testing.T) {
+	f := newCredentialFixture(t, map[string]string{"accessKey": "own-access", "secretKey": "own-secret"}, 0)
+
+	f.dispatch(`{"provider":"aws-s3","bucket":"b","key":"k"}`)
+
+	f.ran(t)
+	var fields []string
+	for _, p := range f.readPaths() {
+		fields = append(fields, p[strings.LastIndex(p, "/")+1:])
+	}
+	assert.ElementsMatch(t, []string{"accessKey", "secretKey"}, fields)
+}
+
 // A value an old plan still carries for a secret field is never read or used:
 // it is replaced by the stored credential, and a path it names is not fetched.
 func TestDispatch_AnAuthoredSecretValueIsNeverUsed(t *testing.T) {
