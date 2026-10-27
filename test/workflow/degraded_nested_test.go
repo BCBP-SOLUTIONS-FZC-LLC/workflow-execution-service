@@ -1,6 +1,7 @@
 package workflow_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -145,6 +146,7 @@ func TestExecute_TwoParksAtOnceEachTakeTheirOwnSignals(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 
+	var mu sync.Mutex
 	var statuses []domain.InstanceStatus
 	registerFakeActivities(env, twoInnerForksCollaboration(), &activityHooks{
 		createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
@@ -153,7 +155,11 @@ func TestExecute_TwoParksAtOnceEachTakeTheirOwnSignals(t *testing.T) {
 			}
 			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
 		},
-		updateInstanceStatus: func(in port.UpdateInstanceStatusInput) { statuses = append(statuses, in.Status) },
+		updateInstanceStatus: func(in port.UpdateInstanceStatusInput) {
+			mu.Lock()
+			defer mu.Unlock()
+			statuses = append(statuses, in.Status)
+		},
 	})
 	for _, d := range []string{"x1", "y1"} {
 		env.RegisterDelayedCallback(func() {
@@ -178,6 +184,8 @@ func TestExecute_TwoParksAtOnceEachTakeTheirOwnSignals(t *testing.T) {
 	if out.Status != domain.InstanceStatusCompleted {
 		t.Errorf("Status = %v, want COMPLETED: each force-forward must reach its own park", out.Status)
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	running := 0
 	for i, s := range statuses {
 		if s == domain.InstanceStatusRunning {
@@ -189,5 +197,40 @@ func TestExecute_TwoParksAtOnceEachTakeTheirOwnSignals(t *testing.T) {
 	}
 	if running != 1 {
 		t.Errorf("statuses = %v, want exactly one RUNNING, written when the last park closes", statuses)
+	}
+}
+
+// A second signal for a park that closes on the first one must not block
+// the signal router: the stage after the park still gets its result.
+func TestExecute_ASignalForAClosingParkDoesNotBlockLaterSignals(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	collab := parallelCollaboration()
+	plan := collab.Plans[0]
+	plan.Departments = append(plan.Departments, dsl.DepartmentDef{ID: "tail", Stages: []dsl.StageDef{{Type: "prep", Activity: "ship_order"}}})
+	plan.Execution.Steps = append(plan.Execution.Steps, dsl.ExecutionStep{Sequential: []string{"tail"}})
+	registerFakeActivities(env, collab, &activityHooks{createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+		if in.NodeKey == "billing/prep" {
+			return port.CreateTaskOutput{}, temporal.NewApplicationError("card declined", "ValidationError")
+		}
+		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+	}})
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1})
+	}, tick)
+	env.RegisterDelayedCallback(func() {
+		for range 2 {
+			env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "billing/prep", RecordVersion: 1})
+		}
+	}, 10*tick)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{DeptID: "tail", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1})
+	}, 20*tick)
+
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1"})
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow returned error: %v", err)
 	}
 }

@@ -120,18 +120,26 @@ func (in *interpreter) openPark(ctx wf.Context, plan *dsl.CompiledPlan, failed [
 	if len(in.parks) == 0 {
 		in.degradedKeepsPause = getVersion(ctx, pauseSurvivesDegradedChangeID) != wf.DefaultVersion
 	}
-	p := &park{ch: wf.NewChannel(ctx), depts: map[string]bool{}}
+	p := &park{ch: wf.NewBufferedChannel(ctx, 8), depts: map[string]bool{}}
+	for _, fb := range failed {
+		p.depts[fb.DeptID] = true
+	}
+	p.branches = parkedBranches(plan, failed)
+	in.parks = append(in.parks, p)
+	in.status = domain.InstanceStatusDegraded
+	return p
+}
+
+func parkedBranches(plan *dsl.CompiledPlan, failed []failedBranch) []domain.FailedBranch {
+	branches := make([]domain.FailedBranch, 0, len(failed))
 	for _, fb := range failed {
 		var iamDeptID string
 		if dept := findDepartment(plan, fb.DeptID); dept != nil {
 			iamDeptID = dept.IAMDepartmentID
 		}
-		p.depts[fb.DeptID] = true
-		p.branches = append(p.branches, domain.FailedBranch{DepartmentID: deptUUID(iamDeptID), LastNodeKey: string(fb.LastCompletedNode)})
+		branches = append(branches, domain.FailedBranch{DepartmentID: deptUUID(iamDeptID), LastNodeKey: string(fb.LastCompletedNode)})
 	}
-	in.parks = append(in.parks, p)
-	in.status = domain.InstanceStatusDegraded
-	return p
+	return branches
 }
 
 func (in *interpreter) closePark(p *park) {
@@ -245,6 +253,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 			in.closePark(p)
 			return stepOutcome{Terminated: true}, cancelErr
 		}
+		p.branches = parkedBranches(plan, failed)
 	}
 
 	if len(in.parks) > 1 {
