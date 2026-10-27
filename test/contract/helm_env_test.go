@@ -21,7 +21,7 @@ var requiredEnv = map[string][]string{
 		"START_REFUSED_STATUSES", "TENANT_PURGE_ENABLED", "TENANT_HISTORY_RETENTION", "LOCK_DATABASE_URL",
 		"PG_MAX_CONNS", "PG_BOUNCER_MODE", "GOMEMLIMIT",
 	},
-	"migrate-job.yaml": {"DATABASE_URL", "MIGRATION_DATABASE_URL"},
+	"migrate-job.yaml": {"DATABASE_URL", "MIGRATION_DATABASE_URL", "PG_BOUNCER_MODE"},
 	"deployment-worker.yaml": {
 		"APP_ENV", "BUILD_VERSION", "OTEL_SERVICE_NAME", "OTEL_EXPORTER_OTLP_ENDPOINT",
 		"DATABASE_URL", "TEMPORAL_HOST_PORT", "DEFINITION_SERVICE_URL", "DEFINITION_SERVICE_TOKEN",
@@ -104,4 +104,17 @@ func TestHelmDeployments_AGoMemLimitMustCarryAUnit(t *testing.T) {
 
 	_, err = helmRender(t, "--set-string", "worker.goMemLimit=200MiB", "--set-string", "api.goMemLimit=1GiB")
 	require.NoError(t, err)
+}
+
+func TestHelmPurgeAlert_LooksBackOverTheSweepIntervalPlusTwoHours(t *testing.T) {
+	out, err := helmRender(t, "-s", "templates/prometheusrule.yaml", "--set", "serviceMonitor.enabled=true", "--set-string", "env.retentionSweepInterval=48h")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "tenant_purge_failures_total[50h]")
+
+	out, err = helmRender(t, "-s", "templates/deployment-api.yaml", "--set-string", "env.retentionSweepInterval=48h")
+	require.NoError(t, err, out)
+	assert.Regexp(t, `name: RETENTION_SWEEP_INTERVAL\s+value: "48h"`, out)
+
+	_, err = helmRender(t, "-s", "templates/prometheusrule.yaml", "--set", "serviceMonitor.enabled=true", "--set-string", "env.retentionSweepInterval=90m")
+	require.Error(t, err, "the alert window is set in whole hours")
 }

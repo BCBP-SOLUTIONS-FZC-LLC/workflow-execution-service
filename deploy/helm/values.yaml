@@ -215,6 +215,8 @@ env:
   # are deleted this long after it left. The audit trail keeps its own retention.
   tenantPurgeEnabled: "true"
   tenantHistoryRetention: 61320h
+  # How often the purge sweep runs, in whole hours; the purge-failure alert looks back over it plus two hours.
+  retentionSweepInterval: 24h
 
 # Secret-backed env vars. existingSecretName takes precedence when set;
 # secretValues is for CI/values-overlay injection — never commit real

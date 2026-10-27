@@ -120,6 +120,9 @@ jobs:
       - name: Helm chart lint + kubeconform
         run: make helm-lint
 
+      - name: Alert rule tests
+        run: make alerts-test
+
       - name: Lint GitHub Actions workflows
         run: make lint-workflows
 

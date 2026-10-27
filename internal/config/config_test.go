@@ -352,6 +352,10 @@ func TestRequire(t *testing.T) {
 		{"migrate needs only a database", (*Config).RequireMigrate, func(c *Config) { *c = Config{DatabaseURL: "postgres://x"} }, ""},
 		{"migrate prefers its direct dsn", (*Config).RequireMigrate, func(c *Config) { *c = Config{MigrationDatabaseURL: "postgres://direct"} }, ""},
 		{"migrate needs a database", (*Config).RequireMigrate, func(c *Config) { c.DatabaseURL = "" }, "DATABASE_URL"},
+		{"migrate behind a pooler needs its direct dsn", (*Config).RequireMigrate, func(c *Config) { *c = Config{DatabaseURL: "postgres://pooled", PGBouncerMode: true} }, "MIGRATION_DATABASE_URL"},
+		{"migrate behind a pooler takes its direct dsn", (*Config).RequireMigrate, func(c *Config) {
+			*c = Config{DatabaseURL: "postgres://pooled", MigrationDatabaseURL: "postgres://direct", PGBouncerMode: true}
+		}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

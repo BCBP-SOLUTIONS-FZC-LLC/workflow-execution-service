@@ -32,6 +32,13 @@ linters:
         - name: error-strings
         - name: error-naming
         - name: if-return
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - hugeParam
+        - rangeValCopy
     nolintlint:
       require-explanation: true
       require-specific: true

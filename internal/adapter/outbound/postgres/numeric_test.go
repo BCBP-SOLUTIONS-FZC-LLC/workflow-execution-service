@@ -28,3 +28,22 @@ func TestClampInt32(t *testing.T) {
 		})
 	}
 }
+
+func TestPageLimit(t *testing.T) {
+	cases := []struct {
+		name string
+		in   int
+		want int32
+	}{
+		{"a page asks for one row more than its limit", 100, 101},
+		{"the largest int still asks for a positive limit", math.MaxInt, math.MaxInt32},
+		{"the largest int32 does not wrap", math.MaxInt32, math.MaxInt32},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pageLimit(tc.in); got != tc.want {
+				t.Errorf("pageLimit(%d) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}

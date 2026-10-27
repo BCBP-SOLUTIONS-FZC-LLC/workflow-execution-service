@@ -1,0 +1,89 @@
+rule_files:
+  - app-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a purge failure alerts for the sweep interval plus two hours, then clears
+    interval: 1h
+    input_series:
+      - series: 'workflow_execution_service_tenant_purge_failures_total'
+        values: '0 1x30'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: TenantPurgeFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              runbook: workflow-execution-service/tenant-purge
+              summary: A tenant data purge keeps failing
+              description: "An offboarded tenant's rows could not be fully deleted after its retention period; the sweep retries on its next run (LLD §4.13)."
+      - eval_time: 25h
+        alertname: TenantPurgeFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              runbook: workflow-execution-service/tenant-purge
+              summary: A tenant data purge keeps failing
+              description: "An offboarded tenant's rows could not be fully deleted after its retention period; the sweep retries on its next run (LLD §4.13)."
+      - eval_time: 27h
+        alertname: TenantPurgeFailing
+        exp_alerts: []
+
+  - name: a recorded RLS violation pages at once
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_rls_violations_total{violation_type="cross_tenant_access"}'
+        values: '0 0 1 1 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: RLSViolation
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: RLSViolation
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              violation_type: cross_tenant_access
+            exp_annotations:
+              runbook: workflow-execution-service/rls
+              summary: "RLS violation recorded: cross_tenant_access"
+              description: "Same severity as Definition Service's own RLSMissingGUC/RLSCrossTenantAccess alerts (LLD §9.2, §9.5, §7.6)."
+
+  - name: an instance entering DEGRADED pages
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_instance_degraded_total'
+        values: '0 0 1 1 1'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: InstanceDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              runbook: workflow-execution-service/instance-degraded
+              summary: Instance entered DEGRADED
+              description: "A parallel-branch failure parked an instance needing admin force-forward/force-back resolution (LLD §3.3, §7.6)."
+
+  - name: no healthy API target alerts after two minutes
+    interval: 1m
+    input_series:
+      - series: 'up{job="workflow-execution-service-api"}'
+        values: '1 1 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ExecutionServiceAPIDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ExecutionServiceAPIDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              runbook: workflow-execution-service/api-down
+              summary: execution-service API has no healthy instances
+              description: "No execution-service API pods have been scraped as healthy for 2 minutes. Check pod readiness: kubectl get pods -l app.kubernetes.io/component=api"

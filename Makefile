@@ -68,7 +68,7 @@ COVER_THRESHOLD    := 95
 # its own identity, and the Search Attribute upsert failure.
 COVER_PKG_FLOORS   := internal/workflow:88 cmd/connector-worker:55 internal/observability:90
 
-.PHONY: metrics-lint metrics-inventory all tools tools-integration generate generate-sqlc mock contract-check contract-breaking \
+.PHONY: alerts-test metrics-lint metrics-inventory all tools tools-integration generate generate-sqlc mock contract-check contract-breaking \
         build migrate dev test test-integration test-e2e test-compat test-ci merge-coverage \
         cover cover-func cover-gaps cover-html cover-check cover-check-pkg \
         arch-lint lint lint-fix vuln \
@@ -309,6 +309,8 @@ check:
 	$(MAKE) arch-lint
 	@echo "==> metrics-lint"
 	$(MAKE) metrics-lint
+	@echo "==> alerts-test"
+	$(MAKE) alerts-test
 	@echo "==> contract-breaking"
 	$(MAKE) contract-breaking
 	@echo "==> design-sync-check-test"
@@ -336,6 +338,14 @@ lint:
 ## lint-fix: Run golangci-lint with auto-fix
 lint-fix:
 	$(GOLANGCI) run --fix --build-tags=integration,e2e,compat ./cmd/... ./internal/... ./test/...
+
+PROMTOOL_IMAGE ?= prom/prometheus:v3.15.0
+
+## alerts-test: Unit-test the alert rules with promtool (a local promtool, else the Prometheus image)
+alerts-test:
+	@if command -v promtool >/dev/null 2>&1; then promtool test rules deploy/monitoring/app-alerts.test.yml; \
+	else docker run --rm --entrypoint promtool -v "$(CURDIR)/deploy/monitoring:/rules:ro" -w /rules \
+		$(PROMTOOL_IMAGE) test rules app-alerts.test.yml; fi
 
 ## metrics-lint: Observability standard: collector naming, metricslint on a real scrape, alert and doc references, inventory drift
 metrics-lint:

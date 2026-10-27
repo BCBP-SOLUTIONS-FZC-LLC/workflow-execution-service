@@ -376,6 +376,9 @@ func (c *Config) RequireMigrate() error {
 	if c.MigrationDSN() == "" {
 		return fmt.Errorf("DATABASE_URL is required")
 	}
+	if c.PGBouncerMode && c.MigrationDatabaseURL == "" {
+		return fmt.Errorf("MIGRATION_DATABASE_URL is required when PG_BOUNCER_MODE is true: migrations take a session advisory lock, which a transaction-pooling proxy does not keep")
+	}
 	return nil
 }
 

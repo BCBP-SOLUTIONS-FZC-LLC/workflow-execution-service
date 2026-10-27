@@ -91,3 +91,11 @@ The platform's APP_ENV vocabulary; any other value fails the render.
 {{- fail (printf "env.appEnv must be one of local, dev, test, staging, prod (got %q)" .Values.env.appEnv) -}}
 {{- end -}}
 {{- end }}
+
+{{- define "workflow-execution-service.purgeAlertWindow" -}}
+{{- $interval := .Values.env.retentionSweepInterval | toString -}}
+{{- if not (regexMatch "^[0-9]+h$" $interval) -}}
+{{- fail "env.retentionSweepInterval must be whole hours (for example 24h), so the purge alert window can follow it" -}}
+{{- end -}}
+{{- printf "%dh" (add (trimSuffix "h" $interval | atoi) 2) -}}
+{{- end -}}

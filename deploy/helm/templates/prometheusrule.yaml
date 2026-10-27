@@ -218,7 +218,7 @@ spec:
             description: "An event failed all publish retries; operable via the outbox runner's DLQ replay (LLD §6.6, §7.6)."
 
         - alert: TenantPurgeFailing
-          expr: increase(workflow_execution_service_tenant_purge_failures_total[26h]) > 0
+          expr: increase(workflow_execution_service_tenant_purge_failures_total[{{ include "workflow-execution-service.purgeAlertWindow" . }}]) > 0
           for: 5m
           labels:
             severity: warning

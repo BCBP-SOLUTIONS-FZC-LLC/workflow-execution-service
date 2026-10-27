@@ -34,7 +34,7 @@ func TestAsyncAPI_EveryMessageHasASchemaFile(t *testing.T) {
 		if strings.HasSuffix(key, "Inbound") {
 			file += "_inbound"
 		}
-		path := filepath.Join("../../internal/eventschema", file+".json")
+		path := filepath.Join("..", "..", "internal", "eventschema", file+".json")
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("message %s has no schema file %s", key, path)
 		}

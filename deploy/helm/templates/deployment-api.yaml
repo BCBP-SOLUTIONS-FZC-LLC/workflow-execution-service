@@ -90,6 +90,8 @@ spec:
               value: {{ .Values.env.tenantPurgeEnabled | quote }}
             - name: TENANT_HISTORY_RETENTION
               value: {{ .Values.env.tenantHistoryRetention | quote }}
+            - name: RETENTION_SWEEP_INTERVAL
+              value: {{ .Values.env.retentionSweepInterval | quote }}
             - name: PG_MAX_CONNS
               value: {{ .Values.env.pgMaxConns | quote }}
             - name: PG_BOUNCER_MODE

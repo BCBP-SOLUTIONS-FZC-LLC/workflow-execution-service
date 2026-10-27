@@ -102,7 +102,7 @@ func (r *TaskRepo) ListByInstance(
 
 	params := db.ListWorkflowTasksByInstanceParams{
 		WorkflowInstanceID: instanceID,
-		Limit:              clampInt32(limit + 1),
+		Limit:              pageLimit(limit),
 	}
 	if page.After != nil {
 		params.CursorCreatedAt = toPgtypeTimestamptz(&page.After.CreatedAt)
@@ -140,7 +140,7 @@ func (r *TaskRepo) ListByTenant(
 
 	params := db.ListWorkflowTasksByTenantParams{
 		TenantID: tenantID,
-		Limit:    clampInt32(limit + 1),
+		Limit:    pageLimit(limit),
 	}
 	if filter.Status != nil {
 		params.Status = db.NullWorkflowTaskStatus{WorkflowTaskStatus: db.WorkflowTaskStatus(*filter.Status), Valid: true}

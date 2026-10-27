@@ -45,4 +45,6 @@ spec:
                   name: {{ include "workflow-execution-service.secretName" . }}
                   key: MIGRATION_DATABASE_URL
                   optional: true
+            - name: PG_BOUNCER_MODE
+              value: {{ .Values.env.pgBouncerMode | quote }}
 {{- end }}

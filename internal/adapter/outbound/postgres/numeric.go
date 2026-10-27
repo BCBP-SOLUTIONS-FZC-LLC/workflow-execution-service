@@ -12,3 +12,7 @@ func clampInt32[T ~int | ~int64](n T) int32 {
 		return int32(n)
 	}
 }
+
+func pageLimit(limit int) int32 {
+	return clampInt32(min(int64(limit), math.MaxInt32-1) + 1)
+}
