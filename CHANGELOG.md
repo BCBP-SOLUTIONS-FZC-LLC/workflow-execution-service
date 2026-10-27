@@ -10,12 +10,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- Public request bodies are read exactly: field names match with case at every depth, every unknown field is named in `invalid_params` (up to twenty), and a bind failure's detail no longer repeats the decoder's text. A path no route serves answers a `404` problem with the new code `NOT_FOUND`; the AsyncAPI endpoint's failure is a `500` problem without the file error (LLD rev 1.120).
 - Behind a pooler (`PG_BOUNCER_MODE=true`) the migrate command refuses to run without `MIGRATION_DATABASE_URL`, also with an existing Secret; the migration job receives `PG_BOUNCER_MODE` (LLD rev 1.119).
 - `RETENTION_SWEEP_INTERVAL` is a chart value (`env.retentionSweepInterval`, whole hours), and the purge-failure alert looks back over it plus two hours.
 - `make alerts-test` unit-tests the alert rules with `promtool`; `make check` and the quality workflow run it.
 - gocritic runs its `diagnostic` and `performance` checks, apart from `hugeParam` and `rangeValCopy`; list queries ask for one row past the page through `pageLimit`, which cannot overflow.
 - Claim, complete, defer and reassign read the compiled plan through the Valkey compiled-plan cache for their eligibility check, so a Definition outage no longer refuses them for a version read in the last hour (LLD rev 1.118).
-- The eligibility client logs every refusal with Org & Membership's `reason`, the tenant, user, department and level. The `ASSIGNEE_INELIGIBLE` detail names the user for a task action or reassignment and keeps "default assignees" for an instance start. LLD rev 1.117.
+- The eligibility client logs every refusal with Org & Membership's `reason`, the tenant, user, department and level. The `ASSIGNEE_INELIGIBLE` detail names the user for a task action or reassignment, and the nodes for an instance start, whose assignee may be a default or an override. LLD rev 1.117.
 - `START_REFUSED_STATUSES` defaults to `suspended,trial_expired,cancelled`, in the service, the chart and `.env.example`: `POST /instances` answers `409 TENANT_NOT_ACTIVE` for a tenant whose instances are paused, as well as for an offboarded one. LLD §5.5, rev 1.116.
 - The NetworkPolicies select the platform namespace `observability` for the Prometheus scrape (it was `monitoring`, while the gateway rule already selected `gateway`), and the prometheus-adapter rule names it; a chart test holds both selectors.
 - The Dockerfile writes, uses and removes the private-module credential in one `RUN`, and `make docker-lint` and the CI image job run `scripts/dockerfile-credentials-check.sh`. Earlier builder layers cached by CI held `GO_PRIVATE_TOKEN`, so it needs rotating.

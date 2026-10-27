@@ -217,7 +217,7 @@ func TestStartInstance_AssigneeIneligible_PopulatesInvalidParams(t *testing.T) {
 	var body problemBody
 	decodeJSON(t, w.Body, &body)
 	assert.Equal(t, "ASSIGNEE_INELIGIBLE", body.Code)
-	assert.Contains(t, body.Detail, "default assignees", "a start is refused for its default assignees")
+	assert.Contains(t, body.Detail, "one or more nodes", "a start is refused per node, whether the assignee is a default or an override")
 	require.Len(t, body.InvalidParams, 2)
 	assert.Equal(t, "finance/review", body.InvalidParams[0].Name)
 	assert.Equal(t, "legal/review", body.InvalidParams[1].Name)

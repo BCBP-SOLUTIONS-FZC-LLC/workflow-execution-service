@@ -13,6 +13,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
 )
 
 const asyncAPISpecPath = "api/asyncapi.yaml"
@@ -144,13 +146,13 @@ func flattenTypeNode(n *yaml.Node) string {
 func AsyncAPIHandler(c *gin.Context) {
 	raw, err := os.ReadFile(asyncAPISpecPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not read AsyncAPI spec: " + err.Error()})
+		handler.SpecUnavailable(c)
 		return
 	}
 
 	var spec asyncSpec
 	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not parse AsyncAPI spec: " + err.Error()})
+		handler.SpecUnavailable(c)
 		return
 	}
 

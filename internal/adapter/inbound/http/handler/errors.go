@@ -1,18 +1,17 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
-	"strings"
-	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
+	"github.com/go-playground/validator/v10"
 
 	adapterhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -58,6 +57,7 @@ const (
 	CodeTaskNotHumanActionable  ErrCode = "TASK_NOT_HUMAN_ACTIONABLE"
 	CodeTaskNotConnectorTyped   ErrCode = "TASK_NOT_CONNECTOR_TYPED"
 	CodeNoAutomationPrincipal   ErrCode = "NO_AUTOMATION_PRINCIPAL"
+	CodeNotFound                ErrCode = "NOT_FOUND"
 )
 
 var codeTitles = map[ErrCode]string{
@@ -67,6 +67,7 @@ var codeTitles = map[ErrCode]string{
 	CodeNotAssignee:              "Not Assigned",
 	CodeNotAuthorizedForResource: "Not Authorized For Resource",
 	CodeTaskNotFound:             "Task Not Found",
+	CodeNotFound:                 "Not Found",
 	CodeOverrideNoOp:             "Override No-Op",
 	CodeRecordVersionConflict:    "Record Version Conflict",
 	CodeTaskAlreadyClaimed:       "Task Already Claimed",
@@ -107,6 +108,7 @@ var problemTypes = map[ErrCode]string{
 	CodeNotAssignee:              errBase + "assignee-not-assigned",
 	CodeNotAuthorizedForResource: errBase + "not-authorized-for-resource",
 	CodeTaskNotFound:             errBase + "task-not-found",
+	CodeNotFound:                 errBase + "not-found",
 	CodeOverrideNoOp:             errBase + "override-no-op",
 	CodeRecordVersionConflict:    errBase + "record-version-conflict",
 	CodeTaskAlreadyClaimed:       errBase + "task-already-claimed",
@@ -180,42 +182,67 @@ func bindErrResponse(c *gin.Context, err error) {
 		writeProblem(c, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, "request body exceeds the 10 MB limit", nil)
 		return
 	}
-	if name := unknownFieldName(err); name != "" {
-		writeProblem(c, http.StatusBadRequest, CodeBadRequest, "request body has a field this endpoint does not define",
-			[]invalidParam{{Name: name, Reason: "is not a known field"}})
-		return
+	detail, params := describeBindError(err)
+	writeProblem(c, http.StatusBadRequest, CodeBadRequest, detail, params)
+}
+
+func describeBindError(err error) (string, []invalidParam) {
+	var invalid validator.ValidationErrors
+	var wrongType *json.UnmarshalTypeError
+	var unknown *unknownFieldsError
+	switch {
+	case errors.As(err, &unknown):
+		params := make([]invalidParam, 0, len(unknown.names))
+		for _, name := range unknown.names {
+			params = append(params, invalidParam{Name: name, Reason: "is not a known field"})
+		}
+		return "request body has fields this endpoint does not define", params
+	case errors.As(err, &invalid):
+		params := make([]invalidParam, 0, len(invalid))
+		for _, fe := range invalid {
+			reason := "is not valid"
+			if fe.Tag() == "required" {
+				reason = "is required"
+			}
+			params = append(params, invalidParam{Name: fe.Field(), Reason: reason})
+		}
+		return "request body has missing or invalid fields", params
+	case errors.As(err, &wrongType):
+		return "request body has a field of the wrong type", []invalidParam{{Name: wrongType.Field, Reason: "has the wrong type"}}
+	case errors.Is(err, errTrailingData):
+		return errTrailingData.Error(), nil
+	default:
+		return "request body is not valid JSON", nil
 	}
-	writeProblem(c, http.StatusBadRequest, CodeBadRequest, err.Error(), nil)
+}
+
+func SpecUnavailable(c *gin.Context) {
+	writeProblem(c, http.StatusInternalServerError, CodeInternal, "the AsyncAPI document is unavailable", nil)
+}
+
+func NotFound(c *gin.Context) {
+	writeProblem(c, http.StatusNotFound, CodeNotFound, "no route matches this method and path", nil)
 }
 
 var errTrailingData = errors.New("request body has data after its JSON value")
 
-const (
-	unknownFieldPrefix = "json: unknown field "
-	maxEchoedFieldName = 64
-)
-
-func unknownFieldName(err error) string {
-	msg := err.Error()
-	at := strings.Index(msg, unknownFieldPrefix)
-	if at < 0 {
-		return ""
-	}
-	name, unquoteErr := strconv.Unquote(msg[at+len(unknownFieldPrefix):])
-	if unquoteErr != nil || name == "" {
-		return ""
-	}
-	if utf8.RuneCountInString(name) > maxEchoedFieldName {
-		name = string([]rune(name)[:maxEchoedFieldName])
-	}
-	return name
-}
+const maxEchoedFieldName = 64
 
 func bindStrictJSON(c *gin.Context, obj any) error {
 	if c.Request == nil || c.Request.Body == nil {
 		return errors.New("invalid request")
 	}
-	dec := json.NewDecoder(c.Request.Body)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return fmt.Errorf("read request body: %w", err)
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return fmt.Errorf("decode request body: %w", io.EOF)
+	}
+	if err := checkKnownFields(body, obj); err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(obj); err != nil {
 		return fmt.Errorf("decode request body: %w", err)

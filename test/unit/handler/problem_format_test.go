@@ -219,3 +219,52 @@ func TestStrictBodies_EveryPublicEndpointWithABodyRefusesAnUnknownField(t *testi
 	}
 	assert.False(t, called)
 }
+
+func TestStrictBodies_NamesMatchExactlyAndEveryUnknownFieldIsNamed(t *testing.T) {
+	tests := []struct {
+		name string
+		body map[string]any
+		want []string
+	}{
+		{
+			name: "a field name in the wrong case",
+			body: map[string]any{"Subject_ID": "SUBJ-1", "business_key": "TND-001", "workflow_version_id": uuid.New()},
+			want: []string{"Subject_ID"},
+		},
+		{
+			name: "every unknown field, sorted",
+			body: map[string]any{"subject_id": "SUBJ-1", "business_key": "TND-001", "workflow_version_id": uuid.New(), "zeta": 1, "alpha": 2},
+			want: []string{"alpha", "zeta"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := newRouter(newInstanceHandler(&fakeInstanceService{}))
+
+			w := do(router, req(http.MethodPost, instancesPath(), tt.body))
+
+			require.Equal(t, http.StatusBadRequest, w.Code)
+			var prob struct {
+				InvalidParams []struct {
+					Name string `json:"name"`
+				} `json:"invalid_params"`
+			}
+			decodeJSON(t, w.Body, &prob)
+			var got []string
+			for _, p := range prob.InvalidParams {
+				got = append(got, p.Name)
+			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestStrictBodies_TheDecoderTextIsNotEchoed(t *testing.T) {
+	router := newRouter(newInstanceHandler(&fakeInstanceService{}))
+
+	w := do(router, req(http.MethodPost, instancesPath(), map[string]any{"subject_id": 5, "business_key": "TND-001", "workflow_version_id": uuid.New()}))
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.NotContains(t, w.Body.String(), "json:")
+	assert.NotContains(t, w.Body.String(), "Go struct")
+}

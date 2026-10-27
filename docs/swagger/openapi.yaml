@@ -662,7 +662,7 @@ components:
           description: >
             Machine-readable error code (stable across releases). One of:
             BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_ASSIGNEE, NOT_AUTHORIZED_FOR_RESOURCE,
-            TENANT_MISMATCH, INSTANCE_NOT_FOUND, TASK_NOT_FOUND,
+            TENANT_MISMATCH, NOT_FOUND, INSTANCE_NOT_FOUND, TASK_NOT_FOUND,
             TARGET_NODE_NOT_FOUND, WAIT_NOT_FOUND, NOT_WAITING, OVERRIDE_NO_OP, DUPLICATE_BUSINESS_KEY,
             TENANT_NOT_ACTIVE, VERSION_NOT_PUBLISHED, VERSION_INVALID,
             RECORD_VERSION_CONFLICT, INSTANCE_ALREADY_TERMINAL, INVALID_INSTANCE_STATE,
@@ -1046,7 +1046,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/assignee-ineligible"
                     title: "Assignee Ineligible"
                     status: 422
-                    detail: "one or more default assignees no longer satisfy their node's eligibility requirement"
+                    detail: "the assignee of one or more nodes does not satisfy the node's eligibility requirement"
                     instance: "/api/v1/instances"
                     code: "ASSIGNEE_INELIGIBLE"
                     invalid_params:

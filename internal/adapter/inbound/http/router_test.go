@@ -141,3 +141,14 @@ func TestRouter_Handler_ReturnsUnderlyingEngine(t *testing.T) {
 
 	require.NotNil(t, router.Handler())
 }
+
+func TestRouter_AnUnroutedPathIsAProblemDocument(t *testing.T) {
+	r := testRouter(fakeDBPinger{}, fakePinger{}, fakePinger{})
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/no-such-route", nil))
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, "application/problem+json", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Body.String(), `"code":"NOT_FOUND"`)
+}

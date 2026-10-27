@@ -56,6 +56,7 @@ func NewRouter(cfg RouterConfig) *Router {
 	r := gin.New()
 	r.UseRawPath = true
 	h := cfg.Handler
+	r.NoRoute(handler.NotFound)
 
 	if dev {
 		r.GET("/asyncapi", AsyncAPIHandler)

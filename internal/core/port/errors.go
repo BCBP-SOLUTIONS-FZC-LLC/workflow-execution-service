@@ -45,7 +45,7 @@ type AssigneeIneligibleError struct {
 }
 
 func (e *AssigneeIneligibleError) Error() string {
-	return "one or more default assignees no longer satisfy their node's eligibility requirement"
+	return "the assignee of one or more nodes does not satisfy the node's eligibility requirement"
 }
 
 func (e *AssigneeIneligibleError) Unwrap() error {

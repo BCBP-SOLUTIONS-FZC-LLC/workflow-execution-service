@@ -107,12 +107,12 @@ func TestAsyncAPIHandler(t *testing.T) {
 		if w.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want 500", w.Code)
 		}
-		var resp map[string]string
+		var resp map[string]any
 		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode error body: %v", err)
 		}
-		if !strings.Contains(resp["error"], "could not read AsyncAPI spec") {
-			t.Errorf("error = %q, want ReadFile-failure message", resp["error"])
+		if resp["code"] != "INTERNAL_ERROR" || strings.Contains(w.Body.String(), "asyncapi.yaml") {
+			t.Errorf("body = %s, want an INTERNAL_ERROR problem that does not name its cause", w.Body.String())
 		}
 	})
 
@@ -135,12 +135,12 @@ func TestAsyncAPIHandler(t *testing.T) {
 		if w.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want 500", w.Code)
 		}
-		var resp map[string]string
+		var resp map[string]any
 		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode error body: %v", err)
 		}
-		if !strings.Contains(resp["error"], "could not parse AsyncAPI spec") {
-			t.Errorf("error = %q, want Unmarshal-failure message", resp["error"])
+		if resp["code"] != "INTERNAL_ERROR" || strings.Contains(w.Body.String(), "asyncapi.yaml") {
+			t.Errorf("body = %s, want an INTERNAL_ERROR problem that does not name its cause", w.Body.String())
 		}
 	})
 }
