@@ -40,9 +40,10 @@ func (l *eventLog) snapshot() []string {
 }
 
 type degradedPauseScenario struct {
-	pauseBeforeFailure bool
-	oldVersion         bool
-	signals            []timedSignal
+	pauseBeforeFailure   bool
+	oldVersion           bool
+	pauseDuringExitWrite bool
+	signals              []timedSignal
 }
 
 func pauseSignal(at time.Duration, initiator, admin string) timedSignal {
@@ -92,7 +93,16 @@ func runDegradedPause(t *testing.T, sc degradedPauseScenario) []string {
 			}
 			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
 		},
-		updateInstanceStatus: func(in port.UpdateInstanceStatusInput) { log.add("status:" + string(in.Status)) },
+		updateInstanceStatus: func(in port.UpdateInstanceStatusInput) {
+			if sc.pauseDuringExitWrite && in.Status == domain.InstanceStatusRunning {
+				env.SignalWorkflow("instance-pause:instance-1", adminSignalWire{AdminUserID: "admin-1", Initiator: domain.InitiatorAdmin, RecordVersion: 1})
+				select {
+				case <-released:
+				case <-time.After(300 * time.Millisecond):
+				}
+			}
+			log.add("status:" + string(in.Status))
+		},
 		pauseInstance: func(in port.PauseInstanceInput) {
 			log.add("pause:" + in.Initiator)
 			once.Do(func() { close(released) })
@@ -223,4 +233,14 @@ func TestDegraded_AResumeAfterTheParkEndedLiftsTheHeldPause(t *testing.T) {
 		cancelSignal(30 * tick),
 	}})
 	assertEvents(t, got, []string{"status:DEGRADED", "pause:tenant_state", "resume:admin", "cancel"})
+}
+
+// A pause that lands while the park's end writes RUNNING is applied after
+// that write, so the stored status ends PAUSED as the workflow is.
+func TestDegraded_APauseDuringTheExitWriteIsAppliedAfterIt(t *testing.T) {
+	got := runDegradedPause(t, degradedPauseScenario{pauseDuringExitWrite: true, signals: []timedSignal{
+		forceForwardSignal(12 * tick),
+		cancelSignal(30 * tick),
+	}})
+	assertEvents(t, got, []string{"status:DEGRADED", "status:RUNNING", "pause:admin", "cancel"})
 }

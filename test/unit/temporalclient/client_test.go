@@ -19,6 +19,7 @@ import (
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
+	"go.temporal.io/sdk/temporal"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporalclient"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -31,6 +32,18 @@ type fakeSDKClient struct {
 	signalWorkflowFunc    func(ctx context.Context, workflowID, runID, signalName string, arg interface{}) error
 	terminateWorkflowFunc func(ctx context.Context, workflowID, runID, reason string, details ...interface{}) error
 	queryWorkflowFunc     func(ctx context.Context, workflowID, runID, queryType string, args ...interface{}) (converter.EncodedValue, error)
+	updateErr             error
+}
+
+type fakeUpdateHandle struct {
+	client.WorkflowUpdateHandle
+	err error
+}
+
+func (h *fakeUpdateHandle) Get(context.Context, interface{}) error { return h.err }
+
+func (f *fakeSDKClient) UpdateWorkflow(context.Context, client.UpdateWorkflowOptions) (client.WorkflowUpdateHandle, error) {
+	return &fakeUpdateHandle{err: f.updateErr}, nil
 }
 
 func (f *fakeSDKClient) ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error) {
@@ -273,4 +286,32 @@ func TestClient_SignalWorkflow_AMissingExecutionIsReportedAsNotFound(t *testing.
 	err := temporalclient.New(sdk).SignalWorkflow(context.Background(), "tenant:biz-key", uuid.New(), "instance-pause", nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, port.ErrWorkflowNotFound)
+}
+
+func TestUpdateWorkflow_OnlyTheWorkflowsOwnRefusalIsARefusal(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantIs  error
+		wantNot error
+	}{
+		{name: "the workflow refuses", err: temporal.NewNonRetryableApplicationError("defer refused: no step", port.UpdateRefusedErrorType, nil), wantIs: port.ErrUpdateRefused},
+		{name: "a stale record version", err: temporal.NewNonRetryableApplicationError("lost the race", port.VersionConflictErrorType, nil), wantIs: port.ErrRecordVersionConflict, wantNot: port.ErrUpdateRefused},
+		{name: "any other handler failure", err: temporal.NewApplicationError("defer task: db down", "", nil), wantNot: port.ErrUpdateRefused},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := temporalclient.New(&fakeSDKClient{updateErr: tt.err})
+
+			err := c.UpdateWorkflow(context.Background(), "wf", uuid.New(), "stage-defer", struct{}{})
+
+			require.Error(t, err)
+			if tt.wantIs != nil {
+				assert.ErrorIs(t, err, tt.wantIs)
+			}
+			if tt.wantNot != nil {
+				assert.NotErrorIs(t, err, tt.wantNot)
+			}
+		})
+	}
 }

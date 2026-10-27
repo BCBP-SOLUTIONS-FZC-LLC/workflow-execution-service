@@ -422,7 +422,7 @@ func instanceWithStatus(task *domain.Task, status domain.InstanceStatus) *domain
 	return &domain.Instance{ID: task.WorkflowInstanceID, TemporalWorkflowID: "tenant:subj:biz", Status: status}
 }
 
-func TestConnectorTaskService_PausedInstance_RefusesTheCallbackUntilResumed(t *testing.T) {
+func TestConnectorTaskService_PausedInstance_AcceptsTheCallbackForTheWorkflowToHold(t *testing.T) {
 	t.Parallel()
 
 	extras := `{"resolved_inputs":{},"output_mapping":[]}`
@@ -441,19 +441,10 @@ func TestConnectorTaskService_PausedInstance_RefusesTheCallbackUntilResumed(t *t
 			task := connectorTask("storage", domain.TaskStatusReady, extras)
 			inst := instanceWithStatus(task, domain.InstanceStatusPaused)
 			temporal := &fakeTemporalClient{}
-			assignments := newFakeAssignmentRepo()
-			svc := newConnectorTaskServiceWith(task, inst, temporal, newFakeCacheStore(), assignments)
+			svc := newConnectorTaskServiceWith(task, inst, temporal, newFakeCacheStore(), newFakeAssignmentRepo())
 
-			err := tc.call(svc, task)
-			require.ErrorIs(t, err, port.ErrInvalidInstanceState, "the worker must be told to redeliver, not that the callback succeeded")
-			assert.Empty(t, temporal.signals, "a paused instance would drop the signal")
-			active, listErr := assignments.ListActiveByTask(context.Background(), task.TenantID, task.ID)
-			require.NoError(t, listErr)
-			assert.Empty(t, active, "a refused callback leaves no assignment")
-
-			inst.Status = domain.InstanceStatusRunning
-			require.NoError(t, tc.call(svc, task), "after resume the redelivered callback goes through")
-			assert.Len(t, temporal.signals, 1)
+			require.NoError(t, tc.call(svc, task), "the outside call has happened; its result is kept, not dead-lettered")
+			assert.Len(t, temporal.signals, 1, "the workflow holds the result until the instance resumes")
 		})
 	}
 }

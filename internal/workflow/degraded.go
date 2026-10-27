@@ -183,26 +183,35 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 	}
 
 	keepsPause := in.degradedKeepsPause
-	in.degradedKeepsPause = false
 	if keepsPause && in.pauseHeld {
-		in.status = domain.InstanceStatusPaused
-		if err := pauseInstance(ctx, port.PauseInstanceInput{
-			InstanceID: in.instanceID, TenantID: in.tenantID,
-			AdminUserID: in.pauseSignal.AdminUserID, Initiator: in.pauseInitiator, RecordVersion: in.pauseSignal.RecordVersion,
-		}); err != nil {
-			wf.GetLogger(ctx).Warn("pauseInstance failed", "error", err)
-		}
+		in.leaveParkPaused(ctx)
 		return stepOutcome{LastNode: preFork}, nil
 	}
-
-	in.pauseHeld = false
-	in.status = domain.InstanceStatusRunning
 	if err := updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusRunning,
 	}); err != nil {
+		in.degradedKeepsPause = false
 		return stepOutcome{}, err
 	}
+	if keepsPause && in.pauseHeld {
+		in.leaveParkPaused(ctx)
+		return stepOutcome{LastNode: preFork}, nil
+	}
+	in.degradedKeepsPause = false
+	in.pauseHeld = false
+	in.status = domain.InstanceStatusRunning
 	return stepOutcome{LastNode: preFork}, nil
+}
+
+func (in *interpreter) leaveParkPaused(ctx wf.Context) {
+	in.degradedKeepsPause = false
+	in.status = domain.InstanceStatusPaused
+	if err := pauseInstance(ctx, port.PauseInstanceInput{
+		InstanceID: in.instanceID, TenantID: in.tenantID,
+		AdminUserID: in.pauseSignal.AdminUserID, Initiator: in.pauseInitiator, RecordVersion: in.pauseSignal.RecordVersion,
+	}); err != nil {
+		wf.GetLogger(ctx).Warn("pauseInstance failed", "error", err)
+	}
 }
 
 func (in *interpreter) handleParallelForceForward(ctx wf.Context, keys []string, branchSteps map[string][]dsl.ExecutionStep, cancels map[string]wf.CancelFunc, resolved map[string]bool, sig adminSignal) (completedBranch, bool) {

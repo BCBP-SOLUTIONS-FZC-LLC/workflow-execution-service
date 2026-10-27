@@ -245,3 +245,26 @@ func TestExecute_ARespawnedBranchThatFailsAgainKeepsItsSteps(t *testing.T) {
 		t.Errorf("status %v, invoice attempts %d; want COMPLETED on the third attempt, the invoice being retried after each failure", out.Status, invoiceCalls)
 	}
 }
+
+// A result that arrives while the instance is paused is held, not dropped:
+// once the instance resumes, the step it completes moves on.
+func TestExecute_AStepResultWhilePausedIsAppliedOnResume(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	registerFakeActivities(env, twoDeptCollaboration(), &activityHooks{})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-pause:instance-1", adminSignalWire{AdminUserID: "admin-1", Initiator: domain.InitiatorAdmin, RecordVersion: 1})
+	}, tick)
+	transitionAt(env, 3*tick, "deptA", 1)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-resume:instance-1", adminSignalWire{AdminUserID: "admin-1", Initiator: domain.InitiatorAdmin, RecordVersion: 1})
+	}, 6*tick)
+	transitionAt(env, 10*tick, "deptB", 1)
+
+	out := finish(t, env, "instance-1")
+
+	if out.Status != domain.InstanceStatusCompleted {
+		t.Errorf("Status = %v, want COMPLETED: deptA's result arrived while paused and must be applied on resume", out.Status)
+	}
+}

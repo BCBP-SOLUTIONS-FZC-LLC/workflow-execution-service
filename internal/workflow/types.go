@@ -61,6 +61,7 @@ type interpreter struct {
 	pending map[nodeVisitKey]wf.Channel
 
 	pendingSignals map[nodeVisitKey]stageTransitionSignal
+	heldResults    []heldResult
 
 	taskVisits map[domain.NodeKey]int64
 

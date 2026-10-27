@@ -180,11 +180,12 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 	}
 }
 
+type heldResult struct {
+	key nodeVisitKey
+	sig stageTransitionSignal
+}
+
 func (in *interpreter) handleStageTransition(ctx wf.Context, sig stageTransitionSignal) {
-	if err := validateSignal(in.status, SignalStageTransition); err != nil {
-		wf.GetLogger(ctx).Warn("dropping stage-transition signal", "error", err)
-		return
-	}
 	key := domain.NodeKey(sig.DeptID + "/" + sig.NodeID)
 	if sig.NodeID == "" {
 		key = domain.NodeKey(sig.DeptID + "/" + sig.ToStage)
@@ -193,7 +194,18 @@ func (in *interpreter) handleStageTransition(ctx wf.Context, sig stageTransition
 	if getVersion(ctx, nodeVisitKeyChangeID) != wf.DefaultVersion {
 		visit = sig.VisitCount
 	}
-	visitKey := nodeVisitKey{Node: key, Visit: visit}
+	in.deliverResult(ctx, SignalStageTransition, nodeVisitKey{Node: key, Visit: visit}, sig)
+}
+
+func (in *interpreter) deliverResult(ctx wf.Context, signal string, visitKey nodeVisitKey, sig stageTransitionSignal) {
+	if in.status == domain.InstanceStatusPaused {
+		in.heldResults = append(in.heldResults, heldResult{key: visitKey, sig: sig})
+		return
+	}
+	if err := validateSignal(in.status, signal); err != nil {
+		wf.GetLogger(ctx).Warn("dropping step result", "signal", signal, "error", err)
+		return
+	}
 	if ch, ok := in.pending[visitKey]; ok {
 		ch.Send(ctx, sig)
 	} else {
@@ -201,11 +213,15 @@ func (in *interpreter) handleStageTransition(ctx wf.Context, sig stageTransition
 	}
 }
 
-func (in *interpreter) handleStageFail(ctx wf.Context, sig stageFailSignal) {
-	if err := validateSignal(in.status, SignalStageFail); err != nil {
-		wf.GetLogger(ctx).Warn("dropping stage-fail signal", "error", err)
-		return
+func (in *interpreter) releaseHeldResults(ctx wf.Context) {
+	held := in.heldResults
+	in.heldResults = nil
+	for _, h := range held {
+		in.deliverResult(ctx, SignalStageTransition, h.key, h.sig)
 	}
+}
+
+func (in *interpreter) handleStageFail(ctx wf.Context, sig stageFailSignal) {
 	transition := stageTransitionSignal{
 		DeptID: sig.DeptID, NodeID: sig.NodeID, Failed: true, Reason: sig.ErrorClass, RecordVersion: sig.RecordVersion,
 		VisitCount: sig.VisitCount,
@@ -215,12 +231,7 @@ func (in *interpreter) handleStageFail(ctx wf.Context, sig stageFailSignal) {
 	if getVersion(ctx, nodeVisitKeyChangeID) != wf.DefaultVersion {
 		visit = sig.VisitCount
 	}
-	visitKey := nodeVisitKey{Node: key, Visit: visit}
-	if ch, ok := in.pending[visitKey]; ok {
-		ch.Send(ctx, transition)
-	} else {
-		in.pendingSignals[visitKey] = transition
-	}
+	in.deliverResult(ctx, SignalStageFail, nodeVisitKey{Node: key, Visit: visit}, transition)
 }
 
 func (in *interpreter) routeAdminSignal(ctx wf.Context, kind string, sig adminSignal) {
@@ -270,10 +281,8 @@ func (in *interpreter) deferTarget() domain.NodeKey {
 	return in.history.Peek()
 }
 
-const DeferRefusedErrorType = "DeferRefused"
-
 func refuseDefer(reason string) error {
-	return temporal.NewNonRetryableApplicationError("defer refused: "+reason, DeferRefusedErrorType, nil) //nolint:wrapcheck // must stay *temporal.ApplicationError so the client reads the refusal
+	return temporal.NewNonRetryableApplicationError("defer refused: "+reason, port.UpdateRefusedErrorType, nil) //nolint:wrapcheck // must stay *temporal.ApplicationError so the client reads the refusal
 }
 
 func (in *interpreter) handleInstanceReassign(ctx wf.Context, sig reassignSignal) {
@@ -344,6 +353,7 @@ func (in *interpreter) handleInstanceResume(ctx wf.Context, sig adminSignal) {
 	}); err != nil {
 		wf.GetLogger(ctx).Warn("resumeInstance failed", "error", err)
 	}
+	in.releaseHeldResults(ctx)
 }
 
 func (in *interpreter) cancelInstanceOnSignal(ctx wf.Context, sig adminSignal) error {

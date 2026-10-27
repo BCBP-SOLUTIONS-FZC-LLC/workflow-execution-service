@@ -129,10 +129,8 @@ func (s *ConnectorTaskService) instanceAcceptingCallback(ctx context.Context, te
 		return nil, false, wrapInstanceErr(err)
 	}
 	switch inst.Status {
-	case domain.InstanceStatusRunning, domain.InstanceStatusDegraded:
+	case domain.InstanceStatusRunning, domain.InstanceStatusDegraded, domain.InstanceStatusPaused:
 		return inst, true, nil
-	case domain.InstanceStatusPaused:
-		return nil, false, fmt.Errorf("instance %s is paused: %w", inst.ID, port.ErrInvalidInstanceState)
 	case domain.InstanceStatusCompleted, domain.InstanceStatusTerminated, domain.InstanceStatusFailed:
 		return nil, false, nil
 	default:
