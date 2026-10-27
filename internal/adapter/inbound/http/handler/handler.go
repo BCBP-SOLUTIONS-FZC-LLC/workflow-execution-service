@@ -2,11 +2,15 @@ package handler
 
 import (
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
+	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -73,6 +77,7 @@ type Services struct {
 }
 
 func New(s Services) *Handler {
+	nameFieldsByJSONTag.Do(registerJSONFieldNames)
 	ttl := s.IdempotencyTTL
 	if ttl == 0 {
 		ttl = defaultIdempotencyTTL
@@ -241,4 +246,20 @@ func pageParams(c *gin.Context) (port.Page, bool) {
 		cursor = &pos
 	}
 	return port.Page{Cursor: cursor, Limit: limit}, true
+}
+
+var nameFieldsByJSONTag sync.Once
+
+func registerJSONFieldNames() {
+	engine, ok := binding.Validator.Engine().(*validator.Validate)
+	if !ok {
+		return
+	}
+	engine.RegisterTagNameFunc(func(f reflect.StructField) string {
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "" || name == "-" {
+			return f.Name
+		}
+		return name
+	})
 }

@@ -268,3 +268,19 @@ func TestStrictBodies_TheDecoderTextIsNotEchoed(t *testing.T) {
 	assert.NotContains(t, w.Body.String(), "json:")
 	assert.NotContains(t, w.Body.String(), "Go struct")
 }
+
+func TestStrictBodies_AMissingFieldIsNamedAsTheClientSendsIt(t *testing.T) {
+	router := newRouter(newInstanceHandler(&fakeInstanceService{}))
+
+	w := do(router, req(http.MethodPost, instancesPath(), map[string]any{"business_key": "TND-001", "workflow_version_id": uuid.New()}))
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var prob struct {
+		InvalidParams []struct {
+			Name string `json:"name"`
+		} `json:"invalid_params"`
+	}
+	decodeJSON(t, w.Body, &prob)
+	require.Len(t, prob.InvalidParams, 1)
+	assert.Equal(t, "subject_id", prob.InvalidParams[0].Name)
+}
