@@ -22,6 +22,7 @@ type TaskService struct {
 	Temporal    port.TemporalClient
 	Eligibility port.EligibilityChecker
 	Definitions port.DefinitionServiceClient
+	Cache       port.CacheStore
 	Log         port.Logger
 }
 
@@ -119,7 +120,7 @@ func (s *TaskService) GetByNode(ctx context.Context, tenantID, instanceID uuid.U
 	if err != nil {
 		return nil, wrapInstanceErr(err)
 	}
-	plan, err := newCompiledPlanCache(s.Definitions, s.logger()).mainPlan(ctx, tenantID, inst.WorkflowVersionID)
+	plan, err := newCompiledPlanCache(s.Definitions, s.logger()).backedBy(s.Cache).mainPlan(ctx, tenantID, inst.WorkflowVersionID)
 	if err != nil {
 		return nil, fmt.Errorf("get compiled plan for the task's required level: %w", err)
 	}
@@ -365,7 +366,7 @@ func (s *TaskService) checkEligible(ctx context.Context, inst *domain.Instance, 
 	if s.Eligibility == nil || s.Definitions == nil {
 		return nil
 	}
-	plan, err := newCompiledPlanCache(s.Definitions, s.logger()).mainPlan(ctx, inst.TenantID, inst.WorkflowVersionID)
+	plan, err := newCompiledPlanCache(s.Definitions, s.logger()).backedBy(s.Cache).mainPlan(ctx, inst.TenantID, inst.WorkflowVersionID)
 	if err != nil {
 		return fmt.Errorf("get compiled plan for eligibility check: %w", err)
 	}

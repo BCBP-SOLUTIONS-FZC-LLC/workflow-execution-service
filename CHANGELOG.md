@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- Claim, complete, defer and reassign read the compiled plan through the Valkey compiled-plan cache for their eligibility check, so a Definition outage no longer refuses them for a version read in the last hour (LLD rev 1.118).
 - The eligibility client logs every refusal with Org & Membership's `reason`, the tenant, user, department and level. The `ASSIGNEE_INELIGIBLE` detail names the user for a task action or reassignment and keeps "default assignees" for an instance start. LLD rev 1.117.
 - `START_REFUSED_STATUSES` defaults to `suspended,trial_expired,cancelled`, in the service, the chart and `.env.example`: `POST /instances` answers `409 TENANT_NOT_ACTIVE` for a tenant whose instances are paused, as well as for an offboarded one. LLD §5.5, rev 1.116.
 - The NetworkPolicies select the platform namespace `observability` for the Prometheus scrape (it was `monitoring`, while the gateway rule already selected `gateway`), and the prometheus-adapter rule names it; a chart test holds both selectors.

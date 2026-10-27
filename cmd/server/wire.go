@@ -198,7 +198,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 	taskService := &service.TaskService{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides,
-		Temporal: temporal, Eligibility: eligibility, Definitions: definitions, Log: log,
+		Temporal: temporal, Eligibility: eligibility, Definitions: definitions, Cache: cache, Log: log,
 	}
 	connectorTaskService := &service.ConnectorTaskService{
 		Instances: instances, Tasks: tasks, Assignments: assignments,

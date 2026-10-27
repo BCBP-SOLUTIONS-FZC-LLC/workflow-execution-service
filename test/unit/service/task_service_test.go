@@ -455,6 +455,30 @@ func TestTaskService_Complete(t *testing.T) {
 		assert.Empty(t, temporal.signals)
 	})
 
+	t.Run("a cached plan answers while Definition is down", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID, versionID := uuid.New(), uuid.New(), uuid.New()
+		definitions := &fakeDefinitionClient{resp: publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, dsl.StageDef{NodeID: "review", Role: "reviewer"}))}
+		svc.Definitions = definitions
+		svc.Cache = newFakeCacheStore()
+		svc.Eligibility = &fakeEligibilityChecker{}
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", WorkflowVersionID: versionID, Status: domain.InstanceStatusRunning}
+		userID := uuid.New()
+		complete := func() error {
+			task := newReadyTask(tenantID, instanceID)
+			tasks.byID[task.ID] = task
+			assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+			_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)
+			return err
+		}
+
+		require.NoError(t, complete())
+		definitions.err = assert.AnError
+
+		require.NoError(t, complete(), "a version's plan never changes, so the cached copy serves the eligibility check")
+		assert.Len(t, temporal.signals, 2)
+	})
+
 	t.Run("multi-assignee lead may complete", func(t *testing.T) {
 		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
 		tenantID, instanceID := uuid.New(), uuid.New()

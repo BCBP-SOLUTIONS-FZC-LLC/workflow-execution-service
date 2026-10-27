@@ -47,35 +47,19 @@ func (s *InstanceService) logger() port.Logger {
 }
 
 func (s *InstanceService) fetchCompiledWorkflow(ctx context.Context, tenantID, versionID uuid.UUID) (*port.CompiledWorkflow, error) {
-	if s.Cache != nil {
-		raw, err := s.Cache.Get(ctx, compiledPlanCacheKey(tenantID, versionID))
-		if err != nil {
-			s.logger().Warn("compiled-plan cache read failed, falling back to Definitions", map[string]any{"error": err.Error()})
-		} else if raw != "" {
-			var compiled port.CompiledWorkflow
-			if err := json.Unmarshal([]byte(raw), &compiled); err == nil {
-				return &compiled, nil
-			}
-			s.logger().Warn("compiled-plan cache hit failed to unmarshal, falling back to Definitions", nil)
-		}
+	compiled, err := cachedCompiledWorkflow(ctx, s.Cache, s.Definitions, s.logger(), tenantID, versionID)
+	if err != nil {
+		s.logger().Warn("compiled-plan read from Definitions failed", map[string]any{"error": err.Error()})
 	}
-	return s.readCompiledWorkflow(ctx, tenantID, versionID)
+	return compiled, err
 }
 
 func (s *InstanceService) readCompiledWorkflow(ctx context.Context, tenantID, versionID uuid.UUID) (*port.CompiledWorkflow, error) {
-	compiled, err := s.Definitions.GetCompiledWorkflow(ctx, tenantID, versionID)
+	compiled, err := liveCompiledWorkflow(ctx, s.Cache, s.Definitions, s.logger(), tenantID, versionID)
 	if err != nil {
 		s.logger().Warn("compiled-plan read from Definitions failed", map[string]any{"error": err.Error()})
-		return nil, err
 	}
-	if s.Cache != nil {
-		if raw, err := json.Marshal(compiled); err != nil {
-			s.logger().Warn("compiled-plan marshal for cache write-through failed", map[string]any{"error": err.Error()})
-		} else if err := s.Cache.Set(ctx, compiledPlanCacheKey(tenantID, versionID), string(raw), compiledPlanCacheTTL); err != nil {
-			s.logger().Warn("compiled-plan cache write-through failed", map[string]any{"error": err.Error()})
-		}
-	}
-	return compiled, nil
+	return compiled, err
 }
 
 func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput) (*port.Instance, error) {
