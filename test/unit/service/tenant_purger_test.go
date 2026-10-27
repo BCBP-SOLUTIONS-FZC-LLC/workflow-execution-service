@@ -10,11 +10,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 )
 
 type fakeRetention struct {
-	due       []uuid.UUID
+	due       []port.TenantPurgeDue
 	listErr   error
 	listedAt  time.Time
 	purged    []uuid.UUID
@@ -22,6 +23,39 @@ type fakeRetention struct {
 	recordErr error
 	markErr   error
 	onList    func()
+	returned  []recordedReturn
+	failures  []recordedFailure
+	versions  []int64
+	changed   bool
+}
+
+type recordedReturn struct {
+	tenantID uuid.UUID
+	at       time.Time
+}
+
+type recordedFailure struct {
+	tenantID    uuid.UUID
+	version     int64
+	attempts    int
+	nextAttempt time.Time
+}
+
+func (f *fakeRetention) RecordReturned(_ context.Context, tenantID uuid.UUID, at time.Time) error {
+	f.returned = append(f.returned, recordedReturn{tenantID, at})
+	return f.recordErr
+}
+
+func (f *fakeRetention) Current(context.Context, uuid.UUID, int64) error {
+	if f.changed {
+		return port.ErrTenantRetentionChanged
+	}
+	return nil
+}
+
+func (f *fakeRetention) RecordFailure(_ context.Context, tenantID uuid.UUID, version int64, attempts int, next time.Time) error {
+	f.failures = append(f.failures, recordedFailure{tenantID, version, attempts, next})
+	return nil
 }
 
 type recordedOffboard struct {
@@ -35,7 +69,7 @@ func (f *fakeRetention) RecordOffboarded(_ context.Context, tenantID uuid.UUID, 
 	return f.recordErr
 }
 
-func (f *fakeRetention) ListDue(_ context.Context, now time.Time, _ int) ([]uuid.UUID, error) {
+func (f *fakeRetention) ListDue(_ context.Context, now time.Time, _ int) ([]port.TenantPurgeDue, error) {
 	f.listedAt = now
 	if f.onList != nil {
 		f.onList()
@@ -43,12 +77,24 @@ func (f *fakeRetention) ListDue(_ context.Context, now time.Time, _ int) ([]uuid
 	return f.due, f.listErr
 }
 
-func (f *fakeRetention) MarkPurged(_ context.Context, tenantID uuid.UUID, _ time.Time) error {
+func (f *fakeRetention) MarkPurged(_ context.Context, tenantID uuid.UUID, version int64, _ time.Time) (int64, error) {
+	f.versions = append(f.versions, version)
 	if f.markErr != nil {
-		return f.markErr
+		return 0, f.markErr
+	}
+	if f.changed {
+		return 0, port.ErrTenantRetentionChanged
 	}
 	f.purged = append(f.purged, tenantID)
-	return nil
+	return version + 1, nil
+}
+
+func dueTenants(ids ...uuid.UUID) []port.TenantPurgeDue {
+	out := make([]port.TenantPurgeDue, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, port.TenantPurgeDue{TenantID: id, RecordVersion: 1})
+	}
+	return out
 }
 
 type fakeDataPurger struct {
@@ -64,7 +110,7 @@ func (f *fakeDataPurger) HasRows(_ context.Context, tenantID uuid.UUID) (bool, e
 	return f.rows[tenantID], f.rowsErr
 }
 
-func (f *fakeDataPurger) PurgeBatch(_ context.Context, tenantID uuid.UUID, limit int) (map[string]int64, error) {
+func (f *fakeDataPurger) PurgeBatch(_ context.Context, tenantID uuid.UUID, _ int64, limit int) (map[string]int64, error) {
 	if f.calls == nil {
 		f.calls = map[uuid.UUID]int{}
 	}
@@ -92,7 +138,7 @@ func newPurger(r *fakeRetention, d *fakeDataPurger, rec map[string]int64, failed
 
 func TestTenantPurger_PurgesADueTenantInBatchesThenMarksIt(t *testing.T) {
 	tenant := uuid.New()
-	r := &fakeRetention{due: []uuid.UUID{tenant}}
+	r := &fakeRetention{due: dueTenants(tenant)}
 	d := &fakeDataPurger{script: map[uuid.UUID][]map[string]int64{tenant: {
 		{"workflow_task": 50}, {"workflow_task": 7}, {"workflow_instance": 3},
 	}}}
@@ -122,7 +168,7 @@ func TestTenantPurger_NothingDueDeletesNothing(t *testing.T) {
 
 func TestTenantPurger_AFailingTenantIsNotMarkedAndDoesNotStopTheOthers(t *testing.T) {
 	bad, good := uuid.New(), uuid.New()
-	r := &fakeRetention{due: []uuid.UUID{bad, good}}
+	r := &fakeRetention{due: dueTenants(bad, good)}
 	d := &fakeDataPurger{
 		errFor: map[uuid.UUID]error{bad: errors.New("fk violation")},
 		script: map[uuid.UUID][]map[string]int64{good: {{"workflow_instance": 1}}},
@@ -144,7 +190,7 @@ func TestTenantPurger_ADueListFailureIsReturned(t *testing.T) {
 
 func TestTenantPurger_ACancelledRunLeavesTheTenantUnmarked(t *testing.T) {
 	tenant := uuid.New()
-	r := &fakeRetention{due: []uuid.UUID{tenant}}
+	r := &fakeRetention{due: dueTenants(tenant)}
 	d := &fakeDataPurger{script: map[uuid.UUID][]map[string]int64{tenant: {{"workflow_task": 50}, {"workflow_task": 50}, {"workflow_task": 50}}}}
 	rec, failed := map[string]int64{}, 0
 	ctx, cancel := context.WithCancel(context.Background())
@@ -158,7 +204,7 @@ func TestTenantPurger_ACancelledRunLeavesTheTenantUnmarked(t *testing.T) {
 
 func TestTenantPurger_AFailureToMarkIsReturnedAndTheTenantIsRetriedNextSweep(t *testing.T) {
 	tenant := uuid.New()
-	r := &fakeRetention{due: []uuid.UUID{tenant}, markErr: errors.New("db down")}
+	r := &fakeRetention{due: dueTenants(tenant), markErr: errors.New("db down")}
 	rec, failed := map[string]int64{}, 0
 
 	err := newPurger(r, &fakeDataPurger{}, rec, &failed).Tick(context.Background())
@@ -200,7 +246,7 @@ func TestTenantPurger_RunLogsAFailedSweepAndKeepsGoing(t *testing.T) {
 
 func TestTenantPurger_DefaultsTheClockAndLoggerWhenNoneAreGiven(t *testing.T) {
 	tenant := uuid.New()
-	r := &fakeRetention{due: []uuid.UUID{tenant}}
+	r := &fakeRetention{due: dueTenants(tenant)}
 	p := service.NewTenantPurger(service.TenantPurgerDeps{
 		Retention: r, Data: &fakeDataPurger{}, Batch: 10, Interval: time.Hour,
 		Record: func(string, int64) {}, Failed: func() {},
@@ -213,7 +259,7 @@ func TestTenantPurger_DefaultsTheClockAndLoggerWhenNoneAreGiven(t *testing.T) {
 
 func TestTenantPurger_ATenantWithRowsLeftIsNotMarkedPurged(t *testing.T) {
 	tenant := uuid.New()
-	r := &fakeRetention{due: []uuid.UUID{tenant}}
+	r := &fakeRetention{due: dueTenants(tenant)}
 	d := &fakeDataPurger{rows: map[uuid.UUID]bool{tenant: true}}
 	rec, failed := map[string]int64{}, 0
 
@@ -226,10 +272,58 @@ func TestTenantPurger_ATenantWithRowsLeftIsNotMarkedPurged(t *testing.T) {
 
 func TestTenantPurger_AFailureToCheckForRemainingRowsIsReturned(t *testing.T) {
 	tenant := uuid.New()
-	r := &fakeRetention{due: []uuid.UUID{tenant}}
+	r := &fakeRetention{due: dueTenants(tenant)}
 	d := &fakeDataPurger{rowsErr: errors.New("db down")}
 	rec, failed := map[string]int64{}, 0
 
 	require.Error(t, newPurger(r, d, rec, &failed).Tick(context.Background()))
 	assert.Empty(t, r.purged)
+}
+
+func TestTenantPurger_TheMarkNamesTheVersionTheDueListRead(t *testing.T) {
+	tenant := uuid.New()
+	r := &fakeRetention{due: []port.TenantPurgeDue{{TenantID: tenant, RecordVersion: 5}}}
+	rec, failed := map[string]int64{}, 0
+
+	require.NoError(t, newPurger(r, &fakeDataPurger{}, rec, &failed).Tick(context.Background()))
+
+	assert.Equal(t, []int64{5}, r.versions)
+}
+
+func TestTenantPurger_AFailingTenantBacksOffSoItCannotStarveTheRest(t *testing.T) {
+	tests := []struct {
+		name         string
+		attempts     int
+		wantAttempts int
+		wantDelay    time.Duration
+	}{
+		{name: "first failure waits one interval", attempts: 0, wantAttempts: 1, wantDelay: time.Hour},
+		{name: "third failure waits four intervals", attempts: 2, wantAttempts: 3, wantDelay: 4 * time.Hour},
+		{name: "the wait stops growing at seven days", attempts: 20, wantAttempts: 21, wantDelay: 7 * 24 * time.Hour},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tenant := uuid.New()
+			r := &fakeRetention{due: []port.TenantPurgeDue{{TenantID: tenant, Attempts: tt.attempts, RecordVersion: 3}}}
+			d := &fakeDataPurger{errFor: map[uuid.UUID]error{tenant: errors.New("fk violation")}}
+			rec, failed := map[string]int64{}, 0
+
+			require.Error(t, newPurger(r, d, rec, &failed).Tick(context.Background()))
+
+			now := time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)
+			assert.Equal(t, []recordedFailure{{tenant, 3, tt.wantAttempts, now.Add(tt.wantDelay)}}, r.failures)
+		})
+	}
+}
+
+func TestTenantPurger_AChangedLedgerRowSkipsTheTenantWithoutAFailure(t *testing.T) {
+	tenant := uuid.New()
+	r := &fakeRetention{due: dueTenants(tenant), changed: true}
+	d := &fakeDataPurger{errFor: map[uuid.UUID]error{tenant: port.ErrTenantRetentionChanged}}
+	rec, failed := map[string]int64{}, 0
+
+	require.NoError(t, newPurger(r, d, rec, &failed).Tick(context.Background()))
+
+	assert.Zero(t, failed, "a tenant that returned or that another replica moved on is not a failure")
+	assert.Empty(t, r.failures)
 }

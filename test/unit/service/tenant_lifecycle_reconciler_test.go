@@ -545,10 +545,20 @@ func TestTenantLifecycleReconciler_OffboardingRecordsTheTenantForThePurge(t *tes
 		assert.Empty(t, ret.recorded)
 	})
 
-	t.Run("other status changes record nothing", func(t *testing.T) {
+	t.Run("any other status records the tenant's return at the event time", func(t *testing.T) {
 		svc, ret, _, _ := newRecording()
-		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: uuid.New(), Status: "suspended", PreviousStatus: "active"}))
+		tenantID, changedAt := uuid.New(), now.Add(-time.Hour)
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "suspended", PreviousStatus: "active", ChangedAt: changedAt}))
 		assert.Empty(t, ret.recorded)
+		assert.Equal(t, []recordedReturn{{tenantID, changedAt}}, ret.returned)
+	})
+
+	t.Run("the offboarding is recorded at the event time when it has one", func(t *testing.T) {
+		svc, ret, _, _ := newRecording()
+		tenantID, changedAt := uuid.New(), now.Add(-time.Hour)
+		require.NoError(t, svc.Apply(context.Background(), port.TenantLifecycleInput{TenantID: tenantID, Status: "offboarded", PreviousStatus: "active", ChangedAt: changedAt}))
+		require.Len(t, ret.recorded, 1)
+		assert.Equal(t, recordedOffboard{tenantID, changedAt, changedAt.Add(24 * time.Hour)}, ret.recorded[0])
 	})
 
 	t.Run("a failure to record is returned so the event is redelivered", func(t *testing.T) {

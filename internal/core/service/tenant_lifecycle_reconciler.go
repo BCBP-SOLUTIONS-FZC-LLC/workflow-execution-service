@@ -78,12 +78,32 @@ func (s *TenantLifecycleReconciler) applyStatusTransition(ctx context.Context, i
 		if err := s.terminateAllNonTerminal(ctx, in.TenantID); err != nil {
 			return err
 		}
-		return s.recordOffboarded(ctx, in.TenantID)
+		return s.recordOffboarded(ctx, in.TenantID, s.eventTime(in))
 	case runsInstances(in.Status):
+		if err := s.recordReturned(ctx, in); err != nil {
+			return err
+		}
 		return s.signalAllNonTerminal(ctx, in.TenantID, port.SignalInstanceResume)
 	default:
+		if err := s.recordReturned(ctx, in); err != nil {
+			return err
+		}
 		return s.signalAllNonTerminal(ctx, in.TenantID, port.SignalInstancePause)
 	}
+}
+
+func (s *TenantLifecycleReconciler) recordReturned(ctx context.Context, in port.TenantLifecycleInput) error {
+	if s.Retention == nil {
+		return nil
+	}
+	return s.Retention.RecordReturned(ctx, in.TenantID, s.eventTime(in))
+}
+
+func (s *TenantLifecycleReconciler) eventTime(in port.TenantLifecycleInput) time.Time {
+	if in.ChangedAt.IsZero() {
+		return s.now()
+	}
+	return in.ChangedAt
 }
 
 func runsInstances(status string) bool {
@@ -153,12 +173,11 @@ func (s *TenantLifecycleReconciler) terminateAllNonTerminal(ctx context.Context,
 	return errors.Join(failures...)
 }
 
-func (s *TenantLifecycleReconciler) recordOffboarded(ctx context.Context, tenantID uuid.UUID) error {
+func (s *TenantLifecycleReconciler) recordOffboarded(ctx context.Context, tenantID uuid.UUID, at time.Time) error {
 	if s.Retention == nil {
 		return nil
 	}
-	now := s.now()
-	return s.Retention.RecordOffboarded(ctx, tenantID, now, now.Add(s.HistoryRetention))
+	return s.Retention.RecordOffboarded(ctx, tenantID, at, at.Add(s.HistoryRetention))
 }
 
 func (s *TenantLifecycleReconciler) terminateOne(ctx context.Context, tenantID uuid.UUID, inst *domain.Instance) error {

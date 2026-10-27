@@ -626,6 +626,7 @@ func (h *Handler) handleTenantMembershipsPurged(c *gin.Context, env events.Envel
 		TenantID:       tenantID,
 		Status:         "offboarded",
 		PreviousStatus: "active",
+		ChangedAt:      env.Timestamp,
 	}); err != nil {
 		h.reconcilerError(c, eventType, err)
 		return

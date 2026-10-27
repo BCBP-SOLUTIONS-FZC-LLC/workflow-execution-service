@@ -4,6 +4,7 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
 )
@@ -184,7 +186,102 @@ func TestTenantRetentionRepo_ARedeliveredOffboardingKeepsTheFirstDates(t *testin
 
 	due, err := repo.ListDue(ctx, first.Add(25*time.Hour), 10)
 	require.NoError(t, err)
-	assert.Equal(t, []uuid.UUID{tenant}, due, "the first purge date still applies")
+	assert.Equal(t, []port.TenantPurgeDue{{TenantID: tenant, RecordVersion: 1}}, due, "the first purge date still applies")
+}
+
+func TestTenantRetentionRepo_AReturnStopsEveryOlderOffboarding(t *testing.T) {
+	base := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	at := func(hours int) time.Time { return base.Add(time.Duration(hours) * time.Hour) }
+	tests := []struct {
+		name    string
+		events  func(ctx context.Context, repo *postgres.TenantRetentionRepo, tenant uuid.UUID) error
+		wantDue bool
+	}{
+		{
+			name: "an offboarding redelivered after the return",
+			events: func(ctx context.Context, repo *postgres.TenantRetentionRepo, tenant uuid.UUID) error {
+				return errors.Join(repo.RecordOffboarded(ctx, tenant, at(0), at(1)), repo.RecordReturned(ctx, tenant, at(10)), repo.RecordOffboarded(ctx, tenant, at(0), at(1)))
+			},
+		},
+		{
+			name: "an offboarding that arrives after the return that undid it",
+			events: func(ctx context.Context, repo *postgres.TenantRetentionRepo, tenant uuid.UUID) error {
+				return errors.Join(repo.RecordReturned(ctx, tenant, at(10)), repo.RecordOffboarded(ctx, tenant, at(0), at(1)))
+			},
+		},
+		{
+			name: "a return older than the offboarding is a late delivery",
+			events: func(ctx context.Context, repo *postgres.TenantRetentionRepo, tenant uuid.UUID) error {
+				return errors.Join(repo.RecordOffboarded(ctx, tenant, at(5), at(6)), repo.RecordReturned(ctx, tenant, at(4)))
+			},
+			wantDue: true,
+		},
+		{
+			name: "an offboarding after the return records afresh",
+			events: func(ctx context.Context, repo *postgres.TenantRetentionRepo, tenant uuid.UUID) error {
+				return errors.Join(repo.RecordOffboarded(ctx, tenant, at(0), at(1)), repo.RecordReturned(ctx, tenant, at(10)), repo.RecordOffboarded(ctx, tenant, at(20), at(21)))
+			},
+			wantDue: true,
+		},
+	}
+	pool := fixtures.NewTestPool(t)
+	repo := postgres.NewTenantRetentionRepo(pool)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			tenant := uuid.New()
+			require.NoError(t, tt.events(ctx, repo, tenant))
+
+			due, err := repo.ListDue(ctx, at(100), 1000)
+			require.NoError(t, err)
+			found := false
+			for _, d := range due {
+				found = found || d.TenantID == tenant
+			}
+			assert.Equal(t, tt.wantDue, found)
+		})
+	}
+}
+
+func TestTenantRetentionRepo_AFailedTenantWaitsAndAStaleWriteIsRefused(t *testing.T) {
+	pool := fixtures.NewTestPool(t)
+	repo := postgres.NewTenantRetentionRepo(pool)
+	ctx := context.Background()
+	failing, other := uuid.New(), uuid.New()
+	at := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	require.NoError(t, repo.RecordOffboarded(ctx, failing, at, at))
+	require.NoError(t, repo.RecordOffboarded(ctx, other, at.Add(time.Minute), at.Add(time.Minute)))
+	now := at.Add(time.Hour)
+
+	require.NoError(t, repo.RecordFailure(ctx, failing, 1, 1, now.Add(24*time.Hour)))
+	require.ErrorIs(t, repo.RecordFailure(ctx, failing, 1, 2, now), port.ErrTenantRetentionChanged, "the version moved on")
+
+	due, err := repo.ListDue(ctx, now, 1)
+	require.NoError(t, err)
+	assert.Equal(t, []port.TenantPurgeDue{{TenantID: other, RecordVersion: 1}}, due, "the failing tenant no longer takes the only slot")
+	due, err = repo.ListDue(ctx, now.Add(25*time.Hour), 10)
+	require.NoError(t, err)
+	assert.Contains(t, due, port.TenantPurgeDue{TenantID: failing, Attempts: 1, RecordVersion: 2})
+}
+
+func TestTenantRetentionRepo_APurgeBatchStopsOnceTheTenantReturned(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	repo := postgres.NewTenantRetentionRepo(appPool)
+	ctx := context.Background()
+	tenant := uuid.New()
+	seedPurgeTenant(t, superPool, tenant, 1, 1)
+	now := time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)
+	require.NoError(t, repo.RecordOffboarded(ctx, tenant, now.Add(-48*time.Hour), now.Add(-time.Hour)))
+	due, err := repo.ListDue(ctx, now, 10)
+	require.NoError(t, err)
+	require.Len(t, due, 1)
+
+	require.NoError(t, repo.RecordReturned(ctx, tenant, now))
+
+	_, err = repo.PurgeBatch(ctx, tenant, due[0].RecordVersion, 10)
+	require.ErrorIs(t, err, port.ErrTenantRetentionChanged)
+	assert.Equal(t, 1, countRows(t, superPool, "workflow_instance", tenant), "a returned tenant keeps its instances")
 }
 
 func TestTenantStateRepo_ARecordedStatusIsReadBackAndAnOlderChangeNeverOverwritesANewerOne(t *testing.T) {

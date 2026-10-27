@@ -1,16 +1,51 @@
 -- name: RecordTenantOffboarded :exec
-INSERT INTO tenant_retention (tenant_id, offboarded_at, history_purge_after, updated_at)
-VALUES ($1, $2, $3, now())
-ON CONFLICT (tenant_id) DO NOTHING;
+INSERT INTO tenant_retention (tenant_id, offboarded_at, history_purge_after, next_attempt_at)
+VALUES ($1, $2, $3, $2)
+ON CONFLICT (tenant_id) DO UPDATE SET
+    offboarded_at = EXCLUDED.offboarded_at,
+    history_purge_after = EXCLUDED.history_purge_after,
+    purged_at = NULL,
+    returned_at = NULL,
+    attempts = 0,
+    next_attempt_at = EXCLUDED.next_attempt_at,
+    record_version = tenant_retention.record_version + 1,
+    updated_at = now()
+WHERE tenant_retention.returned_at IS NOT NULL
+  AND tenant_retention.returned_at < EXCLUDED.offboarded_at;
+
+-- name: RecordTenantReturned :exec
+INSERT INTO tenant_retention (tenant_id, returned_at, next_attempt_at)
+VALUES ($1, $2, $2)
+ON CONFLICT (tenant_id) DO UPDATE SET
+    returned_at = EXCLUDED.returned_at,
+    record_version = tenant_retention.record_version + 1,
+    updated_at = now()
+WHERE (tenant_retention.offboarded_at IS NULL OR tenant_retention.offboarded_at < EXCLUDED.returned_at)
+  AND (tenant_retention.returned_at IS NULL OR tenant_retention.returned_at < EXCLUDED.returned_at);
+
+-- name: LockCurrentTenantRetention :one
+SELECT record_version FROM tenant_retention
+WHERE tenant_id = $1 AND record_version = $2 AND returned_at IS NULL
+FOR SHARE;
 
 -- name: ListTenantsDueForPurge :many
-SELECT tenant_id FROM tenant_retention
-WHERE purged_at IS NULL AND history_purge_after <= $1
+SELECT tenant_id, attempts, record_version FROM tenant_retention
+WHERE purged_at IS NULL AND returned_at IS NULL
+  AND history_purge_after <= $1 AND next_attempt_at <= $1
 ORDER BY history_purge_after, tenant_id
 LIMIT $2;
 
--- name: MarkTenantPurged :exec
-UPDATE tenant_retention SET purged_at = $2, updated_at = now() WHERE tenant_id = $1;
+-- name: MarkTenantPurged :one
+UPDATE tenant_retention
+SET purged_at = $3, attempts = 0, record_version = record_version + 1, updated_at = now()
+WHERE tenant_id = $1 AND record_version = $2
+RETURNING record_version;
+
+-- name: RecordTenantPurgeFailure :one
+UPDATE tenant_retention
+SET attempts = $3, next_attempt_at = $4, record_version = record_version + 1, updated_at = now()
+WHERE tenant_id = $1 AND record_version = $2
+RETURNING record_version;
 
 -- name: PurgeTenantAssigneeOverrides :execrows
 DELETE FROM assignee_overrides
