@@ -33,6 +33,7 @@ type fakeSDKClient struct {
 	terminateWorkflowFunc func(ctx context.Context, workflowID, runID, reason string, details ...interface{}) error
 	queryWorkflowFunc     func(ctx context.Context, workflowID, runID, queryType string, args ...interface{}) (converter.EncodedValue, error)
 	updateErr             error
+	updateCallErr         error
 }
 
 type fakeUpdateHandle struct {
@@ -43,6 +44,9 @@ type fakeUpdateHandle struct {
 func (h *fakeUpdateHandle) Get(context.Context, interface{}) error { return h.err }
 
 func (f *fakeSDKClient) UpdateWorkflow(context.Context, client.UpdateWorkflowOptions) (client.WorkflowUpdateHandle, error) {
+	if f.updateCallErr != nil {
+		return nil, f.updateCallErr
+	}
 	return &fakeUpdateHandle{err: f.updateErr}, nil
 }
 
@@ -310,6 +314,33 @@ func TestUpdateWorkflow_OnlyTheWorkflowsOwnRefusalIsARefusal(t *testing.T) {
 			}
 			if tt.wantNot != nil {
 				assert.NotErrorIs(t, err, tt.wantNot)
+			}
+		})
+	}
+}
+
+func TestUpdateWorkflow_DeliveryOutcomes(t *testing.T) {
+	tests := []struct {
+		name    string
+		sdk     *fakeSDKClient
+		wantErr error
+	}{
+		{name: "applied", sdk: &fakeSDKClient{}},
+		{name: "no such workflow", sdk: &fakeSDKClient{updateCallErr: serviceerror.NewNotFound("gone")}, wantErr: port.ErrWorkflowNotFound},
+		{name: "the call fails before delivery", sdk: &fakeSDKClient{updateCallErr: errors.New("unavailable")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := temporalclient.New(tt.sdk).UpdateWorkflow(context.Background(), "wf", uuid.New(), "stage-defer", struct{}{})
+
+			switch {
+			case tt.name == "applied":
+				require.NoError(t, err)
+			case tt.wantErr != nil:
+				require.ErrorIs(t, err, tt.wantErr)
+			default:
+				require.Error(t, err)
+				assert.NotErrorIs(t, err, port.ErrUpdateRefused)
 			}
 		})
 	}
