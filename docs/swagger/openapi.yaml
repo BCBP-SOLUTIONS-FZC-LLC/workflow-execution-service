@@ -2503,8 +2503,10 @@ paths:
         proceed as-is (e.g. missing documents, incomplete prior step). The task status
         transitions to DEFERRED and the instance goes back one step, as an admin
         force-back does: the previous step's department runs again and creates a new
-        task for it. The response returns the deferred task itself. A task with no
-        completed step before it answers 409 INVALID_TASK_STATE.
+        task for it. The request waits for the workflow to apply the defer and answers
+        200 with the deferred task, now DEFERRED. When the workflow cannot apply it (no
+        completed step to go back to, or the instance is not running) it answers
+        409 INVALID_TASK_STATE naming the reason, and nothing changes.
         The calling user's eligibility for the task's department and its stage's required level
         is read from Org & Membership before the signal: 422 ASSIGNEE_INELIGIBLE when the read
         answers ineligible (a suspended, removed or demoted member) or the node has no stage in
@@ -2536,8 +2538,8 @@ paths:
                     by the handler. Stored on the TaskDeferred event.
                   example: "Supporting documents are missing from the tender package."
       responses:
-        "202":
-          description: Defer accepted; returns the deferred task (now in DEFERRED status).
+        "200":
+          description: Defer applied; returns the deferred task (now in DEFERRED status).
           content:
             application/json:
               schema:

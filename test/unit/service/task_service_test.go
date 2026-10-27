@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -552,7 +553,7 @@ func TestTaskService_Complete(t *testing.T) {
 }
 
 func TestTaskService_Defer(t *testing.T) {
-	t.Run("success signals stage-defer", func(t *testing.T) {
+	t.Run("success waits for the workflow's stage-defer update", func(t *testing.T) {
 		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
 		tenantID, instanceID := uuid.New(), uuid.New()
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:biz"}
@@ -566,8 +567,30 @@ func TestTaskService_Defer(t *testing.T) {
 
 		_, err := svc.Defer(context.Background(), tenantID, task.ID, userID, "not my department", task.RecordVersion)
 		require.NoError(t, err)
-		require.Len(t, temporal.signals, 1)
-		assert.Equal(t, "stage-defer", temporal.signals[0].SignalName)
+		assert.Empty(t, temporal.signals)
+		require.Len(t, temporal.updates, 1)
+		assert.Equal(t, "stage-defer", temporal.updates[0].SignalName)
+	})
+
+	t.Run("a defer the workflow refuses is a conflict naming its reason", func(t *testing.T) {
+		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		tenantID, instanceID := uuid.New(), uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:biz"}
+		done := newReadyTask(tenantID, instanceID)
+		done.Status = domain.TaskStatusCompleted
+		tasks.byID[done.ID] = done
+		task := newReadyTask(tenantID, instanceID)
+		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+		temporal.updateFunc = func(context.Context, string, uuid.UUID, string, any) error {
+			return fmt.Errorf("%w: there is no completed step to go back to", port.ErrUpdateRefused)
+		}
+
+		_, err := svc.Defer(context.Background(), tenantID, task.ID, userID, "not my department", task.RecordVersion)
+
+		require.ErrorIs(t, err, port.ErrInvalidTaskState)
+		assert.Contains(t, err.Error(), "no completed step")
 	})
 
 	t.Run("no completed step to go back to is refused", func(t *testing.T) {
@@ -584,7 +607,7 @@ func TestTaskService_Defer(t *testing.T) {
 		assert.Empty(t, temporal.signals)
 	})
 
-	t.Run("failures reading the instance, its tasks, or signalling are returned", func(t *testing.T) {
+	t.Run("failures reading the instance, its tasks, or updating the workflow are returned", func(t *testing.T) {
 		for _, tc := range []struct {
 			name  string
 			setup func(*fakeInstanceRepo, *fakeTaskRepo, *fakeTemporalClient, uuid.UUID, uuid.UUID)
@@ -593,11 +616,11 @@ func TestTaskService_Defer(t *testing.T) {
 			{"task listing fails", func(_ *fakeInstanceRepo, t *fakeTaskRepo, _ *fakeTemporalClient, _, _ uuid.UUID) {
 				t.listErr = assert.AnError
 			}},
-			{"signal fails", func(_ *fakeInstanceRepo, t *fakeTaskRepo, tc *fakeTemporalClient, tenant, id uuid.UUID) {
+			{"update fails", func(_ *fakeInstanceRepo, t *fakeTaskRepo, tc *fakeTemporalClient, tenant, id uuid.UUID) {
 				done := newReadyTask(tenant, id)
 				done.Status = domain.TaskStatusCompleted
 				t.byID[done.ID] = done
-				tc.signalFunc = func(context.Context, string, uuid.UUID, string, any) error { return assert.AnError }
+				tc.updateFunc = func(context.Context, string, uuid.UUID, string, any) error { return assert.AnError }
 			}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {

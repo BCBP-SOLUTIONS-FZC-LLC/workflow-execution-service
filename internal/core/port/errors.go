@@ -7,6 +7,7 @@ var (
 	ErrNotAssignee           = errors.New("caller is not the task's active assignee")
 	ErrRecordVersionConflict = errors.New("record version conflict")
 	ErrInvalidTaskState      = errors.New("action not valid for task's current status")
+	ErrUpdateRefused         = errors.New("the workflow refused the request")
 	ErrTaskAlreadyClaimed    = errors.New("task already claimed by another assignee")
 	ErrClaimNotApplicable    = errors.New("claim only applies to multi-assignee tasks")
 	ErrNodeAlreadyResolved   = errors.New("node has already progressed")

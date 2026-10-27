@@ -618,8 +618,10 @@ type fakeTemporalClient struct {
 	signalFunc    func(ctx context.Context, temporalWorkflowID string, instanceID uuid.UUID, signalName string, payload any) error
 	terminateFunc func(ctx context.Context, temporalWorkflowID, runID, reason string) error
 	queryFunc     func(ctx context.Context, temporalWorkflowID, queryType string, out any) error
+	updateFunc    func(ctx context.Context, temporalWorkflowID string, instanceID uuid.UUID, updateName string, payload any) error
 
 	signals   []signalCall
+	updates   []signalCall
 	terminate []terminateCall
 }
 
@@ -651,6 +653,14 @@ func (c *fakeTemporalClient) SignalWorkflow(ctx context.Context, temporalWorkflo
 	c.signals = append(c.signals, signalCall{TemporalWorkflowID: temporalWorkflowID, InstanceID: instanceID, SignalName: signalName, Payload: payload})
 	if c.signalFunc != nil {
 		return c.signalFunc(ctx, temporalWorkflowID, instanceID, signalName, payload)
+	}
+	return nil
+}
+
+func (c *fakeTemporalClient) UpdateWorkflow(ctx context.Context, temporalWorkflowID string, instanceID uuid.UUID, updateName string, payload any) error {
+	c.updates = append(c.updates, signalCall{TemporalWorkflowID: temporalWorkflowID, InstanceID: instanceID, SignalName: updateName, Payload: payload})
+	if c.updateFunc != nil {
+		return c.updateFunc(ctx, temporalWorkflowID, instanceID, updateName, payload)
 	}
 	return nil
 }

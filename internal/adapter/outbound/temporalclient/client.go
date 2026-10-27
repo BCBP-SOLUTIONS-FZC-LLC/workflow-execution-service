@@ -9,6 +9,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/temporal"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
@@ -59,6 +60,31 @@ func (c *Client) SignalWorkflow(ctx context.Context, temporalWorkflowID string, 
 		return fmt.Errorf("signal workflow %q: %w", channelName, err)
 	}
 	return nil
+}
+
+func (c *Client) UpdateWorkflow(ctx context.Context, temporalWorkflowID string, instanceID uuid.UUID, updateName string, payload any) error {
+	name := updateName + ":" + instanceID.String()
+	handle, err := c.sdk.UpdateWorkflow(ctx, client.UpdateWorkflowOptions{
+		WorkflowID:   temporalWorkflowID,
+		UpdateName:   name,
+		Args:         []any{payload},
+		WaitForStage: client.WorkflowUpdateStageCompleted,
+	})
+	if err == nil {
+		err = handle.Get(ctx, nil)
+	}
+	if err == nil {
+		return nil
+	}
+	var notFound *serviceerror.NotFound
+	if errors.As(err, &notFound) {
+		return fmt.Errorf("update workflow %q: %w: %w", name, port.ErrWorkflowNotFound, err)
+	}
+	var refused *temporal.ApplicationError
+	if errors.As(err, &refused) {
+		return fmt.Errorf("%w: %s", port.ErrUpdateRefused, refused.Message())
+	}
+	return fmt.Errorf("update workflow %q: %w", name, err)
 }
 
 func (c *Client) TerminateWorkflow(ctx context.Context, temporalWorkflowID, runID, reason string) error {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -300,13 +301,21 @@ func (s *TaskService) Defer(ctx context.Context, tenantID, taskID, userID uuid.U
 		return nil, port.ErrInvalidTaskState
 	}
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
-	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-defer", stageDeferWire{
+	err = s.Temporal.UpdateWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-defer", stageDeferWire{
 		DeptID: deptID, FromStage: nodeID, Reason: reason, UserID: userID.String(), RecordVersion: recordVersion,
 		TaskID: task.ID.String(), AssignmentID: assignment.ID.String(),
-	}); err != nil {
-		return nil, fmt.Errorf("signal stage-defer: %w", err)
+	})
+	if errors.Is(err, port.ErrUpdateRefused) {
+		return nil, fmt.Errorf("%w: %w", port.ErrInvalidTaskState, err)
 	}
-	return toPortTask(task), nil
+	if err != nil {
+		return nil, fmt.Errorf("update stage-defer: %w", err)
+	}
+	deferred, err := s.Tasks.GetByID(ctx, tenantID, taskID)
+	if err != nil {
+		return nil, wrapTaskErr(err)
+	}
+	return toPortTask(deferred), nil
 }
 
 func (s *TaskService) Reassign(ctx context.Context, tenantID, taskID, actorUserID, newUserID uuid.UUID, recordVersion int64) (*port.Task, error) {

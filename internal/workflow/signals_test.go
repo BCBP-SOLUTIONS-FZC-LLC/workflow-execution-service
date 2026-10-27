@@ -134,7 +134,9 @@ func TestStageDeferOnPendingStageDoesNotWipeHistory(t *testing.T) {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-defer:instance", stageDeferSignal{DeptID: "deptA", FromStage: "approve", Reason: "need more info", UserID: "user-1"})
+		env.UpdateWorkflow("stage-defer:instance", "defer-1", &testsuite.TestUpdateCallback{
+			OnAccept: func() {}, OnReject: func(error) {}, OnComplete: func(any, error) {},
+		}, stageDeferSignal{DeptID: "deptA", FromStage: "approve", Reason: "need more info", UserID: "user-1"})
 	}, 2*time.Millisecond)
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "deptA", ToStage: "approve", ResultJSON: "{}", VisitCount: 1})

@@ -68,8 +68,9 @@ func TestExecute_DeferSendsTheInstanceOneStepBack(t *testing.T) {
 	})
 
 	transitionAt(env, tick, "deptA", 1)
+	answer := &updateAnswer{}
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-defer:instance-1", deferWire{
+		env.UpdateWorkflow("stage-defer:instance-1", "defer-1", answer, deferWire{
 			DeptID: "deptB", FromStage: "prep", Reason: "need more info", UserID: "user-1", RecordVersion: 1, TaskID: "deptB/prep", AssignmentID: "assign-1",
 		})
 	}, 5*tick)
@@ -82,6 +83,9 @@ func TestExecute_DeferSendsTheInstanceOneStepBack(t *testing.T) {
 	defer mu.Unlock()
 	if out.Status != domain.InstanceStatusCompleted {
 		t.Errorf("Status = %v, want COMPLETED", out.Status)
+	}
+	if !answer.completed || answer.err != nil || answer.rejected != nil {
+		t.Errorf("defer answer = %+v, want completed without error", answer)
 	}
 	if len(deferred) != 1 || deferred[0].DeferredToNodeKey != "deptA/prep" {
 		t.Errorf("DeferTask inputs = %+v, want one naming deptA/prep as the node the instance goes back to", deferred)
@@ -98,18 +102,30 @@ func TestExecute_DeferSendsTheInstanceOneStepBack(t *testing.T) {
 	}
 }
 
-// A task with no completed step before it has nowhere to go back to; the
-// service refuses it synchronously, and a signal that gets past it anyway
-// changes nothing.
-func TestExecute_DeferAtTheFirstStepGoesNowhere(t *testing.T) {
+type updateAnswer struct {
+	rejected  error
+	completed bool
+	err       error
+}
+
+func (a *updateAnswer) Accept()          {}
+func (a *updateAnswer) Reject(err error) { a.rejected = err }
+func (a *updateAnswer) Complete(_ any, err error) {
+	a.completed, a.err = true, err
+}
+
+// A task with no completed step before it has nowhere to go back to: the
+// workflow refuses the defer, so the caller hears it, and nothing changes.
+func TestExecute_DeferAtTheFirstStepIsRefused(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 
 	deferCalls := 0
 	registerFakeActivities(env, twoDeptCollaboration(), &activityHooks{deferTask: func(port.DeferTaskInput) { deferCalls++ }})
 
+	answer := &updateAnswer{}
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-defer:instance-1", deferWire{DeptID: "deptA", FromStage: "prep", UserID: "user-1", RecordVersion: 1, TaskID: "deptA/prep", AssignmentID: "assign-1"})
+		env.UpdateWorkflow("stage-defer:instance-1", "defer-1", answer, deferWire{DeptID: "deptA", FromStage: "prep", UserID: "user-1", RecordVersion: 1, TaskID: "deptA/prep", AssignmentID: "assign-1"})
 	}, tick)
 	transitionAt(env, 5*tick, "deptA", 1)
 	transitionAt(env, 10*tick, "deptB", 1)
@@ -117,7 +133,10 @@ func TestExecute_DeferAtTheFirstStepGoesNowhere(t *testing.T) {
 	out := finish(t, env, "instance-1")
 
 	if out.Status != domain.InstanceStatusCompleted || deferCalls != 0 {
-		t.Errorf("status %v, DeferTask calls %d; want COMPLETED with the defer dropped", out.Status, deferCalls)
+		t.Errorf("status %v, DeferTask calls %d; want COMPLETED with nothing deferred", out.Status, deferCalls)
+	}
+	if answer.rejected == nil {
+		t.Errorf("defer answer = %+v, want a refusal the caller sees", answer)
 	}
 }
 

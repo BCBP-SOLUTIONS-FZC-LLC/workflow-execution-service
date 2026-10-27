@@ -31,10 +31,10 @@ func TestTaskSignals_ObserveDurationPerOperation(t *testing.T) {
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 	base := "/api/v1/tasks/" + testTaskID.String()
 
-	for _, op := range []string{"claim", "complete", "defer"} {
+	for op, want := range map[string]int{"claim": http.StatusAccepted, "complete": http.StatusAccepted, "defer": http.StatusOK} {
 		before := obstest.Sum(t, name, map[string]string{"operation": op})
 		w := do(router, req(http.MethodPost, base+"/"+op, map[string]any{"record_version": 4}))
-		require.Equal(t, http.StatusAccepted, w.Code, op)
+		require.Equal(t, want, w.Code, op)
 		assert.Equal(t, before+1, obstest.Sum(t, name, map[string]string{"operation": op}), "%s adds one observation", op)
 	}
 }

@@ -41,6 +41,8 @@ type TemporalClient interface {
 
 	SignalWorkflow(ctx context.Context, temporalWorkflowID string, instanceID uuid.UUID, signalName string, payload any) error
 
+	UpdateWorkflow(ctx context.Context, temporalWorkflowID string, instanceID uuid.UUID, updateName string, payload any) error
+
 	TerminateWorkflow(ctx context.Context, temporalWorkflowID, runID, reason string) error
 
 	QueryWorkflow(ctx context.Context, temporalWorkflowID, queryType string, out any) error

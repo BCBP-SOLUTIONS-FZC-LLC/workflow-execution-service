@@ -421,7 +421,7 @@ func TestDeferTask(t *testing.T) {
 		"reason": "backlog", "record_version": 4,
 	}))
 
-	assert.Equal(t, http.StatusAccepted, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestDeferTask_ReasonTooLong_400(t *testing.T) {

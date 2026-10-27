@@ -3,6 +3,7 @@ package workflow
 import (
 	"fmt"
 
+	"go.temporal.io/sdk/temporal"
 	wf "go.temporal.io/sdk/workflow"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
@@ -116,12 +117,10 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 		in.handleStageTransition(ctx, sig)
 	})
 
-	deferCh := wf.GetSignalChannel(ctx, SignalStageDefer+":"+in.instanceID)
-	sel.AddReceive(deferCh, func(c wf.ReceiveChannel, more bool) {
-		var sig stageDeferSignal
-		c.Receive(ctx, &sig)
-		in.handleStageDefer(ctx, sig)
-	})
+	if err := wf.SetUpdateHandlerWithOptions(ctx, SignalStageDefer+":"+in.instanceID, in.applyStageDefer,
+		wf.UpdateHandlerOptions{Validator: in.validateStageDefer}); err != nil {
+		logger.Error("stage-defer update handler not registered", "error", err)
+	}
 
 	failCh := wf.GetSignalChannel(ctx, SignalStageFail+":"+in.instanceID)
 	sel.AddReceive(failCh, func(c wf.ReceiveChannel, more bool) {
@@ -233,39 +232,48 @@ func (in *interpreter) routeAdminSignal(ctx wf.Context, kind string, sig adminSi
 	}
 }
 
-func (in *interpreter) handleStageDefer(ctx wf.Context, sig stageDeferSignal) {
+func (in *interpreter) validateStageDefer(sig stageDeferSignal) error {
 	if err := validateSignal(in.status, SignalStageDefer); err != nil {
-		wf.GetLogger(ctx).Warn("dropping stage-defer signal", "error", err)
-		return
+		return refuseDefer(err.Error())
+	}
+	if in.status != domain.InstanceStatusRunning {
+		return refuseDefer(fmt.Sprintf("only a running instance goes back a step; it is %s", in.status))
+	}
+	if in.deferTarget() == "" {
+		return refuseDefer("there is no completed step to go back to")
+	}
+	return nil
+}
+
+func (in *interpreter) applyStageDefer(ctx wf.Context, sig stageDeferSignal) error {
+	if err := in.validateStageDefer(sig); err != nil {
+		return err
 	}
 	input := port.DeferTaskInput{
 		TaskID: sig.TaskID, TenantID: in.tenantID, UserID: sig.UserID,
 		AssignmentID: sig.AssignmentID, Reason: sig.Reason, RecordVersion: sig.RecordVersion,
+		DeferredToNodeKey: string(in.deferTarget()),
 	}
-	if getVersion(ctx, deferRoutesBackChangeID) == wf.DefaultVersion {
-		_ = deferTask(ctx, input)
-		return
-	}
-	if in.status != domain.InstanceStatusRunning {
-		wf.GetLogger(ctx).Warn("dropping stage-defer signal: only a running instance goes back a step", "status", in.status)
-		return
-	}
-	target := in.history.Peek()
-	if in.parallelDepth > 0 {
-		target = in.forkEntries[len(in.forkEntries)-1]
-	}
-	if target == "" {
-		wf.GetLogger(ctx).Warn("dropping stage-defer signal: no completed step to go back to")
-		return
-	}
-	input.DeferredToNodeKey = string(target)
 	if err := deferTask(ctx, input); err != nil {
-		wf.GetLogger(ctx).Warn("deferTask failed", "error", err)
-		return
+		return fmt.Errorf("defer task: %w", err)
 	}
 	in.routeAdminSignal(ctx, SignalInstanceForceBack, adminSignal{
 		AdminUserID: sig.UserID, Reason: sig.Reason, RecordVersion: sig.RecordVersion, FromDefer: true,
 	})
+	return nil
+}
+
+func (in *interpreter) deferTarget() domain.NodeKey {
+	if in.parallelDepth > 0 {
+		return in.forkEntries[len(in.forkEntries)-1]
+	}
+	return in.history.Peek()
+}
+
+const DeferRefusedErrorType = "DeferRefused"
+
+func refuseDefer(reason string) error {
+	return temporal.NewNonRetryableApplicationError("defer refused: "+reason, DeferRefusedErrorType, nil) //nolint:wrapcheck // must stay *temporal.ApplicationError so the client reads the refusal
 }
 
 func (in *interpreter) handleInstanceReassign(ctx wf.Context, sig reassignSignal) {

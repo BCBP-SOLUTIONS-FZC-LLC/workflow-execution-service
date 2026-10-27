@@ -298,7 +298,7 @@ func (h *Handler) DeferTask(c *gin.Context) {
 		return
 	}
 	observability.ObserveHistogramVec(observability.TaskSignalDurationSeconds, time.Since(start).Seconds(), "defer")
-	c.JSON(http.StatusAccepted, toTaskResp(task))
+	c.JSON(http.StatusOK, toTaskResp(task))
 }
 
 type reassignReq struct {

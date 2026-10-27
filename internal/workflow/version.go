@@ -22,8 +22,6 @@ const boundaryEndsPathChangeID = "boundary-no-target-ends-path"
 
 const exclusiveEndCompletesPathChangeID = "exclusive-end-completes-path"
 
-const deferRoutesBackChangeID = "defer-routes-back"
-
 const forceRouteByNodeKeyChangeID = "force-route-by-node-key"
 
 const abandonedTaskSupersededChangeID = "abandoned-task-superseded"

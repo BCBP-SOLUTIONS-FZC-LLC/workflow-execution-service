@@ -42,8 +42,12 @@ func TestE2E_TaskDefer(t *testing.T) {
 	resp = f.assignee.do(http.MethodPost, "/api/v1/tasks/"+second.ID.String()+"/defer", map[string]any{
 		"reason": "need more info", "record_version": second.RecordVersion,
 	}, nil)
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("defer at the second step: status = %d, want 202", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("defer at the second step: status = %d, want 200", resp.StatusCode)
+	}
+	var deferred taskSummary
+	if err := json.NewDecoder(resp.Body).Decode(&deferred); err != nil || deferred.Status != "DEFERRED" {
+		t.Fatalf("defer answer = %+v (%v), want the task DEFERRED once the workflow applied it", deferred, err)
 	}
 
 	detail = pollInstance(t, f.admin, f.instanceID, func(d instanceDetail) bool { return len(d.Tasks) == 3 })
