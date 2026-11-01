@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The LLD names the membership and user topics as their producers do (`iam-membership-events`, `iam-user-events`), and the delegate-impact `next_cursor` is documented as omitted on the last page, never null (LLD rev 1.130).
 - `WorkflowInstanceDegraded` and `WorkflowInstanceFailed` carry `started_by_user_id`, a required field like the other instance events, so the Dashboard Stream Gateway can route them (LLD rev 1.129).
 - The LLD points to the Workflow Events Consumer LLD instead of recording that none exists, and states that `DepartmentMembershipRevoked` is routed by the consumer to the Definition Service, not to Execution (LLD rev 1.128).
 - The delegate-impact preview answers `active_workflows` (distinct instances), `active_assignments` and `workflow_ids` with a `next_cursor` that reaches every affected instance in ascending id order; `reassigned_count` is gone, and the page limit no longer hides the rest. Org & Membership gates a user's removal on `active_workflows` (LLD rev 1.127).

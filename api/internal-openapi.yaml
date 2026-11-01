@@ -649,8 +649,7 @@ paths:
                     description: UUIDs of the distinct workflow instances affected, one page.
                   next_cursor:
                     type: string
-                    nullable: true
-                    description: Opaque cursor for the next page of workflow_ids; omitted/null on the final page.
+                    description: Opaque cursor for the next page of workflow_ids; omitted on the final page.
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":

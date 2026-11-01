@@ -73,3 +73,27 @@ func TestDelegationStartedInbound_OptionalFieldsAreAbsentNotNull(t *testing.T) {
 		}
 	}
 }
+
+func TestInternalSpec_NextCursorIsOmittedNotNull(t *testing.T) {
+	raw, err := os.ReadFile("../../api/internal-openapi.yaml")
+	require.NoError(t, err)
+	var doc struct {
+		Paths map[string]struct {
+			Get struct {
+				Responses map[string]struct {
+					Content map[string]struct {
+						Schema struct {
+							Properties map[string]struct {
+								Nullable bool `yaml:"nullable"`
+							} `yaml:"properties"`
+						} `yaml:"schema"`
+					} `yaml:"content"`
+				} `yaml:"responses"`
+			} `yaml:"get"`
+		} `yaml:"paths"`
+	}
+	require.NoError(t, yaml.Unmarshal(raw, &doc))
+	prop, ok := doc.Paths["/api/v1/internal/workflows/delegate-impact"].Get.Responses["200"].Content["application/json"].Schema.Properties["next_cursor"]
+	require.True(t, ok, "delegate-impact documents next_cursor")
+	assert.False(t, prop.Nullable, "the answer omits next_cursor on the last page; it is never null")
+}
