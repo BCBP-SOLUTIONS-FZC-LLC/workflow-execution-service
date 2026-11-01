@@ -153,6 +153,7 @@ func TestRLSForceEnabledOnTenantTables(t *testing.T) {
 	policyBearing := []string{
 		"workflow_instance", "workflow_task", "workflow_task_assignment",
 		"assignee_overrides", "connector_documents", "connector_document_attempts", "connector_send_intents",
+		"user_availability",
 	}
 	for _, table := range policyBearing {
 		enabled, forced := rlsFlags(t, superPool, ctx, table)
@@ -238,6 +239,40 @@ func TestOutboxRelayRoleHasBypassRLS(t *testing.T) {
 // TestRLSPoliciesUseCheckTenantFunction is a definition-level check distinct
 // from TestRLSPolicyEnforcement's behavioral one, which would pass unchanged
 // whether 000006's policy swap actually landed or not.
+func TestRLSIsolatesUserAvailability(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	ctx := context.Background()
+	tenantA, tenantB := uuid.New(), uuid.New()
+
+	for _, tenant := range []uuid.UUID{tenantA, tenantB} {
+		require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+			_, err := conn.Exec(ctx, "INSERT INTO user_availability (tenant_id, user_id, status, changed_at) VALUES ($1, $2, 'ooo', now())", tenant, uuid.New())
+			return err
+		}))
+	}
+
+	count := func(ctx context.Context) (n int) {
+		require.NoError(t, appPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+			return conn.QueryRow(ctx, "SELECT count(*) FROM user_availability").Scan(&n)
+		}))
+		return n
+	}
+	assert.Equal(t, 1, count(withGUC(ctx, tenantA)), "a tenant sees its own row only")
+	assert.Equal(t, 1, count(withGUC(ctx, tenantB)))
+	assert.Equal(t, 0, count(ctx), "a connection with no tenant sees nothing")
+
+	require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
+		_, err := conn.Exec(ctx, "ALTER TABLE user_availability NO FORCE ROW LEVEL SECURITY")
+		if err != nil {
+			return err
+		}
+		_, err = conn.Exec(ctx, "ALTER TABLE user_availability DISABLE ROW LEVEL SECURITY")
+		return err
+	}))
+	assert.Equal(t, 2, count(withGUC(ctx, tenantA)), "with the policy off the same query sees every tenant, so the assertions above depend on it")
+}
+
 func TestRLSPoliciesUseCheckTenantFunction(t *testing.T) {
 	superPool, _ := fixtures.NewTestPoolAndDSN(t)
 	ctx := context.Background()
@@ -246,6 +281,7 @@ func TestRLSPoliciesUseCheckTenantFunction(t *testing.T) {
 		"workflow_instance", "workflow_task", "workflow_task_assignment",
 		"assignee_overrides", "outbox_events", "outbox_dead_letters",
 		"connector_documents", "connector_document_attempts", "connector_send_intents",
+		"user_availability",
 	}
 	for _, table := range swapped {
 		t.Run(table, func(t *testing.T) {

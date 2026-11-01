@@ -318,8 +318,9 @@ components:
       description: >
         Fires when ClaimAssignmentActivity marks a multi-assignee task's claiming
         assignment as lead (is_lead=true) — never fires for single-assignee tasks, since
-        claim is a no-op there. Consumed by Audit and the Dashboard Stream Gateway, so
-        other assignees see live that the task is already claimed.
+        claim is a no-op there. assignee_user_ids lists every active assignee of the task
+        at claim time, the claimer included. Consumed by Audit and the Dashboard Stream
+        Gateway, so every assignee sees live that the task is already claimed.
       x-lifecycle: { status: active }
       x-owner: { team: platform-engineers, slack: "#workflow-engine" }
       traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]

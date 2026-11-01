@@ -30,26 +30,26 @@ func (s *OOOAvailabilityReconciler) logger() port.Logger {
 func (s *OOOAvailabilityReconciler) Apply(ctx context.Context, in port.UserAvailabilityInput) error {
 	switch in.Status {
 	case port.AvailabilityOOO:
-		if err := s.record(ctx, in); err != nil {
+		written, err := s.record(ctx, in)
+		if err != nil || !written || in.DelegateUserID != nil {
 			return err
-		}
-		if in.DelegateUserID != nil {
-			return nil
 		}
 		return s.signalActiveInstances(ctx, in.TenantID, in.UserID, port.SignalInstancePause)
 	case port.AvailabilityAvailable:
-		if err := s.record(ctx, in); err != nil {
+		written, err := s.record(ctx, in)
+		if err != nil || !written {
 			return err
 		}
 		return s.signalActiveInstances(ctx, in.TenantID, in.UserID, port.SignalInstanceResume)
 	case port.AvailabilityBusy:
-		return s.record(ctx, in)
+		_, err := s.record(ctx, in)
+		return err
 	default:
 		return nil
 	}
 }
 
-func (s *OOOAvailabilityReconciler) record(ctx context.Context, in port.UserAvailabilityInput) error {
+func (s *OOOAvailabilityReconciler) record(ctx context.Context, in port.UserAvailabilityInput) (bool, error) {
 	return s.Availability.Record(ctx, in.TenantID, in.UserID, in.Status, in.ChangedAt)
 }
 

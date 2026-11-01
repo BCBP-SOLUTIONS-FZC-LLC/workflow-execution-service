@@ -24,13 +24,20 @@ func NewUserAvailabilityRepo(pool *pgcommon.Pool) *UserAvailabilityRepo {
 	return &UserAvailabilityRepo{pool: pool}
 }
 
-func (r *UserAvailabilityRepo) Record(ctx context.Context, tenantID, userID uuid.UUID, status string, changedAt time.Time) error {
+func (r *UserAvailabilityRepo) Record(ctx context.Context, tenantID, userID uuid.UUID, status string, changedAt time.Time) (bool, error) {
 	ctx = withTenantGUC(ctx, tenantID)
-	return exec(ctx, r.pool, func(dbtx db.DBTX) error {
-		return mapErr(db.New(dbtx).UpsertUserAvailability(ctx, db.UpsertUserAvailabilityParams{
+	var written bool
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		n, err := db.New(dbtx).UpsertUserAvailability(ctx, db.UpsertUserAvailabilityParams{
 			TenantID: tenantID, UserID: userID, Status: db.UserAvailabilityStatus(status), ChangedAt: changedAt,
-		}))
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		written = n > 0
+		return nil
 	})
+	return written, err
 }
 
 func (r *UserAvailabilityRepo) Get(ctx context.Context, tenantID, userID uuid.UUID) (string, bool, error) {

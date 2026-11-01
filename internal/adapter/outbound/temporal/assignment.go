@@ -41,7 +41,15 @@ func (d *Deps) ClaimAssignment(ctx context.Context, in port.ClaimAssignmentInput
 		if err != nil {
 			return err
 		}
-		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{existing.UserID}}
+		active, err := d.Assignments.ListActiveByTask(ctx, tenantID, task.ID)
+		if err != nil {
+			return fmt.Errorf("list active assignees: %w", err)
+		}
+		assignees := make([]uuid.UUID, len(active))
+		for i, a := range active {
+			assignees[i] = a.UserID
+		}
+		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assignees}
 		payload := domain.NewWorkflowTaskClaimedPayload(core, taskCore, existing.UserID)
 		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskClaimed, payload)
 	})

@@ -474,3 +474,24 @@ func TestUpdateTaskStatus_RetriedCall_NoOp(t *testing.T) {
 	require.NoError(t, deps.UpdateTaskStatus(context.Background(), in), "a retried UpdateTaskStatus must succeed idempotently, not error on the now-stale RecordVersion")
 	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.failed")
 }
+
+func TestClaimAssignment_NamesEveryActiveAssigneeAndTheClaimer(t *testing.T) {
+	tenantID, taskID := uuid.New(), uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
+	claimer := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
+	second := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
+	third := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
+	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(claimer, second, third))
+
+	err := deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{
+		AssignmentID: claimer.ID.String(), TenantID: tenantID.String(), UserID: claimer.UserID.String(), RecordVersion: 1,
+	})
+	require.NoError(t, err)
+
+	require.Len(t, outbox.enqueued, 1)
+	var payload domain.WorkflowTaskClaimedPayload
+	require.NoError(t, json.Unmarshal(outbox.enqueued[0].Payload, &payload))
+	assert.Equal(t, claimer.UserID, payload.ClaimedByUserID)
+	assert.ElementsMatch(t, []uuid.UUID{claimer.UserID, second.UserID, third.UserID}, payload.AssigneeUserIDs,
+		"every assignee learns that the task is taken")
+}

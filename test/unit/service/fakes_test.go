@@ -842,13 +842,13 @@ func newFakeUserAvailability() *fakeUserAvailability {
 	return &fakeUserAvailability{status: map[[2]uuid.UUID]string{}, changedAt: map[[2]uuid.UUID]time.Time{}}
 }
 
-func (f *fakeUserAvailability) Record(_ context.Context, tenantID, userID uuid.UUID, status string, changedAt time.Time) error {
+func (f *fakeUserAvailability) Record(_ context.Context, tenantID, userID uuid.UUID, status string, changedAt time.Time) (bool, error) {
 	key := [2]uuid.UUID{tenantID, userID}
 	if at, ok := f.changedAt[key]; ok && changedAt.Before(at) {
-		return nil
+		return false, nil
 	}
 	f.status[key], f.changedAt[key] = status, changedAt
-	return nil
+	return true, nil
 }
 
 func (f *fakeUserAvailability) Get(_ context.Context, tenantID, userID uuid.UUID) (string, bool, error) {
@@ -857,4 +857,9 @@ func (f *fakeUserAvailability) Get(_ context.Context, tenantID, userID uuid.UUID
 	}
 	status, ok := f.status[[2]uuid.UUID{tenantID, userID}]
 	return status, ok, nil
+}
+
+func (f *fakeUserAvailability) byRecord(tenantID, userID uuid.UUID, status string) error {
+	_, err := f.Record(context.Background(), tenantID, userID, status, time.Now().UTC())
+	return err
 }

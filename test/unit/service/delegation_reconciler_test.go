@@ -666,3 +666,74 @@ func TestDelegationReconciler_Reverse_AFailedAvailabilityReadChangesNothing(t *t
 	assert.Empty(t, outbox.enqueued)
 	assert.Empty(t, temporal.signals)
 }
+
+func TestDelegationReconciler_Reverse_PausesAnInstanceOnceForTwoRestoredTasks(t *testing.T) {
+	svc, instances, tasks, assignments, _, temporal, definitions, _ := newDelegationReconcilerHarness()
+	store := newFakeUserAvailability()
+	svc.Availability = store
+	tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	inst, _, first := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegateID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+	inst.Status = domain.InstanceStatusRunning
+	first.Reason = "delegation:" + delegationID.String()
+	secondTask := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, NodeKey: tasks.byID[first.TaskID].NodeKey, RecordVersion: 1}
+	tasks.byID[secondTask.ID] = secondTask
+	second := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: secondTask.ID, UserID: delegateID, IsActive: true, Reason: "delegation:" + delegationID.String()}
+	assignments.byID[second.ID] = second
+	require.NoError(t, store.byRecord(tenantID, delegatorID, "ooo"))
+
+	require.NoError(t, svc.Reverse(context.Background(), port.DelegationReversalInput{
+		TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, EndedReason: "expired",
+	}))
+
+	pauses := 0
+	for _, s := range temporal.signals {
+		if s.SignalName == port.SignalInstancePause {
+			pauses++
+		}
+	}
+	assert.Equal(t, 1, pauses, "two restored tasks of one instance pause the instance once")
+}
+
+func TestDelegationReconciler_Reverse_AReassignedDelegationPausesNothing(t *testing.T) {
+	svc, instances, tasks, assignments, _, temporal, definitions, _ := newDelegationReconcilerHarness()
+	store := newFakeUserAvailability()
+	svc.Availability = store
+	tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	inst, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegateID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+	inst.Status = domain.InstanceStatusRunning
+	a.Reason = "delegation:" + delegationID.String()
+	require.NoError(t, store.byRecord(tenantID, delegatorID, "ooo"))
+
+	require.NoError(t, svc.Reverse(context.Background(), port.DelegationReversalInput{
+		TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, EndedReason: "reassigned",
+	}))
+
+	for _, s := range temporal.signals {
+		assert.NotEqual(t, port.SignalInstancePause, s.SignalName, "a new delegation follows a reassignment at once, so nothing waits with the absent delegator")
+	}
+}
+
+func TestDelegationReconciler_Reverse_APauseThatCannotBeSentFailsTheEventBeforeAnythingChanges(t *testing.T) {
+	svc, instances, tasks, assignments, outbox, temporal, definitions, _ := newDelegationReconcilerHarness()
+	store := newFakeUserAvailability()
+	svc.Availability = store
+	temporal.signalFunc = func(_ context.Context, _ string, _ uuid.UUID, signalName string, _ any) error {
+		if signalName == port.SignalInstancePause {
+			return assert.AnError
+		}
+		return nil
+	}
+	tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	inst, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegateID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+	inst.Status = domain.InstanceStatusRunning
+	a.Reason = "delegation:" + delegationID.String()
+	require.NoError(t, store.byRecord(tenantID, delegatorID, "ooo"))
+
+	err := svc.Reverse(context.Background(), port.DelegationReversalInput{
+		TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, EndedReason: "delegate_disabled",
+	})
+
+	require.Error(t, err, "the event is redelivered, which repeats the pause")
+	assert.True(t, assignments.byID[a.ID].IsActive, "the assignment is still with the delegate: the pause comes first")
+	assert.Empty(t, outbox.enqueued)
+}

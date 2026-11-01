@@ -240,13 +240,12 @@ func (s *DelegationReconciler) Reverse(ctx context.Context, in port.DelegationRe
 	if err != nil {
 		return err
 	}
-	if err := s.commitReassignments(ctx, in.TenantID, eligible, in.DelegatorID, "", &in.DelegationID); err != nil {
-		return err
+	if absent && in.EndedReason != port.DelegationEndedReassigned {
+		if err := s.pauseRestoredInstances(ctx, eligible); err != nil {
+			return err
+		}
 	}
-	if absent {
-		s.pauseRestoredInstances(ctx, eligible)
-	}
-	return nil
+	return s.commitReassignments(ctx, in.TenantID, eligible, in.DelegatorID, "", &in.DelegationID)
 }
 
 func (s *DelegationReconciler) isOutOfOffice(ctx context.Context, tenantID, userID uuid.UUID) (bool, error) {
@@ -257,7 +256,7 @@ func (s *DelegationReconciler) isOutOfOffice(ctx context.Context, tenantID, user
 	return found && status == port.AvailabilityOOO, nil
 }
 
-func (s *DelegationReconciler) pauseRestoredInstances(ctx context.Context, rows []delegationCandidate) {
+func (s *DelegationReconciler) pauseRestoredInstances(ctx context.Context, rows []delegationCandidate) error {
 	paused := make(map[uuid.UUID]struct{}, len(rows))
 	for _, c := range rows {
 		if _, ok := paused[c.instance.ID]; ok {
@@ -266,7 +265,8 @@ func (s *DelegationReconciler) pauseRestoredInstances(ctx context.Context, rows 
 		paused[c.instance.ID] = struct{}{}
 		wire := adminSignalWire{Initiator: domain.InitiatorOOO, RecordVersion: c.instance.RecordVersion}
 		if err := s.Temporal.SignalWorkflow(ctx, c.instance.TemporalWorkflowID, c.instance.ID, port.SignalInstancePause, wire); err != nil {
-			s.logger().Warn("delegation reconciler: failed to pause an instance handed back to an out-of-office assignee", map[string]any{"instance_id": c.instance.ID, "error": err.Error()})
+			return fmt.Errorf("delegation reversal: pause instance %s: %w", c.instance.ID, err)
 		}
 	}
+	return nil
 }

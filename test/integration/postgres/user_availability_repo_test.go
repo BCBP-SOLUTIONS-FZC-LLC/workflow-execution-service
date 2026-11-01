@@ -25,7 +25,9 @@ func TestUserAvailabilityRepo_RecordsAndReadsAStatus(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, found, "a user with no row has no recorded status")
 
-	require.NoError(t, repo.Record(ctx, tenantID, userID, "ooo", time.Now().UTC()))
+	written, err := repo.Record(ctx, tenantID, userID, "ooo", time.Now().UTC())
+	require.NoError(t, err)
+	assert.True(t, written)
 	status, found, err := repo.Get(ctx, tenantID, userID)
 	require.NoError(t, err)
 	assert.True(t, found)
@@ -39,13 +41,20 @@ func TestUserAvailabilityRepo_AnOlderChangeNeverOverwritesANewerOne(t *testing.T
 	tenantID, userID := uuid.New(), uuid.New()
 	now := time.Now().UTC()
 
-	require.NoError(t, repo.Record(ctx, tenantID, userID, "available", now))
-	require.NoError(t, repo.Record(ctx, tenantID, userID, "ooo", now.Add(-time.Hour)))
+	written, err := repo.Record(ctx, tenantID, userID, "available", now)
+	require.NoError(t, err)
+	require.True(t, written)
+
+	written, err = repo.Record(ctx, tenantID, userID, "ooo", now.Add(-time.Hour))
+	require.NoError(t, err)
+	assert.False(t, written, "the caller must learn that an older change was not stored")
 	status, _, err := repo.Get(ctx, tenantID, userID)
 	require.NoError(t, err)
 	assert.Equal(t, "available", status)
 
-	require.NoError(t, repo.Record(ctx, tenantID, userID, "busy", now.Add(time.Minute)))
+	written, err = repo.Record(ctx, tenantID, userID, "busy", now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.True(t, written)
 	status, _, err = repo.Get(ctx, tenantID, userID)
 	require.NoError(t, err)
 	assert.Equal(t, "busy", status)
@@ -55,20 +64,21 @@ func TestUserAvailabilityRepo_AUnknownStatusIsRefusedByTheDatabase(t *testing.T)
 	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
 	repo := postgres.NewUserAvailabilityRepo(newAppRolePool(t, superPool, superDSN))
 
-	err := repo.Record(context.Background(), uuid.New(), uuid.New(), "retired", time.Now().UTC())
+	_, err := repo.Record(context.Background(), uuid.New(), uuid.New(), "retired", time.Now().UTC())
 
 	require.Error(t, err)
 }
 
-func TestUserAvailabilityRepo_ATenantNeverSeesAnotherTenantsRows(t *testing.T) {
+func TestUserAvailabilityRepo_KeysTheRowByTenantAndUser(t *testing.T) {
 	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
 	repo := postgres.NewUserAvailabilityRepo(newAppRolePool(t, superPool, superDSN))
 	ctx := context.Background()
 	tenantA, tenantB, userID := uuid.New(), uuid.New(), uuid.New()
-	require.NoError(t, repo.Record(ctx, tenantA, userID, "ooo", time.Now().UTC()))
+	_, err := repo.Record(ctx, tenantA, userID, "ooo", time.Now().UTC())
+	require.NoError(t, err)
 
 	_, found, err := repo.Get(ctx, tenantB, userID)
 
 	require.NoError(t, err)
-	assert.False(t, found, "the same user id under another tenant is a different row, and RLS hides tenant A's")
+	assert.False(t, found, "the same user id under another tenant is a different row")
 }

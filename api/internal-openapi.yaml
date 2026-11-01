@@ -61,9 +61,10 @@ components:
       schema:
         type: string
       description: >
-        Opaque keyset cursor encoding the previous page's last (created_at|occurred_at, id)
-        pair (§5.9). Omit for the first page. An unparseable or tampered cursor returns 400
-        BAD_REQUEST rather than silently restarting.
+        Opaque cursor returned as next_cursor by the previous page. The delegate-impact
+        answer pages the affected workflow instance ids in ascending id order and its cursor
+        names the last id returned. Omit for the first page. An unparseable or tampered cursor
+        returns 400 BAD_REQUEST rather than silently restarting.
 
     IdempotencyKey:
       name: Idempotency-Key

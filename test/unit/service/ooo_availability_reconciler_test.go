@@ -199,3 +199,20 @@ func TestOOOAvailabilityReconciler_Apply_AnOlderStatusNeverOverwritesANewerOne(t
 	require.NoError(t, err)
 	assert.Equal(t, "available", got)
 }
+
+func TestOOOAvailabilityReconciler_Apply_AStaleStatusSendsNoSignal(t *testing.T) {
+	svc, instances, tasks, assignments, temporal := newOOOAvailabilityHarness()
+	tenantID, userID := uuid.New(), uuid.New()
+	instanceID := uuid.New()
+	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning, TemporalWorkflowID: "tenant:biz"}
+	task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID}
+	tasks.byID[task.ID] = task
+	assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+	now := time.Now().UTC()
+
+	require.NoError(t, svc.Apply(context.Background(), port.UserAvailabilityInput{TenantID: tenantID, UserID: userID, Status: "available", ChangedAt: now}))
+	signalsAfterNewest := len(temporal.signals)
+	require.NoError(t, svc.Apply(context.Background(), port.UserAvailabilityInput{TenantID: tenantID, UserID: userID, Status: "ooo", ChangedAt: now.Add(-time.Hour)}))
+
+	assert.Equal(t, signalsAfterNewest, len(temporal.signals), "an older status than the stored one must not pause or resume anything")
+}

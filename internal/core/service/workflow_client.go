@@ -126,7 +126,10 @@ func (s *WorkflowClient) DelegateImpact(ctx context.Context, in port.DelegateImp
 		return port.DelegateImpactResult{}, err
 	}
 	matched := matchingAssignments(active, in.DelegationID)
-	affected := s.affectedWorkflows(ctx, in.TenantID, matched)
+	affected, err := s.affectedWorkflows(ctx, in.TenantID, matched)
+	if err != nil {
+		return port.DelegateImpactResult{}, err
+	}
 	ids, next := pageAffectedWorkflows(affected, in.Page)
 
 	return port.DelegateImpactResult{
@@ -141,14 +144,13 @@ type affectedWorkflow struct {
 	createdAt time.Time
 }
 
-func (s *WorkflowClient) affectedWorkflows(ctx context.Context, tenantID uuid.UUID, assignments []*domain.TaskAssignment) []affectedWorkflow {
+func (s *WorkflowClient) affectedWorkflows(ctx context.Context, tenantID uuid.UUID, assignments []*domain.TaskAssignment) ([]affectedWorkflow, error) {
 	seen := make(map[uuid.UUID]struct{})
 	var affected []affectedWorkflow
 	for _, a := range assignments {
 		task, err := s.Tasks.GetByID(ctx, tenantID, a.TaskID)
 		if err != nil {
-			s.logger().Warn("skipping assignment with unreadable task", map[string]any{"assignment_id": a.ID, "error": err.Error()})
-			continue
+			return nil, fmt.Errorf("delegate impact: read task of assignment %s: %w", a.ID, err)
 		}
 		if _, ok := seen[task.WorkflowInstanceID]; ok {
 			continue
@@ -159,7 +161,7 @@ func (s *WorkflowClient) affectedWorkflows(ctx context.Context, tenantID uuid.UU
 	sort.Slice(affected, func(i, j int) bool {
 		return bytes.Compare(affected[i].id[:], affected[j].id[:]) < 0
 	})
-	return affected
+	return affected, nil
 }
 
 func pageAffectedWorkflows(affected []affectedWorkflow, page port.Page) ([]uuid.UUID, string) {

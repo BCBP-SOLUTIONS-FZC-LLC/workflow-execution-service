@@ -1,4 +1,4 @@
--- name: UpsertUserAvailability :exec
+-- name: UpsertUserAvailability :execrows
 INSERT INTO user_availability (tenant_id, user_id, status, changed_at)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (tenant_id, user_id) DO UPDATE
