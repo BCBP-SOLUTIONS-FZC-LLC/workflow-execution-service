@@ -68,18 +68,20 @@ func (h *Handler) CancelByDelegate(c *gin.Context) {
 }
 
 type delegateImpactResp struct {
-	ReassignedCount int         `json:"reassigned_count"`
-	WorkflowIDs     []uuid.UUID `json:"workflow_ids"`
-	NextCursor      string      `json:"next_cursor,omitempty"`
+	ActiveWorkflows   int         `json:"active_workflows"`
+	ActiveAssignments int         `json:"active_assignments"`
+	WorkflowIDs       []uuid.UUID `json:"workflow_ids"`
+	NextCursor        string      `json:"next_cursor,omitempty"`
 }
 
 func toDelegateImpactResp(r port.DelegateImpactResult) delegateImpactResp {
 	ids := make([]uuid.UUID, len(r.WorkflowIDs.Items))
 	copy(ids, r.WorkflowIDs.Items)
 	return delegateImpactResp{
-		ReassignedCount: r.ReassignedCount,
-		WorkflowIDs:     ids,
-		NextCursor:      r.WorkflowIDs.NextCursor,
+		ActiveWorkflows:   r.ActiveWorkflows,
+		ActiveAssignments: r.ActiveAssignments,
+		WorkflowIDs:       ids,
+		NextCursor:        r.WorkflowIDs.NextCursor,
 	}
 }
 

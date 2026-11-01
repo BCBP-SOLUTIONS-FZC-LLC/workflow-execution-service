@@ -1,10 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -123,11 +126,26 @@ func (s *WorkflowClient) DelegateImpact(ctx context.Context, in port.DelegateImp
 		return port.DelegateImpactResult{}, err
 	}
 	matched := matchingAssignments(active, in.DelegationID)
+	affected := s.affectedWorkflows(ctx, in.TenantID, matched)
+	ids, next := pageAffectedWorkflows(affected, in.Page)
 
+	return port.DelegateImpactResult{
+		ActiveWorkflows:   len(affected),
+		ActiveAssignments: len(matched),
+		WorkflowIDs:       port.PageResult[uuid.UUID]{Items: ids, NextCursor: next},
+	}, nil
+}
+
+type affectedWorkflow struct {
+	id        uuid.UUID
+	createdAt time.Time
+}
+
+func (s *WorkflowClient) affectedWorkflows(ctx context.Context, tenantID uuid.UUID, assignments []*domain.TaskAssignment) []affectedWorkflow {
 	seen := make(map[uuid.UUID]struct{})
-	var workflowIDs []uuid.UUID
-	for _, a := range matched {
-		task, err := s.Tasks.GetByID(ctx, in.TenantID, a.TaskID)
+	var affected []affectedWorkflow
+	for _, a := range assignments {
+		task, err := s.Tasks.GetByID(ctx, tenantID, a.TaskID)
 		if err != nil {
 			s.logger().Warn("skipping assignment with unreadable task", map[string]any{"assignment_id": a.ID, "error": err.Error()})
 			continue
@@ -136,17 +154,35 @@ func (s *WorkflowClient) DelegateImpact(ctx context.Context, in port.DelegateImp
 			continue
 		}
 		seen[task.WorkflowInstanceID] = struct{}{}
-		workflowIDs = append(workflowIDs, task.WorkflowInstanceID)
+		affected = append(affected, affectedWorkflow{id: task.WorkflowInstanceID, createdAt: task.CreatedAt})
 	}
+	sort.Slice(affected, func(i, j int) bool {
+		return bytes.Compare(affected[i].id[:], affected[j].id[:]) < 0
+	})
+	return affected
+}
 
-	limit := in.Page.Limit
-	if limit <= 0 || limit > len(workflowIDs) {
-		limit = len(workflowIDs)
+func pageAffectedWorkflows(affected []affectedWorkflow, page port.Page) ([]uuid.UUID, string) {
+	remaining := affected
+	if page.Cursor != nil {
+		after := page.Cursor.ID
+		remaining = remaining[sort.Search(len(remaining), func(i int) bool {
+			return bytes.Compare(remaining[i].id[:], after[:]) > 0
+		}):]
 	}
-	return port.DelegateImpactResult{
-		ReassignedCount: len(matched),
-		WorkflowIDs:     port.PageResult[uuid.UUID]{Items: workflowIDs[:limit]},
-	}, nil
+	limit := page.Limit
+	if limit <= 0 || limit > len(remaining) {
+		limit = len(remaining)
+	}
+	ids := make([]uuid.UUID, limit)
+	for i, w := range remaining[:limit] {
+		ids[i] = w.id
+	}
+	if limit == len(remaining) {
+		return ids, ""
+	}
+	last := remaining[limit-1]
+	return ids, port.EncodeCursor(port.CursorPosition{CreatedAt: last.createdAt, ID: last.id})
 }
 
 func (s *WorkflowClient) checkAssigneeEligible(ctx context.Context, plans *compiledPlanCache, answered map[eligibilityPair]bool, tenantID uuid.UUID, task *domain.Task, newUserID uuid.UUID) (bool, error) {

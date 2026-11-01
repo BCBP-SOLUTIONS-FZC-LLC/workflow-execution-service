@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -389,9 +390,62 @@ func TestWorkflowClient_DelegateImpact(t *testing.T) {
 
 	result, err := svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: delegate, Page: port.Page{Limit: 10}})
 	require.NoError(t, err)
-	assert.Equal(t, 2, result.ReassignedCount)
+	assert.Equal(t, 2, result.ActiveAssignments)
+	assert.Equal(t, 1, result.ActiveWorkflows)
 	require.Len(t, result.WorkflowIDs.Items, 1, "two tasks on the same instance must dedupe to one workflow id")
 	assert.Equal(t, instanceID, result.WorkflowIDs.Items[0])
+}
+
+func TestWorkflowClient_DelegateImpact_CountsWorkflowsAndAssignmentsAcrossPages(t *testing.T) {
+	svc, _, tasks, assignments, _ := newWorkflowClientHarness()
+	tenantID, delegate := uuid.New(), uuid.New()
+	created := time.Now()
+	instanceIDs := []uuid.UUID{uuid.New(), uuid.New()}
+	for i, instanceID := range []uuid.UUID{instanceIDs[0], instanceIDs[0], instanceIDs[1]} {
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, CreatedAt: created.Add(time.Duration(i) * time.Second)}
+		tasks.byID[task.ID] = task
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegate, IsActive: true}
+	}
+
+	result, err := svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: delegate, Page: port.Page{Limit: 1}})
+	require.NoError(t, err)
+	assert.Equal(t, 2, result.ActiveWorkflows, "the workflow total is independent of the page")
+	assert.Equal(t, 3, result.ActiveAssignments)
+	assert.Len(t, result.WorkflowIDs.Items, 1)
+}
+
+func TestWorkflowClient_DelegateImpact_CursorReachesEveryWorkflow(t *testing.T) {
+	svc, _, tasks, assignments, _ := newWorkflowClientHarness()
+	tenantID, delegate := uuid.New(), uuid.New()
+	created := time.Now()
+	want := map[uuid.UUID]bool{}
+	for i := 0; i < 5; i++ {
+		instanceID := uuid.New()
+		want[instanceID] = true
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, CreatedAt: created.Add(time.Duration(i) * time.Second)}
+		tasks.byID[task.ID] = task
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegate, IsActive: true}
+	}
+
+	got := map[uuid.UUID]bool{}
+	var page port.Page
+	page.Limit = 2
+	for pages := 0; ; pages++ {
+		require.Less(t, pages, 10, "the cursor never ended")
+		result, err := svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: delegate, Page: page})
+		require.NoError(t, err)
+		for _, id := range result.WorkflowIDs.Items {
+			assert.False(t, got[id], "a workflow id repeated across pages")
+			got[id] = true
+		}
+		if result.WorkflowIDs.NextCursor == "" {
+			break
+		}
+		pos, err := port.DecodeCursor(result.WorkflowIDs.NextCursor)
+		require.NoError(t, err)
+		page.Cursor = &pos
+	}
+	assert.Equal(t, want, got, "every affected workflow must be reachable through the cursor")
 }
 
 // TestWorkflowClient_DelegateImpact_ChainedDelegate proves the delegate-
@@ -423,12 +477,14 @@ func TestWorkflowClient_DelegateImpact_ChainedDelegate(t *testing.T) {
 
 	resultForC, err := svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: delegateC, Page: port.Page{Limit: 10}})
 	require.NoError(t, err)
-	assert.Equal(t, 1, resultForC.ReassignedCount, "C's preview must only reflect C's own current holdings")
+	assert.Equal(t, 1, resultForC.ActiveAssignments, "C's preview must only reflect C's own current holdings")
+	assert.Equal(t, 1, resultForC.ActiveWorkflows)
 	require.Len(t, resultForC.WorkflowIDs.Items, 1)
 	assert.Equal(t, taskBC.WorkflowInstanceID, resultForC.WorkflowIDs.Items[0])
 
 	resultForA, err := svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: grantorA, Page: port.Page{Limit: 10}})
 	require.NoError(t, err)
-	assert.Zero(t, resultForA.ReassignedCount, "the original grantor's preview must not chase the chain forward to C")
+	assert.Zero(t, resultForA.ActiveAssignments, "the original grantor's preview must not chase the chain forward to C")
+	assert.Zero(t, resultForA.ActiveWorkflows)
 	assert.Empty(t, resultForA.WorkflowIDs.Items)
 }

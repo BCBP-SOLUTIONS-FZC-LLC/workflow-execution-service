@@ -439,7 +439,8 @@ func TestDelegateImpact_Success(t *testing.T) {
 	fake := &fakeWorkflowClient{
 		delegateImpact: func(context.Context, port.DelegateImpactInput) (port.DelegateImpactResult, error) {
 			return port.DelegateImpactResult{
-				ReassignedCount: 5,
+				ActiveWorkflows:   2,
+				ActiveAssignments: 5,
 				WorkflowIDs: port.PageResult[uuid.UUID]{
 					Items:      []uuid.UUID{testInstID, testTaskID},
 					NextCursor: "abc",
@@ -454,12 +455,14 @@ func TestDelegateImpact_Success(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp struct {
-		ReassignedCount int         `json:"reassigned_count"`
-		WorkflowIDs     []uuid.UUID `json:"workflow_ids"`
-		NextCursor      string      `json:"next_cursor"`
+		ActiveWorkflows   int         `json:"active_workflows"`
+		ActiveAssignments int         `json:"active_assignments"`
+		WorkflowIDs       []uuid.UUID `json:"workflow_ids"`
+		NextCursor        string      `json:"next_cursor"`
 	}
 	decodeJSON(t, w.Body, &resp)
-	assert.Equal(t, 5, resp.ReassignedCount)
+	assert.Equal(t, 2, resp.ActiveWorkflows)
+	assert.Equal(t, 5, resp.ActiveAssignments)
 	assert.Equal(t, []uuid.UUID{testInstID, testTaskID}, resp.WorkflowIDs)
 	assert.Equal(t, "abc", resp.NextCursor)
 }
@@ -478,7 +481,7 @@ func TestDelegateImpact_ZeroImpact(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	// workflow_ids must serialize as [] not null (toDelegateImpactResp always
 	// builds via make([]uuid.UUID, len(...))).
-	assert.JSONEq(t, `{"reassigned_count":0,"workflow_ids":[]}`, w.Body.String())
+	assert.JSONEq(t, `{"active_workflows":0,"active_assignments":0,"workflow_ids":[]}`, w.Body.String())
 }
 
 func TestDelegateImpact_MissingTenantID(t *testing.T) {

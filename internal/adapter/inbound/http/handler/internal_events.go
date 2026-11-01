@@ -398,7 +398,8 @@ func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json
 
 func knownEndedReason(reason string) bool {
 	switch reason {
-	case "expired", "cancelled", "delegate_removed", "review_expired":
+	case "expired", "cancelled", "reassigned",
+		"delegate_removed", "review_expired", "delegate_disabled":
 		return true
 	default:
 		return false

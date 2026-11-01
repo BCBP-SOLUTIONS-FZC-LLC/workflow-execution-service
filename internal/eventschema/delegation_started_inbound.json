@@ -32,10 +32,7 @@
       ]
     },
     "scope_id": {
-      "type": [
-        "string",
-        "null"
-      ],
+      "type": "string",
       "format": "uuid"
     },
     "starts_at": {
@@ -43,10 +40,7 @@
       "format": "date-time"
     },
     "ends_at": {
-      "type": [
-        "string",
-        "null"
-      ],
+      "type": "string",
       "format": "date-time"
     }
   }

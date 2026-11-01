@@ -27,8 +27,9 @@ type DelegateImpactInput struct {
 }
 
 type DelegateImpactResult struct {
-	ReassignedCount int
-	WorkflowIDs     PageResult[uuid.UUID]
+	ActiveWorkflows   int
+	ActiveAssignments int
+	WorkflowIDs       PageResult[uuid.UUID]
 }
 
 type WorkflowClient interface {

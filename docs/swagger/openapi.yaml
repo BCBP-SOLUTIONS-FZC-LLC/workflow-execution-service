@@ -88,7 +88,7 @@ components:
       schema:
         type: string
         enum: [starter, pro, enterprise]
-      description: Tenant plan tier (gateway-injected).
+      description: Tenant plan tier (gateway-injected). The codes are the plan codes of the Catalog Service, the source of truth.
     FeatureFlagsHeader:
       name: x-feature-flags
       in: header
@@ -695,7 +695,7 @@ components:
               reason:
                 type: string
                 description: Human-readable explanation of why this entry is invalid.
-                example: "user no longer holds required_level=SENIOR in department_id=9b1c...finance"
+                example: "user no longer holds required_level=approver in department_id=9b1c...finance"
               code:
                 type: string
                 description: Optional machine-readable sub-code for this specific violation.
@@ -1051,7 +1051,7 @@ paths:
                     code: "ASSIGNEE_INELIGIBLE"
                     invalid_params:
                       - name: "review_finance"
-                        reason: "user no longer holds required_level=SENIOR in department_id=9b1c...finance"
+                        reason: "user no longer holds required_level=approver in department_id=9b1c...finance"
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
         "500":

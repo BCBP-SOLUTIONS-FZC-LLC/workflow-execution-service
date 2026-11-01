@@ -158,7 +158,7 @@ operations:
   receiveUserEvents:
     action: receive
     channel: { $ref: '#/channels/iam~1user~1events' }
-    description: UserDeleted safety-net pause + UserAvailabilityChanged OOO pause/resume.
+    description: UserDeleted safety-net vacate + UserAvailabilityChanged OOO pause/resume.
   receiveSelfTaskDispatch:
     action: receive
     channel: { $ref: '#/channels/self~1task-dispatch' }
@@ -790,9 +790,9 @@ components:
         delegator_id:  { type: string, format: uuid }
         delegate_id:   { type: string, format: uuid }
         scope:         { type: string, enum: [all, department, tender] }
-        scope_id:      { type: ["string", "null"], format: uuid }
+        scope_id:      { type: string, format: uuid, description: omitted by the producer when the scope names no single object }
         starts_at:     { type: string, format: date-time }
-        ends_at:       { type: ["string", "null"], format: date-time }
+        ends_at:       { type: string, format: date-time, description: omitted by the producer for an open-ended delegation }
     DelegationEndedInbound:
       type: object
       additionalProperties: true
@@ -801,7 +801,7 @@ components:
         delegation_id: { type: string, format: uuid }
         delegator_id:  { type: string, format: uuid }
         delegate_id:   { type: string, format: uuid }
-        ended_reason:  { type: string, enum: [expired, cancelled, delegate_removed] }
+        ended_reason:  { type: string, enum: [expired, cancelled, reassigned, delegate_removed, review_expired, delegate_disabled] }
     TenantStateChangedInbound:
       type: object
       additionalProperties: true

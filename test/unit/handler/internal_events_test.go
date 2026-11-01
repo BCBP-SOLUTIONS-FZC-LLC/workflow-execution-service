@@ -407,24 +407,47 @@ func TestHandleInternalEvent_DelegationEnded_InvalidEnvelopeTenantID_400(t *test
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestHandleInternalEvent_DelegationEnded_UnknownEndedReason_StillProcessed(t *testing.T) {
-	fakes := newEventsFakes()
-	called := false
-	fakes.delegation.reverse = func(context.Context, port.DelegationReversalInput) error {
-		called = true
-		return nil
+func TestHandleInternalEvent_DelegationEnded_EndedReason(t *testing.T) {
+	const unknownLog = "internal events: unknown DelegationEnded ended_reason, treating as generic end"
+	for _, tc := range []struct {
+		reason      string
+		wantUnknown bool
+	}{
+		{"expired", false},
+		{"cancelled", false},
+		{"reassigned", false},
+		{"delegate_removed", false},
+		{"review_expired", false},
+		{"delegate_disabled", false},
+		{"some_future_reason", true},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			fakes := newEventsFakes()
+			called := false
+			fakes.delegation.reverse = func(context.Context, port.DelegationReversalInput) error {
+				called = true
+				return nil
+			}
+			loggedUnknown := false
+			fakes.log.info = func(msg string, _ map[string]any) {
+				if msg == unknownLog {
+					loggedUnknown = true
+				}
+			}
+			router := newInternalRouter(newEventsHandler(fakes))
+
+			w := postEvent(router, envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
+				"delegation_id": testDelegationID2,
+				"delegator_id":  testDelegatorID,
+				"delegate_id":   testDelegateID2,
+				"ended_reason":  tc.reason,
+			}))
+
+			require.Equal(t, http.StatusOK, w.Code)
+			assert.True(t, called, "every ended_reason must still reverse the delegation")
+			assert.Equal(t, tc.wantUnknown, loggedUnknown)
+		})
 	}
-	router := newInternalRouter(newEventsHandler(fakes))
-
-	w := postEvent(router, envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"delegation_id": testDelegationID2,
-		"delegator_id":  testDelegatorID,
-		"delegate_id":   testDelegateID2,
-		"ended_reason":  "some_future_reason",
-	}))
-
-	require.Equal(t, http.StatusOK, w.Code)
-	assert.True(t, called, "an unknown ended_reason must still be processed, not rejected")
 }
 
 // --- UserDeleted ---

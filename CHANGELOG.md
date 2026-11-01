@@ -10,6 +10,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The delegate-impact preview answers `active_workflows` (distinct instances), `active_assignments` and `workflow_ids` with a `next_cursor` that reaches every affected instance in ascending id order; `reassigned_count` is gone, and the page limit no longer hides the rest. Org & Membership gates a user's removal on `active_workflows` (LLD rev 1.127).
+- `DelegationEnded` lists all six `ended_reason` values (`reassigned`, `delegate_disabled` and `review_expired` were missing from the AsyncAPI and the inbound schema, and the handler logged the first two as unknown), and `scope_id` and `ends_at` of `DelegationStarted` are optional and absent, never null. The error example in the OpenAPI documents uses the role level `approver`, the plan header names the Catalog Service as the source of the plan codes, and the queue-filter paragraph of LLD §6.2 states the settled filters (LLD rev 1.127).
 - A defer supersedes every other task the run it ends held open, such as one a non-interrupting boundary path started; they were left open (LLD rev 1.126).
 - A force-forward or force-back to a department found only on a boundary path runs the rest of that path from it, instead of that department alone (LLD rev 1.126).
 - Tests pin a force-back inside a nested parallel step, both for a failed inner branch and while every branch is open.

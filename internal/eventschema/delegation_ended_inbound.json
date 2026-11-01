@@ -27,7 +27,10 @@
       "enum": [
         "expired",
         "cancelled",
-        "delegate_removed"
+        "reassigned",
+        "delegate_removed",
+        "review_expired",
+        "delegate_disabled"
       ]
     }
   }
