@@ -79,6 +79,10 @@ WHERE id IN (SELECT d.id FROM connector_document_attempts d WHERE d.tenant_id = 
 DELETE FROM connector_send_intents
 WHERE id IN (SELECT s.id FROM connector_send_intents s WHERE s.tenant_id = $1 LIMIT $2);
 
+-- name: PurgeTenantUserAvailability :execrows
+DELETE FROM user_availability
+WHERE (tenant_id, user_id) IN (SELECT u.tenant_id, u.user_id FROM user_availability u WHERE u.tenant_id = $1 LIMIT $2);
+
 -- name: PurgeTenantQueues :execrows
 DELETE FROM active_task_queues WHERE tenant_id = $1;
 
@@ -99,6 +103,7 @@ SELECT (
     OR EXISTS (SELECT 1 FROM connector_documents d WHERE d.tenant_id = @tenant_text::text)
     OR EXISTS (SELECT 1 FROM connector_document_attempts da WHERE da.tenant_id = @tenant_text::text)
     OR EXISTS (SELECT 1 FROM connector_send_intents s WHERE s.tenant_id = @tenant_text::text)
+    OR EXISTS (SELECT 1 FROM user_availability u WHERE u.tenant_id = @tenant_id::uuid)
     OR EXISTS (SELECT 1 FROM active_task_queues q WHERE q.tenant_id = @tenant_id::uuid)
     OR EXISTS (SELECT 1 FROM event_recency_guard g WHERE g.scope_key = @tenant_scope::text OR g.scope_key LIKE @user_scope::text)
 )::boolean AS has_rows;

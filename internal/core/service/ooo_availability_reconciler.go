@@ -12,11 +12,12 @@ import (
 var _ port.OOOAvailabilityReconciler = (*OOOAvailabilityReconciler)(nil)
 
 type OOOAvailabilityReconciler struct {
-	Instances   port.InstanceRepository
-	Assignments port.TaskAssignmentRepository
-	Tasks       port.TaskRepository
-	Temporal    port.TemporalClient
-	Log         port.Logger
+	Instances    port.InstanceRepository
+	Assignments  port.TaskAssignmentRepository
+	Tasks        port.TaskRepository
+	Temporal     port.TemporalClient
+	Availability port.UserAvailabilityRepository
+	Log          port.Logger
 }
 
 func (s *OOOAvailabilityReconciler) logger() port.Logger {
@@ -28,16 +29,28 @@ func (s *OOOAvailabilityReconciler) logger() port.Logger {
 
 func (s *OOOAvailabilityReconciler) Apply(ctx context.Context, in port.UserAvailabilityInput) error {
 	switch in.Status {
-	case "ooo":
+	case port.AvailabilityOOO:
+		if err := s.record(ctx, in); err != nil {
+			return err
+		}
 		if in.DelegateUserID != nil {
 			return nil
 		}
 		return s.signalActiveInstances(ctx, in.TenantID, in.UserID, port.SignalInstancePause)
-	case "available":
+	case port.AvailabilityAvailable:
+		if err := s.record(ctx, in); err != nil {
+			return err
+		}
 		return s.signalActiveInstances(ctx, in.TenantID, in.UserID, port.SignalInstanceResume)
+	case port.AvailabilityBusy:
+		return s.record(ctx, in)
 	default:
 		return nil
 	}
+}
+
+func (s *OOOAvailabilityReconciler) record(ctx context.Context, in port.UserAvailabilityInput) error {
+	return s.Availability.Record(ctx, in.TenantID, in.UserID, in.Status, in.ChangedAt)
 }
 
 func (s *OOOAvailabilityReconciler) signalActiveInstances(ctx context.Context, tenantID, userID uuid.UUID, signalName string) error {

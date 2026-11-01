@@ -170,11 +170,12 @@ func buildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, definitio
 	userSafetyNetReconciler := &service.UserSafetyNetReconciler{Assignments: assignments}
 	oooAvailabilityReconciler := &service.OOOAvailabilityReconciler{
 		Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal,
+		Availability: postgres.NewUserAvailabilityRepo(pool),
 	}
 	delegationReconciler := &service.DelegationReconciler{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
-		Validator: validator,
+		Validator: validator, Availability: postgres.NewUserAvailabilityRepo(pool),
 	}
 
 	h := handler.New(handler.Services{

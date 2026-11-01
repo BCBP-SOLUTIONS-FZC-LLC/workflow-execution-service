@@ -1499,3 +1499,21 @@ func TestHandleInternalEvent_TenantSweeps_OutliveACallerThatGaveUp(t *testing.T)
 		})
 	}
 }
+
+func TestHandleInternalEvent_UserAvailabilityChanged_CarriesTheEventTime(t *testing.T) {
+	fakes := newEventsFakes()
+	var gotIn port.UserAvailabilityInput
+	fakes.oooAvailability.apply = func(_ context.Context, in port.UserAvailabilityInput) error {
+		gotIn = in
+		return nil
+	}
+	router := newInternalRouter(newEventsHandler(fakes))
+	at := time.Now().UTC().Truncate(time.Second)
+
+	w := postEvent(router, envelope("UserAvailabilityChanged", uuid.New(), testTenantID, at, map[string]any{
+		"user_id": testUserID.String(), "status": "ooo",
+	}))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, at.Equal(gotIn.ChangedAt), "the stored status is ordered by the event's own time")
+}

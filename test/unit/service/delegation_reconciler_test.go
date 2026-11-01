@@ -46,6 +46,7 @@ func newDelegationReconcilerHarness() (*service.DelegationReconciler, *fakeInsta
 		Instances: instances, Tasks: tasks, Assignments: assignments,
 		Outbox: outbox, Transactor: fakeTransactor{}, Temporal: temporal,
 		Definitions: definitions, Eligibility: eligibility, Validator: realValidator(),
+		Availability: newFakeUserAvailability(),
 	}
 	return svc, instances, tasks, assignments, outbox, temporal, definitions, eligibility
 }
@@ -548,6 +549,7 @@ func TestDelegationReconciler_CommitReassignments(t *testing.T) {
 			Instances: instances, Tasks: tasks, Assignments: assignments,
 			Outbox: outbox, Transactor: fakeTransactor{}, Temporal: temporal,
 			Definitions: definitions, Eligibility: eligibility, Validator: failingValidator{},
+			Availability: newFakeUserAvailability(),
 		}
 		tenantID, delegatorID, delegateID := uuid.New(), uuid.New(), uuid.New()
 		seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
@@ -580,4 +582,87 @@ func TestDelegationReconciler_CommitReassignments(t *testing.T) {
 		assert.False(t, assignments.byID[a.ID].IsActive, "DB state already committed despite the signal failure")
 		assert.NotEmpty(t, log.warnCalls)
 	})
+}
+
+func TestDelegationReconciler_Reverse_HoldsWorkForAnOutOfOfficeDelegator(t *testing.T) {
+	setup := func(t *testing.T) (*service.DelegationReconciler, *service.OOOAvailabilityReconciler, *fakeTemporalClient, port.DelegationReversalInput, uuid.UUID) {
+		svc, instances, tasks, assignments, _, temporal, definitions, _ := newDelegationReconcilerHarness()
+		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		inst, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegateID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+		inst.Status = domain.InstanceStatusRunning
+		a.Reason = "delegation:" + delegationID.String()
+		store := newFakeUserAvailability()
+		svc.Availability = store
+		ooo := &service.OOOAvailabilityReconciler{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal, Availability: store}
+		return svc, ooo, temporal, port.DelegationReversalInput{
+			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, EndedReason: "delegate_disabled",
+		}, inst.ID
+	}
+	pauses := func(temporal *fakeTemporalClient) int {
+		count := 0
+		for _, s := range temporal.signals {
+			if s.SignalName == port.SignalInstancePause {
+				count++
+			}
+		}
+		return count
+	}
+
+	t.Run("a delegator who is out of office gets the work back paused", func(t *testing.T) {
+		svc, ooo, temporal, in, _ := setup(t)
+		delegate := in.DelegateID
+		require.NoError(t, ooo.Apply(context.Background(), port.UserAvailabilityInput{
+			TenantID: in.TenantID, UserID: in.DelegatorID, Status: "ooo", DelegateUserID: &delegate,
+		}))
+		require.Zero(t, pauses(temporal), "an out-of-office user with a delegate is not paused while the delegation covers the work")
+
+		require.NoError(t, svc.Reverse(context.Background(), in))
+
+		require.Equal(t, 1, pauses(temporal), "the work handed back to an out-of-office delegator must be held")
+		for _, s := range temporal.signals {
+			if s.SignalName == port.SignalInstancePause {
+				b, err := json.Marshal(s.Payload)
+				require.NoError(t, err)
+				assert.Contains(t, string(b), `"Initiator":"`+domain.InitiatorOOO+`"`)
+			}
+		}
+	})
+
+	t.Run("a delegator who is available gets the work back running", func(t *testing.T) {
+		svc, _, temporal, in, _ := setup(t)
+		require.NoError(t, svc.Reverse(context.Background(), in))
+		assert.Zero(t, pauses(temporal))
+	})
+
+	t.Run("a delegator who came back before the delegation ended gets the work back running", func(t *testing.T) {
+		svc, ooo, temporal, in, _ := setup(t)
+		delegate := in.DelegateID
+		require.NoError(t, ooo.Apply(context.Background(), port.UserAvailabilityInput{
+			TenantID: in.TenantID, UserID: in.DelegatorID, Status: "ooo", DelegateUserID: &delegate,
+		}))
+		require.NoError(t, ooo.Apply(context.Background(), port.UserAvailabilityInput{TenantID: in.TenantID, UserID: in.DelegatorID, Status: "available"}))
+
+		require.NoError(t, svc.Reverse(context.Background(), in))
+
+		assert.Zero(t, pauses(temporal))
+	})
+}
+
+func TestDelegationReconciler_Reverse_AFailedAvailabilityReadChangesNothing(t *testing.T) {
+	svc, instances, tasks, assignments, outbox, temporal, definitions, _ := newDelegationReconcilerHarness()
+	store := newFakeUserAvailability()
+	store.getErr = assert.AnError
+	svc.Availability = store
+	tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegateID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+	a.Reason = "delegation:" + delegationID.String()
+
+	err := svc.Reverse(context.Background(), port.DelegationReversalInput{
+		TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, EndedReason: "expired",
+	})
+
+	require.ErrorIs(t, err, assert.AnError, "the event is retried, so nothing may be half applied")
+	assert.True(t, assignments.byID[a.ID].IsActive)
+	assert.Empty(t, outbox.enqueued)
+	assert.Empty(t, temporal.signals)
 }

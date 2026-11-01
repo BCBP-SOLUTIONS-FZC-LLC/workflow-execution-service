@@ -15,16 +15,17 @@ import (
 var _ port.DelegationReconciler = (*DelegationReconciler)(nil)
 
 type DelegationReconciler struct {
-	Instances   port.InstanceRepository
-	Tasks       port.TaskRepository
-	Assignments port.TaskAssignmentRepository
-	Outbox      port.OutboxRepository
-	Transactor  port.Transactor
-	Temporal    port.TemporalClient
-	Definitions port.DefinitionServiceClient
-	Eligibility port.EligibilityChecker
-	Validator   port.EventValidator
-	Log         port.Logger
+	Instances    port.InstanceRepository
+	Tasks        port.TaskRepository
+	Assignments  port.TaskAssignmentRepository
+	Outbox       port.OutboxRepository
+	Transactor   port.Transactor
+	Temporal     port.TemporalClient
+	Definitions  port.DefinitionServiceClient
+	Eligibility  port.EligibilityChecker
+	Validator    port.EventValidator
+	Availability port.UserAvailabilityRepository
+	Log          port.Logger
 }
 
 func (s *DelegationReconciler) logger() port.Logger {
@@ -235,5 +236,37 @@ func (s *DelegationReconciler) Reverse(ctx context.Context, in port.DelegationRe
 		return nil
 	}
 
-	return s.commitReassignments(ctx, in.TenantID, eligible, in.DelegatorID, "", &in.DelegationID)
+	absent, err := s.isOutOfOffice(ctx, in.TenantID, in.DelegatorID)
+	if err != nil {
+		return err
+	}
+	if err := s.commitReassignments(ctx, in.TenantID, eligible, in.DelegatorID, "", &in.DelegationID); err != nil {
+		return err
+	}
+	if absent {
+		s.pauseRestoredInstances(ctx, eligible)
+	}
+	return nil
+}
+
+func (s *DelegationReconciler) isOutOfOffice(ctx context.Context, tenantID, userID uuid.UUID) (bool, error) {
+	status, found, err := s.Availability.Get(ctx, tenantID, userID)
+	if err != nil {
+		return false, fmt.Errorf("delegation reversal: read availability: %w", err)
+	}
+	return found && status == port.AvailabilityOOO, nil
+}
+
+func (s *DelegationReconciler) pauseRestoredInstances(ctx context.Context, rows []delegationCandidate) {
+	paused := make(map[uuid.UUID]struct{}, len(rows))
+	for _, c := range rows {
+		if _, ok := paused[c.instance.ID]; ok {
+			continue
+		}
+		paused[c.instance.ID] = struct{}{}
+		wire := adminSignalWire{Initiator: domain.InitiatorOOO, RecordVersion: c.instance.RecordVersion}
+		if err := s.Temporal.SignalWorkflow(ctx, c.instance.TemporalWorkflowID, c.instance.ID, port.SignalInstancePause, wire); err != nil {
+			s.logger().Warn("delegation reconciler: failed to pause an instance handed back to an out-of-office assignee", map[string]any{"instance_id": c.instance.ID, "error": err.Error()})
+		}
+	}
 }

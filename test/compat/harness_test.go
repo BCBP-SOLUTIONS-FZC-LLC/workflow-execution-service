@@ -375,14 +375,14 @@ func buildExecution(t *testing.T, pool *pgcommon.Pool, sdk client.Client, rdb *r
 		Delegation: &service.DelegationReconciler{
 			Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
 			Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
-			Validator: validator,
+			Validator: validator, Availability: postgres.NewUserAvailabilityRepo(pool),
 		},
 		TenantLifecycle: &service.TenantLifecycleReconciler{
 			Instances: instances, Tasks: tasks, Assignments: assignments, Queues: queues, Outbox: outboxRepo,
 			Transactor: transactor, Temporal: temporal, Validator: validator,
 		},
 		UserSafetyNet:   &service.UserSafetyNetReconciler{Assignments: assignments},
-		OOOAvailability: &service.OOOAvailabilityReconciler{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal},
+		OOOAvailability: &service.OOOAvailabilityReconciler{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal, Availability: postgres.NewUserAvailabilityRepo(pool)},
 		ConnectorTasks: &service.ConnectorTaskService{
 			Instances: instances, Tasks: tasks, Assignments: assignments,
 			Temporal: temporal, Cache: cache, Principals: onePrincipal{},

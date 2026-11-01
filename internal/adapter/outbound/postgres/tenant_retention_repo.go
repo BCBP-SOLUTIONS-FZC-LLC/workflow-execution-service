@@ -129,6 +129,9 @@ var tenantPurgeSteps = []purgeStep{
 	{"connector_send_intents", func(ctx context.Context, q *db.Queries, t uuid.UUID, n int32) (int64, error) {
 		return q.PurgeTenantConnectorSendIntents(ctx, db.PurgeTenantConnectorSendIntentsParams{TenantID: t.String(), Limit: n})
 	}},
+	{"user_availability", func(ctx context.Context, q *db.Queries, t uuid.UUID, n int32) (int64, error) {
+		return q.PurgeTenantUserAvailability(ctx, db.PurgeTenantUserAvailabilityParams{TenantID: t, Limit: n})
+	}},
 	{"active_task_queues", func(ctx context.Context, q *db.Queries, t uuid.UUID, _ int32) (int64, error) {
 		return q.PurgeTenantQueues(ctx, t)
 	}},

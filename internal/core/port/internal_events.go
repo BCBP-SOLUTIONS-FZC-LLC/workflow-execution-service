@@ -47,6 +47,7 @@ type UserAvailabilityInput struct {
 	OOOFrom        *time.Time
 	OOOUntil       *time.Time
 	DelegateUserID *uuid.UUID
+	ChangedAt      time.Time
 }
 
 type OOOAvailabilityReconciler interface {

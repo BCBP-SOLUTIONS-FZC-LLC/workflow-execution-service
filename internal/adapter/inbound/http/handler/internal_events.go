@@ -507,7 +507,7 @@ func (h *Handler) handleUserAvailabilityChanged(c *gin.Context, env events.Envel
 	scopeKey := "user_availability:" + tenantID.String() + ":" + userID.String()
 	input := port.UserAvailabilityInput{
 		TenantID: tenantID, UserID: userID, Status: p.Status,
-		OOOFrom: oooFrom, OOOUntil: oooUntil, DelegateUserID: delegateUserID,
+		OOOFrom: oooFrom, OOOUntil: oooUntil, DelegateUserID: delegateUserID, ChangedAt: env.Timestamp,
 	}
 	if err := h.applyUserAvailabilityLocked(c, env, input, scopeKey); err != nil {
 		h.reconcilerError(c, eventType, err)

@@ -25,7 +25,7 @@ import (
 var purgeTables = []string{
 	"assignee_overrides", "workflow_task_assignment", "workflow_task", "workflow_instance",
 	"connector_documents", "connector_document_attempts", "connector_send_intents",
-	"active_task_queues", "event_recency_guard",
+	"active_task_queues", "user_availability", "event_recency_guard",
 }
 
 func countRows(t *testing.T, pool *pgcommon.Pool, table string, tenantID uuid.UUID) int {
@@ -78,6 +78,7 @@ func seedPurgeTenant(t *testing.T, superPool *pgcommon.Pool, tenantID uuid.UUID,
 			args []any
 		}{
 			{`INSERT INTO tenant_state (tenant_id, status, changed_at) VALUES ($1, 'offboarded', now())`, []any{tenantID}},
+			{`INSERT INTO user_availability (tenant_id, user_id, status, changed_at) VALUES ($1, $2, 'ooo', now())`, []any{tenantID, uuid.New()}},
 			{`INSERT INTO event_recency_guard (scope_key, last_applied_at) VALUES ($1, now())`, []any{"tenant:" + tenantID.String()}},
 			{`INSERT INTO event_recency_guard (scope_key, last_applied_at) VALUES ($1, now())`, []any{"user_availability:" + tenantID.String() + ":" + uuid.NewString()}},
 			{`INSERT INTO connector_documents (tenant_id, provider, container, filename, state) VALUES ($1, 'drive', 'c', 'f', 'AVAILABLE')`, []any{tenantID.String()}},

@@ -831,3 +831,30 @@ type fakePrincipals struct {
 func (f fakePrincipals) AutomationPrincipal(context.Context, uuid.UUID) (port.AutomationPrincipal, error) {
 	return port.AutomationPrincipal{ID: f.principal, Subject: "sub-" + f.principal.String()}, f.err
 }
+
+type fakeUserAvailability struct {
+	status    map[[2]uuid.UUID]string
+	changedAt map[[2]uuid.UUID]time.Time
+	getErr    error
+}
+
+func newFakeUserAvailability() *fakeUserAvailability {
+	return &fakeUserAvailability{status: map[[2]uuid.UUID]string{}, changedAt: map[[2]uuid.UUID]time.Time{}}
+}
+
+func (f *fakeUserAvailability) Record(_ context.Context, tenantID, userID uuid.UUID, status string, changedAt time.Time) error {
+	key := [2]uuid.UUID{tenantID, userID}
+	if at, ok := f.changedAt[key]; ok && changedAt.Before(at) {
+		return nil
+	}
+	f.status[key], f.changedAt[key] = status, changedAt
+	return nil
+}
+
+func (f *fakeUserAvailability) Get(_ context.Context, tenantID, userID uuid.UUID) (string, bool, error) {
+	if f.getErr != nil {
+		return "", false, f.getErr
+	}
+	status, ok := f.status[[2]uuid.UUID{tenantID, userID}]
+	return status, ok, nil
+}

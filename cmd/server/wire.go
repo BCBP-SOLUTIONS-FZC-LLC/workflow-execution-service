@@ -212,10 +212,11 @@ func newApp(cfg *config.Config) (*app, error) {
 	pauser := &service.UserTaskPauser{
 		Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal, Log: log,
 	}
+	availability := postgres.NewUserAvailabilityRepo(appPool)
 	delegationReconciler := &service.DelegationReconciler{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
-		Validator: validator, Log: log,
+		Validator: validator, Availability: availability, Log: log,
 	}
 	tenantLifecycleReconciler := &service.TenantLifecycleReconciler{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Queues: queues, Outbox: outboxRepo,
@@ -224,7 +225,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 	userSafetyNetReconciler := &service.UserSafetyNetReconciler{Assignments: assignments}
 	oooAvailabilityReconciler := &service.OOOAvailabilityReconciler{
-		Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal, Log: log,
+		Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal, Availability: availability, Log: log,
 	}
 
 	h := handler.New(handler.Services{

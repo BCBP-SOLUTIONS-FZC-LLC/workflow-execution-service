@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -19,7 +20,7 @@ func newOOOAvailabilityHarness() (*service.OOOAvailabilityReconciler, *fakeInsta
 	tasks := newFakeTaskRepo()
 	assignments := newFakeAssignmentRepo()
 	temporal := &fakeTemporalClient{}
-	svc := &service.OOOAvailabilityReconciler{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal}
+	svc := &service.OOOAvailabilityReconciler{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal, Availability: newFakeUserAvailability()}
 	return svc, instances, tasks, assignments, temporal
 }
 
@@ -156,4 +157,45 @@ func TestOOOAvailabilityReconciler_Apply(t *testing.T) {
 		err := svc.Apply(context.Background(), port.UserAvailabilityInput{TenantID: uuid.New(), UserID: uuid.New(), Status: "ooo"})
 		assert.Error(t, err)
 	})
+}
+
+func TestOOOAvailabilityReconciler_Apply_RecordsTheStatus(t *testing.T) {
+	changedAt := time.Now().UTC()
+	for _, tc := range []struct {
+		status     string
+		wantStored bool
+	}{
+		{"ooo", true}, {"available", true}, {"busy", true}, {"retired", false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			svc, _, _, _, _ := newOOOAvailabilityHarness()
+			store := newFakeUserAvailability()
+			svc.Availability = store
+			tenantID, userID := uuid.New(), uuid.New()
+
+			require.NoError(t, svc.Apply(context.Background(), port.UserAvailabilityInput{TenantID: tenantID, UserID: userID, Status: tc.status, ChangedAt: changedAt}))
+
+			got, found, err := store.Get(context.Background(), tenantID, userID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantStored, found)
+			if tc.wantStored {
+				assert.Equal(t, tc.status, got)
+			}
+		})
+	}
+}
+
+func TestOOOAvailabilityReconciler_Apply_AnOlderStatusNeverOverwritesANewerOne(t *testing.T) {
+	svc, _, _, _, _ := newOOOAvailabilityHarness()
+	store := newFakeUserAvailability()
+	svc.Availability = store
+	tenantID, userID := uuid.New(), uuid.New()
+	now := time.Now().UTC()
+
+	require.NoError(t, svc.Apply(context.Background(), port.UserAvailabilityInput{TenantID: tenantID, UserID: userID, Status: "available", ChangedAt: now}))
+	require.NoError(t, svc.Apply(context.Background(), port.UserAvailabilityInput{TenantID: tenantID, UserID: userID, Status: "busy", ChangedAt: now.Add(-time.Hour)}))
+
+	got, _, err := store.Get(context.Background(), tenantID, userID)
+	require.NoError(t, err)
+	assert.Equal(t, "available", got)
 }
