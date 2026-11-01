@@ -836,6 +836,7 @@ type fakeUserAvailability struct {
 	status    map[[2]uuid.UUID]string
 	changedAt map[[2]uuid.UUID]time.Time
 	getErr    error
+	onGet     func()
 }
 
 func newFakeUserAvailability() *fakeUserAvailability {
@@ -852,6 +853,9 @@ func (f *fakeUserAvailability) Record(_ context.Context, tenantID, userID uuid.U
 }
 
 func (f *fakeUserAvailability) Get(_ context.Context, tenantID, userID uuid.UUID) (string, bool, error) {
+	if f.onGet != nil {
+		f.onGet()
+	}
 	if f.getErr != nil {
 		return "", false, f.getErr
 	}
@@ -863,3 +867,17 @@ func (f *fakeUserAvailability) byRecord(tenantID, userID uuid.UUID, status strin
 	_, err := f.Record(context.Background(), tenantID, userID, status, time.Now().UTC())
 	return err
 }
+
+type fakeLocker struct {
+	keys []string
+	held bool
+}
+
+func (f *fakeLocker) WithLock(ctx context.Context, scopeKey string, fn func(context.Context) error) error {
+	f.keys = append(f.keys, scopeKey)
+	f.held = true
+	defer func() { f.held = false }()
+	return fn(ctx)
+}
+
+var _ port.ScopeLocker = (*fakeLocker)(nil)

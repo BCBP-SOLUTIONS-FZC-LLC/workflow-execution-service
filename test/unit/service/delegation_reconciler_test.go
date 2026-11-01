@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -46,7 +47,7 @@ func newDelegationReconcilerHarness() (*service.DelegationReconciler, *fakeInsta
 		Instances: instances, Tasks: tasks, Assignments: assignments,
 		Outbox: outbox, Transactor: fakeTransactor{}, Temporal: temporal,
 		Definitions: definitions, Eligibility: eligibility, Validator: realValidator(),
-		Availability: newFakeUserAvailability(),
+		Availability: newFakeUserAvailability(), Locks: &fakeLocker{},
 	}
 	return svc, instances, tasks, assignments, outbox, temporal, definitions, eligibility
 }
@@ -711,6 +712,14 @@ func TestDelegationReconciler_Reverse_AReassignedDelegationPausesNothing(t *test
 	for _, s := range temporal.signals {
 		assert.NotEqual(t, port.SignalInstancePause, s.SignalName, "a new delegation follows a reassignment at once, so nothing waits with the absent delegator")
 	}
+	assert.False(t, assignments.byID[a.ID].IsActive, "the reversal still restored the task")
+	restored := false
+	for _, na := range assignments.byID {
+		if na.UserID == delegatorID && na.IsActive {
+			restored = true
+		}
+	}
+	assert.True(t, restored, "the delegator holds the task again")
 }
 
 func TestDelegationReconciler_Reverse_APauseThatCannotBeSentFailsTheEventBeforeAnythingChanges(t *testing.T) {
@@ -736,4 +745,89 @@ func TestDelegationReconciler_Reverse_APauseThatCannotBeSentFailsTheEventBeforeA
 	require.Error(t, err, "the event is redelivered, which repeats the pause")
 	assert.True(t, assignments.byID[a.ID].IsActive, "the assignment is still with the delegate: the pause comes first")
 	assert.Empty(t, outbox.enqueued)
+}
+
+func TestDelegationReconciler_Reverse_ReleasesAnOutOfOfficePauseLeftByAFailedAttempt(t *testing.T) {
+	setup := func(t *testing.T, status domain.InstanceStatus) (*service.DelegationReconciler, *fakeTemporalClient, port.DelegationReversalInput) {
+		svc, instances, tasks, assignments, _, temporal, definitions, _ := newDelegationReconcilerHarness()
+		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		inst, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegateID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+		inst.Status = status
+		a.Reason = "delegation:" + delegationID.String()
+		return svc, temporal, port.DelegationReversalInput{
+			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, EndedReason: "expired",
+		}
+	}
+	resumes := func(temporal *fakeTemporalClient) (n int, initiator string) {
+		for _, s := range temporal.signals {
+			if s.SignalName != port.SignalInstanceResume {
+				continue
+			}
+			n++
+			b, err := json.Marshal(s.Payload)
+			require.NoError(t, err)
+			if strings.Contains(string(b), `"Initiator":"`+domain.InitiatorOOO+`"`) {
+				initiator = domain.InitiatorOOO
+			}
+		}
+		return n, initiator
+	}
+
+	t.Run("a paused instance of an available delegator is released with the ooo initiator", func(t *testing.T) {
+		svc, temporal, in := setup(t, domain.InstanceStatusPaused)
+
+		require.NoError(t, svc.Reverse(context.Background(), in))
+
+		n, initiator := resumes(temporal)
+		assert.Equal(t, 1, n, "the pause an earlier attempt left must not outlive the redelivery")
+		assert.Equal(t, domain.InitiatorOOO, initiator, "the workflow honours the resume only for an ooo pause")
+	})
+
+	t.Run("a running instance is left alone", func(t *testing.T) {
+		svc, temporal, in := setup(t, domain.InstanceStatusRunning)
+
+		require.NoError(t, svc.Reverse(context.Background(), in))
+
+		n, _ := resumes(temporal)
+		assert.Zero(t, n)
+	})
+}
+
+func TestDelegationReconciler_Reverse_LocksOnlyTheShortPart(t *testing.T) {
+	svc, instances, tasks, assignments, _, temporal, definitions, eligibility := newDelegationReconcilerHarness()
+	locker := &fakeLocker{}
+	svc.Locks = locker
+	store := newFakeUserAvailability()
+	svc.Availability = store
+	tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	inst, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegateID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+	inst.Status = domain.InstanceStatusRunning
+	a.Reason = "delegation:" + delegationID.String()
+	require.NoError(t, store.byRecord(tenantID, delegatorID, "ooo"))
+
+	var eligibilityHeld, availabilityHeld, pauseHeld bool
+	eligibility.batchCheck = func(_ context.Context, _ uuid.UUID, reqs []port.EligibilityCheckRequest) ([]port.EligibilityResult, error) {
+		eligibilityHeld = locker.held
+		out := make([]port.EligibilityResult, len(reqs))
+		for i := range out {
+			out[i].Eligible = true
+		}
+		return out, nil
+	}
+	store.onGet = func() { availabilityHeld = locker.held }
+	temporal.signalFunc = func(_ context.Context, _ string, _ uuid.UUID, signalName string, _ any) error {
+		if signalName == port.SignalInstancePause {
+			pauseHeld = locker.held
+		}
+		return nil
+	}
+
+	require.NoError(t, svc.Reverse(context.Background(), port.DelegationReversalInput{
+		TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, EndedReason: "delegate_disabled",
+	}))
+
+	assert.Equal(t, []string{port.UserAvailabilityScope(tenantID, delegatorID)}, locker.keys, "the reversal takes the delegator's availability lock")
+	assert.False(t, eligibilityHeld, "the slow reads stay outside the lock, which pins one of four lock connections")
+	assert.True(t, availabilityHeld, "the status is read under the lock")
+	assert.True(t, pauseHeld, "the pause is sent under the lock")
 }

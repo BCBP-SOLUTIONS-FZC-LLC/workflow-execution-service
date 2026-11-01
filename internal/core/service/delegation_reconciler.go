@@ -25,6 +25,7 @@ type DelegationReconciler struct {
 	Eligibility  port.EligibilityChecker
 	Validator    port.EventValidator
 	Availability port.UserAvailabilityRepository
+	Locks        port.ScopeLocker
 	Log          port.Logger
 }
 
@@ -236,16 +237,27 @@ func (s *DelegationReconciler) Reverse(ctx context.Context, in port.DelegationRe
 		return nil
 	}
 
+	return s.Locks.WithLock(ctx, port.UserAvailabilityScope(in.TenantID, in.DelegatorID), func(ctx context.Context) error {
+		if err := s.settleOutOfOfficePauses(ctx, in, eligible); err != nil {
+			return err
+		}
+		return s.commitReassignments(ctx, in.TenantID, eligible, in.DelegatorID, "", &in.DelegationID)
+	})
+}
+
+func (s *DelegationReconciler) settleOutOfOfficePauses(ctx context.Context, in port.DelegationReversalInput, rows []delegationCandidate) error {
 	absent, err := s.isOutOfOffice(ctx, in.TenantID, in.DelegatorID)
 	if err != nil {
 		return err
 	}
-	if absent && in.EndedReason != port.DelegationEndedReassigned {
-		if err := s.pauseRestoredInstances(ctx, eligible); err != nil {
-			return err
-		}
+	switch {
+	case !absent:
+		return s.signalRestoredInstances(ctx, rows, port.SignalInstanceResume)
+	case in.EndedReason == port.DelegationEndedReassigned:
+		return nil
+	default:
+		return s.signalRestoredInstances(ctx, rows, port.SignalInstancePause)
 	}
-	return s.commitReassignments(ctx, in.TenantID, eligible, in.DelegatorID, "", &in.DelegationID)
 }
 
 func (s *DelegationReconciler) isOutOfOffice(ctx context.Context, tenantID, userID uuid.UUID) (bool, error) {
@@ -256,16 +268,19 @@ func (s *DelegationReconciler) isOutOfOffice(ctx context.Context, tenantID, user
 	return found && status == port.AvailabilityOOO, nil
 }
 
-func (s *DelegationReconciler) pauseRestoredInstances(ctx context.Context, rows []delegationCandidate) error {
-	paused := make(map[uuid.UUID]struct{}, len(rows))
+func (s *DelegationReconciler) signalRestoredInstances(ctx context.Context, rows []delegationCandidate, signalName string) error {
+	signalled := make(map[uuid.UUID]struct{}, len(rows))
 	for _, c := range rows {
-		if _, ok := paused[c.instance.ID]; ok {
+		if _, ok := signalled[c.instance.ID]; ok {
 			continue
 		}
-		paused[c.instance.ID] = struct{}{}
+		if signalName == port.SignalInstanceResume && c.instance.Status != domain.InstanceStatusPaused {
+			continue
+		}
+		signalled[c.instance.ID] = struct{}{}
 		wire := adminSignalWire{Initiator: domain.InitiatorOOO, RecordVersion: c.instance.RecordVersion}
-		if err := s.Temporal.SignalWorkflow(ctx, c.instance.TemporalWorkflowID, c.instance.ID, port.SignalInstancePause, wire); err != nil {
-			return fmt.Errorf("delegation reversal: pause instance %s: %w", c.instance.ID, err)
+		if err := s.Temporal.SignalWorkflow(ctx, c.instance.TemporalWorkflowID, c.instance.ID, signalName, wire); err != nil {
+			return fmt.Errorf("delegation reversal: %s instance %s: %w", signalName, c.instance.ID, err)
 		}
 	}
 	return nil

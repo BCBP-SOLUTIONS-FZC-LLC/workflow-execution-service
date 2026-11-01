@@ -1517,25 +1517,3 @@ func TestHandleInternalEvent_UserAvailabilityChanged_CarriesTheEventTime(t *test
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.True(t, at.Equal(gotIn.ChangedAt), "the stored status is ordered by the event's own time")
 }
-
-func TestHandleInternalEvent_DelegationEnded_ReversesUnderTheDelegatorsAvailabilityLock(t *testing.T) {
-	fakes := newEventsFakes()
-	heldDuringReverse := false
-	fakes.delegation.reverse = func(context.Context, port.DelegationReversalInput) error {
-		heldDuringReverse = fakes.recency.held
-		return nil
-	}
-	router := newInternalRouter(newEventsHandler(fakes))
-
-	w := postEvent(router, envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"delegation_id": testDelegationID2,
-		"delegator_id":  testDelegatorID,
-		"delegate_id":   testDelegateID2,
-		"ended_reason":  "delegate_disabled",
-	}))
-
-	require.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, []string{"user_availability:" + testTenantID.String() + ":" + testDelegatorID.String()}, fakes.recency.lockKeys,
-		"an availability event for the delegator takes the same lock, so the two cannot interleave")
-	assert.True(t, heldDuringReverse, "the reversal runs while the lock is held")
-}

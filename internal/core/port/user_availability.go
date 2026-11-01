@@ -7,6 +7,10 @@ import (
 	"github.com/google/uuid"
 )
 
+func UserAvailabilityScope(tenantID, userID uuid.UUID) string {
+	return "user_availability:" + tenantID.String() + ":" + userID.String()
+}
+
 const DelegationEndedReassigned = "reassigned"
 
 const (

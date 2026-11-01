@@ -216,7 +216,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	delegationReconciler := &service.DelegationReconciler{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
-		Validator: validator, Availability: availability, Log: log,
+		Validator: validator, Availability: availability, Locks: recency, Log: log,
 	}
 	tenantLifecycleReconciler := &service.TenantLifecycleReconciler{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Queues: queues, Outbox: outboxRepo,

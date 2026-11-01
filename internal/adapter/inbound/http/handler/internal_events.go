@@ -381,17 +381,14 @@ func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json
 		})
 	}
 
-	reversal := port.DelegationReversalInput{
+	ctx := guCtx(c.Request.Context(), env.TenantID)
+	if err := h.delegation.Reverse(ctx, port.DelegationReversalInput{
 		TenantID:     tenantID,
 		DelegationID: delegationID,
 		DelegatorID:  delegatorID,
 		DelegateID:   delegateID,
 		EndedReason:  p.EndedReason,
-	}
-	err = h.recency.WithLock(c.Request.Context(), userAvailabilityScope(tenantID, delegatorID), func(ctx context.Context) error {
-		return h.delegation.Reverse(guCtx(ctx, env.TenantID), reversal)
-	})
-	if err != nil {
+	}); err != nil {
 		h.reconcilerError(c, eventType, err)
 		return
 	}
@@ -507,7 +504,7 @@ func (h *Handler) handleUserAvailabilityChanged(c *gin.Context, env events.Envel
 		return
 	}
 
-	scopeKey := userAvailabilityScope(tenantID, userID)
+	scopeKey := port.UserAvailabilityScope(tenantID, userID)
 	input := port.UserAvailabilityInput{
 		TenantID: tenantID, UserID: userID, Status: p.Status,
 		OOOFrom: oooFrom, OOOUntil: oooUntil, DelegateUserID: delegateUserID, ChangedAt: env.Timestamp,
@@ -518,10 +515,6 @@ func (h *Handler) handleUserAvailabilityChanged(c *gin.Context, env events.Envel
 	}
 
 	h.respondOK(c, eventID, consumerUser, eventType)
-}
-
-func userAvailabilityScope(tenantID, userID uuid.UUID) string {
-	return "user_availability:" + tenantID.String() + ":" + userID.String()
 }
 
 func (h *Handler) applyUserAvailabilityLocked(

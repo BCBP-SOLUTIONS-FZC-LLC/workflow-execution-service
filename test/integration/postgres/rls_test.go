@@ -236,9 +236,6 @@ func TestOutboxRelayRoleHasBypassRLS(t *testing.T) {
 	assert.False(t, isSuper, "execution_outbox_relay must not be a superuser")
 }
 
-// TestRLSPoliciesUseCheckTenantFunction is a definition-level check distinct
-// from TestRLSPolicyEnforcement's behavioral one, which would pass unchanged
-// whether 000006's policy swap actually landed or not.
 func TestRLSIsolatesUserAvailability(t *testing.T) {
 	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
 	appPool := newAppRolePool(t, superPool, superDSN)
@@ -273,6 +270,9 @@ func TestRLSIsolatesUserAvailability(t *testing.T) {
 	assert.Equal(t, 2, count(withGUC(ctx, tenantA)), "with the policy off the same query sees every tenant, so the assertions above depend on it")
 }
 
+// TestRLSPoliciesUseCheckTenantFunction is a definition-level check distinct
+// from TestRLSPolicyEnforcement's behavioral one, which would pass unchanged
+// whether 000006's policy swap actually landed or not.
 func TestRLSPoliciesUseCheckTenantFunction(t *testing.T) {
 	superPool, _ := fixtures.NewTestPoolAndDSN(t)
 	ctx := context.Background()

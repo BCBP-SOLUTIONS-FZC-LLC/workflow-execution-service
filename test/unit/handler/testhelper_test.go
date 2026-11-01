@@ -387,9 +387,7 @@ var _ port.ProcessedEventRepository = (*fakeProcessedEventRepository)(nil)
 // fakeRecencyGuard is the hand-rolled fake for port.RecencyGuard, backed by
 // an in-memory map of scopeKey -> last-applied time.
 type fakeRecencyGuard struct {
-	last     map[string]time.Time
-	lockKeys []string
-	held     bool
+	last map[string]time.Time
 }
 
 func newFakeRecencyGuard() *fakeRecencyGuard {
@@ -419,10 +417,7 @@ func (f *fakeRecencyGuard) Commit(_ context.Context, scopeKey string, eventTime 
 
 // WithLock is a single-process test fake — no real locking needed, fn just
 // runs directly.
-func (f *fakeRecencyGuard) WithLock(ctx context.Context, scopeKey string, fn func(context.Context) error) error {
-	f.lockKeys = append(f.lockKeys, scopeKey)
-	f.held = true
-	defer func() { f.held = false }()
+func (f *fakeRecencyGuard) WithLock(ctx context.Context, _ string, fn func(context.Context) error) error {
 	return fn(ctx)
 }
 

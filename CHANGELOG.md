@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The reversal of an ended delegation takes the delegator's availability lock after its slow reads and holds it only for the status read, the signals and the restoration, and releases a still-paused instance it restores to an assignee who is not out of office, so a pause left by a failed attempt cannot outlive the redelivery (LLD rev 1.133).
 - The reversal of an ended delegation runs under the delegator's availability lock, pauses an out-of-office delegator's instances before it commits, fails the event when the pause cannot be sent, and pauses nothing when the delegation ended as `reassigned`. The availability upsert reports whether it wrote the row, and only a written status pauses or resumes (LLD rev 1.132).
 - The delegate-impact call fails when a task cannot be read, so `active_workflows` is never short; `WorkflowTaskClaimed` names every active assignee and the claimer; the LLD says a delegation start reroutes and `status=available` resumes, and lists resuming on the start as an open item (LLD rev 1.132).
 - Work handed back by an ended delegation is held when the delegator is out of office: the service records each user's last availability status (`user_availability`, migration `000012`) and pauses the instances a reversal restores to a user whose status is `ooo`, with `initiator=ooo`. `status=available` resumes them. The table has tenant row-level security and is purged with the tenant (LLD rev 1.131).
