@@ -66,3 +66,33 @@ func TestHandleInternalEvent_SchemaRegistryFrame_UndecodableIs502(t *testing.T) 
 		})
 	}
 }
+
+func TestHandleInternalEvent_SchemaRegistryFrame_UserAvailabilityChangedKeepsTheDelegate(t *testing.T) {
+	fakes := newEventsFakes()
+	var gotIn port.UserAvailabilityInput
+	fakes.oooAvailability.apply = func(_ context.Context, in port.UserAvailabilityInput) error {
+		gotIn = in
+		return nil
+	}
+	from := time.Now().UTC().Truncate(time.Second)
+	until := from.Add(72 * time.Hour)
+	body, err := json.Marshal(map[string]any{
+		"user_id":          testUserID.String(),
+		"status":           "ooo",
+		"ooo_from":         from.Format(time.RFC3339),
+		"ooo_until":        until.Format(time.RFC3339),
+		"delegate_user_id": testDelegateID2.String(),
+	})
+	require.NoError(t, err)
+	router := newInternalRouter(newEventsHandler(fakes))
+
+	w := postEvent(router, envelopeWithSchemaID("UserAvailabilityChanged", uuid.New(), testTenantID, time.Now(), uuid.NewString(), glueFrame(0x03, 0x00, body)))
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, testUserID, gotIn.UserID)
+	assert.Equal(t, "ooo", gotIn.Status)
+	require.NotNil(t, gotIn.DelegateUserID, "the producer names the delegate in delegate_user_id")
+	assert.Equal(t, testDelegateID2, *gotIn.DelegateUserID)
+	require.NotNil(t, gotIn.OOOUntil)
+	assert.True(t, until.Equal(*gotIn.OOOUntil))
+}
