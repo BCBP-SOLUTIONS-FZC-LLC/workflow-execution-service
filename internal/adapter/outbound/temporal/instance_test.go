@@ -406,3 +406,38 @@ func TestUpdateInstanceStatus_Running_EnqueuesDegradedRecoveryResumed(t *testing
 	assert.Equal(t, startedBy, payload.StartedByUserID)
 	assert.Nil(t, payload.ActorUserID)
 }
+
+func TestUpdateInstanceStatus_Failed_NamesWhoStartedTheInstance(t *testing.T) {
+	instanceID, tenantID, startedBy := uuid.New(), uuid.New(), uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1, StartedByUserID: startedBy}
+	deps, outbox := newInstanceTestDeps(inst, nil, nil)
+
+	err := deps.UpdateInstanceStatus(context.Background(), port.UpdateInstanceStatusInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), Status: domain.InstanceStatusFailed,
+	})
+	require.NoError(t, err)
+
+	require.Len(t, outbox.enqueued, 1)
+	assert.Equal(t, domain.EventWorkflowInstanceFailed, outbox.enqueued[0].Type)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(outbox.enqueued[0].Payload, &payload))
+	assert.Equal(t, startedBy.String(), payload["started_by_user_id"])
+}
+
+func TestUpdateInstanceStatus_Degraded_NamesWhoStartedTheInstance(t *testing.T) {
+	instanceID, tenantID, startedBy := uuid.New(), uuid.New(), uuid.New()
+	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1, StartedByUserID: startedBy}
+	deps, outbox := newInstanceTestDeps(inst, nil, nil)
+
+	err := deps.UpdateInstanceStatus(context.Background(), port.UpdateInstanceStatusInput{
+		InstanceID: instanceID.String(), TenantID: tenantID.String(), Status: domain.InstanceStatusDegraded,
+		FailedBranches: []domain.FailedBranch{{DepartmentID: uuid.New(), LastNodeKey: "legal_review/approve"}},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, outbox.enqueued, 1)
+	assert.Equal(t, domain.EventWorkflowInstanceDegraded, outbox.enqueued[0].Type)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(outbox.enqueued[0].Payload, &payload))
+	assert.Equal(t, startedBy.String(), payload["started_by_user_id"])
+}

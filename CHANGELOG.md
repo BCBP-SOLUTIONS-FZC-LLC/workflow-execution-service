@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- `WorkflowInstanceDegraded` and `WorkflowInstanceFailed` carry `started_by_user_id`, a required field like the other instance events, so the Dashboard Stream Gateway can route them (LLD rev 1.129).
 - The LLD points to the Workflow Events Consumer LLD instead of recording that none exists, and states that `DepartmentMembershipRevoked` is routed by the consumer to the Definition Service, not to Execution (LLD rev 1.128).
 - The delegate-impact preview answers `active_workflows` (distinct instances), `active_assignments` and `workflow_ids` with a `next_cursor` that reaches every affected instance in ascending id order; `reassigned_count` is gone, and the page limit no longer hides the rest. Org & Membership gates a user's removal on `active_workflows` (LLD rev 1.127).
 - `DelegationEnded` lists all six `ended_reason` values (`reassigned`, `delegate_disabled` and `review_expired` were missing from the AsyncAPI and the inbound schema, and the handler logged the first two as unknown), and `scope_id` and `ends_at` of `DelegationStarted` are optional and absent, never null. The error example in the OpenAPI documents uses the role level `approver`, the plan header names the Catalog Service as the source of the plan codes, and the queue-filter paragraph of LLD §6.2 states the settled filters (LLD rev 1.127).

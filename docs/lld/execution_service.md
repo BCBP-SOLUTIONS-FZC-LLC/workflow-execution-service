@@ -1382,8 +1382,8 @@ Envelope shape: `events.NewEnvelope(type, "workflow-execution-svc", payload, Wit
 | `WorkflowInstanceResumed` | `INSTANCE_RESUMED` | admin resume / `TenantStateChanged`(→active) loop / OOO-return loop / DEGRADED park-loop exit | `started_by_user_id`, `initiator` (`admin`\|`tenant_state`\|`safety_net`\|`ooo`\|`degraded_recovery`), `actor_user_id?` | Audit, Notif, Dashboard |
 | `WorkflowInstanceCancelled` | `INSTANCE_CANCELLED` | admin cancel | `started_by_user_id`, `actor_user_id`, `reason?` | Audit, Notif, Dashboard |
 | `WorkflowInstanceTerminated` | `INSTANCE_TERMINATED` | admin terminate / tenant-offboard loop | `started_by_user_id`, `initiator` (`admin`\|`tenant_state`), `actor_user_id?` | Audit, Notif, Dashboard |
-| `WorkflowInstanceDegraded` | `INSTANCE_DEGRADED` | parallel aggregation, ≥1 failed branch | `failed_branches[]{department_id, last_node_key}` | Audit, Ops, Notif, Dashboard |
-| `WorkflowInstanceFailed` | `INSTANCE_FAILED` | main-path non-retryable failure | `error_class` | Audit, Ops, Notif, Dashboard |
+| `WorkflowInstanceDegraded` | `INSTANCE_DEGRADED` | parallel aggregation, ≥1 failed branch | `started_by_user_id`, `failed_branches[]{department_id, last_node_key}` | Audit, Ops, Notif, Dashboard |
+| `WorkflowInstanceFailed` | `INSTANCE_FAILED` | main-path non-retryable failure | `started_by_user_id`, `error_class` | Audit, Ops, Notif, Dashboard |
 | `WorkflowInstanceFinished` | `WORKFLOW_FINISHED` | clean completion | `started_by_user_id`, `completed_at` | Tender post-hoc finalization, Audit, Notif, Dashboard |
 | `WorkflowTaskCreated` | `TASK_CREATED` | task creation | `due_at?`, `follow_up_at?`, `stage_type`, `connector_type?` | Notif, LLM pre-warm, Dashboard, `cmd/connector-worker` (connector-typed tasks only, `workflow_connectors.md` §5.4) |
 | `WorkflowTaskClaimed` | `TASK_CLAIMED` | `task-claim`, multi-assignee only | `claimed_by_user_id` | Audit, Dashboard |
@@ -1428,7 +1428,7 @@ Four representative envelopes, following the shape above:
 }
 ```
 
-`WorkflowInstanceDegraded` — common core plus the failed-branch set that triggered the parallel-aggregation degrade:
+`WorkflowInstanceDegraded` — common core plus `started_by_user_id` and the failed-branch set that triggered the parallel-aggregation degrade:
 
 ```json
 {
@@ -1443,6 +1443,7 @@ Four representative envelopes, following the shape above:
     "workflow_instance_id": "a3c7d1e2-9f45-4b6a-8c12-3e9b7d4f6a01",
     "business_key": "TND-2026-04512",
     "workflow_version_id": "8fa88cde-824c-47bc-836b-665cd42c2222",
+    "started_by_user_id": "9e21c8a0-6b45-4a10-8e3f-2d6c1a9b4400",
     "failed_branches": [
       {
         "department_id": "9b1cf3a0-2d4e-4b6a-8c11-3e9b7d4f6a02",
@@ -2659,3 +2660,4 @@ Coding style, formatting rules, naming conventions, comment/documentation standa
 | 1.126 | 2026-10-27 | **Defer and force-routing around boundary paths** (§2.7, §4.3). A defer left open a task that a non-interrupting boundary path had started beside the deferred task: the ended run's tasks were left for an admin force-route to supersede, and a defer records none. They are now superseded as an interrupting boundary supersedes them. A force-forward or force-back to a department found only on a boundary path ran that department alone; it now runs the rest of the path from it. |
 | 1.127 | 2026-11-01 | **The delegate-impact preview counts workflows and pages to the end, and the inbound delegation contract lists every producer value** (§5.8, §6.2). The preview named its count `reassigned_count`, counted assignments, and cut `workflow_ids` at the page limit without ever returning a cursor, so a caller could not reach the rest and Org & Membership's removal gate, which reads the number of active workflows, saw none. The answer now carries `active_workflows` (distinct instances), `active_assignments`, one page of `workflow_ids` in ascending id order and a `next_cursor` that reaches every instance once. `DelegationEnded` lists all six `ended_reason` values the Delegation Service publishes (`reassigned`, `delegate_disabled` and `review_expired` were missing from the contract), and `scope_id` and `ends_at` of `DelegationStarted` are optional and absent, never null. §6.2's queue-filter paragraph said `delegation-workflow-q` delivers four delegation types and listed an earlier membership filter; it now states the settled filters and points to the Workflow Events Consumer LLD for delivery and failure behaviour. |
 | 1.128 | 2026-11-01 | **The consumer has its own LLD, and the queue table says where each type goes** (§6.1, §6.2, Appendix A, Appendix B). The text said the shared Workflow-Events Consumer had no LLD and listed that as an open item; the Workflow Events Consumer LLD specifies it, and the two rows are resolved. `DepartmentMembershipRevoked` is not consumed by Execution and is routed by the consumer to the Definition Service; the row said it reached no target. Appendix B no longer says Execution subscribes to the membership queue itself. |
+| 1.129 | 2026-11-01 | **The instance degraded and failed events name who started the instance** (§6.4). Every other instance event carried `started_by_user_id`, the field the Dashboard Stream Gateway routes an instance event on, so these two reached nobody. Both now carry it as a required field, in the payload tables, the Degraded example, the AsyncAPI and the schemas. The Dashboard Stream Gateway and the consumer carry all 16 events §6.5 lists; `WorkflowInstanceStarted` and `WorkflowInstanceForceRouted` are not routed to the dashboard. |

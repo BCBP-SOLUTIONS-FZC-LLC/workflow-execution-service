@@ -81,14 +81,16 @@ var allEvents = []eventCase{
 		name:      "WorkflowInstanceDegraded",
 		eventType: domain.EventWorkflowInstanceDegraded,
 		payload: func() any {
-			return domain.NewWorkflowInstanceDegradedPayload(testCore(), []domain.FailedBranch{{DepartmentID: uuid.New(), LastNodeKey: "review_legal"}})
+			return domain.NewWorkflowInstanceDegradedPayload(testCore(), uuid.New(), []domain.FailedBranch{{DepartmentID: uuid.New(), LastNodeKey: "review_legal"}})
 		},
 		dropField: "failed_branches",
 	},
 	{
 		name:      "WorkflowInstanceFailed",
 		eventType: domain.EventWorkflowInstanceFailed,
-		payload:   func() any { return domain.NewWorkflowInstanceFailedPayload(testCore(), "TemporalActivityError") },
+		payload: func() any {
+			return domain.NewWorkflowInstanceFailedPayload(testCore(), uuid.New(), "TemporalActivityError")
+		},
 		dropField: "error_class",
 	},
 	{
@@ -262,4 +264,26 @@ func TestSchemaValidator_WorkflowTaskFailed_ErrorClass(t *testing.T) {
 	broken, err := json.Marshal(wrongType)
 	require.NoError(t, err)
 	require.Error(t, validator.Validate(context.Background(), domain.EventWorkflowTaskFailed, broken), "the class is text")
+}
+
+func TestSchemaValidator_InstanceEventsRequireTheirRecipient(t *testing.T) {
+	validator, err := eventbus.NewSchemaValidator()
+	require.NoError(t, err)
+	for _, tc := range allEvents {
+		if tc.eventType != domain.EventWorkflowInstanceDegraded && tc.eventType != domain.EventWorkflowInstanceFailed {
+			continue
+		}
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.payload())
+			require.NoError(t, err)
+			var m map[string]any
+			require.NoError(t, json.Unmarshal(raw, &m))
+			delete(m, "started_by_user_id")
+			without, err := json.Marshal(m)
+			require.NoError(t, err)
+
+			require.Error(t, validator.Validate(context.Background(), tc.eventType, without),
+				"the dashboard routes an instance event to started_by_user_id")
+		})
+	}
 }

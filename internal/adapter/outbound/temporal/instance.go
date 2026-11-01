@@ -51,11 +51,11 @@ func (d *Deps) UpdateInstanceStatus(ctx context.Context, in port.UpdateInstanceS
 			if err := d.failActiveTasks(ctx, tenantID, instanceID, "instance_failed"); err != nil {
 				return err
 			}
-			payload := domain.NewWorkflowInstanceFailedPayload(core, "workflow_error")
+			payload := domain.NewWorkflowInstanceFailedPayload(core, updated.StartedByUserID, "workflow_error")
 			return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowInstanceFailed, payload)
 
 		case domain.InstanceStatusDegraded:
-			payload := domain.NewWorkflowInstanceDegradedPayload(core, in.FailedBranches)
+			payload := domain.NewWorkflowInstanceDegradedPayload(core, updated.StartedByUserID, in.FailedBranches)
 			if err := d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowInstanceDegraded, payload); err != nil {
 				return err
 			}

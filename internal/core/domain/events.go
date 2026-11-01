@@ -143,20 +143,22 @@ func NewWorkflowInstanceTerminatedPayload(core CommonCore, startedByUserID uuid.
 
 type WorkflowInstanceDegradedPayload struct {
 	CommonCore
-	FailedBranches []FailedBranch `json:"failed_branches"`
+	StartedByUserID uuid.UUID      `json:"started_by_user_id"`
+	FailedBranches  []FailedBranch `json:"failed_branches"`
 }
 
-func NewWorkflowInstanceDegradedPayload(core CommonCore, failedBranches []FailedBranch) WorkflowInstanceDegradedPayload {
-	return WorkflowInstanceDegradedPayload{CommonCore: core, FailedBranches: failedBranches}
+func NewWorkflowInstanceDegradedPayload(core CommonCore, startedByUserID uuid.UUID, failedBranches []FailedBranch) WorkflowInstanceDegradedPayload {
+	return WorkflowInstanceDegradedPayload{CommonCore: core, StartedByUserID: startedByUserID, FailedBranches: failedBranches}
 }
 
 type WorkflowInstanceFailedPayload struct {
 	CommonCore
-	ErrorClass string `json:"error_class"`
+	StartedByUserID uuid.UUID `json:"started_by_user_id"`
+	ErrorClass      string    `json:"error_class"`
 }
 
-func NewWorkflowInstanceFailedPayload(core CommonCore, errorClass string) WorkflowInstanceFailedPayload {
-	return WorkflowInstanceFailedPayload{CommonCore: core, ErrorClass: errorClass}
+func NewWorkflowInstanceFailedPayload(core CommonCore, startedByUserID uuid.UUID, errorClass string) WorkflowInstanceFailedPayload {
+	return WorkflowInstanceFailedPayload{CommonCore: core, StartedByUserID: startedByUserID, ErrorClass: errorClass}
 }
 
 type WorkflowInstanceFinishedPayload struct {
