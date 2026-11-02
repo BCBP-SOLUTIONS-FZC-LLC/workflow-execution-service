@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The LLD (revision 1.136) states force-back as one completed step back, gives `StartWorkflow`'s real input, drops the stale "DB event_type" column of the event table and removes a connector-callback paragraph that contradicted §5.7.
 - A force-forward is checked against the compiled plan before the signal is sent and answers `409 TARGET_NODE_NOT_FOUND` for an absent target; the duplicate-SLA-event index filters on the wire type names the outbox stores (LLD revision 1.135). A force-forward on a running nested branch superseding its inner sibling is recorded as open.
 - The LLD (revision 1.134) lists the delegation scopes as `all`, `department` and `tender` (matched on `subject_id`) and states that the administrator routes admit `tenant_admin` and `tenant_owner` only.
 - The reversal of an ended delegation takes the delegator's availability lock after its slow reads and holds it only for the status read, the signals and the restoration, and releases a still-paused instance it restores to an assignee who is not out of office, so a pause left by a failed attempt cannot outlive the redelivery (LLD rev 1.133).
