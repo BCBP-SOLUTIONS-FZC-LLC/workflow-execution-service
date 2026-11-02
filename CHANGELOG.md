@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The LLD (revision 1.134) lists the delegation scopes as `all`, `department` and `tender` (matched on `subject_id`) and states that the administrator routes admit `tenant_admin` and `tenant_owner` only.
 - The reversal of an ended delegation takes the delegator's availability lock after its slow reads and holds it only for the status read, the signals and the restoration, and releases a still-paused instance it restores to an assignee who is not out of office, so a pause left by a failed attempt cannot outlive the redelivery (LLD rev 1.133).
 - The reversal of an ended delegation runs under the delegator's availability lock, pauses an out-of-office delegator's instances before it commits, fails the event when the pause cannot be sent, and pauses nothing when the delegation ended as `reassigned`. The availability upsert reports whether it wrote the row, and only a written status pauses or resumes (LLD rev 1.132).
 - The delegate-impact call fails when a task cannot be read, so `active_workflows` is never short; `WorkflowTaskClaimed` names every active assignee and the claimer; the LLD says a delegation start reroutes and `status=available` resumes, and lists resuming on the start as an open item (LLD rev 1.132).
