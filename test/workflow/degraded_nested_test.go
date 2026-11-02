@@ -335,3 +335,54 @@ func TestExecute_ForceBackWhileANestedParallelIsOpenReturnsBeforeTheFork(t *test
 		}
 	}
 }
+
+func TestExecute_ForceForwardOnARunningNestedBranchLeavesTheOtherBranchesRunning(t *testing.T) {
+	t.Skip("open: a force-forward on a running branch of a nested parallel step cancels the outer branch that runs it, so the inner sibling's open task is superseded (tracker I-C24)")
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+
+	var mu sync.Mutex
+	superseded := map[string]bool{}
+	registerFakeActivities(env, nestedParallelCollaboration(), &activityHooks{
+		createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+			return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+		},
+		updateTaskStatus: func(in port.UpdateTaskStatusInput) error {
+			if in.Status == domain.TaskStatusSuperseded {
+				mu.Lock()
+				superseded[in.TaskID] = true
+				mu.Unlock()
+			}
+			return nil
+		},
+	})
+
+	var supersededBeforeCancel map[string]bool
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
+			AdminUserID: "admin-1", TargetDeptID: "b1", TargetNodeKey: "b1/prep", RecordVersion: 1,
+		})
+	}, 10*tick)
+	env.RegisterDelayedCallback(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		supersededBeforeCancel = map[string]bool{}
+		for k := range superseded {
+			supersededBeforeCancel[k] = true
+		}
+	}, 20*tick)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-cancel:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
+	}, 30*tick)
+
+	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+	})
+
+	if supersededBeforeCancel["b2/prep"] {
+		t.Errorf("force-forward on b1 superseded the open task of its sibling branch b2: %v", supersededBeforeCancel)
+	}
+	if supersededBeforeCancel["a/prep"] {
+		t.Errorf("force-forward on b1 superseded the open task of the other outer branch a: %v", supersededBeforeCancel)
+	}
+}

@@ -932,10 +932,11 @@ func TestInstanceService_LifecycleSignals(t *testing.T) {
 	})
 
 	t.Run("force-forward carries the target node key", func(t *testing.T) {
-		svc, instances, _, _, _, temporal, _, _ := newInstanceServiceHarness()
+		svc, instances, _, _, _, temporal, definitions, _ := newInstanceServiceHarness()
 		tenantID := uuid.New()
 		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
 		instances.byID[inst.ID] = inst
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "settlement"}))
 
 		err := svc.ForceForward(context.Background(), tenantID, inst.ID, uuid.New(), "finance/settlement", 1)
 		require.NoError(t, err)
@@ -944,6 +945,30 @@ func TestInstanceService_LifecycleSignals(t *testing.T) {
 		b, err := json.Marshal(temporal.signals[0].Payload)
 		require.NoError(t, err)
 		assert.Contains(t, string(b), `"finance/settlement"`)
+	})
+
+	t.Run("force-forward to a node that is not in the compiled plan is refused and sends no signal", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, definitions, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[inst.ID] = inst
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t, dsl.StageDef{Type: "userTask", NodeID: "settlement"}))
+
+		err := svc.ForceForward(context.Background(), tenantID, inst.ID, uuid.New(), "finance/typo", 1)
+		assert.ErrorIs(t, err, port.ErrTargetNodeNotFound)
+		assert.Empty(t, temporal.signals)
+	})
+
+	t.Run("force-forward is refused when the compiled plan cannot be read", func(t *testing.T) {
+		svc, instances, _, _, _, temporal, definitions, _ := newInstanceServiceHarness()
+		tenantID := uuid.New()
+		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusRunning, RecordVersion: 1, TemporalWorkflowID: "tenant:biz"}
+		instances.byID[inst.ID] = inst
+		definitions.err = assert.AnError
+
+		err := svc.ForceForward(context.Background(), tenantID, inst.ID, uuid.New(), "finance/settlement", 1)
+		assert.Error(t, err)
+		assert.Empty(t, temporal.signals)
 	})
 
 	// TestInstanceService_LifecycleSignals/pause-resume-carry-admin-initiator

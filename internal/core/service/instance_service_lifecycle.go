@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
+
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
@@ -83,6 +85,9 @@ func (s *InstanceService) ForceForward(ctx context.Context, tenantID, instanceID
 		return port.ErrRecordVersionConflict
 	}
 	if err := validateInstanceStateFor(port.SignalInstanceForceFwd, inst.Status); err != nil {
+		return err
+	}
+	if err := s.requireNodeInPlan(ctx, tenantID, inst.WorkflowVersionID, targetNodeKey); err != nil {
 		return err
 	}
 	return s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, port.SignalInstanceForceFwd, adminSignalWire{
@@ -206,4 +211,33 @@ func failOpenTask(ctx context.Context, tasks port.TaskRepository, assignments po
 
 func isTerminalInstanceStatus(status domain.InstanceStatus) bool {
 	return status == domain.InstanceStatusCompleted || status == domain.InstanceStatusTerminated || status == domain.InstanceStatusFailed
+}
+
+func (s *InstanceService) requireNodeInPlan(ctx context.Context, tenantID, versionID uuid.UUID, nodeKey string) error {
+	compiled, err := s.fetchCompiledWorkflow(ctx, tenantID, versionID)
+	if err != nil {
+		return err
+	}
+	collab, err := decodeCollaboration(compiled.CompiledPlanJSON)
+	if err != nil {
+		return err
+	}
+	if !planHasNode(collab, nodeKey) {
+		return port.ErrTargetNodeNotFound
+	}
+	return nil
+}
+
+func planHasNode(collab *dsl.CompiledCollaboration, nodeKey string) bool {
+	for _, plan := range collab.Plans {
+		for i := range plan.Departments {
+			dept := &plan.Departments[i]
+			for j := range dept.Stages {
+				if dsl.NodeKey(dept.ID, &dept.Stages[j]) == nodeKey {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

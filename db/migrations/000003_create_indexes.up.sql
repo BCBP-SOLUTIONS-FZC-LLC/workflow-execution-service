@@ -78,4 +78,4 @@ CREATE INDEX idx_outbox_events_task
 -- classified as already-done the same way workflow_task_pkey already is.
 CREATE UNIQUE INDEX idx_outbox_events_sla_task_unique
     ON outbox_events (event_type, (payload -> 'data' ->> 'task_id'))
-    WHERE event_type IN ('workflow.task.sla-warning', 'workflow.task.sla-breached');
+    WHERE event_type IN ('WorkflowTaskSlaWarning', 'WorkflowTaskSlaBreached');

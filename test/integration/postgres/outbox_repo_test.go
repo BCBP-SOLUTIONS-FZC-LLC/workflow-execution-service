@@ -17,6 +17,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
 )
@@ -159,4 +160,35 @@ func TestOutboxRepo_ListByInstance_KeysetPagination(t *testing.T) {
 	for i, id := range collected {
 		assert.Equal(t, seeded[3-i], id, "page order mismatch at position %d", i)
 	}
+}
+
+func TestOutboxRepo_SLAEventIsUniquePerTaskAndType(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	outboxRepo := postgres.NewOutboxRepo(appPool)
+	transactor := postgres.NewTransactor(appPool)
+	ctx := context.Background()
+
+	tenantID := uuid.New()
+	taskID := uuid.New()
+	enqueue := func(taskID uuid.UUID, eventType string) error {
+		env := taskEventEnvelope(tenantID, taskID, eventType)
+		return transactor.RunInTx(withGUC(ctx, tenantID), func(ctx context.Context) error {
+			return outboxRepo.Enqueue(ctx, env)
+		})
+	}
+
+	require.NoError(t, enqueue(taskID, "WorkflowTaskSlaWarning"))
+
+	t.Run("a second warning for the same task is refused by the database", func(t *testing.T) {
+		assert.ErrorIs(t, enqueue(taskID, "WorkflowTaskSlaWarning"), domain.ErrAlreadyExists)
+	})
+
+	t.Run("the breach of the same task is a different event", func(t *testing.T) {
+		require.NoError(t, enqueue(taskID, "WorkflowTaskSlaBreached"))
+	})
+
+	t.Run("a warning for another task is allowed", func(t *testing.T) {
+		require.NoError(t, enqueue(uuid.New(), "WorkflowTaskSlaWarning"))
+	})
 }
