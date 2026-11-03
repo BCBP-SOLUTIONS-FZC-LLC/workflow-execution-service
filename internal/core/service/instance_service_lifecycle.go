@@ -112,7 +112,7 @@ func (s *InstanceService) ForceBack(ctx context.Context, tenantID, instanceID, a
 			return err
 		}
 		if !done {
-			return port.ErrInvalidInstanceState
+			return port.ErrForceBackNoSavedBranch
 		}
 	}
 	if inst.Status == domain.InstanceStatusRunning {

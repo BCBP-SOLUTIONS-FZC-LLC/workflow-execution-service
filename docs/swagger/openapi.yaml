@@ -352,7 +352,7 @@ components:
             type: string
           description: >
             Sibling branch(es) saved by a force-forward skip, restorable by force-back.
-            Empty when there is nothing to restore (FORCE_BACK_NO_SAVED_BRANCH).
+            Empty when no branch is saved.
         status:
           $ref: "#/components/schemas/InstanceStatus"
         started_by_user_id:
@@ -1883,9 +1883,11 @@ paths:
           $ref: "#/components/responses/InstanceNotFound"
         "409":
           description: >
-            State conflict. See code field: FORCE_BACK_NO_SAVED_BRANCH — instance is not RUNNING,
-            or the completedNodes stack is empty (the instance has not yet advanced past the
-            first step); RECORD_VERSION_CONFLICT — record_version is stale;
+            State conflict. See code field: FORCE_BACK_NO_SAVED_BRANCH — a RUNNING instance with
+            no completed step to go back to (it has not yet advanced past the first step);
+            INVALID_INSTANCE_STATE — instance is neither RUNNING nor DEGRADED;
+            INSTANCE_ALREADY_TERMINAL — instance is already in a terminal state;
+            RECORD_VERSION_CONFLICT — record_version is stale;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:
             application/problem+json:

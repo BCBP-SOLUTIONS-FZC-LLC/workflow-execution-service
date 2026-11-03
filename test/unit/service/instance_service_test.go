@@ -824,7 +824,7 @@ func TestInstanceService_LifecycleSignals(t *testing.T) {
 		instances.byID[inst.ID] = inst
 
 		err := svc.ForceBack(context.Background(), tenantID, inst.ID, uuid.New(), "", 3)
-		assert.ErrorIs(t, err, port.ErrInvalidInstanceState)
+		assert.ErrorIs(t, err, port.ErrForceBackNoSavedBranch)
 		assert.Empty(t, temporal.signals)
 	})
 
