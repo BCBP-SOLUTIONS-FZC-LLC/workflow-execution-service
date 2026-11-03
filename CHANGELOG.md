@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The public OpenAPI's force-forward 409 lists `INSTANCE_ALREADY_TERMINAL`, `INVALID_INSTANCE_STATE` for an instance that is neither RUNNING nor DEGRADED and `TARGET_NODE_NOT_FOUND` for a node absent from the compiled plan; the AsyncAPI comments say the `_inbound` schema copies are hand-kept.
 - The LLD (revision 1.142) names the inbox table `processed_events` in the dependency failure matrix.
 - The service pins `workflow-models` `v2.1.1-rc.1`; the module's allowed-elements list no longer names two elements Definition refuses, and nothing in this service reads it.
 - A force-forward on a running branch of a nested parallel step resolves only that branch: the signal is delivered to the innermost running parallel step that holds the department, behind the version marker `nested-force-forward-innermost-gateway`, so its sibling branches keep their open tasks (LLD revision 1.141).

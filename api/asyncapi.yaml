@@ -64,8 +64,8 @@ channels:
       WorkflowTaskSlaWarning:     { $ref: '#/components/messages/WorkflowTaskSlaWarning' }
       WorkflowTaskSlaBreached:    { $ref: '#/components/messages/WorkflowTaskSlaBreached' }
 
-  # Schemas below are documentation-only (no "Payload" suffix → schema-gov skips them);
-  # the authoritative contracts are owned/registered by the producing service.
+  # Schemas below are documentation-only (no "Payload" suffix → schema-gov does not extract them);
+  # the authoritative contracts are owned by the producing service.
   iam/membership/events:
     address: iam-membership-events
     description: Consumed off membership-workflow-q (dedup consumer `membership-execution`).
@@ -785,8 +785,9 @@ components:
         assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
         due_at:               { type: string, format: date-time }
 
-    # No "Payload" suffix → schema-gov never extracts or registers these. They record
-    # the fields Execution actually reads; the authoritative schema is the producer's.
+    # No "Payload" suffix → schema-gov never extracts these; internal/eventschema/<name>_inbound.json
+    # holds the hand-kept copy of each. They record the fields Execution actually reads; the
+    # authoritative schema is the producer's.
     DelegationStartedInbound:
       type: object
       additionalProperties: true

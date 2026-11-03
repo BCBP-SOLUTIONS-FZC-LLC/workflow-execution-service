@@ -1771,8 +1771,11 @@ paths:
           $ref: "#/components/responses/InstanceNotFound"
         "409":
           description: >
-            State conflict. See code field: INVALID_INSTANCE_STATE — instance is not RUNNING;
-            TARGET_NODE_NOT_FOUND — target node is not reachable from current state;
+            State conflict. See code field: INSTANCE_ALREADY_TERMINAL — instance is already in a
+            terminal state (COMPLETED, TERMINATED, FAILED);
+            INVALID_INSTANCE_STATE — instance is neither RUNNING nor DEGRADED;
+            TARGET_NODE_NOT_FOUND — target_node_key is not a node of the instance's compiled plan,
+            checked before the signal is sent;
             RECORD_VERSION_CONFLICT — record_version is stale;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:
@@ -1793,7 +1796,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/target-node-not-found"
                     title: "Target Node Not Found"
                     status: 409
-                    detail: "target_node_key 'approval_stage' is not reachable from the current state"
+                    detail: "target node not found in the compiled plan"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-forward"
                     code: "TARGET_NODE_NOT_FOUND"
                 RecordVersionConflict:
