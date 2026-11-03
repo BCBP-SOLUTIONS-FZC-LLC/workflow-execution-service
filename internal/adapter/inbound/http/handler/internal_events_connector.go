@@ -61,13 +61,13 @@ func (h *Handler) handleWorkflowTaskCreated(c *gin.Context, env events.Envelope[
 		return
 	}
 
-	if h.alreadyProcessed(c, eventID, consumerConnector, eventType) {
+	if h.alreadyProcessed(c, eventID, port.ConsumerConnector, eventType) {
 		return
 	}
 
 	if h.connectorEvents == nil {
 		h.logWarn("internal events: connector event publisher not configured, dropping", map[string]any{"task_id": taskID})
-		h.respondOK(c, eventID, consumerConnector, eventType)
+		h.respondOK(c, eventID, port.ConsumerConnector, eventType)
 		return
 	}
 
@@ -91,5 +91,5 @@ func (h *Handler) handleWorkflowTaskCreated(c *gin.Context, env events.Envelope[
 		return
 	}
 
-	h.respondOK(c, eventID, consumerConnector, eventType)
+	h.respondOK(c, eventID, port.ConsumerConnector, eventType)
 }

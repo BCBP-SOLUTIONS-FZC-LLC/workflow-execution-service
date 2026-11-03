@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- Inbound-event dedup goes through the `platform-events` inbox: the `processed_event` table, its repository, queries and mock are gone, the migrate command applies the library's inbox schema (`processed_events`), and the retention sweep prunes every consumer's rows (LLD revision 1.139). Startup and the connector worker log through the platform logger instead of the standard library `log`; `make lint` forbids `database/sql`, `log`, `log/slog`, `zap`, the OpenTelemetry SDK and exporters, and the Prometheus client outside `internal/observability`, plus direct pool and connection construction.
 - Appendix C of the LLD (revision 1.138) names the migrations that add the tables it does not list.
 - The LLD (revision 1.137) and the DBML match the code on indexes, partitioning, routes, error codes, configuration, metrics, alerts and examples; the internal spec's `TENANT_MISMATCH` examples and the notes on the retired catch-all route are corrected; the start-duration metric help says `201`.
 - The LLD (revision 1.136) states force-back as one completed step back, gives `StartWorkflow`'s real input, drops the stale "DB event_type" column of the event table and removes a connector-callback paragraph that contradicted §5.7.

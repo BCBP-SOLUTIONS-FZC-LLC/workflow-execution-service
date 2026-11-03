@@ -11,7 +11,7 @@ import (
 
 const (
 	retentionTableOutbox         = "outbox_events"
-	retentionTableProcessedEvent = "processed_event"
+	retentionTableProcessedEvent = "processed_events"
 )
 
 type OutboxPruner interface {
@@ -19,7 +19,7 @@ type OutboxPruner interface {
 }
 
 type ProcessedEventPruner interface {
-	PruneOlderThan(ctx context.Context, olderThan time.Duration) (int64, error)
+	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
 }
 
 type RetentionSweeperDeps struct {
@@ -62,7 +62,7 @@ func (s *RetentionSweeper) pruneOutbox(ctx context.Context) error {
 }
 
 func (s *RetentionSweeper) pruneProcessedEvents(ctx context.Context) error {
-	deleted, err := s.deps.ProcessedEvents.PruneOlderThan(ctx, s.deps.ProcessedEventRetention)
+	deleted, err := s.deps.ProcessedEvents.Prune(ctx, s.deps.ProcessedEventRetention)
 	if err != nil {
 		return fmt.Errorf("prune processed events: %w", err)
 	}

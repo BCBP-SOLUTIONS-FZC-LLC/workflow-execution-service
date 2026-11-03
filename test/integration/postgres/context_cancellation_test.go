@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
@@ -28,7 +29,8 @@ func TestRepositoryMethods_SurfaceUnderlyingErrors(t *testing.T) {
 	taskRepo := postgres.NewTaskRepo(appPool)
 	assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
 	outboxRepo := postgres.NewOutboxRepo(appPool)
-	processedEventRepo := postgres.NewProcessedEventRepo(appPool)
+	processedEventRepo, err := eventbus.NewInbox(appPool, port.EventConsumers...)
+	require.NoError(t, err)
 	transactor := postgres.NewTransactor(appPool)
 
 	tenantA := uuid.New()
@@ -93,13 +95,12 @@ func TestRepositoryMethods_SurfaceUnderlyingErrors(t *testing.T) {
 
 	t.Run("ProcessedEventRepo", func(t *testing.T) {
 		err := withCancelledTx(func(ctx context.Context) error {
-			_, err := processedEventRepo.RecordIfNew(ctx, uuid.New(), "membership-execution", "x")
-			return err
+			return processedEventRepo.MarkProcessed(ctx, uuid.New(), port.ConsumerMembership)
 		})
 		assert.Error(t, err)
 
 		err = withCancelledTx(func(ctx context.Context) error {
-			_, err := processedEventRepo.PruneOlderThan(ctx, 7*24*time.Hour)
+			_, err := processedEventRepo.Prune(ctx, 7*24*time.Hour)
 			return err
 		})
 		assert.Error(t, err)

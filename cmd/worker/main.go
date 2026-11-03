@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -48,17 +47,19 @@ func main() {
 
 	wlog, err := logger.NewLogger(cfg.AppEnv)
 	if err != nil {
-		log.Fatalf("cmd/worker: new logger: %v", err)
+		fmt.Fprintf(os.Stderr, "cmd/worker: new logger: %v\n", err)
+		os.Exit(1)
 	}
 	tracingShutdown, err := observability.InitTelemetry(observability.GinConfig(cfg.OTELServiceName, cfg.BuildVersion, cfg.AppEnv, wlog), wlog)
 	if err != nil {
-		log.Fatalf("cmd/worker: telemetry: %v", err)
+		wlog.Error("telemetry init failed", map[string]any{"error": err.Error()})
+		os.Exit(1)
 	}
 	defer tracingShutdown()
 
 	deps, queueRepo, pool, cleanup, err := buildDeps(cfg, wlog)
 	if err != nil {
-		fatalf(tracingShutdown, "cmd/worker: %v", err)
+		fatal(wlog, tracingShutdown, "startup failed", err)
 	}
 	defer cleanup()
 
@@ -66,13 +67,13 @@ func main() {
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
 		tracingInterceptor, err := observability.NewTemporalTracingInterceptor(opentelemetry.TracerOptions{})
 		if err != nil {
-			fatalf(func() { cleanup(); tracingShutdown() }, "cmd/worker: temporal tracing interceptor: %v", err)
+			fatal(wlog, func() { cleanup(); tracingShutdown() }, "temporal tracing interceptor", err)
 		}
 		clientInterceptors = append(clientInterceptors, tracingInterceptor)
 	}
 	sdk, err := client.Dial(client.Options{HostPort: cfg.TemporalHostPort, Namespace: cfg.TemporalNamespace, Interceptors: clientInterceptors})
 	if err != nil {
-		fatalf(func() { cleanup(); tracingShutdown() }, "cmd/worker: dial temporal: %v", err)
+		fatal(wlog, func() { cleanup(); tracingShutdown() }, "dial temporal", err)
 	}
 	defer sdk.Close()
 
@@ -83,7 +84,7 @@ func main() {
 	registry := newWorkerRegistry()
 	defaultWorker, err := startWorkerForQueue(sdk, deps, cfg.TemporalTaskQueue, worker.Options{WorkerStopTimeout: 25 * time.Second, Interceptors: []interceptor.WorkerInterceptor{observability.NewTemporalMetricsInterceptor()}})
 	if err != nil {
-		fatalf(func() { cleanup(); tracingShutdown() }, "cmd/worker: start default worker: %v", err)
+		fatal(wlog, func() { cleanup(); tracingShutdown() }, "start default worker", err)
 	}
 	registry.add(cfg.TemporalTaskQueue, defaultWorker)
 
@@ -174,8 +175,8 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*outboundtemporal.Deps, po
 	return deps, queueRepo, pool, cleanup, nil
 }
 
-func fatalf(flush func(), format string, v ...any) {
-	log.Printf(format, v...)
+func fatal(wlog port.Logger, flush func(), msg string, err error) {
+	wlog.Error(msg, map[string]any{"error": err.Error()})
 	flush()
 	os.Exit(1)
 }

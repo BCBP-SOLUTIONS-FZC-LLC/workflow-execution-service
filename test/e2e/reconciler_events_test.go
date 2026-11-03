@@ -279,12 +279,12 @@ func TestE2E_UserAvailabilityChangedConcurrentOutOfOrder(t *testing.T) {
 	}
 }
 
-// countProcessedEvents returns how many processed_event rows exist for
+// countProcessedEvents returns how many processed_events rows exist for
 // consumer, optionally narrowed to a single event id.
 func countProcessedEvents(t *testing.T, pool *pgcommon.Pool, consumer string, eventID *uuid.UUID) int {
 	t.Helper()
 	var n int
-	query := `SELECT count(*) FROM processed_event WHERE consumer = $1`
+	query := `SELECT count(*) FROM processed_events WHERE consumer = $1`
 	args := []any{consumer}
 	if eventID != nil {
 		query += ` AND event_id = $2`
@@ -293,14 +293,14 @@ func countProcessedEvents(t *testing.T, pool *pgcommon.Pool, consumer string, ev
 	if err := pool.WithConn(context.Background(), func(ctx context.Context, c *pgxpool.Conn) error {
 		return c.QueryRow(ctx, query, args...).Scan(&n)
 	}); err != nil {
-		t.Fatalf("count processed_event: %v", err)
+		t.Fatalf("count processed_events: %v", err)
 	}
 	return n
 }
 
 // TestE2E_DuplicateInternalEventDeliveryIsDeduped closes LLD §7.2's dedup
 // half. SNS delivers at-least-once, so every inbound handler can be invoked
-// twice with the same envelope; processed_event + RecordIfNew is this
+// twice with the same envelope; processed_events + MarkProcessed is this
 // service's own guarantee that the second invocation does nothing.
 //
 // The existing coverage stops one layer short of this on both sides:
@@ -310,7 +310,7 @@ func countProcessedEvents(t *testing.T, pool *pgcommon.Pool, consumer string, ev
 // actually durable across two separate HTTP requests.
 //
 // The final delivery with a fresh event id is the control: without it, a
-// completely dead RecordIfNew path would satisfy the "still one row"
+// completely dead MarkProcessed path would satisfy the "still one row"
 // assertion just as well as a working one.
 func TestE2E_DuplicateInternalEventDeliveryIsDeduped(t *testing.T) {
 	f := newReconcilerFixture(t)
@@ -329,7 +329,7 @@ func TestE2E_DuplicateInternalEventDeliveryIsDeduped(t *testing.T) {
 		t.Fatalf("first delivery status = %d, want 200", resp.StatusCode)
 	}
 	if n := countProcessedEvents(t, f.pool, "user-execution", &eventID); n != 1 {
-		t.Fatalf("processed_event rows for the delivered event = %d, want 1 — the dedup row was never written, so every redelivery would re-run the handler", n)
+		t.Fatalf("processed_events rows for the delivered event = %d, want 1 — the dedup row was never written, so every redelivery would re-run the handler", n)
 	}
 
 	// Byte-identical redelivery, exactly as SQS would repeat it.
@@ -337,7 +337,7 @@ func TestE2E_DuplicateInternalEventDeliveryIsDeduped(t *testing.T) {
 		t.Fatalf("redelivery status = %d, want 200 — a duplicate must be acknowledged, not rejected", resp.StatusCode)
 	}
 	if n := countProcessedEvents(t, f.pool, "user-execution", &eventID); n != 1 {
-		t.Errorf("processed_event rows after redelivery = %d, want 1", n)
+		t.Errorf("processed_events rows after redelivery = %d, want 1", n)
 	}
 
 	// Control: a distinct event id must still be recorded, proving the
@@ -347,7 +347,7 @@ func TestE2E_DuplicateInternalEventDeliveryIsDeduped(t *testing.T) {
 		t.Fatalf("distinct-id delivery status = %d, want 200", resp.StatusCode)
 	}
 	if n := countProcessedEvents(t, f.pool, "user-execution", nil); n != 2 {
-		t.Errorf("processed_event rows for consumer user-execution = %d, want 2 (one per distinct event id)", n)
+		t.Errorf("processed_events rows for consumer user-execution = %d, want 2 (one per distinct event id)", n)
 	}
 }
 

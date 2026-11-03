@@ -147,7 +147,7 @@ operations:
     channel: { $ref: '#/channels/iam~1membership~1events' }
     description: >
       The TenantStateChanged tenant-lifecycle relay, MembershipRevoked and
-      TenantMembershipsPurged. Dedup after side effects (processed_event,
+      TenantMembershipsPurged. Dedup after side effects (processed_events,
       consumer `membership-execution`).
   receiveDelegationEvents:
     action: receive

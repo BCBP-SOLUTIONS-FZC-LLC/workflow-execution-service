@@ -593,7 +593,7 @@ Execution Service owns its own Postgres schema (`workflow_execution`), physicall
 | `user_availability` | One row per user: the last availability status applied from `UserAvailabilityChanged`, read when a delegation ends (§4.14, §6.2) | Domain (service-authored) |
 | `assignee_overrides` | One row per admin node-override action — the API process's own synchronous audit record, written before the Temporal signal (§4.12, §5.4) | Domain (service-authored) |
 | `outbox_events` / `outbox_dead_letters` | Transactional outbox envelope and dead-letter tables | `platform-events` (library-owned migration, no local `CREATE TABLE`) |
-| `processed_event` | Consumer-idempotency dedup table for inbound events (§6) | Domain (service-authored, following the platform-wide convention) |
+| `processed_events` | Consumer-idempotency dedup table for inbound events (§6) | `platform-events` (library-owned inbox migration, no local `CREATE TABLE`) |
 
 Not modeled here: Definition Service's own tables (`workflow`, `workflow_version`, `workflow_node_assignee`) — out of Execution's database entirely, per the database-per-service principle. The one documented exception to that principle is that the Execution API process and the Temporal Worker process share this one schema (§5.1) — that is a same-domain exception, not a cross-service one.
 
@@ -718,16 +718,15 @@ Index: `(queue_name)` unique — the registry's own upsert key. No other index i
 
 **`outbox_events` / `outbox_dead_letters`** are created entirely by `platform-events`' own embedded migrations — Execution Service authors no `CREATE TABLE` for either. The service only ever calls `outbox.Enqueue(ctx, tx, envelope)` inside the same transaction as the triggering domain write; `outbox_dead_letters` is written exclusively by the library's own relay on retry exhaustion. The one thing the service does author for these tables is the RLS policy migration (§4.8) — the schema itself is not local.
 
-**`processed_event`** is a service-authored migration, following the same platform-wide consumer-idempotency convention already used by Definition Service and IAM's `iam-user-profile`:
+**`processed_events`** is created entirely by `platform-events`' inbox migration, which the migrate command applies beside the outbox schema — Execution Service authors no `CREATE TABLE` for it. Dedup reads and writes go through the library's inbox store, one store per consumer name, on the service's own connection pool. The library's table shape is:
 
 | Column | Type | Notes |
 | --- | --- | --- |
-| `event_id` | `uuid` NOT NULL | Matches Definition Service's shape (IAM's own equivalent table uses `text` here — a minor cross-service divergence that doesn't affect dedup semantics). |
-| `consumer` | `text` NOT NULL | |
-| `event_type` | `text` | |
-| `processed_at` | `timestamptz` NOT NULL DEFAULT now() | |
+| `event_id` | `uuid` NOT NULL | The event envelope's ID. |
+| `consumer` | `text` NOT NULL | The logical subscription that handled the event. |
+| `processed_at` | `timestamptz` NOT NULL DEFAULT now() | Drives the retention prune. |
 
-Composite PK: `(event_id, consumer)` — the dedup key is the event envelope's ID per consuming handler, so two different consumers can each process the same event exactly once. No `tenant_id` column and no RLS: the envelope ID is globally unique, and the table is infrastructure dedup state, not tenant business data. Which `consumer` values this table actually carries — the delegation pair and the `TenantStateChanged` tenant-lifecycle relay off `iam-membership-events`, plus `iam-user-events`, all forwarded via the shared Workflow-Events Consumer — is designed in §6, not here; this section fixes only the shape.
+Composite PK: `(event_id, consumer)` — the dedup key is the event envelope's ID per consuming handler, so two different consumers can each process the same event exactly once. No `tenant_id` column and no RLS: the envelope ID is globally unique, and the table is infrastructure dedup state, not tenant business data. Which `consumer` values this table carries — the delegation pair and the `TenantStateChanged` tenant-lifecycle relay off `iam-membership-events`, plus `iam-user-events`, and the connector stream, all forwarded via the shared Workflow-Events Consumer — is designed in §6, not here; this section fixes only the shape.
 
 ### 4.8 Row-Level Security
 
@@ -736,7 +735,7 @@ Every tenant-scoped table (`workflow_instance`, `workflow_task`, `workflow_task_
 Two named exceptions, both deliberate:
 
 - **`active_task_queues`** — no RLS policy at all (§4.6): an operational/infra table read cross-tenant by design, never queried by a tenant-facing code path.
-- **`processed_event`** — no `tenant_id` column and no RLS: infrastructure dedup state keyed by globally-unique envelope IDs (§4.7).
+- **`processed_events`** — no `tenant_id` column and no RLS: infrastructure dedup state keyed by globally-unique envelope IDs (§4.7).
 
 `outbox_events`/`outbox_dead_letters` **do** get RLS, but the policy is itself a service-authored migration (not library-provided) — matching Definition Service's own `000005_outbox_rls` pattern exactly: `current_setting('app.tenant_id', true)` (the missing-OK variant), plain text comparison with no `::uuid` cast, since that table's `tenant_id` column is `text`.
 
@@ -763,7 +762,7 @@ Every index below is derived from a stated access pattern, not added speculative
 | `(event_type, (payload -> 'data' ->> 'task_id')) WHERE event_type IN ('WorkflowTaskSlaWarning','WorkflowTaskSlaBreached')` UNIQUE | `outbox_events` | DB-level backstop under `ExistsForTask`'s app-level SLA-event dedup check (§4.5) — not a query-serving index, a correctness constraint against two overlapping activity attempts both passing that check under READ COMMITTED |
 | `(queue_name)` UNIQUE | `active_task_queues` | The registry's own upsert key — declared via the column's own `UNIQUE` constraint (§4.6, Appendix C), not a separate index |
 | `(workflow_instance_id, node_key)` | `assignee_overrides` | "Override history for this node" — the read pattern §4.12's own audit purpose exists to serve |
-| `(processed_at)` | `processed_event` | The 7-day TTL prune sweep's own delete-by-age query (§6.8) |
+| `(processed_at)` | `processed_events` | The 7-day TTL prune sweep's own delete-by-age query (§6.8); created by the library's inbox migration |
 
 **Considered, not added:** `workflow_instance (tenant_id, started_by_user_id)` for a "workflows I started" view — no stated access pattern currently justifies it; noted here rather than silently never considered. `workflow_id` on `workflow_instance` is indexed only through the partial archive-guard index above; no query reads it among terminal rows.
 
@@ -836,7 +835,7 @@ An offboarded tenant keeps its work history for a retention period and is then p
 - **Recording.** When the offboarding event is applied (`TenantMembershipsPurged`, or `TenantStateChanged` to `offboarded`) and the tenant's instances are terminated, the tenant is recorded in `tenant_retention`: tenant id, the offboarding time (the event's own time), `history_purge_after` (the offboarding time plus the configured history retention, 7 years by default), `purged_at` (null until purged), the failed attempts and the time of the next attempt, and `record_version`, `created_at` and `updated_at`. A redelivered event keeps the first recorded times.
 - **A tenant that comes back.** Any other status change marks the row returned (`returned_at`, a row of its own when no offboarding is on record) unless the recorded offboarding is newer. A returned row is never due, an offboarding older than the return is ignored even when redelivered, and only a newer one records afresh.
 - **Purge.** A sweep in the API process, once the retention period has passed, deletes the tenant's operational rows in batches as the tenant, under its own row-level security (the purge needs no `BYPASSRLS` role), children first: assignee overrides, assignments, tasks (first clearing the reference between tasks), instances, then the connector document, attempt and send-intent rows, the tenant's queue registry row, its user availability rows and its recency rows. Its recorded status stays as a marker (§5.5), so the start gate still sees an offboarded tenant and a late event cannot make it look new. It sets `purged_at` only after a check across every purged table finds no row left for the tenant: a pass that deleted nothing can mean another replica took the rows, so it counts as a failure and the next run retries. A run that stops part-way resumes where it left off, a tenant already purged is ignored, and other tenants' rows are never touched. Each batch runs in one transaction that first locks the ledger row at the version the due list read and stops if it changed or the tenant returned, and the purged mark names that version. A failed run counts the attempt and waits the sweep interval doubled per failure, at most seven days, so tenants that keep failing never fill the due list.
-- **Not deleted.** `outbox_events` and `outbox_dead_letters`, the audit trail, which keep their own 7-year floor (§4.11); `processed_event`, which has no tenant. The stored objects behind connector documents, Temporal histories and Valkey stream entries are not deleted by this service; their retention is infrastructure configuration.
+- **Not deleted.** `outbox_events` and `outbox_dead_letters`, the audit trail, which keep their own 7-year floor (§4.11); `processed_events`, which has no tenant. The stored objects behind connector documents, Temporal histories and Valkey stream entries are not deleted by this service; their retention is infrastructure configuration.
 - **Configuration.** The retention period is a setting, so the compliance rule changes a value, not code. The sweep can be switched off. Nothing is deleted for a tenant before its period has passed, and nothing for a tenant that was not offboarded.
 
 ### 4.14 User availability
@@ -1360,7 +1359,7 @@ Each queue's subscription filter is stated in the Workflow Events Consumer LLD �
    3. **Re-check eligibility** per surviving row, batched by distinct `(department_id, required_level)` pair — one IAM call per distinct pair, not per row, so a delegate with hundreds of assignments across a handful of pairs costs a handful of round-trips. Ineligible rows stay held and are flagged.
    4. **Commit** one bulk transaction that vacates the delegator's assignments and inserts delegate rows tagged `reason="delegation:<delegation_id>"`, writing `WorkflowTaskReassigned` events + outbox pairs. The ≤4s SLO clock stops here.
    5. **Signal** each affected instance in a loop.
-   6. **Record** dedup (`RecordIfNew`).
+   6. **Record** dedup.
 2. **Delegation reversal (`DelegationEnded`).**
    1. **Find** every active assignment tagged `reason="delegation:<delegation_id>"` — the tag alone identifies the full starting set, no scope re-filter needed.
    2. **Re-check eligibility** on the original assignee to be restored, batched by distinct `(department_id, required_level)` pair — the same mechanism the forward reroute uses (step 1.3). An original assignee who was deleted or lost department membership during the delegation window stays ineligible; those rows stay with the delegate and are flagged, mirroring the forward direction's partial-success shape rather than blindly restoring.
@@ -1379,12 +1378,12 @@ Each queue's subscription filter is stated in the Workflow Events Consumer LLD �
 
 ### 6.3 Consumer Idempotency and Dedup
 
-- **Table.** `processed_event (event_id uuid, consumer text, event_type text, processed_at)`, PK `(event_id, consumer)` — service-authored migration, no RLS.
-- **Consumer strings**, one per logical subscription: `membership-execution` (delegation pair + `TenantStateChanged`), `user-execution`. One event delivered to two subscriptions dedupes independently per string.
+- **Table.** `processed_events (event_id uuid, consumer text, processed_at)`, PK `(event_id, consumer)` — the `platform-events` inbox table, no RLS.
+- **Consumer strings**, one per logical subscription: `membership-execution` (delegation pair + `TenantStateChanged`), `user-execution` and `connector-stream-execution`. One event delivered to two subscriptions dedupes independently per string.
 - **Record-after-side-effects.** Dedup is recorded as the handler's *last* step, not its first, matching Definition Service's own shipped convention. A transient side-effect failure returns `5xx` without recording, so redelivery re-drives the whole handler; every side effect is individually idempotent (`ON CONFLICT DO NOTHING`, pre-generated IDs, state-checked signal loops), so a partial redelivery converges. At-least-once plus idempotent handlers — not atomicity — is the correctness guarantee.
-- **No separate on-entry check for correctness.** The dedup check *is* the final `RecordIfNew` call. Handlers with expensive side effects (the tenant-wide bulk loops) may additionally do a cheap up-front read as a pure optimization to skip obvious replays early, but this never substitutes for the final record step.
-- **Idempotent-across-retries is not the same guarantee as safe-under-concurrency.** Sequential re-runs after a prior delivery's committed `RecordIfNew` are safe by the above. Two deliveries of the same event dispatched *concurrently* — both past any optional early-exit check, neither yet recorded — are a real possibility under at-least-once delivery with no ordering guarantee, and dedup alone does not resolve that window. The actual backstop is each handler's own DB-level uniqueness constraint on the row(s) it writes (`workflow_task_assignment`'s `UNIQUE(task_id,user_id) WHERE is_active`; `active_task_queues`' `UNIQUE(queue_name)`) — the losing concurrent writer hits a constraint violation, surfaces as a transient `5xx`, and its own redelivery then converges normally against dedup.
-- **TTL prune.** The retention sweep (once a day and at start, in the API process) deletes `processed_event` rows older than 7 days, and calls the outbox's own `PrunePublished` at the 7-year audit floor (§4.11).
+- **No separate on-entry check for correctness.** The dedup check *is* the final record call. Handlers with expensive side effects (the tenant-wide bulk loops) may additionally do a cheap up-front read as a pure optimization to skip obvious replays early, but this never substitutes for the final record step.
+- **Idempotent-across-retries is not the same guarantee as safe-under-concurrency.** Sequential re-runs after a prior delivery's committed record are safe by the above. Two deliveries of the same event dispatched *concurrently* — both past any optional early-exit check, neither yet recorded — are a real possibility under at-least-once delivery with no ordering guarantee, and dedup alone does not resolve that window. The actual backstop is each handler's own DB-level uniqueness constraint on the row(s) it writes (`workflow_task_assignment`'s `UNIQUE(task_id,user_id) WHERE is_active`; `active_task_queues`' `UNIQUE(queue_name)`) — the losing concurrent writer hits a constraint violation, surfaces as a transient `5xx`, and its own redelivery then converges normally against dedup.
+- **TTL prune.** The retention sweep (once a day and at start, in the API process) deletes `processed_events` rows older than 7 days, for every consumer,, and calls the outbox's own `PrunePublished` at the 7-year audit floor (§4.11).
 
 ### 6.4 Outbound Event Catalogue
 
@@ -1619,7 +1618,7 @@ Execution Service has one deployable unit split into **two processes** — the A
 
 - **Instance lifecycle**: instantiate → real `StartWorkflow` → poll status until `RUNNING` → complete a task → assert progression, and that each transition's outbox row is written in the same transaction as the state change it describes.
 - **Delegation-reroute SLO**: deliver a `DelegationStarted` envelope and assert the reroute lands within the 4s budget — the one test that gives the SLO a real number instead of an aspirational one. The eligibility-check dependency must be **real or latency-representative, not mocked-instant** — a test double returning instantly wouldn't exercise the one variable most likely to actually blow the SLO, so the fixture stubs the Org & Membership eligibility endpoint with a configurable, non-zero per-distinct-pair latency.
-- **Duplicate inbound delivery**: redeliver one envelope and assert the side effect happens once, against the real `processed_event` table. SNS delivers at-least-once, so every inbound handler can be invoked twice with the same envelope; this is where the real repository and the real handler meet, which the unit tier (fake repository) and the repository integration tier (no handler above it) each miss on their own.
+- **Duplicate inbound delivery**: redeliver one envelope and assert the side effect happens once, against the real `processed_events` table. SNS delivers at-least-once, so every inbound handler can be invoked twice with the same envelope; this is where the real repository and the real handler meet, which the unit tier (fake repository) and the repository integration tier (no handler above it) each miss on their own.
 
 **The broker hop is out of scope here, deliberately.** No test in this service asserts `outbox row → relay → SNS → subscribed queue`. Subtract the parts this service does not own and nothing of its own is left under assertion: the claim/lease/publish loop belongs to `platform-events` and is tested there, SNS-to-SQS delivery is covered against real LocalStack by the shared Workflow-Events Consumer that owns the consume side, and the outbox row itself is asserted above. The three risks that *are* this service's — the relay pool must bypass RLS (§4: `app_tenant_id()` returning NULL means the relay sees zero rows forever, with no error), the Glue codec's encoding, and the composition root's own wiring — are each invisible to such a test, since the test pool connects as a superuser, the codec is stubbed against a registry LocalStack does not run, and a test harness builds its own publisher rather than `cmd/server`'s. Coverage for the first of those is a relay-pool RLS test connecting as a non-superuser role, tracked in Appendix B.
 
@@ -1706,7 +1705,7 @@ Every binary answers a `version` subcommand, handled before any configuration is
 | `workflow_execution_service_rls_violations_total` | CounterVec | `violation_type` (`missing_or_invalid_guc`\|`cross_tenant_access`) | Sampled violations read from `rls_violation_log` (§9.2) |
 | `workflow_execution_service_workflow_replay_failures_total` | CounterVec | `workflow_type` | A workflow function panicked, which includes non-determinism raised while replaying workflow code |
 | `workflow_execution_service_sla_breaches_total` | Counter | — | A `WorkflowTaskSlaBreached` event recorded |
-| `workflow_execution_service_retention_rows_deleted_total` | CounterVec | `table` | Rows the retention sweeps deleted, by table (`outbox_events`, `processed_event`, or a tenant's purged tables) |
+| `workflow_execution_service_retention_rows_deleted_total` | CounterVec | `table` | Rows the retention sweeps deleted, by table (`outbox_events`, `processed_events`, or a tenant's purged tables) |
 | `workflow_execution_service_tenant_purge_failures_total` | Counter | — | Tenant purges that failed part-way and are retried on the next sweep |
 | `workflow_execution_service_upstream_dependency_errors_total` | CounterVec | `dependency` (`definition_service`\|`iam`) | A request answered `503` because an upstream failed, separating a compiled-plan or eligibility outage from the service's own `5xx` rate |
 | `workflow_execution_service_wf_cache_hits_total` / `..._wf_cache_misses_total` | Counter | — | The compiled-plan cache's hits and misses |
@@ -2096,7 +2095,7 @@ This appendix consolidates every design decision made across the document, group
 | 7 | Pagination is keyset, not offset, on `workflow_task`/`outbox_events` | These are the schema's highest-cardinality, highest-write-volume tables; offset pagination degrades with page depth precisely where it matters most |
 | 8 | The `record_version`/`created_at`/`updated_at`/`deleted_at` convention is applied need-based, not blanket-copied | A table gets each column only where a genuine concurrent-write risk or a genuine "removed as a business concept" need exists (§4.11) |
 | 9 | Retention/partitioning for all five audit/history-bearing tables is deferred, not designed | No production volume data exists yet for a design-only pass (§4.11) |
-| 10 | `processed_event` is a service-authored migration, not a `platform-events`-provided table | Matches the real, existing convention already used by Definition Service and IAM's `iam-user-profile` (§4.7) |
+| 10 | `processed_events` is the `platform-events` inbox table, not a service-authored one | Dedup goes through the platform events library only, as the outbox does; the table and its prune come with it (§4.7) |
 
 #### A.4 API Design (§5)
 
@@ -2385,20 +2384,6 @@ CREATE TABLE active_task_queues (
     updated_at     TIMESTAMPTZ  NOT NULL
 );
 
--- Consumer-idempotency dedup table for inbound events (§6), following the same
--- platform-wide convention already used by Definition Service and IAM's
--- iam-user-profile. Service-authored migration, not platform-events-provided.
-CREATE TABLE processed_event (
-    event_id     UUID        NOT NULL,
-    consumer     TEXT        NOT NULL,
-    event_type   TEXT,
-    processed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (event_id, consumer)
-);
-
-CREATE INDEX idx_processed_event_processed_at
-    ON processed_event (processed_at);
-
 -- Node-override's own audit record (§4.12, §5.4). Insert-only, immutable: no
 -- record_version/updated_at/deleted_at, the same reasoning applied to every
 -- audit-bearing row in this schema (§4.5, §4.11).
@@ -2466,9 +2451,9 @@ CREATE POLICY tenant_isolation_policy ON assignee_overrides
 -- operational/infra table, not tenant business data.
 -- (Intentionally: no ALTER TABLE ... ENABLE ROW LEVEL SECURITY statement here.)
 
--- NO RLS on processed_event, and no tenant_id column at all (§4.7, §4.8):
--- infrastructure dedup state keyed by a globally-unique envelope ID, not tenant
--- business data. Matches Definition Service's own processed_event table exactly.
+-- NO RLS on processed_events, the platform-events inbox table, and no tenant_id
+-- column at all (§4.7, §4.8): infrastructure dedup state keyed by a
+-- globally-unique envelope ID, not tenant business data.
 -- (Intentionally: no ALTER TABLE ... ENABLE ROW LEVEL SECURITY statement here.)
 
 -- outbox_events / outbox_dead_letters DO get RLS, but per the ownership-split
@@ -2534,7 +2519,7 @@ CREATE UNIQUE INDEX idx_outbox_events_sla_task_unique
 | --- | --- |
 | **`record_version`** | The optimistic-lock counter present on `workflow_instance` and `workflow_task`, bumped on every row update and separately checked against a client-supplied value for any write with an external caller. |
 | **outbox / transactional outbox** | The reliability pattern that persists domain events to `outbox_events` in the same transaction as the triggering domain write, later published to SNS by a background relay. There is no separate `workflow_event` audit table — `outbox_events` is Execution's full internal audit trail as well, with identifying fields living inside its `payload` column (§4.5, §4.10). |
-| **`processed_event`** | The service-authored, composite-PK (`event_id, consumer`) dedup table enforcing idempotent consumption of inbound events. |
+| **`processed_events`** | The `platform-events` inbox table, composite-PK (`event_id, consumer`), enforcing idempotent consumption of inbound events. |
 | **`assignee_overrides`** | Node-override's own insert-only audit table — one row per admin override action, written by the API process itself before the Temporal signal, distinct from the `outbox_events` row the eventual reassignment signal separately produces (§4.12, §5.4). |
 
 #### Cross-Service & UI Integration
@@ -2703,3 +2688,4 @@ Coding style, formatting rules, naming conventions, comment/documentation standa
 | 1.136 | 2026-11-02 | **Four statements match the code** (§2.7, §3.2, §5.7, §6.4, Appendix A.2). Force-back pops the most recent completed node of a running instance (the fork entry inside a parallel step, a node of the failed branch for a `DEGRADED` instance), not an admin-chosen target. `StartWorkflow`'s input is `{tenantID, instanceID, versionID, contextJSON, overrideMap}`; the subject and the business key travel in the `workflowID`. The §6.4 event table no longer carries a "DB `event_type`" column, because the stored value is the wire type. The connector callback paragraph that still described the actor as a request field is removed; §5.7 states that the callbacks carry no actor. |
 | 1.137 | 2026-11-03 | **The schema, route, configuration, metric and example text match the code** (§1.7, §4.9, §4.11, §5.9, §5.10, §6.1, §6.4, §7.6, Appendix A, Appendix C). The archive-guard index is on `workflow_id`, the active-queue index is listed, and the connector-status index that no query uses is removed; `outbox_events` is not partitioned and is pruned by the retention sweep; the SNS publisher and outbox runner are built in the API's composition root; the activity implementations live in the Temporal adapter package and the API's client in its own package; Workers are a separate deployment from one module. Inbound events arrive on four type-scoped routes. `TASK_NOT_HUMAN_ACTIONABLE`, `TASK_NOT_CONNECTOR_TYPED` and `NO_AUTOMATION_PRINCIPAL` join the error catalogue. The configuration table names `VALKEY_ADDR` and the variables it omitted, and the Worker's health and metrics ports are `:8081` and `:8082`. The metric table gains the retention and purge metrics, the alert table gains `TenantPurgeFailing` and loses three alerts that no rule defines (Appendix B), the poll cadence is 500 ms, and a start answers `201`. The examples carry `subject_id` and a stage-style `business_key`. Revision rows 1.46 and 1.47 are in order, and the second 1.76 is 1.76a. |
 | 1.138 | 2026-11-03 | **Appendix C states which migrations hold what** (Appendix C). The statements show the core tables of migrations 000001 to 000005; the opening paragraph now names the later migrations and where each table is specified (`rls_violation_log` with `log_rls_violation` and `rls_check_tenant`, `event_recency_guard`, the `subject_id` column, forced row-level security on the connector tables, `tenant_retention`, `tenant_state`, `user_availability`), and the migration file name is `000001_create_schema.up.sql`. |
+| 1.139 | 2026-11-03 | **Dedup goes through the platform events library** (§4.1, §4.7, §4.8, §4.9, §4.13, §6.3, §7.2, §7.6, Appendix A.3, Appendix C, glossary). The inbound-event dedup table is the `platform-events` inbox table `processed_events` (event id, consumer, processed time), created by the library's inbox migration beside the outbox schema, instead of a service-authored `processed_event` table with an event-type column. Three consumer names share it: `membership-execution`, `user-execution` and `connector-stream-execution`. The retention sweep prunes every consumer's rows; the metric label for it is `processed_events`. The statements, the index and the Appendix A decision row follow. |

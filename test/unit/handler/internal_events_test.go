@@ -956,7 +956,7 @@ func TestHandleInternalEvent_TenantStateChanged_ApplyError_500_RecencyNotCommitt
 
 // --- respondOK / alreadyProcessed error paths ---
 
-func TestHandleInternalEvent_RecordIfNewError_StillReturns200(t *testing.T) {
+func TestHandleInternalEvent_MarkProcessedError_StillReturns200(t *testing.T) {
 	fakes := newEventsFakes()
 	fakes.userSafetyNet.vacateAssignments = func(context.Context, port.UserDeletedInput) error { return nil }
 	h := newEventsHandlerWithProcessedEvents(fakes, &erroringProcessedEventRepository{recordErr: errors.New("db down")})

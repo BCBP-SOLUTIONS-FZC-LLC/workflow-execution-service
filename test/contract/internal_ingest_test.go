@@ -23,11 +23,9 @@ type fakeProcessed struct{}
 
 func (fakeProcessed) IsProcessed(context.Context, uuid.UUID, string) (bool, error) { return false, nil }
 
-func (fakeProcessed) RecordIfNew(context.Context, uuid.UUID, string, string) (bool, error) {
-	return true, nil
-}
+func (fakeProcessed) MarkProcessed(context.Context, uuid.UUID, string) error { return nil }
 
-func (fakeProcessed) PruneOlderThan(context.Context, time.Duration) (int64, error) { return 0, nil }
+func (fakeProcessed) Prune(context.Context, time.Duration) (int64, error) { return 0, nil }
 
 type fakeDelegation struct{ err error }
 

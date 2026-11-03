@@ -4,7 +4,7 @@
 -- scopes reduce to the identical check+store shape, with no FK relationships
 -- to enforce. No RLS: scope_key already encodes tenant/user identity where
 -- relevant — this is bookkeeping state, not tenant business data (same
--- rationale as active_task_queues and processed_event).
+-- rationale as active_task_queues and processed_events).
 CREATE TABLE event_recency_guard (
     scope_key       TEXT        PRIMARY KEY,
     last_applied_at TIMESTAMPTZ NOT NULL,

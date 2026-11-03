@@ -40,6 +40,6 @@ CREATE POLICY tenant_isolation_policy ON assignee_overrides
 -- per-tenant GUC context switch would be backwards for what is fundamentally an
 -- operational/infra table, not tenant business data.
 
--- NO RLS on processed_event, and no tenant_id column at all (LLD §4.7, §4.8):
+-- NO RLS on processed_events, the platform-events inbox table (LLD §4.7, §4.8):
 -- infrastructure dedup state keyed by a globally-unique envelope ID, not tenant
 -- business data.

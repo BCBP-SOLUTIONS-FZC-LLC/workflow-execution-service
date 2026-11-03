@@ -369,16 +369,12 @@ func (f *fakeProcessedEventRepository) IsProcessed(_ context.Context, eventID uu
 	return f.seen[processedKey(eventID, consumer)], nil
 }
 
-func (f *fakeProcessedEventRepository) RecordIfNew(_ context.Context, eventID uuid.UUID, consumer, _ string) (bool, error) {
-	key := processedKey(eventID, consumer)
-	if f.seen[key] {
-		return false, nil
-	}
-	f.seen[key] = true
-	return true, nil
+func (f *fakeProcessedEventRepository) MarkProcessed(_ context.Context, eventID uuid.UUID, consumer string) error {
+	f.seen[processedKey(eventID, consumer)] = true
+	return nil
 }
 
-func (f *fakeProcessedEventRepository) PruneOlderThan(context.Context, time.Duration) (int64, error) {
+func (f *fakeProcessedEventRepository) Prune(context.Context, time.Duration) (int64, error) {
 	return 0, nil
 }
 
@@ -557,7 +553,7 @@ func (e *erroringRecencyGuard) WithLock(context.Context, string, func(context.Co
 var _ port.RecencyGuard = (*erroringRecencyGuard)(nil)
 
 // erroringProcessedEventRepository lets a test force IsProcessed and/or
-// RecordIfNew to fail independently, to exercise a handler's
+// MarkProcessed to fail independently, to exercise a handler's
 // "proceed anyway"/"still return 200" fallback branches.
 type erroringProcessedEventRepository struct {
 	isProcessedErr error
@@ -568,11 +564,11 @@ func (e *erroringProcessedEventRepository) IsProcessed(context.Context, uuid.UUI
 	return false, e.isProcessedErr
 }
 
-func (e *erroringProcessedEventRepository) RecordIfNew(context.Context, uuid.UUID, string, string) (bool, error) {
-	return false, e.recordErr
+func (e *erroringProcessedEventRepository) MarkProcessed(context.Context, uuid.UUID, string) error {
+	return e.recordErr
 }
 
-func (e *erroringProcessedEventRepository) PruneOlderThan(context.Context, time.Duration) (int64, error) {
+func (e *erroringProcessedEventRepository) Prune(context.Context, time.Duration) (int64, error) {
 	return 0, nil
 }
 

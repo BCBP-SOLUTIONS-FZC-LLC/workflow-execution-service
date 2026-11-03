@@ -77,7 +77,7 @@ func registerServiceMetrics() {
 		"Delegations arriving with a scope this service has no case for, by scope. They match no assignment.", "scope"))
 	RetentionRowsDeletedTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_retention_rows_deleted_total",
-		"Rows the retention sweeps deleted, by table (outbox_events, processed_event, or a tenant's purged tables).", "table"))
+		"Rows the retention sweeps deleted, by table (outbox_events, processed_events, or a tenant's purged tables).", "table"))
 	TenantPurgeFailuresTotal = must(gincommon.NewCounter(nil,
 		"workflow_execution_service_tenant_purge_failures_total",
 		"Tenant purges that failed part-way and will be retried on the next sweep."))

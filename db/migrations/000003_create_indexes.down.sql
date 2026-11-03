@@ -2,8 +2,6 @@ DROP INDEX IF EXISTS idx_outbox_events_sla_task_unique;
 DROP INDEX IF EXISTS idx_outbox_events_task;
 DROP INDEX IF EXISTS idx_outbox_events_instance_created;
 
-DROP INDEX IF EXISTS idx_processed_event_processed_at;
-
 DROP INDEX IF EXISTS idx_assignee_overrides_instance_node;
 
 DROP INDEX IF EXISTS idx_workflow_task_assignment_user_active;

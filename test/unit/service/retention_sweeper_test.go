@@ -41,7 +41,7 @@ type fakeInboxPruner struct {
 	olderThan time.Duration
 }
 
-func (f *fakeInboxPruner) PruneOlderThan(_ context.Context, olderThan time.Duration) (int64, error) {
+func (f *fakeInboxPruner) Prune(_ context.Context, olderThan time.Duration) (int64, error) {
 	f.calls.Add(1)
 	f.olderThan = olderThan
 	return f.deleted, f.err
@@ -67,7 +67,7 @@ func TestRetentionSweeper_PrunesOutboxInBatchesUntilAShortOne(t *testing.T) {
 	assert.Equal(t, 8*24*time.Hour, outbox.olderThan)
 	assert.Equal(t, 1000, outbox.limit)
 	assert.Equal(t, 9*24*time.Hour, inbox.olderThan)
-	assert.Equal(t, map[string]int64{"outbox_events": 2400, "processed_event": 7}, deleted)
+	assert.Equal(t, map[string]int64{"outbox_events": 2400, "processed_events": 7}, deleted)
 }
 
 func TestRetentionSweeper_OneTableFailingDoesNotStopTheOther(t *testing.T) {
@@ -75,7 +75,7 @@ func TestRetentionSweeper_OneTableFailingDoesNotStopTheOther(t *testing.T) {
 	inbox := &fakeInboxPruner{deleted: 3}
 	var inboxDeleted int64
 	sweeper := newSweeper(outbox, inbox, func(table string, n int64) {
-		if table == "processed_event" {
+		if table == "processed_events" {
 			inboxDeleted += n
 		}
 	})

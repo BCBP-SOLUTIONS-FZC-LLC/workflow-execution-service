@@ -142,7 +142,10 @@ func buildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, definitio
 	assignments := postgres.NewTaskAssignmentRepo(pool)
 	outboxRepo := postgres.NewOutboxRepo(pool)
 	overrides := postgres.NewAssigneeOverrideRepo(pool)
-	processedEvents := postgres.NewProcessedEventRepo(pool)
+	processedEvents, err := eventbus.NewInbox(pool, port.EventConsumers...)
+	if err != nil {
+		t.Fatalf("new inbox: %v", err)
+	}
 	recency := postgres.NewRecencyGuardRepo(pool, pool)
 	queues := postgres.NewActiveTaskQueueRepo(pool)
 	transactor := postgres.NewTransactor(pool)

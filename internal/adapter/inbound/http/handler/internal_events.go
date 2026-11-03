@@ -37,12 +37,6 @@ func observeDelegationReroute(seconds float64) {
 }
 
 const (
-	consumerMembership = "membership-execution"
-	consumerUser       = "user-execution"
-	consumerConnector  = "connector-stream-execution"
-)
-
-const (
 	eventTypeDelegationStarted       = "DelegationStarted"
 	eventTypeDelegationEnded         = "DelegationEnded"
 	eventTypeUserDeleted             = "UserDeleted"
@@ -216,8 +210,8 @@ func (h *Handler) decodeSchemaRegistryPayload(c *gin.Context, env events.Envelop
 }
 
 func (h *Handler) respondOK(c *gin.Context, eventID uuid.UUID, consumer, eventType string) {
-	if _, err := h.processedEvents.RecordIfNew(c.Request.Context(), eventID, consumer, eventType); err != nil {
-		h.logWarn("internal events: RecordIfNew failed after side effects committed", map[string]any{
+	if err := h.processedEvents.MarkProcessed(c.Request.Context(), eventID, consumer); err != nil {
+		h.logWarn("internal events: MarkProcessed failed after side effects committed", map[string]any{
 			"event_type": eventType, "event_id": eventID, "error": err.Error(),
 		})
 	}
@@ -308,7 +302,7 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 		endsAt = &v
 	}
 
-	if h.alreadyProcessed(c, eventID, consumerMembership, eventType) {
+	if h.alreadyProcessed(c, eventID, port.ConsumerMembership, eventType) {
 		return
 	}
 
@@ -330,7 +324,7 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 	}
 	observeDelegationReroute(time.Since(start).Seconds())
 
-	h.respondOK(c, eventID, consumerMembership, eventType)
+	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
 }
 
 type delegationEndedPayload struct {
@@ -371,7 +365,7 @@ func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json
 		return
 	}
 
-	if h.alreadyProcessed(c, eventID, consumerMembership, eventType) {
+	if h.alreadyProcessed(c, eventID, port.ConsumerMembership, eventType) {
 		return
 	}
 
@@ -393,7 +387,7 @@ func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json
 		return
 	}
 
-	h.respondOK(c, eventID, consumerMembership, eventType)
+	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
 }
 
 func knownEndedReason(reason string) bool {
@@ -437,7 +431,7 @@ func (h *Handler) handleUserDeleted(c *gin.Context, env events.Envelope[json.Raw
 		return
 	}
 
-	if h.alreadyProcessed(c, eventID, consumerUser, eventType) {
+	if h.alreadyProcessed(c, eventID, port.ConsumerUser, eventType) {
 		return
 	}
 
@@ -451,7 +445,7 @@ func (h *Handler) handleUserDeleted(c *gin.Context, env events.Envelope[json.Raw
 		return
 	}
 
-	h.respondOK(c, eventID, consumerUser, eventType)
+	h.respondOK(c, eventID, port.ConsumerUser, eventType)
 }
 
 type userAvailabilityChangedPayload struct {
@@ -500,7 +494,7 @@ func (h *Handler) handleUserAvailabilityChanged(c *gin.Context, env events.Envel
 		delegateUserID = &v
 	}
 
-	if h.alreadyProcessed(c, eventID, consumerUser, eventType) {
+	if h.alreadyProcessed(c, eventID, port.ConsumerUser, eventType) {
 		return
 	}
 
@@ -514,7 +508,7 @@ func (h *Handler) handleUserAvailabilityChanged(c *gin.Context, env events.Envel
 		return
 	}
 
-	h.respondOK(c, eventID, consumerUser, eventType)
+	h.respondOK(c, eventID, port.ConsumerUser, eventType)
 }
 
 func (h *Handler) applyUserAvailabilityLocked(
@@ -590,7 +584,7 @@ func (h *Handler) handleMembershipRevoked(c *gin.Context, env events.Envelope[js
 		return
 	}
 
-	if h.alreadyProcessed(c, eventID, consumerMembership, eventType) {
+	if h.alreadyProcessed(c, eventID, port.ConsumerMembership, eventType) {
 		return
 	}
 
@@ -604,7 +598,7 @@ func (h *Handler) handleMembershipRevoked(c *gin.Context, env events.Envelope[js
 		return
 	}
 
-	h.respondOK(c, eventID, consumerMembership, eventType)
+	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
 }
 
 func (h *Handler) handleTenantMembershipsPurged(c *gin.Context, env events.Envelope[json.RawMessage]) {
@@ -618,7 +612,7 @@ func (h *Handler) handleTenantMembershipsPurged(c *gin.Context, env events.Envel
 		return
 	}
 
-	if h.alreadyProcessed(c, eventID, consumerMembership, eventType) {
+	if h.alreadyProcessed(c, eventID, port.ConsumerMembership, eventType) {
 		return
 	}
 
@@ -633,7 +627,7 @@ func (h *Handler) handleTenantMembershipsPurged(c *gin.Context, env events.Envel
 		return
 	}
 
-	h.respondOK(c, eventID, consumerMembership, eventType)
+	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
 }
 
 func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[json.RawMessage]) {
@@ -661,7 +655,7 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 		return
 	}
 
-	if h.alreadyProcessed(c, eventID, consumerMembership, eventType) {
+	if h.alreadyProcessed(c, eventID, port.ConsumerMembership, eventType) {
 		return
 	}
 
@@ -671,7 +665,7 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 		return
 	}
 
-	h.respondOK(c, eventID, consumerMembership, eventType)
+	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
 }
 
 func (h *Handler) applyTenantStateChangeLocked(

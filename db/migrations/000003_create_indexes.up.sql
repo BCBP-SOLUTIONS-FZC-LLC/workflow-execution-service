@@ -53,11 +53,6 @@ CREATE INDEX idx_workflow_task_assignment_user_active
 CREATE INDEX idx_assignee_overrides_instance_node
     ON assignee_overrides (workflow_instance_id, node_key);
 
--- processed_event -------------------------------------------------------------
-
-CREATE INDEX idx_processed_event_processed_at
-    ON processed_event (processed_at);
-
 -- outbox_events (platform-events-owned table; these two indexes are this
 -- service's own addition on top of it, giving the merged audit trail its query
 -- access, LLD §4.5/§4.9/§4.10) --------------------------------------------

@@ -10,6 +10,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/inbox"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/outbox"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/migrate"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
@@ -76,6 +77,9 @@ func applyMigrations(t *testing.T, dsn string) {
 	ctx := context.Background()
 	if err := outbox.ApplySchema(ctx, &migrate.Runner{DSN: dsn}); err != nil {
 		t.Fatalf("fixtures: outbox ApplySchema: %v", err)
+	}
+	if err := inbox.ApplySchema(ctx, &migrate.Runner{DSN: dsn}); err != nil {
+		t.Fatalf("fixtures: inbox ApplySchema: %v", err)
 	}
 	if err := documentsql.ApplySchema(ctx, &migrate.Runner{DSN: dsn}); err != nil {
 		t.Fatalf("fixtures: connector documents ApplySchema: %v", err)

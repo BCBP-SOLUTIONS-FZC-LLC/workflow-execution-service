@@ -86,17 +86,6 @@ CREATE TABLE active_task_queues (
     updated_at     TIMESTAMPTZ  NOT NULL
 );
 
--- Consumer-idempotency dedup table for inbound events (LLD §6), following the
--- same platform-wide convention as Definition Service and iam-user-profile.
--- No RLS, no tenant_id — infrastructure dedup state, not tenant business data.
-CREATE TABLE processed_event (
-    event_id     UUID        NOT NULL,
-    consumer     TEXT        NOT NULL,
-    event_type   TEXT,
-    processed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (event_id, consumer)
-);
-
 -- Node-override's own audit record (LLD §4.13, §5.4). Insert-only, immutable:
 -- no record_version/updated_at/deleted_at, same reasoning as every audit-bearing
 -- row in this schema.

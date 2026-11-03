@@ -171,7 +171,10 @@ func e2eBuildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, valkey
 	tasks := postgres.NewTaskRepo(pool)
 	assignments := postgres.NewTaskAssignmentRepo(pool)
 	outboxRepo := postgres.NewOutboxRepo(pool)
-	processedEvents := postgres.NewProcessedEventRepo(pool)
+	processedEvents, err := eventbus.NewInbox(pool, port.EventConsumers...)
+	if err != nil {
+		t.Fatalf("new inbox: %v", err)
+	}
 	transactor := postgres.NewTransactor(pool)
 
 	validator, err := eventbus.NewSchemaValidator()

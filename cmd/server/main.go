@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/logger"
@@ -49,7 +48,8 @@ func main() {
 
 	a, err := newApp(cfg)
 	if err != nil {
-		log.Fatalf("cmd/server: %v", err)
+		fmt.Fprintf(os.Stderr, "cmd/server: %v\n", err)
+		os.Exit(1)
 	}
 	a.run()
 }

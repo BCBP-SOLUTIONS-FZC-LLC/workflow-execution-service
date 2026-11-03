@@ -24,6 +24,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkeystream"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
@@ -58,6 +59,12 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, err
 	}
 	cleanups = append(cleanups, appPool.Close)
+
+	processedEvents, err := eventbus.NewInbox(appPool, port.EventConsumers...)
+	if err != nil {
+		unwind()
+		return nil, err
+	}
 
 	relayPool, err := newRelayPool(ctx, cfg, log)
 	if err != nil {
@@ -124,7 +131,7 @@ func newApp(cfg *config.Config) (*app, error) {
 
 	retentionSweeper := service.NewRetentionSweeper(service.RetentionSweeperDeps{
 		Outbox:                  relay,
-		ProcessedEvents:         postgres.NewProcessedEventRepo(appPool),
+		ProcessedEvents:         processedEvents,
 		OutboxRetention:         cfg.OutboxRetention,
 		ProcessedEventRetention: cfg.ProcessedEventRetention,
 		Batch:                   cfg.RetentionSweepBatch,
@@ -183,7 +190,6 @@ func newApp(cfg *config.Config) (*app, error) {
 	tasks := postgres.NewTaskRepo(appPool)
 	assignments := postgres.NewTaskAssignmentRepo(appPool)
 	outboxRepo := postgres.NewOutboxRepo(appPool)
-	processedEvents := postgres.NewProcessedEventRepo(appPool)
 	recency := postgres.NewRecencyGuardRepo(appPool, lockPool)
 	overrides := postgres.NewAssigneeOverrideRepo(appPool)
 	queues := postgres.NewActiveTaskQueueRepo(appPool)

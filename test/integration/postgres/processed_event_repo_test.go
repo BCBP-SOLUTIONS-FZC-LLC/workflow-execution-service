@@ -12,106 +12,88 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
 )
 
-func TestProcessedEventRepo_RecordIfNew(t *testing.T) {
-	superPool, _ := fixtures.NewTestPoolAndDSN(t)
-	repo := postgres.NewProcessedEventRepo(superPool)
-	ctx := context.Background()
-
-	eventID := uuid.New()
-
-	isNew, err := repo.RecordIfNew(ctx, eventID, "membership-execution", "WorkflowTaskCreated")
-	require.NoError(t, err)
-	assert.True(t, isNew, "first record should be new")
-
-	isNew, err = repo.RecordIfNew(ctx, eventID, "membership-execution", "WorkflowTaskCreated")
-	require.NoError(t, err)
-	assert.False(t, isNew, "redelivery of the same (event_id, consumer) should not be new")
-
-	isNew, err = repo.RecordIfNew(ctx, eventID, "user-execution", "WorkflowTaskCreated")
-	require.NoError(t, err)
-	assert.True(t, isNew, "same event_id under a different consumer dedups independently")
-}
-
-func TestProcessedEventRepo_IsProcessed(t *testing.T) {
+func TestInbox_RedeliveredEventIsSeen(t *testing.T) {
 	pool := fixtures.NewTestPool(t)
-	repo := postgres.NewProcessedEventRepo(pool)
+	ledger, err := eventbus.NewInbox(pool, port.ConsumerMembership, port.ConsumerUser)
+	require.NoError(t, err)
 	ctx := context.Background()
-
 	eventID := uuid.New()
 
-	processed, err := repo.IsProcessed(ctx, eventID, "membership-execution")
+	processed, err := ledger.IsProcessed(ctx, eventID, port.ConsumerMembership)
 	require.NoError(t, err)
 	assert.False(t, processed)
 
-	_, err = repo.RecordIfNew(ctx, eventID, "membership-execution", "DelegationStarted")
-	require.NoError(t, err)
+	require.NoError(t, ledger.MarkProcessed(ctx, eventID, port.ConsumerMembership))
+	require.NoError(t, ledger.MarkProcessed(ctx, eventID, port.ConsumerMembership), "recording twice is a no-op")
 
-	processed, err = repo.IsProcessed(ctx, eventID, "membership-execution")
+	processed, err = ledger.IsProcessed(ctx, eventID, port.ConsumerMembership)
 	require.NoError(t, err)
-	assert.True(t, processed)
+	assert.True(t, processed, "a redelivery of the same (event_id, consumer) is skipped")
+
+	processed, err = ledger.IsProcessed(ctx, eventID, port.ConsumerUser)
+	require.NoError(t, err)
+	assert.False(t, processed, "the same event_id under a different consumer dedups independently")
 }
 
-func TestProcessedEventRepo_PruneOlderThan(t *testing.T) {
+func TestInbox_UnknownConsumerIsRefused(t *testing.T) {
+	pool := fixtures.NewTestPool(t)
+	ledger, err := eventbus.NewInbox(pool, port.ConsumerMembership)
+	require.NoError(t, err)
+
+	_, err = ledger.IsProcessed(context.Background(), uuid.New(), "nobody")
+	require.Error(t, err)
+	require.Error(t, ledger.MarkProcessed(context.Background(), uuid.New(), "nobody"))
+}
+
+func TestInbox_PruneDropsRowsOutsideTheRetentionWindow(t *testing.T) {
 	superPool, _ := fixtures.NewTestPoolAndDSN(t)
-	repo := postgres.NewProcessedEventRepo(superPool)
+	ledger, err := eventbus.NewInbox(superPool, port.ConsumerMembership, port.ConsumerUser)
+	require.NoError(t, err)
 	ctx := context.Background()
 
-	oldID := uuid.New()
-	freshID := uuid.New()
-	require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
-		_, err := conn.Exec(ctx,
-			`INSERT INTO processed_event (event_id, consumer, event_type, processed_at) VALUES ($1, 'membership-execution', 'x', $2)`,
-			oldID, time.Now().UTC().Add(-8*24*time.Hour))
-		return err
-	}))
-	require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
-		_, err := conn.Exec(ctx,
-			`INSERT INTO processed_event (event_id, consumer, event_type, processed_at) VALUES ($1, 'membership-execution', 'x', now())`,
-			freshID)
-		return err
-	}))
-
-	deleted, err := repo.PruneOlderThan(ctx, 7*24*time.Hour)
-	require.NoError(t, err)
-	assert.Equal(t, int64(1), deleted)
-
-	var freshStillThere bool
-	require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
-		return conn.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM processed_event WHERE event_id = $1)", freshID).Scan(&freshStillThere)
-	}))
-	assert.True(t, freshStillThere, "a row inside the retention window must survive the prune")
-
-	processed, err := repo.IsProcessed(ctx, oldID, "membership-execution")
-	require.NoError(t, err)
-	assert.False(t, processed, "pruned rows must no longer be considered processed")
-}
-
-func TestProcessedEventRepo_PruneOlderThan_OnTheAppRoleWithNoTenant(t *testing.T) {
-	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
-	appPool := newAppRolePool(t, superPool, superDSN)
-	ctx := context.Background()
-
-	old := time.Now().UTC().Add(-9 * 24 * time.Hour)
-	ids := []uuid.UUID{uuid.New(), uuid.New(), uuid.New()}
-	for i, id := range ids {
-		processedAt := old
-		if i == 2 {
-			processedAt = time.Now().UTC()
-		}
+	oldID, freshID := uuid.New(), uuid.New()
+	insert := func(id uuid.UUID, consumer string, at time.Time) {
 		require.NoError(t, superPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
 			_, err := conn.Exec(ctx,
-				`INSERT INTO processed_event (event_id, consumer, event_type, processed_at) VALUES ($1, $2, 'x', $3)`,
-				id, []string{"membership-execution", "user-execution", "membership-execution"}[i], processedAt)
+				`INSERT INTO processed_events (event_id, consumer, processed_at) VALUES ($1, $2, $3)`, id, consumer, at)
 			return err
 		}))
 	}
+	insert(oldID, port.ConsumerMembership, time.Now().UTC().Add(-8*24*time.Hour))
+	insert(uuid.New(), port.ConsumerUser, time.Now().UTC().Add(-9*24*time.Hour))
+	insert(freshID, port.ConsumerMembership, time.Now().UTC())
 
-	deleted, err := postgres.NewProcessedEventRepo(appPool).PruneOlderThan(ctx, 8*24*time.Hour)
-
+	deleted, err := ledger.Prune(ctx, 7*24*time.Hour)
 	require.NoError(t, err)
-	assert.Equal(t, int64(2), deleted, "the table has no row-level security, so the app role prunes every consumer's old rows with no tenant set")
+	assert.Equal(t, int64(2), deleted, "every consumer's old rows go")
+
+	processed, err := ledger.IsProcessed(ctx, freshID, port.ConsumerMembership)
+	require.NoError(t, err)
+	assert.True(t, processed, "a row inside the window survives")
+	processed, err = ledger.IsProcessed(ctx, oldID, port.ConsumerMembership)
+	require.NoError(t, err)
+	assert.False(t, processed, "a pruned row is no longer processed")
+}
+
+func TestInbox_AppRoleWithNoTenantRecordsAndPrunes(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	ledger, err := eventbus.NewInbox(appPool, port.ConsumerMembership)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	id := uuid.New()
+	require.NoError(t, ledger.MarkProcessed(ctx, id, port.ConsumerMembership))
+	processed, err := ledger.IsProcessed(ctx, id, port.ConsumerMembership)
+	require.NoError(t, err)
+	assert.True(t, processed, "the table has no row-level security, so the app role needs no tenant")
+
+	deleted, err := ledger.Prune(ctx, time.Hour)
+	require.NoError(t, err)
+	assert.Zero(t, deleted)
 }

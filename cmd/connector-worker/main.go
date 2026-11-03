@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,6 +13,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/logger"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
@@ -40,17 +40,19 @@ func main() {
 
 	wlog, err := logger.NewLogger(cfg.AppEnv)
 	if err != nil {
-		log.Fatalf("cmd/connector-worker: new logger: %v", err)
+		fmt.Fprintf(os.Stderr, "cmd/connector-worker: new logger: %v\n", err)
+		os.Exit(1)
 	}
 	tracingShutdown, err := observability.InitTelemetry(observability.GinConfig(cfg.OTELServiceName, cfg.BuildVersion, cfg.AppEnv, wlog), wlog)
 	if err != nil {
-		log.Fatalf("cmd/connector-worker: telemetry: %v", err)
+		wlog.Error("telemetry init failed", map[string]any{"error": err.Error()})
+		os.Exit(1)
 	}
 	defer tracingShutdown()
 
 	deps, cleanup, err := buildDeps(cfg, wlog)
 	if err != nil {
-		fatalf(tracingShutdown, "cmd/connector-worker: %v", err)
+		fatal(wlog, tracingShutdown, "startup failed", err)
 	}
 	defer cleanup()
 
@@ -119,8 +121,8 @@ func checkRequiredConfig(cfg *config.Config) error {
 	return nil
 }
 
-func fatalf(flush func(), format string, v ...any) {
-	log.Printf(format, v...)
+func fatal(wlog port.Logger, flush func(), msg string, err error) {
+	wlog.Error(msg, map[string]any{"error": err.Error()})
 	flush()
 	os.Exit(1)
 }
