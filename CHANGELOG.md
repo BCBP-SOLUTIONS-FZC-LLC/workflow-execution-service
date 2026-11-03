@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- Appendix C of the LLD (revision 1.138) names the migrations that add the tables it does not list.
 - The LLD (revision 1.137) and the DBML match the code on indexes, partitioning, routes, error codes, configuration, metrics, alerts and examples; the internal spec's `TENANT_MISMATCH` examples and the notes on the retired catch-all route are corrected; the start-duration metric help says `201`.
 - The LLD (revision 1.136) states force-back as one completed step back, gives `StartWorkflow`'s real input, drops the stale "DB event_type" column of the event table and removes a connector-callback paragraph that contradicted §5.7.
 - A force-forward is checked against the compiled plan before the signal is sent and answers `409 TARGET_NODE_NOT_FOUND` for an absent target; the duplicate-SLA-event index filters on the wire type names the outbox stores (LLD revision 1.135). A force-forward on a running nested branch superseding its inner sibling is recorded as open.
