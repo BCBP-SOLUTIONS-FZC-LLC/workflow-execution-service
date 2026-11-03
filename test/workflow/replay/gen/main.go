@@ -56,6 +56,8 @@ func main() {
 		runDegradedPause(c, "degraded-pause-fixture")
 	case "degraded-pause-held":
 		runDegradedPause(c, "degraded-pause-held-fixture")
+	case "nested-force-forward":
+		runNestedForceForward(c, "nested-force-forward-fixture")
 	default:
 		log.Fatalf("unknown scenario %q", scenario)
 	}
@@ -213,6 +215,60 @@ func runDegradedPause(c client.Client, wfID string) {
 		AdminUserID: "33333333-3333-3333-3333-333333333333", Initiator: "admin",
 		TargetDeptID: "billing", TargetNodeKey: "billing/charge", RecordVersion: 1,
 	})
+
+	var out wfengine.ExecuteOutput
+	if err := run.Get(context.Background(), &out); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("workflow completed with status:", out.Status)
+}
+
+func runNestedForceForward(c client.Client, wfID string) {
+	department := func(id string) dsl.DepartmentDef {
+		return dsl.DepartmentDef{ID: id, IAMDepartmentID: "11111111-1111-1111-1111-111111111111", Stages: []dsl.StageDef{{Type: "approve", NodeID: "work", Role: "reviewer"}}}
+	}
+	collab := dsl.CompiledCollaboration{
+		MainPlan:      "main",
+		SchemaVersion: dsl.CurrentSchemaVersion,
+		Plans: []*dsl.CompiledPlan{{
+			Name:        "main",
+			Departments: []dsl.DepartmentDef{department("a"), department("b1"), department("b2")},
+			Execution: dsl.ExecutionPlan{Steps: []dsl.ExecutionStep{{Parallel: []dsl.ParallelBranch{
+				{DeptID: "a", Steps: []dsl.ExecutionStep{{Sequential: []string{"a"}}}},
+				{DeptID: "b", Steps: []dsl.ExecutionStep{{Parallel: []dsl.ParallelBranch{
+					{DeptID: "b1", Steps: []dsl.ExecutionStep{{Sequential: []string{"b1"}}}},
+					{DeptID: "b2", Steps: []dsl.ExecutionStep{{Sequential: []string{"b2"}}}},
+				}}}},
+			}}}},
+		}},
+	}
+
+	taskQueue := "replay-fixture-gen-nested-tq"
+	w := startWorker(c, taskQueue, collab, func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
+		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
+	})
+	defer w.Stop()
+
+	run, err := c.ExecuteWorkflow(context.Background(), client.StartWorkflowOptions{
+		ID: wfID, TaskQueue: taskQueue,
+	}, wfengine.Execute, wfengine.ExecuteInput{
+		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("started run", run.GetRunID())
+
+	time.Sleep(1500 * time.Millisecond)
+	send(c, wfID, "instance-force-forward:instance-1", adminSignal{
+		AdminUserID: "33333333-3333-3333-3333-333333333333", Initiator: "admin",
+		TargetDeptID: "b1", TargetNodeKey: "b1/work", RecordVersion: 1,
+	})
+
+	for _, dept := range []string{"a", "b2"} {
+		time.Sleep(1500 * time.Millisecond)
+		send(c, wfID, "stage-transition:instance-1", stageTransition{DeptID: dept, NodeID: "work", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1})
+	}
 
 	var out wfengine.ExecuteOutput
 	if err := run.Get(context.Background(), &out); err != nil {

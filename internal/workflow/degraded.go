@@ -24,6 +24,13 @@ type completedBranch struct {
 	LastNode domain.NodeKey
 }
 
+type gateway struct {
+	own         wf.Channel
+	keys        []string
+	branchSteps map[string][]dsl.ExecutionStep
+	resolved    map[string]bool
+}
+
 func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branches []dsl.ParallelBranch, admin wf.Channel) (stepOutcome, error) {
 	preFork := in.history.PreForkEntry()
 
@@ -40,6 +47,9 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 	cancels := make(map[string]wf.CancelFunc, len(branches))
 	branchSteps := make(map[string][]dsl.ExecutionStep, len(branches))
 	resolved := make(map[string]bool, len(branches))
+	gw := &gateway{own: wf.NewBufferedChannel(ctx, 8), keys: keys, branchSteps: branchSteps, resolved: resolved}
+	in.gateways = append(in.gateways, gw)
+	defer func() { in.gateways = slices.DeleteFunc(in.gateways, func(g *gateway) bool { return g == gw }) }()
 	for i, b := range branches {
 		deptIDs = append(deptIDs, b.DeptID)
 		key, deptID, steps := keys[i], b.DeptID, b.Steps
@@ -62,10 +72,12 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 		sel := wf.NewSelector(ctx)
 		var envelope adminSignalEnvelope
 		gotAdmin := false
-		sel.AddReceive(admin, func(c wf.ReceiveChannel, more bool) {
+		receiveAdmin := func(c wf.ReceiveChannel, more bool) {
 			c.Receive(ctx, &envelope)
 			gotAdmin = true
-		})
+		}
+		sel.AddReceive(admin, receiveAdmin)
+		sel.AddReceive(gw.own, receiveAdmin)
 		sel.AddReceive(settle, func(c wf.ReceiveChannel, more bool) {
 			var out branchOutcome
 			c.Receive(ctx, &out)
@@ -315,6 +327,16 @@ func (in *interpreter) handleParallelForceForward(ctx wf.Context, keys []string,
 	}
 	resolved[key] = true
 	return completedBranch{DeptID: deptID, LastNode: sig.TargetNodeKey}, true
+}
+
+func (in *interpreter) innermostGatewayRunning(deptID string) *gateway {
+	for i := len(in.gateways) - 1; i >= 0; i-- {
+		gw := in.gateways[i]
+		if branchRunning(gw.keys, gw.branchSteps, gw.resolved, deptID) != "" {
+			return gw
+		}
+	}
+	return nil
 }
 
 func branchKeys(ctx wf.Context, branches []dsl.ParallelBranch) []string {

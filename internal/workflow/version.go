@@ -41,3 +41,5 @@ const receiveRecordsNodeChangeID = "receive-records-node"
 const abandonedMidActivityChangeID = "abandoned-mid-activity"
 
 const pauseSurvivesDegradedChangeID = "pause-survives-degraded"
+
+const nestedForceForwardChangeID = "nested-force-forward-innermost-gateway"

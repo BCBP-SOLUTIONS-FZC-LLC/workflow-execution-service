@@ -38,3 +38,19 @@ func TestReplay_DegradedPauseHeld(t *testing.T) {
 		t.Fatalf("replay failed: %v", err)
 	}
 }
+
+// TestReplay_NestedForceForward replays an instance whose force-forward on a
+// running branch of a nested parallel step reached the inner gateway, recorded
+// with change id nested-force-forward-innermost-gateway. Any edit to how an
+// administrator signal finds its gateway must still replay this history.
+func TestReplay_NestedForceForward(t *testing.T) {
+	replayer, err := worker.NewWorkflowReplayerWithOptions(worker.WorkflowReplayerOptions{})
+	if err != nil {
+		t.Fatalf("NewWorkflowReplayerWithOptions: %v", err)
+	}
+	replayer.RegisterWorkflow(wfengine.Execute)
+
+	if err := replayer.ReplayWorkflowHistoryFromJSONFile(nil, "testdata/nested_force_forward.json"); err != nil {
+		t.Fatalf("replay failed: %v", err)
+	}
+}

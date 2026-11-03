@@ -10,6 +10,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- A force-forward on a running branch of a nested parallel step resolves only that branch: the signal is delivered to the innermost running parallel step that holds the department, behind the version marker `nested-force-forward-innermost-gateway`, so its sibling branches keep their open tasks (LLD revision 1.141).
+- The AsyncAPI description and the LLD (revision 1.140) say that the schema pipeline validates, diffs and registers every file of `internal/eventschema`, the seven `_inbound` copies included.
 - Inbound-event dedup goes through the `platform-events` inbox: the `processed_event` table, its repository, queries and mock are gone, the migrate command applies the library's inbox schema (`processed_events`), and the retention sweep prunes every consumer's rows (LLD revision 1.139). Startup and the connector worker log through the platform logger instead of the standard library `log`; `make lint` forbids `database/sql`, `log`, `log/slog`, `zap`, the OpenTelemetry SDK and exporters, and the Prometheus client outside `internal/observability`, plus direct pool and connection construction.
 - Appendix C of the LLD (revision 1.138) names the migrations that add the tables it does not list.
 - The LLD (revision 1.137) and the DBML match the code on indexes, partitioning, routes, error codes, configuration, metrics, alerts and examples; the internal spec's `TENANT_MISMATCH` examples and the notes on the retired catch-all route are corrected; the start-duration metric help says `201`.

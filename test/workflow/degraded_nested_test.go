@@ -7,6 +7,7 @@ import (
 
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
+	wf "go.temporal.io/sdk/workflow"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -336,10 +337,13 @@ func TestExecute_ForceBackWhileANestedParallelIsOpenReturnsBeforeTheFork(t *test
 	}
 }
 
-func TestExecute_ForceForwardOnARunningNestedBranchLeavesTheOtherBranchesRunning(t *testing.T) {
-	t.Skip("open: a force-forward on a running branch of a nested parallel step cancels the outer branch that runs it, so the inner sibling's open task is superseded (tracker I-C24)")
+func supersededAfterNestedForceForward(t *testing.T, beforeTheChange bool) map[string]bool {
+	t.Helper()
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
+	if beforeTheChange {
+		env.OnGetVersion("nested-force-forward-innermost-gateway", wf.DefaultVersion, 1).Return(wf.DefaultVersion)
+	}
 
 	var mu sync.Mutex
 	superseded := map[string]bool{}
@@ -378,11 +382,27 @@ func TestExecute_ForceForwardOnARunningNestedBranchLeavesTheOtherBranchesRunning
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
 	})
+	return supersededBeforeCancel
+}
+
+func TestExecute_ForceForwardOnARunningNestedBranchLeavesTheOtherBranchesRunning(t *testing.T) {
+	supersededBeforeCancel := supersededAfterNestedForceForward(t, false)
 
 	if supersededBeforeCancel["b2/prep"] {
 		t.Errorf("force-forward on b1 superseded the open task of its sibling branch b2: %v", supersededBeforeCancel)
 	}
 	if supersededBeforeCancel["a/prep"] {
 		t.Errorf("force-forward on b1 superseded the open task of the other outer branch a: %v", supersededBeforeCancel)
+	}
+	if !supersededBeforeCancel["b1/prep"] {
+		t.Errorf("force-forward on b1 left its own open task running: %v", supersededBeforeCancel)
+	}
+}
+
+func TestExecute_NestedForceForward_BeforeTheChangeCancelsTheOuterBranch(t *testing.T) {
+	supersededBeforeCancel := supersededAfterNestedForceForward(t, true)
+
+	if !supersededBeforeCancel["b2/prep"] {
+		t.Errorf("a history recorded before the change replays as it ran: the outer branch is cancelled with its inner siblings, got %v", supersededBeforeCancel)
 	}
 }

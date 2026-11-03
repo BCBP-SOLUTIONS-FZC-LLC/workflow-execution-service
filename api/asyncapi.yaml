@@ -7,8 +7,11 @@ info:
     lifecycle events published to the SNS topic wf-workflow-events (SNS → SQS
     fan-out), governed by platform-schemagov. Inbound: the events Execution
     consumes through the shared Workflow-Events Consumer, which forwards them to
-    the category routes under /api/v1/internal/events. Their payload schemas are
-    owned and registered by the producing service and are not re-registered here.
+    the category routes under /api/v1/internal/events. The producing service owns
+    each inbound contract. This repository keeps a copy of every inbound payload
+    schema as internal/eventschema/<name>_inbound.json, and the schema pipeline
+    validates, diffs and registers every file of that directory, those copies
+    included.
   x-forward-compatibility:
     open-schemas: >
       Every governed <Name>Payload sets additionalProperties:true. Consumers MUST
