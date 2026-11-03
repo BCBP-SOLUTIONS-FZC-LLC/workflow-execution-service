@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The `TenantMembershipsPurged` inbound description says IAM also sends `tenant_id` and `actor_id`, which Execution does not read, and the LLD (revision 1.144) records that the provisioned names of IAM's user and delegation topics are to be confirmed (an SNS topic name cannot contain a dot).
 - A force-back on a `RUNNING` instance with no completed step answers `409 FORCE_BACK_NO_SAVED_BRANCH`, as the OpenAPI and the LLD (revision 1.143) already said; it answered `INVALID_INSTANCE_STATE`.
 - The public OpenAPI's force-forward 409 lists `INSTANCE_ALREADY_TERMINAL`, `INVALID_INSTANCE_STATE` for an instance that is neither RUNNING nor DEGRADED and `TARGET_NODE_NOT_FOUND` for a node absent from the compiled plan; the AsyncAPI comments say the `_inbound` schema copies are hand-kept.
 - The LLD (revision 1.142) names the inbox table `processed_events` in the dependency failure matrix.

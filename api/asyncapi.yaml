@@ -824,7 +824,7 @@ components:
     TenantMembershipsPurgedInbound:
       type: object
       additionalProperties: true
-      description: The tenant is identified by the envelope's tenant_id; the payload carries no required field.
+      description: The tenant is identified by the envelope's tenant_id. IAM also sends tenant_id and actor_id in the payload; Execution reads neither.
     MembershipRevokedInbound:
       type: object
       additionalProperties: true
