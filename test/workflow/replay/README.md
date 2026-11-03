@@ -26,7 +26,7 @@ interpreter kept a pause across `DEGRADED`, so it is the old-history guard for t
 present, the park ends `PAUSED`), exported with `--workflow-id degraded-pause-held-fixture` to
 `testdata/degraded_pause_held.json`.
 
-`nested-force-forward` is a force-forward on a running branch of a nested parallel step, recorded with marker `nested-force-forward-innermost-gateway` present, exported with `--workflow-id nested-force-forward-fixture` to `testdata/nested_force_forward.json`.
+`nested-force-forward` is a force-forward on a running branch of a nested parallel step, recorded with marker `nested-force-forward-innermost-gateway` present, exported with `--workflow-id nested-force-forward-fixture` to `testdata/nested_force_forward.json`. `testdata/nested_force_forward_before.json` is the same scenario recorded by the interpreter before that marker (a worktree of the commit before it, with this generator copied in), the old-history guard for the change.
 
 `gen/main.go` is never run by CI — only when adding or regenerating a fixture. It takes the scenario name as its argument (`initial-interpreter`, `degraded-pause`, `degraded-pause-held`, `nested-force-forward`) and each scenario is its own function; add one per new fixture rather than a generic flag, the "3+ consumers before generalizing" threshold this repo already uses elsewhere.
 

@@ -54,3 +54,19 @@ func TestReplay_NestedForceForward(t *testing.T) {
 		t.Fatalf("replay failed: %v", err)
 	}
 }
+
+// TestReplay_NestedForceForwardBeforeTheChange replays the same scenario
+// recorded before change id nested-force-forward-innermost-gateway: the signal
+// resolved the outer branch, and the instance finished without b2's task.
+// The interpreter that routes by gateway must still replay it as it ran.
+func TestReplay_NestedForceForwardBeforeTheChange(t *testing.T) {
+	replayer, err := worker.NewWorkflowReplayerWithOptions(worker.WorkflowReplayerOptions{})
+	if err != nil {
+		t.Fatalf("NewWorkflowReplayerWithOptions: %v", err)
+	}
+	replayer.RegisterWorkflow(wfengine.Execute)
+
+	if err := replayer.ReplayWorkflowHistoryFromJSONFile(nil, "testdata/nested_force_forward_before.json"); err != nil {
+		t.Fatalf("replay failed: %v", err)
+	}
+}
