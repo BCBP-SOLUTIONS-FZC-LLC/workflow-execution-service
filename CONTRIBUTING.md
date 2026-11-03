@@ -22,7 +22,7 @@ The pre-commit hook runs tidy, format and lint.
 
 - Dependency direction is `domain ← port ← service ← adapter`; `make arch-lint` enforces it.
 - Non-test code carries no comments except `//go:` and `//nolint` directives. Names carry the meaning and the design documents carry the rationale.
-- Logs, metrics and traces go through `platform-gincommon`, database access through `platform-pgcommon`, events and the outbox through `platform-events`. New metrics are built in `internal/observability` as `workflow_execution_service_*` collectors, and `make metrics-lint` must pass.
+- Logs, metrics and traces go through `platform-gincommon`, database access through `platform-pgcommon`, events and the outbox through `platform-events`. New metrics are built in `internal/observability` as `workflow_execution_service_*` collectors, and `make metrics-lint` must pass. `make lint` enforces it: `database/sql`, `log`, `log/slog`, `zap`, the OpenTelemetry SDK and exporters and the Prometheus client (outside `internal/observability`) cannot be imported from non-test code, and pools and connections are built only through `pgcommon`.
 - Code that inserts a row inside a Temporal Activity derives the row id deterministically, and an Activity with no status to gate a retry on checks for the existing record first.
 - A repository call with a tenant id sets the tenant GUC; a caller composing several calls in one transaction sets it on the context before the transaction opens.
 - A fix starts with a test of the correct behaviour that fails, then the change.

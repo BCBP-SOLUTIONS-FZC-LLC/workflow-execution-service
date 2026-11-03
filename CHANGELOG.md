@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The LLD (revision 1.142) names the inbox table `processed_events` in the dependency failure matrix.
 - The service pins `workflow-models` `v2.1.1-rc.1`; the module's allowed-elements list no longer names two elements Definition refuses, and nothing in this service reads it.
 - A force-forward on a running branch of a nested parallel step resolves only that branch: the signal is delivered to the innermost running parallel step that holds the department, behind the version marker `nested-force-forward-innermost-gateway`, so its sibling branches keep their open tasks (LLD revision 1.141).
 - The AsyncAPI description and the LLD (revision 1.140) say that the schema pipeline validates, diffs and registers every file of `internal/eventschema`, the seven `_inbound` copies included.
