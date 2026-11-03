@@ -435,7 +435,7 @@ paths:
         Service-to-service ingest of an envelope forwarded by the shared Workflow-Events Consumer (§6.1); sets the RLS GUC from the tenant_id, is idempotent per envelope id, and is scoped to
         DelegationStarted/DelegationEnded. A type outside this category
         (should the consumer ever send one) is accepted and ignored with 200,
-        same as the catch-all's unrecognized-type behavior.
+        as for any type this route does not handle.
       security:
         - InternalServiceAuth: []
       requestBody:
@@ -665,7 +665,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/tenant-mismatch"
                 title: "Tenant Mismatch"
                 status: 403
-                detail: "caller's service identity is not authorized for this tenant_id"
+                detail: "the delegation belongs to a different tenant than the tenant_id parameter"
                 instance: "/api/v1/internal/workflows/delegate-impact"
                 code: "TENANT_MISMATCH"
         "500":
@@ -740,7 +740,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/tenant-mismatch"
                 title: "Tenant Mismatch"
                 status: 403
-                detail: "caller's service identity is not authorized for this tenant_id"
+                detail: "the delegation belongs to a different tenant than the tenant_id parameter"
                 instance: "/api/v1/internal/workflows/reassign-delegate"
                 code: "TENANT_MISMATCH"
         "409":
@@ -817,7 +817,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/tenant-mismatch"
                 title: "Tenant Mismatch"
                 status: 403
-                detail: "caller's service identity is not authorized for this tenant_id"
+                detail: "the delegation belongs to a different tenant than the tenant_id parameter"
                 instance: "/api/v1/internal/workflows/cancel-by-delegate"
                 code: "TENANT_MISMATCH"
         "409":

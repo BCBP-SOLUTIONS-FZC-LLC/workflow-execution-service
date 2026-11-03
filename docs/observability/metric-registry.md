@@ -49,7 +49,7 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 | `workflow_execution_service_instance_degraded_current` | gauge | - | Live count of instances currently DEGRADED. |
 | `workflow_execution_service_instance_degraded_oldest_age_seconds` | gauge | - | Age in seconds of the longest-parked DEGRADED instance. |
 | `workflow_execution_service_instance_degraded_total` | counter | - | Total instances that entered DEGRADED. |
-| `workflow_execution_service_instance_start_duration_seconds` | histogram | - | POST /instances received to 202-returned latency (LLD §10.3 SLO, p99 <= 1s). |
+| `workflow_execution_service_instance_start_duration_seconds` | histogram | - | POST /instances received to 201-returned latency (LLD §7.6 SLO, p99 <= 1s). |
 | `workflow_execution_service_instances_by_queue` | gauge | `queue` | Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue, sampled by the API process. A queue with none is absent. |
 | `workflow_execution_service_internal_events_ingest_total` | counter | `event_type`, `result` | Total internal event ingest calls, by event_type and result. |
 | `workflow_execution_service_internal_events_last_received_timestamp` | gauge | `event_type` | Unix timestamp of the last successfully dispatched POST /internal/events call, by event_type. |
@@ -58,7 +58,7 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 | `workflow_execution_service_retention_rows_deleted_total` | counter | `table` | Rows the retention sweeps deleted, by table (outbox_events, processed_event, or a tenant's purged tables). |
 | `workflow_execution_service_rls_violations_total` | counter | `violation_type` | Sampled row-level-security violations recorded in rls_violation_log, by violation_type. |
 | `workflow_execution_service_sla_breaches_total` | counter | - | Total workflow.task.sla-breached events. |
-| `workflow_execution_service_task_signal_duration_seconds` | histogram | `operation` | HTTP-request-received to 202-returned latency for task claim/complete/defer (LLD §10.3 SLO, p99 <= 300ms). |
+| `workflow_execution_service_task_signal_duration_seconds` | histogram | `operation` | HTTP-request-received to 202-returned latency for task claim/complete/defer (LLD §7.6 SLO, p99 <= 300ms). |
 | `workflow_execution_service_tenant_purge_failures_total` | counter | - | Tenant purges that failed part-way and will be retried on the next sweep. |
 | `workflow_execution_service_upstream_dependency_errors_total` | counter | `dependency` | Total upstream dependency call failures, by dependency. |
 | `workflow_execution_service_wf_cache_hits_total` | counter | - | Total compiled-plan cache hits. |
