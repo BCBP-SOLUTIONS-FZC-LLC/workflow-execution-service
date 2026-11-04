@@ -193,9 +193,25 @@ jobs:
           secrets: go_private_token=${{ secrets.GO_PRIVATE_TOKEN }}
           cache-from: type=gha,scope=connector-worker
 
+      - name: Install Trivy
+        env:
+          TRIVY_VERSION: 0.70.0
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/trivy-bin"
+          mkdir -p "$dir"
+          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL -o "$dir/$archive" "$base/$archive"
+          curl -fsSL -o "$dir/checksums.txt" "$base/trivy_${TRIVY_VERSION}_checksums.txt"
+          (cd "$dir" && grep " ${archive}\$" checksums.txt | sha256sum -c -)
+          tar -xzf "$dir/$archive" -C "$dir" trivy
+          echo "$dir" >> "$GITHUB_PATH"
+
       - name: Scan server image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          skip-setup-trivy: true
           image-ref: ${{ env.IMAGE_BASE }}-server:${{ github.sha }}
           format: table
           exit-code: '1'
@@ -206,6 +222,7 @@ jobs:
       - name: Scan worker image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          skip-setup-trivy: true
           image-ref: ${{ env.IMAGE_BASE }}-worker:${{ github.sha }}
           format: table
           exit-code: '1'
@@ -216,6 +233,7 @@ jobs:
       - name: Scan connector-worker image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          skip-setup-trivy: true
           image-ref: ${{ env.IMAGE_BASE }}-connector-worker:${{ github.sha }}
           format: table
           exit-code: '1'
