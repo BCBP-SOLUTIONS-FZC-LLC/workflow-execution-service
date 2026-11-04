@@ -12,6 +12,14 @@ exclude:
   - "vendor"
   - "test"
 
+# cmd/connector-worker's own e2e test files import test/fixtures for their
+# real Postgres/Temporal/Valkey testcontainers, the same fixtures test/e2e
+# uses — test/e2e is exempt via the top-level "test" exclude above, but
+# these files live under the tracked cmd component, so they need their own
+# narrow exemption rather than loosening cmd's real dependency rules below.
+excludeFiles:
+  - "cmd/connector-worker/e2e.*_test\\.go$"
+
 allow:
   # Only check inter-component project imports; vendor packages are unrestricted.
   depOnAnyVendor: true
@@ -30,14 +38,21 @@ components:
     in: "internal/workflow/**"
   config:
     in: "internal/config/**"
+  # Metric vars, tracing-init helpers, and Search-Attribute constants/helpers
+  # (execution LLD §7.6, §3.6). A peer-level leaf like domain/port, not nested
+  # under adapter, since workflow-context code (Search Attributes) must be
+  # able to import it without depending on adapter.
+  observability:
+    in: "internal/observability/**"
   # postgres/db is sqlc-generated code; declared separately so adapter can import it
   db:
     in: "internal/adapter/outbound/postgres/db/**"
+  # Embedded event JSON Schemas (go:embed only); declared separately, same
+  # reasoning as db, so adapter (eventbus.SchemaValidator) can import it.
+  eventschema:
+    in: "internal/eventschema/**"
   adapter:
     in: "internal/adapter/**"
-  # proto-generated code used by both adapter and cmd
-  gen:
-    in: "gen/**"
   db_migrations:
     in: "db/**"
   cmd:
@@ -49,10 +64,16 @@ deps:
     mayDependOn:
       - domain
       - port
+  observability:
+    # external test files (package observability_test) import observability
+    # itself (self-reference), same as port/mocks above
+    mayDependOn:
+      - observability
   service:
     mayDependOn:
       - domain
       - port
+      - observability # instance_service.go logs eligibility-call-volume via the centralized metrics
   workflow:
     mayDependOn:
       - domain
@@ -61,9 +82,11 @@ deps:
     mayDependOn:
       - domain
       - port
-      - service   # handlers reference service request/response types
-      - db        # sqlc-generated types
-      - gen       # proto-generated types (grpc server + definition client)
+      - adapter       # inbound handlers reference outbound clients' sentinel errors (e.g. eligibility_client.go)
+      - service       # handlers reference service request/response types
+      - db            # sqlc-generated types
+      - eventschema   # eventbus.SchemaValidator embeds the event JSON Schemas
+      - observability # internal_events.go records the centralized ingest/reroute/last-received metrics
   cmd:
     mayDependOn:
       - domain
@@ -72,5 +95,5 @@ deps:
       - workflow  # cmd/worker registers the workflow function + Activities
       - adapter
       - config
-      - gen
       - db_migrations
+      - observability # both binaries call Register()/InitTracing() at boot

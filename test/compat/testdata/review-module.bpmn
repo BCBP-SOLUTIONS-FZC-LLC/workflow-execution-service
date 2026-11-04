@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions
+  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  id="Def_CompatReview" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="{{PROCESS}}" name="Compat Review" isExecutable="true">
+    <bpmn:startEvent id="Review_Start"/>
+    <bpmn:userTask id="Review_Task" name="Review"><bpmn:extensionElements><zeebe:taskDefinition type="review"/><zeebe:assignmentDefinition candidateGroups="reviewer" candidateUsers="{{ASSIGNEE}}"/></bpmn:extensionElements></bpmn:userTask>
+    <bpmn:endEvent id="Review_End"/>
+    <bpmn:sequenceFlow id="Review_F1" sourceRef="Review_Start" targetRef="Review_Task"/>
+    <bpmn:sequenceFlow id="Review_F2" sourceRef="Review_Task" targetRef="Review_End"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="{{PROCESS}}">
+      <bpmndi:BPMNShape id="Review_Start_di" bpmnElement="Review_Start"/>
+      <bpmndi:BPMNShape id="Review_Task_di" bpmnElement="Review_Task"/>
+      <bpmndi:BPMNShape id="Review_End_di" bpmnElement="Review_End"/>
+      <bpmndi:BPMNEdge id="Review_F1_di" bpmnElement="Review_F1"/>
+      <bpmndi:BPMNEdge id="Review_F2_di" bpmnElement="Review_F2"/>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

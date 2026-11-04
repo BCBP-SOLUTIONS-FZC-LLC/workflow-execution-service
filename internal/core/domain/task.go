@@ -1,0 +1,28 @@
+package domain
+
+import (
+	"encoding/json"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Task struct {
+	ID                 uuid.UUID
+	TenantID           uuid.UUID
+	WorkflowInstanceID uuid.UUID
+	NodeKey            string
+	DepartmentID       uuid.UUID
+	Status             TaskStatus
+	RecordVersion      int64
+	VisitCount         int64
+	AssigneeMode       string
+	ConnectorType      *string
+	ExtrasJSON         json.RawMessage
+	DeferredFromTaskID *uuid.UUID
+	DueAt              *time.Time
+	FollowUpAt         *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	CompletedAt        *time.Time
+}

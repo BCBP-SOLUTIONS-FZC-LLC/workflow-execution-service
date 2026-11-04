@@ -1,0 +1,27 @@
+# Version control
+.git/
+.github/
+
+# Local dev tooling and build artifacts
+.tools/
+bin/
+.coverage/
+
+# Documentation
+docs/
+*.md
+.claude/
+
+# Tests, scripts, and deploy manifests — not part of either binary
+test/
+scripts/
+deploy/
+
+# Environment files — secrets must be passed via build args/secrets or runtime env
+.env
+.env.*
+
+# Editor and OS artifacts
+.DS_Store
+*.swp
+*.swo

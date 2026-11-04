@@ -1,0 +1,27 @@
+package service
+
+import (
+	"context"
+	"math"
+
+	"github.com/google/uuid"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+)
+
+var _ port.ArchiveGuard = (*ArchiveGuard)(nil)
+
+type ArchiveGuard struct {
+	Instances port.InstanceRepository
+}
+
+func (s *ArchiveGuard) CheckActiveInstances(ctx context.Context, tenantID, workflowID uuid.UUID) (bool, int32, error) {
+	count, err := s.Instances.CountActiveByWorkflow(ctx, tenantID, workflowID)
+	if err != nil {
+		return false, 0, err
+	}
+	if count > math.MaxInt32 {
+		count = math.MaxInt32
+	}
+	return count > 0, int32(count), nil
+}

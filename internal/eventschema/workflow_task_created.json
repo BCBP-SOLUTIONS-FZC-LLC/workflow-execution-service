@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WorkflowTaskCreatedPayload",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["workflow_instance_id", "subject_id", "business_key", "workflow_version_id", "task_id", "node_key", "department_id", "assignee_user_ids", "stage_type"],
+  "properties": {
+    "workflow_instance_id": { "type": "string", "format": "uuid" },
+    "subject_id": { "type": "string" },
+    "business_key": { "type": "string" },
+    "workflow_version_id": { "type": "string", "format": "uuid" },
+    "task_id": { "type": "string", "format": "uuid" },
+    "node_key": { "type": "string" },
+    "department_id": { "type": "string", "format": "uuid" },
+    "assignee_user_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+    "stage_type": { "type": "string" },
+    "due_at": { "type": ["string", "null"], "format": "date-time" },
+    "follow_up_at": { "type": ["string", "null"], "format": "date-time" },
+    "connector_type": { "type": ["string", "null"] },
+    "resolved_inputs": { "type": ["object", "null"] },
+    "output_mapping": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "required": ["source", "target"],
+        "properties": {
+          "source": { "type": "string" },
+          "target": { "type": "string" }
+        }
+      }
+    }
+  }
+}

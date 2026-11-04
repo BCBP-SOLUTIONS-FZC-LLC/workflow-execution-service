@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MembershipRevokedInbound",
+  "type": "object",
+  "required": [
+    "user_id"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

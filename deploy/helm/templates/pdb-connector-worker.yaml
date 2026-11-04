@@ -1,0 +1,13 @@
+{{- if .Values.connectorWorker.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "workflow-execution-service.connectorWorkerFullname" . }}
+  labels:
+    {{- include "workflow-execution-service.connectorWorkerSelectorLabels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "workflow-execution-service.connectorWorkerSelectorLabels" . | nindent 6 }}
+{{- end }}

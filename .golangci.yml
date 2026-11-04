@@ -16,7 +16,58 @@ linters:
     - misspell
     - unconvert
     - unparam
+    - bodyclose
+    - noctx
+    - nilerr
+    - gosec
+    - contextcheck
+    - gocritic
+    - nolintlint
+    - sqlclosecheck
+    - depguard
+    - forbidigo
   settings:
+    depguard:
+      rules:
+        platform-libraries:
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/test/**"
+            - "!**/internal/adapter/outbound/postgres/db/**"
+          deny:
+            - pkg: database/sql
+              desc: database access goes through platform-pgcommon only
+            - pkg: log
+              desc: logs go through platform-gincommon's logger only
+            - pkg: log/slog
+              desc: logs go through platform-gincommon's logger only
+            - pkg: go.uber.org/zap
+              desc: logs go through platform-gincommon's logger only
+            - pkg: go.opentelemetry.io/otel/sdk
+              desc: the tracing pipeline is initialised by platform-gincommon only
+            - pkg: go.opentelemetry.io/otel/exporters
+              desc: the tracing pipeline is initialised by platform-gincommon only
+        metrics-collectors:
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/test/**"
+            - "!**/internal/observability/**"
+          deny:
+            - pkg: github.com/prometheus/client_golang
+              desc: collectors are built in internal/observability with platform-gincommon constructors
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: 'pgxpool\.(New|NewWithConfig|Connect|ParseConfig)$'
+          msg: "construct pools only via pgcommon.NewPool and configure them with pgcommon.Config — never pgxpool directly"
+        - pattern: 'pgx\.(Connect|ConnectConfig|ParseConfig)$'
+          msg: "connections and their configuration go through pgcommon only"
+        - pattern: 'sql\.Open$'
+          msg: "this service uses pgx through pgcommon, not database/sql"
+        - pattern: 'otel\.SetTracerProvider$'
+          msg: "the tracing pipeline is initialised by platform-gincommon only"
     revive:
       rules:
         - name: var-naming
@@ -24,22 +75,44 @@ linters:
         - name: error-strings
         - name: error-naming
         - name: if-return
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - hugeParam
+        - rangeValCopy
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     wrapcheck:
       ignore-package-globs:
         - github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/*
 
   exclusions:
     paths:
-      - gen/
       - platform-libs/
       - internal/adapter/outbound/postgres/db/
       - internal/core/port/mocks/
-      - test/integration/
     rules:
       - path: _test\.go
         linters:
           - wrapcheck
           - unparam
+          - noctx
+          - gosec
+          - contextcheck
+          - bodyclose
+      - path: ^test/
+        linters:
+          - noctx
+          - gosec
+          - contextcheck
+          - bodyclose
+      - path: ^test/workflow/replay/gen/
+        text: exitAfterDefer
+        linters:
+          - gocritic
       - path: internal/
         text: "exported: "
         linters:
@@ -50,7 +123,6 @@ formatters:
     - goimports
   exclusions:
     paths:
-      - gen/
       - platform-libs/
       - internal/adapter/outbound/postgres/db/
       - internal/core/port/mocks/
