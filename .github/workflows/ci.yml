@@ -383,5 +383,42 @@ jobs:
     if: always() && github.event_name == 'pull_request'
     needs: [ci-gate, validate-quality, validate-test, build-image-cache, trivy-cve-scan, smoke-tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
-      - run: echo "All CI gates are real as of T1.12 — build, scan, and smoke-test all images (ci-gate run=${{ needs.ci-gate.outputs.run }})"
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage
+          path: .coverage
+        continue-on-error: true
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Compute coverage percentage
+        id: cov
+        run: |
+          if [ -f .coverage/coverage.out ]; then
+            pct=$(go tool cover -func=.coverage/coverage.out | tail -1 | awk '{print $3}')
+          else
+            pct="n/a"
+          fi
+          echo "pct=$pct" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/github-script@v7
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+          COVERAGE_PCT: ${{ steps.cov.outputs.pct }}
+        with:
+          script: |
+            const prSummary = require('./.github/scripts/pr-summary.js');
+            await prSummary({ github, context });

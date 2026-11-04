@@ -78,6 +78,13 @@ jobs:
       - name: Coverage threshold gate
         run: make cover
 
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: .coverage/coverage.out
+          if-no-files-found: ignore
+
       - name: Architecture lint
         run: make arch-lint
 

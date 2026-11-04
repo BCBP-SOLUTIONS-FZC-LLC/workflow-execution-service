@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The `PR summary` job posts the sticky pull request comment with the job results and the coverage figure (`.github/scripts/pr-summary.js`, as the other workflow repositories do); it only printed a line before. The test job uploads the merged coverage profile for it.
 - `github.com/go-jose/go-jose/v4` moves from v4.1.4 to v4.1.8 (an indirect module of the connector worker) so the image scan no longer reports CVE-2026-116587; the code never called the affected function.
 - The `TenantMembershipsPurged` inbound description says IAM also sends `tenant_id` and `actor_id`, which Execution does not read, and the LLD (revision 1.144) records that the provisioned names of IAM's user and delegation topics are to be confirmed (an SNS topic name cannot contain a dot).
 - A force-back on a `RUNNING` instance with no completed step answers `409 FORCE_BACK_NO_SAVED_BRANCH`, as the OpenAPI and the LLD (revision 1.143) already said; it answered `INVALID_INSTANCE_STATE`.
