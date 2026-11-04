@@ -28,6 +28,10 @@ function icon(result) {
 module.exports = async function prSummary({ github, context }) {
   const jobResults = JSON.parse(process.env.JOB_RESULTS || "{}");
   const coveragePct = process.env.COVERAGE_PCT || "n/a";
+  const coverageMin = process.env.COVERAGE_MIN;
+  const coverageRow = coverageMin
+    ? `| ${parseFloat(coveragePct) >= parseFloat(coverageMin) ? "✅" : "❌"} | Coverage ≥ ${coverageMin}% | \`${coveragePct}\` |`
+    : `| | Total coverage (the tests job holds each package to its floor) | \`${coveragePct}\` |`;
 
   const rows = JOB_LABELS.filter(([id]) => jobResults[id])
     .map(([id, label]) => {
@@ -50,7 +54,7 @@ module.exports = async function prSummary({ github, context }) {
     "| | Check | Result |",
     "|---|---|---|",
     rows,
-    `| | Coverage ≥ 95% | \`${coveragePct}\` |`,
+    coverageRow,
     "",
     "📦 Image built for `linux/amd64` · merges to `main` are signed with Cosign",
     `🔍 [Security tab](https://github.com/${context.repo.owner}/${context.repo.repo}/security)`,
