@@ -11,6 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 ### Changed
 
 - The compat job runs against the Definition Service branch that has the same name as this one when it exists, otherwise against its `main`, and prints the ref it chose (`compat_peer_ref` still overrides it). `api/contracts/SOURCES` tracks `main`. Neither depends on a branch that gets deleted any more.
+- Dependency updates: `workflow-models` v2.1.1 and `workflow-connectors` v2.3.0 (the releases of the release candidates this service pinned), `platform-pgcommon/v2` v2.0.2, and the `golang.org/x` modules they pull in (`x/net` v0.62.0 among them).
 - CI: the coverage step runs `make cover-check-pkg`, so each package is held to its floor (it only printed the total before). The PR summary comment shows the total without a made-up limit.
 - The `PR summary` job posts the sticky pull request comment with the job results and the coverage figure (`.github/scripts/pr-summary.js`, as the other workflow repositories do); it only printed a line before. The test job uploads the merged coverage profile for it.
 - `github.com/go-jose/go-jose/v4` moves from v4.1.4 to v4.1.8 (an indirect module of the connector worker) so the image scan no longer reports CVE-2026-116587; the code never called the affected function.
