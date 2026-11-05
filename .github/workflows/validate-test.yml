@@ -4,10 +4,10 @@ name: Validate / Test
   workflow_call:
     inputs:
       compat_peer_ref:
-        description: 'Branch or tag of the Definition Service the compat job runs against'
+        description: 'Branch or tag of the Definition Service the compat job runs against; empty means the branch named like this one if the Definition Service has it, otherwise main'
         type: string
         required: false
-        default: feat/service
+        default: ''
       compat_consumer_ref:
         description: 'Branch or tag of the Workflow-Events Consumer the compat job runs'
         type: string
@@ -93,7 +93,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      COMPAT_PEER_REF: ${{ inputs.compat_peer_ref }}
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_EC2_METADATA_DISABLED: 'true'
@@ -105,11 +104,29 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
 
+      - name: Resolve the Definition Service ref
+        id: peer
+        env:
+          PEER_REF: ${{ inputs.compat_peer_ref }}
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
+          READ_TOKEN: ${{ secrets.CI_REPO_READ_TOKEN || secrets.GO_PRIVATE_TOKEN }}
+        run: |
+          set -euo pipefail
+          ref="$PEER_REF"
+          if [ -z "$ref" ]; then
+            ref=main
+            if git ls-remote --exit-code --heads "https://x-access-token:${READ_TOKEN}@github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-definition-service.git" "refs/heads/${HEAD_REF}" >/dev/null 2>&1; then
+              ref="$HEAD_REF"
+            fi
+          fi
+          echo "Definition Service ref: ${ref}"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout the Definition Service
         uses: actions/checkout@v7
         with:
           repository: BCBP-SOLUTIONS-FZC-LLC/workflow-definition-service
-          ref: ${{ env.COMPAT_PEER_REF }}
+          ref: ${{ steps.peer.outputs.ref }}
           path: peer/definition_service
           persist-credentials: false
           token: ${{ secrets.CI_REPO_READ_TOKEN || secrets.GO_PRIVATE_TOKEN }}
