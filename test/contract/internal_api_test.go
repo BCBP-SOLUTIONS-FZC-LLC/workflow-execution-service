@@ -40,12 +40,14 @@ func (g *guard) CheckActiveInstances(_ context.Context, tenantID, workflowID uui
 }
 
 type pauser struct {
-	err error
-	got [2]uuid.UUID
+	err        error
+	got        [2]uuid.UUID
+	department *uuid.UUID
 }
 
-func (p *pauser) PauseUserTasks(_ context.Context, tenantID, userID uuid.UUID) error {
+func (p *pauser) PauseUserTasks(_ context.Context, tenantID, userID uuid.UUID, departmentID *uuid.UUID) error {
 	p.got = [2]uuid.UUID{tenantID, userID}
+	p.department = departmentID
 	return p.err
 }
 

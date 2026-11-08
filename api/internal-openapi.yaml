@@ -397,7 +397,13 @@ paths:
         invalidates a published version the user is a default assignee of.
         Each RUNNING instance with an active assignment for the user is sent a
         pause signal with initiator safety_net; a failure to signal one
-        instance is logged and skipped, so a retry is safe.
+        instance is logged and skipped, so a retry is safe. With the optional
+        department_id only the instances holding an active task of the user
+        in that department are signalled (a user losing one of several
+        departments keeps the others running); without it every instance
+        holding a task of the user is signalled, as a full membership
+        revocation needs. The pause stops the whole instance, so an instance
+        that also holds the user's task in another department is paused too.
       parameters:
         - in: path
           name: user_id
@@ -412,6 +418,14 @@ paths:
               required: [tenant_id]
               properties:
                 tenant_id: { type: string, format: uuid }
+                department_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: >
+                    Optional. Limits the pause to the user's tasks in this
+                    department. Absent or null means every department. A value
+                    that is not a UUID, or the all-zero UUID, is a 400.
       responses:
         "204":
           description: The pause signals were sent. No body.

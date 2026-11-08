@@ -26,7 +26,7 @@ func (s *UserTaskPauser) logger() port.Logger {
 	return noopLogger{}
 }
 
-func (s *UserTaskPauser) PauseUserTasks(ctx context.Context, tenantID, userID uuid.UUID) error {
+func (s *UserTaskPauser) PauseUserTasks(ctx context.Context, tenantID, userID uuid.UUID, departmentID *uuid.UUID) error {
 	assignments, err := s.Assignments.ListActiveByUser(ctx, tenantID, userID)
 	if err != nil {
 		return err
@@ -37,6 +37,9 @@ func (s *UserTaskPauser) PauseUserTasks(ctx context.Context, tenantID, userID uu
 		task, err := s.Tasks.GetByID(ctx, tenantID, a.TaskID)
 		if err != nil {
 			s.logger().Warn("skipping assignment with unreadable task during safety-net pause", map[string]any{"assignment_id": a.ID, "error": err.Error()})
+			continue
+		}
+		if departmentID != nil && task.DepartmentID != *departmentID {
 			continue
 		}
 		if _, ok := seen[task.WorkflowInstanceID]; ok {

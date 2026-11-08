@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- `POST /api/v1/internal/users/{user_id}/pause-tasks` takes an optional `department_id` (UUID; absent or null means every department): only the instances holding the user's task in that department are paused, so a department-membership revocation no longer pauses the user's work elsewhere; a malformed or all-zero id answers `400 BAD_REQUEST` (LLD revision 1.145).
 - The compat job runs against the Definition Service branch that has the same name as this one when it exists, otherwise against its `main`, and prints the ref it chose (`compat_peer_ref` still overrides it). `api/contracts/SOURCES` tracks `main`. Neither depends on a branch that gets deleted any more.
 - Dependency updates: `workflow-models` v2.1.1 and `workflow-connectors` v2.3.0 (the releases of the release candidates this service pinned), `platform-pgcommon/v2` v2.0.2, and the `golang.org/x` modules they pull in (`x/net` v0.62.0 among them).
 - CI: the coverage step runs `make cover-check-pkg`, so each package is held to its floor (it only printed the total before). The PR summary comment shows the total without a made-up limit.

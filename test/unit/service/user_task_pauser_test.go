@@ -29,7 +29,7 @@ func TestUserTaskPauser_PauseUserTasks(t *testing.T) {
 		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
 
 		pauser := &service.UserTaskPauser{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal}
-		err := pauser.PauseUserTasks(context.Background(), tenantID, userID)
+		err := pauser.PauseUserTasks(context.Background(), tenantID, userID, nil)
 		require.NoError(t, err)
 		require.Len(t, temporal.signals, 1)
 		assert.Equal(t, port.SignalInstancePause, temporal.signals[0].SignalName)
@@ -54,7 +54,7 @@ func TestUserTaskPauser_PauseUserTasks(t *testing.T) {
 		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
 
 		pauser := &service.UserTaskPauser{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal}
-		err := pauser.PauseUserTasks(context.Background(), tenantID, userID)
+		err := pauser.PauseUserTasks(context.Background(), tenantID, userID, nil)
 		require.NoError(t, err, "a non-pausable instance is logged and skipped, not a batch failure")
 		assert.Empty(t, temporal.signals)
 	})
@@ -62,7 +62,7 @@ func TestUserTaskPauser_PauseUserTasks(t *testing.T) {
 	t.Run("no active assignments is a valid, non-error outcome", func(t *testing.T) {
 		instances := newFakeInstanceRepo()
 		pauser := &service.UserTaskPauser{Instances: instances, Assignments: newFakeAssignmentRepo(), Tasks: newFakeTaskRepo(), Temporal: &fakeTemporalClient{}}
-		err := pauser.PauseUserTasks(context.Background(), uuid.New(), uuid.New())
+		err := pauser.PauseUserTasks(context.Background(), uuid.New(), uuid.New(), nil)
 		require.NoError(t, err)
 	})
 
@@ -70,7 +70,7 @@ func TestUserTaskPauser_PauseUserTasks(t *testing.T) {
 		assignments := newFakeAssignmentRepo()
 		assignments.listActiveByUserErr = assert.AnError
 		pauser := &service.UserTaskPauser{Instances: newFakeInstanceRepo(), Assignments: assignments, Tasks: newFakeTaskRepo(), Temporal: &fakeTemporalClient{}}
-		err := pauser.PauseUserTasks(context.Background(), uuid.New(), uuid.New())
+		err := pauser.PauseUserTasks(context.Background(), uuid.New(), uuid.New(), nil)
 		assert.Error(t, err)
 	})
 
@@ -80,7 +80,7 @@ func TestUserTaskPauser_PauseUserTasks(t *testing.T) {
 		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: uuid.New(), UserID: userID, IsActive: true}
 		pauser := &service.UserTaskPauser{Instances: newFakeInstanceRepo(), Assignments: assignments, Tasks: newFakeTaskRepo(), Temporal: &fakeTemporalClient{}}
 
-		err := pauser.PauseUserTasks(context.Background(), tenantID, userID)
+		err := pauser.PauseUserTasks(context.Background(), tenantID, userID, nil)
 		require.NoError(t, err)
 	})
 
@@ -94,7 +94,7 @@ func TestUserTaskPauser_PauseUserTasks(t *testing.T) {
 		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
 		pauser := &service.UserTaskPauser{Instances: newFakeInstanceRepo(), Assignments: assignments, Tasks: tasks, Temporal: &fakeTemporalClient{}, Log: log}
 
-		err := pauser.PauseUserTasks(context.Background(), tenantID, userID)
+		err := pauser.PauseUserTasks(context.Background(), tenantID, userID, nil)
 		require.NoError(t, err)
 		assert.NotEmpty(t, log.warnCalls)
 	})
@@ -113,7 +113,7 @@ func TestUserTaskPauser_PauseUserTasks(t *testing.T) {
 		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
 		pauser := &service.UserTaskPauser{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal, Log: log}
 
-		err := pauser.PauseUserTasks(context.Background(), tenantID, userID)
+		err := pauser.PauseUserTasks(context.Background(), tenantID, userID, nil)
 		require.NoError(t, err)
 		assert.NotEmpty(t, log.warnCalls)
 	})
@@ -135,7 +135,7 @@ func TestUserTaskPauser_PauseUserTasks(t *testing.T) {
 		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: taskB.ID, UserID: userID, IsActive: true}
 
 		pauser := &service.UserTaskPauser{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal}
-		err := pauser.PauseUserTasks(context.Background(), tenantID, userID)
+		err := pauser.PauseUserTasks(context.Background(), tenantID, userID, nil)
 		require.NoError(t, err)
 		assert.Len(t, temporal.signals, 1)
 	})

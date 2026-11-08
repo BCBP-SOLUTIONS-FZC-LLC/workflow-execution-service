@@ -32,7 +32,8 @@ func (h *Handler) ActiveInstances(c *gin.Context) {
 }
 
 type pauseUserTasksReq struct {
-	TenantID uuid.UUID `json:"tenant_id" binding:"required"`
+	TenantID     uuid.UUID  `json:"tenant_id" binding:"required"`
+	DepartmentID *uuid.UUID `json:"department_id"`
 }
 
 func (h *Handler) PauseUserTasks(c *gin.Context) {
@@ -45,7 +46,11 @@ func (h *Handler) PauseUserTasks(c *gin.Context) {
 	if !bindInternalJSON(c, &req) {
 		return
 	}
-	if err := h.userTaskPauser.PauseUserTasks(c.Request.Context(), req.TenantID, userID); err != nil {
+	if req.DepartmentID != nil && *req.DepartmentID == uuid.Nil {
+		writeProblem(c, http.StatusBadRequest, CodeBadRequest, "department_id must be a non-zero UUID", nil)
+		return
+	}
+	if err := h.userTaskPauser.PauseUserTasks(c.Request.Context(), req.TenantID, userID, req.DepartmentID); err != nil {
 		errResponse(c, err)
 		return
 	}

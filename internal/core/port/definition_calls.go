@@ -11,5 +11,5 @@ type ArchiveGuard interface {
 }
 
 type UserTaskPauser interface {
-	PauseUserTasks(ctx context.Context, tenantID, userID uuid.UUID) error
+	PauseUserTasks(ctx context.Context, tenantID, userID uuid.UUID, departmentID *uuid.UUID) error
 }
