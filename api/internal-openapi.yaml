@@ -5,8 +5,9 @@ info:
   description: >
     Service-to-service endpoints under /api/v1/internal. They are not routed by
     the public gateway and carry no gateway identity headers: the caller
-    presents x-internal-token, and the tenant comes from the request (a query
-    parameter, the body or the event envelope), not from x-tenant-id. This
+    presents the reserved system identity (`x-tenant-roles: iam-system` and an
+    `x-user-id`) under the mesh's mutual TLS, and the tenant comes from the
+    request (a query parameter, the body or the event envelope), not from x-tenant-id. This
     document is the authority for these endpoints. A service that calls them
     keeps a byte-identical copy and tests its requests against it (execution
     LLD §5.3).
@@ -43,15 +44,18 @@ components:
     InternalServiceAuth:
       type: apiKey
       in: header
-      name: x-internal-token
+      name: x-tenant-roles
       description: >
-        Service-to-service credential for the internal route group (RequireInternalToken,
-        INTERNAL_API_TOKEN) — the same convention Definition Service already ships. These
-        routes are NOT exposed through the Envoy public gateway and do NOT carry gateway
-        identity headers; they are restricted to in-mesh callers by a Kubernetes
-        NetworkPolicy AND authenticated by this shared secret — defense-in-depth, not either
-        control alone (§9.2). The tenant context for these routes is taken from the request
-        payload, not from x-tenant-id.
+        The reserved system role `iam-system`, sent with an `x-user-id`, the way the IAM
+        services call each other. These routes are NOT exposed through the Envoy public
+        gateway and do NOT carry gateway identity headers. Mutual TLS in the mesh names the
+        caller, and the authorization policy admits each route group for its own callers:
+        `events` (the shared events consumer), `definition` (the Definition Service: the
+        active-instances read and pause-tasks), `workflow-client` (Org & Membership:
+        delegate-impact, reassign-delegate and cancel-by-delegate) and `connector-tasks` (the
+        connector worker). A Kubernetes NetworkPolicy admits only the named caller pods. The
+        headers are not a credential (§9.2). The tenant context for these routes is taken
+        from the request payload, not from x-tenant-id.
 
   parameters:
     CursorQuery:
@@ -239,7 +243,7 @@ components:
 
   responses:
     Unauthorized:
-      description: Missing or wrong x-internal-token.
+      description: Missing or wrong internal caller identity.
       content:
         application/problem+json:
           schema:
@@ -248,7 +252,7 @@ components:
             type: "https://errors.bcbp.io/execution/unauthorized"
             title: "Unauthorized"
             status: 401
-            detail: "missing or invalid x-internal-token header"
+            detail: "missing or invalid internal caller identity"
             instance: "/api/v1/internal/workflows/delegate-impact"
             code: "UNAUTHORIZED"
 
@@ -396,8 +400,19 @@ paths:
         Called by the Definition Service when a membership revocation
         invalidates a published version the user is a default assignee of.
         Each RUNNING instance with an active assignment for the user is sent a
-        pause signal with initiator safety_net; a failure to signal one
-        instance is logged and skipped, so a retry is safe.
+        pause signal with initiator safety_net. The call attempts every
+        instance. A signal that finds the workflow already gone counts as
+        paused. A failed read of a task or an instance, or a failed signal of
+        any other kind, does not stop the others and makes the call answer 503
+        UPSTREAM_UNAVAILABLE after the last attempt, so the caller retries,
+        and a retry is safe. The call is complete when every instance is
+        paused or gone. With the optional
+        department_id only the instances holding an active task of the user
+        in that department are signalled (a user losing one of several
+        departments keeps the others running); without it every instance
+        holding a task of the user is signalled, as a full membership
+        revocation needs. The pause stops the whole instance, so an instance
+        that also holds the user's task in another department is paused too.
       parameters:
         - in: path
           name: user_id
@@ -412,6 +427,14 @@ paths:
               required: [tenant_id]
               properties:
                 tenant_id: { type: string, format: uuid }
+                department_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: >
+                    Optional. Limits the pause to the user's tasks in this
+                    department. Absent or null means every department. A value
+                    that is not a UUID, or the all-zero UUID, is a 400.
       responses:
         "204":
           description: The pause signals were sent. No body.
@@ -425,6 +448,8 @@ paths:
           $ref: "#/components/responses/UnsupportedMediaType"
         "500":
           $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /api/v1/internal/events/delegation:
     post:
