@@ -36,6 +36,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- Contract copies: `make contract-check` no longer reads a branch name from `api/contracts/SOURCES` (its branch column is gone). It compares the copy with the Definition Service's branch named like the branch under test when that branch exists, and with `main` otherwise, the rule the compat job already uses; `CONTRACT_SRC_REF` overrides it. `make contract-check-test` tests the script and runs in `make check`.
 - Docs only: the in-repo LLD, the internal OpenAPI and the copy of the Definition internal spec match the design repository again. No code changed.
 - Docs only: the in-repo LLD is brought to 1.151 and the internal OpenAPI states that a pause signal that finds the workflow already gone counts as paused (the stale window of the flag cache ends at twice the TTL, the alias registry applies the third empty answer in a row, and the ingest metric labels refusals before the type check `unknown`). No code changed.
 - Chart: fixed names (`fullnameOverride: workflow-execution-service`), per-path caller rules (`authorizationPolicy.internalRoutes` replaces `internalCallers`: events, Definition calls, Org & Membership routes, connector-task callbacks), the NetworkPolicy admits the connector worker and Org & Membership, the render refuses a disabled policy in staging and prod unless `authorizationPolicy.allowDisabled`, `appProtocol: http` on the metrics ports, the Entitlements egress rule needs ports and pods, and the chart tests decode the rendered rules.

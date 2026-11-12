@@ -1,2 +1,2 @@
-# <copy> <owner/repo> <path in that repo> <branch> <commit the copy was taken at>
-definition-internal-openapi.yaml BCBP-SOLUTIONS-FZC-LLC/workflow-definition-service api/internal-openapi.yaml docs/review-sync e6a1295
+# <copy> <owner/repo> <path in that repo> <commit the copy was taken at>
+definition-internal-openapi.yaml BCBP-SOLUTIONS-FZC-LLC/workflow-definition-service api/internal-openapi.yaml e6a1295
