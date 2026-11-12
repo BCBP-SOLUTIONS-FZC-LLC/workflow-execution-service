@@ -217,6 +217,15 @@ spec:
             summary: "Outbound event dead-lettered for {{ "{{" }} $labels.event_type {{ "}}" }}"
             description: "An event failed all publish retries; operable via the outbox runner's DLQ replay (LLD §6.6, §7.6)."
 
+        - alert: ConnectorDispatchDeadLettered
+          expr: increase(workflow_execution_service_connector_dispatch_dead_lettered_total[5m]) > 0
+          labels:
+            severity: page
+          annotations:
+            runbook: "workflow-execution-service/connector-dead-letter"
+            summary: "Connector task entry dead-lettered for {{ "{{" }} $labels.connector_type {{ "}}" }}"
+            description: "A connector stream entry exceeded its delivery cap, so its task stays open and its instance waits; the worker's callback Warn lines name the status the Execution API answered."
+
         - alert: TenantPurgeFailing
           expr: increase(workflow_execution_service_tenant_purge_failures_total[{{ include "workflow-execution-service.purgeAlertWindow" . }}]) > 0
           for: 5m

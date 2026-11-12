@@ -1,4 +1,5 @@
 {{- include "workflow-execution-service.validateEnv" . }}
+{{- include "workflow-execution-service.validateAuthorizationPolicy" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -80,6 +81,14 @@ spec:
               {{- end }}
             - name: ELIGIBILITY_BASE_URL
               value: {{ required "env.eligibilityBaseURL is required: the API refuses to start without it" .Values.env.eligibilityBaseURL | quote }}
+            - name: ENTITLEMENTS_BASE_URL
+              value: {{ .Values.env.entitlementsBaseURL | quote }}
+            - name: ENTITLEMENTS_CLIENT_TIMEOUT
+              value: {{ .Values.env.entitlementsClientTimeout | quote }}
+            - name: ENTITLEMENTS_CACHE_TTL
+              value: {{ .Values.env.entitlementsCacheTTL | quote }}
+            - name: ENTITLEMENTS_FRESHNESS_BOUND
+              value: {{ .Values.env.entitlementsFreshnessBound | quote }}
             - name: OUTBOX_POLL_INTERVAL
               value: {{ .Values.env.outboxPollInterval | quote }}
             - name: OUTBOX_BATCH_SIZE
@@ -146,20 +155,6 @@ spec:
                   optional: true
             - name: DEFINITION_SERVICE_URL
               value: {{ .Values.definitionServiceURL | quote }}
-            - name: DEFINITION_SERVICE_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "workflow-execution-service.secretName" . }}
-                  key: DEFINITION_SERVICE_TOKEN
-                  {{- /* secret.yaml requires it outside dev */}}
-                  optional: {{ has .Values.env.appEnv (list "dev" "local") }}
-            - name: INTERNAL_API_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "workflow-execution-service.secretName" . }}
-                  key: INTERNAL_API_TOKEN
-                  {{- /* secret.yaml requires it outside dev */}}
-                  optional: {{ has .Values.env.appEnv (list "dev" "local") }}
             {{- if .Values.temporalMTLS.enabled }}
             - name: TEMPORAL_TLS_CERT_PATH
               value: /etc/temporal-tls/tls.crt

@@ -91,13 +91,6 @@ spec:
                   key: TEMPORAL_HOST_PORT
             - name: DEFINITION_SERVICE_URL
               value: {{ .Values.definitionServiceURL | quote }}
-            - name: DEFINITION_SERVICE_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "workflow-execution-service.secretName" . }}
-                  key: DEFINITION_SERVICE_TOKEN
-                  {{- /* secret.yaml requires it outside dev */}}
-                  optional: {{ has .Values.env.appEnv (list "dev" "local") }}
             {{- if .Values.temporalMTLS.enabled }}
             - name: TEMPORAL_TLS_CERT_PATH
               value: /etc/temporal-tls/tls.crt

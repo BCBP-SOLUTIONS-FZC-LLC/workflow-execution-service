@@ -4,8 +4,8 @@
 # injected by the Envoy Gateway's ext_authz filter after JWT validation, never sent
 # by the browser client itself. Allow-listing them here would
 # incorrectly imply a client is expected to set them, which the mesh's trust
-# model is specifically designed to prevent. x-internal-token is excluded for
-# the same reason: it is a service-to-service credential, never a browser one.
+# model is specifically designed to prevent. x-tenant-roles is excluded for the same
+# reason: the reserved iam-system role marks a service-to-service call, never a browser one.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
 metadata:

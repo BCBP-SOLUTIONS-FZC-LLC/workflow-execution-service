@@ -28,4 +28,23 @@ spec:
     - port: metrics
       path: /metrics
       interval: {{ .Values.serviceMonitor.interval }}
+{{- if .Values.connectorWorker.enabled }}
+---
+# The connector worker has no Service; it serves /metrics on its health port, and the
+# dead-letter alert reads a counter only this process emits.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "workflow-execution-service.connectorWorkerFullname" . }}
+  labels:
+    {{- include "workflow-execution-service.connectorWorkerSelectorLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "workflow-execution-service.connectorWorkerSelectorLabels" . | nindent 6 }}
+  podMetricsEndpoints:
+    - port: health
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}
 {{- end }}

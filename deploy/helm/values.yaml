@@ -6,7 +6,10 @@ image:
   pullPolicy: IfNotPresent
 
 nameOverride: ""
-fullnameOverride: ""
+# Fixed on purpose: the Services and ServiceAccounts render as workflow-execution-service-api,
+# -worker and -connector-worker whatever the release is called, so the addresses below and the
+# caller lists in the Definition and event consumer charts stay true. Install one release per namespace.
+fullnameOverride: workflow-execution-service
 
 # replicas:2 on both is a stated LLD §7.5 precondition, not an arbitrary
 # choice: minAvailable:1 at replicas:1 would let the PDB block every
@@ -172,11 +175,11 @@ containerSecurityContext:
 
 # The Definition Service's internal HTTP Service, read by the API (compiled
 # plans), the Worker (GetCompiledPlan) and the connector-worker (the alias
-# registry) — LLD §5.3. Its token is secret.secretValues.DEFINITION_SERVICE_TOKEN.
+# registry) — LLD §5.3.
 definitionServiceURL: http://workflow-definition-service:8080
 
 # Plain env vars — non-secret config only, matching internal/config's real
-# fields. Secrets (INTERNAL_API_TOKEN, DEFINITION_SERVICE_TOKEN, ...) come from
+# fields. Secrets (DATABASE_URL, OPENBAO_TOKEN, ...) come from
 # the Secret below.
 env:
   appEnv: prod
@@ -195,6 +198,16 @@ env:
   eligibilityBaseURL: ""
   # The identity subsystem's Token Service, read for each tenant's automation principal. Required outside dev.
   tokenServiceBaseURL: ""
+  # The Entitlements service (commercial namespace). When set, the API reads the tenant's dedicated_workflow_queue
+  # grant at instance start and routes the instance to the tenant's own queue only when it is held; empty keeps
+  # the registry (filled from the plan on TenantStateChanged) as the only rule. Not required in any environment.
+  entitlementsBaseURL: ""
+  # Bound on one Entitlements read.
+  entitlementsClientTimeout: 5s
+  # How long a tenant's feature flags stay fresh before the next read.
+  entitlementsCacheTTL: 60s
+  # A read that fails keeps serving the last flags for this long; beyond it the start falls back to the registry. Not below the TTL.
+  entitlementsFreshnessBound: 10m
   outboxPollInterval: 500ms
   outboxBatchSize: "50"
   # Per-process Postgres pool ceiling. A worker runs up to 1,000 concurrent activities (200 per tenant
@@ -239,10 +252,9 @@ secret:
     # The outbox relay's own DSN, a role with BYPASSRLS; required outside dev.
     OUTBOX_RELAY_DATABASE_URL: ""
     OPENBAO_TOKEN: ""
-    # This service's own token, which its internal-API callers present.
-    INTERNAL_API_TOKEN: ""
-    # The Definition Service's INTERNAL_API_TOKEN, sent on its internal API.
-    DEFINITION_SERVICE_TOKEN: ""
+    # Optional. Sent as x-internal-token on the connector worker's calls to alias targets only;
+    # empty sends the text "unset", because workflow-connectors refuses an empty token. The Workflow services' internal routes check no token.
+    CONNECTOR_ALIAS_CALL_TOKEN: ""
 
 # LLD §7.5's mTLS/namespace-bootstrap note: registering the Temporal
 # namespace and provisioning mTLS material are cluster-operator actions this
@@ -253,20 +265,20 @@ temporalMTLS:
   secretName: ""
 
 networkPolicy:
-  # LLD §5.7/§9.2: /internal/* must be restricted to the Shared
-  # Workflow-Events Consumer and Definition Service. No dedicated internal
-  # port exists yet (cmd/server has one httpPort for every route, and its
-  # real listener isn't built), so this policy scopes all of port 8080 to
-  # these pod identities — coarse L3/L4 defense-in-depth alongside the
-  # x-internal-token app-layer check (LLD §5.7), not a replacement for it.
-  # Revisit once a dedicated internal port exists.
+  # LLD §5.7/§9.2: the internal routes are for in-cluster callers only. One HTTP port (8080) serves every
+  # route, so this policy admits the gateway and the named callers onto that port (layer 3/4, no paths);
+  # the authorizationPolicy below is what separates the internal paths from the public ones and one
+  # caller from another. The mesh and these policies are the protection: the x-user-id and
+  # x-tenant-roles headers the service checks are not a credential.
   enabled: true
-  # Regular browser-gateway traffic (/api/v1/* routes) — the same port
-  # allowedCallers restricts for /internal/* traffic, since there's no
-  # dedicated internal port to split them onto (see the note above).
+  # Regular browser-gateway traffic (/api/v1/* routes), on the same port as the callers below.
   ingressControllerNamespaceSelector:
     matchLabels:
       kubernetes.io/metadata.name: gateway
+  # Callers admitted to the API port: the event consumer, the Definition Service and Org & Membership.
+  # An entry with a namespaceSelector matches pods of that namespace only; one without matches the
+  # release namespace. The connector worker is admitted by the template itself when it is enabled.
+  # PLACEHOLDER, confirm with Platform: the iam namespace and the Org & Membership pod label.
   allowedCallers:
     - podSelector:
         matchLabels:
@@ -274,6 +286,12 @@ networkPolicy:
     - podSelector:
         matchLabels:
           app.kubernetes.io/name: workflow-definition-service
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: iam-org-membership
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: iam
   # Named same-namespace egress targets, replacing a blanket podSelector: {}
   # allow. The Definition Service is the only same-namespace outbound
   # dependency of the API and the Worker (the compiled-plan read).
@@ -298,6 +316,17 @@ networkPolicy:
         matchLabels:
           kubernetes.io/metadata.name: iam
       ports: [8080]
+  # Egress to the Entitlements service in the commercial namespace. Rendered only when
+  # env.entitlementsBaseURL is set and both ports and podSelector are non-empty. The pod labels and port are PLACEHOLDERS until
+  # Platform names the real ones; replace them before enabling the setting.
+  entitlementsEgress:
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: commercial-entitlements
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: commercial
+    ports: [8080]
   metricsIngress:
     enabled: true
     namespaceSelector:
@@ -309,7 +338,54 @@ networkPolicy:
   additionalIngressRules: []
   additionalEgressRules: []
 
-# Requires the Prometheus Operator CRDs (ServiceMonitor/PrometheusRule).
+# authorizationPolicy: Istio AuthorizationPolicy (security.istio.io/v1, action ALLOW) that replaces the
+# retired shared internal token. The mesh names each caller by its service account (mutual TLS), so the
+# policy needs a sidecar on both ends; a caller without a mesh identity is refused on the internal paths.
+# The first rule admits every request outside /api/v1/internal/* (gateway routes, probes, metrics).
+# Each entry of internalRoutes then admits its own callers onto its own paths, one rule per entry.
+# An entry with no caller renders no rule, so its paths stay closed. The policy selects the API pods.
+# Turning it off leaves the NetworkPolicy alone in front of the internal routes: the render refuses that
+# in staging and prod unless allowDisabled is true. PeerAuthentication (mesh-wide mTLS) is Platform's.
+authorizationPolicy:
+  enabled: true
+  allowDisabled: false
+  trustDomain: cluster.local
+  # PLACEHOLDERS, confirm with Platform: the namespaces and ServiceAccount names below.
+  # Istio matches a wildcard at the start or the end of a path only, hence "*/active-instances".
+  # The route named connector-tasks also admits this chart's own connector worker (release namespace)
+  # when connectorWorker.enabled is true; keep that name.
+  internalRoutes:
+    # The event consumer forwards the workflow, user and tenant events.
+    - name: events
+      paths:
+        - /api/v1/internal/events/*
+      callers:
+        - namespace: workflow-app
+          serviceAccount: workflow-events-consumer
+    # The Definition Service: the archive guard and the pause of a removed member's tasks.
+    - name: definition
+      paths:
+        - /api/v1/internal/users/*
+        - "*/active-instances"
+      callers:
+        - namespace: workflow-app
+          serviceAccount: workflow-definition-service
+    # Org & Membership: the delegate impact preview and the bulk reassign and cancel.
+    - name: workflow-client
+      paths:
+        - /api/v1/internal/workflows/delegate-impact
+        - /api/v1/internal/workflows/reassign-delegate
+        - /api/v1/internal/workflows/cancel-by-delegate
+      callers:
+        - namespace: iam
+          serviceAccount: iam-org-membership
+    # The connector worker resolves its tasks; the chart adds its principal.
+    - name: connector-tasks
+      paths:
+        - /api/v1/internal/connector-tasks/*
+      callers: []
+
+# Requires the Prometheus Operator CRDs (ServiceMonitor, PodMonitor, PrometheusRule).
 # Left disabled by default since neither this repo nor either reference repo
 # assumes the Operator is installed in every target cluster.
 serviceMonitor:

@@ -1,12 +1,9 @@
-# LLD §5.7/§9.2: /internal/* must be restricted to the Shared
-# Workflow-Events Consumer and Definition Service pod identities. Since
-# cmd/server exposes one HTTP port for both /api/v1/* (browser-gateway
-# traffic) and /internal/* (machine-to-machine traffic) — no dedicated
-# internal port exists yet — this policy allows both traffic classes onto
-# the same port rather than scoping the restriction to the path itself,
-# which a plain NetworkPolicy (L3/L4 only) cannot do. The x-internal-token
-# check at the application layer (LLD §5.7) is what actually enforces the
-# path-level boundary; this is defense-in-depth, not a replacement for it.
+# LLD §5.7/§9.2: the internal routes are for in-cluster callers only. cmd/server exposes one HTTP
+# port for /api/v1/* (gateway traffic) and /api/v1/internal/* (service-to-service traffic), and a
+# NetworkPolicy (layer 3/4) cannot tell paths apart, so this policy admits the gateway and the named
+# callers onto that port. The AuthorizationPolicy (authorizationpolicy.yaml) separates the internal
+# paths from the public ones and one caller from another. The mesh and these two policies are the
+# protection: the x-user-id and x-tenant-roles headers the service checks are not a credential.
 {{- if .Values.networkPolicy.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -32,14 +29,30 @@ spec:
         - port: {{ .Values.api.httpPort }}
           protocol: TCP
 
-    # Machine-to-machine /internal/* callers, on the same port (see note above).
+    # Machine-to-machine /api/v1/internal/* callers, on the same port (see note above). An entry
+    # with a namespaceSelector matches pods of that namespace; one without, the release namespace.
     {{- range .Values.networkPolicy.allowedCallers }}
     - from:
         - podSelector:
             matchLabels:
               {{- toYaml .podSelector.matchLabels | nindent 14 }}
+          {{- with .namespaceSelector }}
+          namespaceSelector:
+            matchLabels:
+              {{- toYaml .matchLabels | nindent 14 }}
+          {{- end }}
       ports:
         - port: {{ $.Values.api.httpPort }}
+          protocol: TCP
+    {{- end }}
+    {{- if .Values.connectorWorker.enabled }}
+    # The connector worker's task callbacks (connector-tasks routes).
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "workflow-execution-service.connectorWorkerSelectorLabels" . | nindent 14 }}
+      ports:
+        - port: {{ .Values.api.httpPort }}
           protocol: TCP
     {{- end }}
 
@@ -102,6 +115,22 @@ spec:
               {{- toYaml .namespaceSelector.matchLabels | nindent 14 }}
       ports:
         {{- range .ports }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+    {{- $ent := .Values.networkPolicy.entitlementsEgress }}
+    {{- if and .Values.env.entitlementsBaseURL $ent $ent.ports $ent.podSelector $ent.podSelector.matchLabels }}
+    # Entitlements service (commercial namespace), read for the dedicated_workflow_queue grant.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.entitlementsEgress.podSelector.matchLabels | nindent 14 }}
+          namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.entitlementsEgress.namespaceSelector.matchLabels | nindent 14 }}
+      ports:
+        {{- range .Values.networkPolicy.entitlementsEgress.ports }}
         - port: {{ . }}
           protocol: TCP
         {{- end }}

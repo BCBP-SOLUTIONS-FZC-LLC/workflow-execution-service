@@ -87,3 +87,23 @@ tests:
               runbook: workflow-execution-service/api-down
               summary: execution-service API has no healthy instances
               description: "No execution-service API pods have been scraped as healthy for 2 minutes. Check pod readiness: kubectl get pods -l app.kubernetes.io/component=api"
+
+  - name: a connector dead-letter pages at once and names the connector type
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_connector_dispatch_dead_lettered_total{connector_type="rest-call"}'
+        values: '0 0 1 1 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ConnectorDispatchDeadLettered
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: ConnectorDispatchDeadLettered
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              connector_type: rest-call
+            exp_annotations:
+              runbook: workflow-execution-service/connector-dead-letter
+              summary: "Connector task entry dead-lettered for rest-call"
+              description: "A connector stream entry exceeded its delivery cap, so its task stays open and its instance waits; the worker's callback Warn lines name the status the Execution API answered."
