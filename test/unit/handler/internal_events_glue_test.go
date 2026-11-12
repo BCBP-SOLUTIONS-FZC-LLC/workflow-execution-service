@@ -56,12 +56,12 @@ func TestHandleInternalEvent_SchemaRegistryFrame_UndecodableIs502(t *testing.T) 
 				return nil
 			}
 			router := newInternalRouter(newEventsHandler(fakes))
-			before := decodeFailedSampleCount(t, "UserDeleted")
+			before := decodeFailedSampleCount(t, "unknown")
 
 			w := postEvent(router, envelopeWithSchemaID("UserDeleted", uuid.New(), testTenantID, time.Now(), uuid.NewString(), framed))
 
 			assert.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
-			assert.Equal(t, before+1, decodeFailedSampleCount(t, "UserDeleted"))
+			assert.Equal(t, before+1, decodeFailedSampleCount(t, "unknown"))
 			assert.False(t, called)
 		})
 	}

@@ -5,7 +5,6 @@ package compat_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -22,7 +21,6 @@ import (
 
 	outboundhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
 // minRunnableFixtures is how many of Definition's own BPMN fixtures publish
@@ -53,7 +51,7 @@ func TestCompat(t *testing.T) {
 	t.Run("a revoked membership invalidates the version and pauses the user's work", func(t *testing.T) { e.revocation(t) })
 	t.Run("a revoked tenant membership invalidates the version and pauses the user's work", func(t *testing.T) { e.tenantRevocation(t) })
 	t.Run("IAM events reach both services through the event consumer", func(t *testing.T) { e.eventsThroughConsumer(t) })
-	t.Run("each service accepts only the other's configured token", func(t *testing.T) { e.tokens(t) })
+	t.Run("each service refuses an internal call without the system caller identity", func(t *testing.T) { e.tokens(t) })
 	t.Run("a version that cannot start is refused with the documented code", func(t *testing.T) { e.unstartable(t) })
 	t.Run("a connector alias written in Definition reaches the connector worker", func(t *testing.T) { e.aliases(t) })
 }
@@ -74,7 +72,7 @@ func definitionFixtures(t *testing.T, root string) []string {
 
 func (e *env) everyFixtureRuns(t *testing.T) {
 	tn := newTenant()
-	client := outboundhttp.NewDefinitionClient(e.definitionURL, definitionToken, 5*time.Second)
+	client := outboundhttp.NewDefinitionClient(e.definitionURL, 5*time.Second)
 	ran := 0
 	for _, path := range definitionFixtures(t, e.definitionDir) {
 		name := filepath.Base(filepath.Dir(filepath.Dir(path))) + "/" + filepath.Base(path)
@@ -207,7 +205,7 @@ func (e *env) revoke(t *testing.T, tn tenant, eventType string, user, department
 		ID: uuid.NewString(), Type: eventType, Source: "iam-org-membership",
 		TenantID: tn.id.String(), Timestamp: time.Now().UTC(), Payload: payload,
 	}
-	caller{t: t, baseURL: e.definitionURL, token: definitionToken}.must(http.MethodPost, "/api/v1/internal/events", env, http.StatusOK)
+	caller{t: t, baseURL: e.definitionURL, system: true}.must(http.MethodPost, "/api/v1/internal/events", env, http.StatusOK)
 }
 
 func (e *env) version(t *testing.T, tn tenant, p published) (status string, valid bool) {
@@ -246,25 +244,28 @@ func (e *env) tokens(t *testing.T) {
 	tn := newTenant()
 	p := e.mustPublish(t, tn, twoStage(t, newUser(), uuid.New()))
 
-	t.Run("Execution's client with Definition's token reads the plan", func(t *testing.T) {
-		c := outboundhttp.NewDefinitionClient(e.definitionURL, definitionToken, 5*time.Second)
+	t.Run("Execution's client reads the plan with the system caller identity", func(t *testing.T) {
+		c := outboundhttp.NewDefinitionClient(e.definitionURL, 5*time.Second)
 		if _, err := c.GetCompiledWorkflow(context.Background(), tn.id, p.versionID); err != nil {
-			t.Fatalf("read with the configured token: %v", err)
+			t.Fatalf("read with the system caller identity: %v", err)
 		}
 	})
-	t.Run("Execution's client with another token is rejected, not retried as an outage", func(t *testing.T) {
-		c := outboundhttp.NewDefinitionClient(e.definitionURL, "not-the-token", 5*time.Second)
-		_, err := c.GetCompiledWorkflow(context.Background(), tn.id, p.versionID)
-		if !errors.Is(err, port.ErrDefinitionRejected) {
-			t.Fatalf("read with a wrong token: %v, want ErrDefinitionRejected", err)
-		}
-	})
-	t.Run("Definition with another Execution token cannot pass the archive guard", func(t *testing.T) {
-		wrong := e.startDefinition(t, freePort(t), "not-the-token")
-		if a := e.archive(t, tn, wrong, p.workflowID); a.status != http.StatusServiceUnavailable {
-			t.Fatalf("archive through a Definition holding a wrong Execution token = %d %s, want 503", a.status, a.body)
-		}
-	})
+	for name, base := range map[string]string{"Definition": e.definitionURL, "Execution": e.executionURL} {
+		t.Run(name+" refuses an internal call without the identity", func(t *testing.T) {
+			path := "/api/v1/internal/workflows/" + p.workflowID.String() + "/active-instances?tenant_id=" + tn.id.String()
+			if name == "Definition" {
+				path = "/api/v1/internal/connector-aliases"
+			}
+			a := caller{t: t, baseURL: base}.do(http.MethodGet, path, nil)
+			if a.status != http.StatusUnauthorized || a.code(t) != "UNAUTHORIZED" {
+				t.Fatalf("%s without the identity = %d %s, want 401 UNAUTHORIZED", name, a.status, a.body)
+			}
+			admitted := caller{t: t, baseURL: base, system: true}
+			if got := admitted.do(http.MethodGet, path, nil); got.status == http.StatusUnauthorized {
+				t.Fatalf("%s with the identity = 401 %s", name, got.body)
+			}
+		})
+	}
 }
 
 func (e *env) unstartable(t *testing.T) {
@@ -304,7 +305,7 @@ func (e *env) unstartable(t *testing.T) {
 }
 
 func (e *env) aliases(t *testing.T) {
-	internal := caller{t: t, baseURL: e.definitionURL, token: definitionToken}
+	internal := caller{t: t, baseURL: e.definitionURL, system: true}
 	internal.must(http.MethodPost, "/api/v1/internal/connector-aliases/rest", map[string]any{
 		"alias": "compat-partner", "method": "POST", "baseURL": "https://" + aliasHost,
 		"pathTemplate": "/orders/{id}", "timeoutMs": 2500,
@@ -382,9 +383,9 @@ func (e *env) tenantRevocation(t *testing.T) {
 }
 
 type partnerCall struct {
-	method, path, token, tenant, user, lane string
-	departments                             []string
-	body                                    map[string]any
+	method, path, aliasToken, tenant, user, lane string
+	departments                                  []string
+	body                                         map[string]any
 }
 
 func (e *env) connectorRoundTrip(t *testing.T) {
@@ -394,7 +395,7 @@ func (e *env) connectorRoundTrip(t *testing.T) {
 	calls := make(chan partnerCall, 4)
 	partner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c := partnerCall{
-			method: r.Method, path: r.URL.Path, token: r.Header.Get("x-internal-token"),
+			method: r.Method, path: r.URL.Path, aliasToken: r.Header.Get("x-internal-token"),
 			tenant: r.Header.Get("x-tenant-id"), user: r.Header.Get("x-user-id"), lane: r.Header.Get("x-workflow-department-id"),
 			departments: r.Header.Values("x-departments"),
 		}
@@ -406,7 +407,7 @@ func (e *env) connectorRoundTrip(t *testing.T) {
 	t.Cleanup(partner.Close)
 
 	alias := "compat-partner-" + uuid.NewString()[:8]
-	caller{t: t, baseURL: e.definitionURL, token: definitionToken}.must(http.MethodPost, "/api/v1/internal/connector-aliases/rest", map[string]any{
+	caller{t: t, baseURL: e.definitionURL, system: true}.must(http.MethodPost, "/api/v1/internal/connector-aliases/rest", map[string]any{
 		"alias": alias, "method": "POST", "baseURL": partner.URL, "pathTemplate": "/orders", "timeoutMs": 5000,
 	}, http.StatusNoContent)
 	e.startConnectorWorker(t)
@@ -435,8 +436,8 @@ func (e *env) connectorRoundTrip(t *testing.T) {
 		if c.method != http.MethodPost || c.path != "/orders" {
 			t.Errorf("partner call = %s %s, want POST /orders", c.method, c.path)
 		}
-		if c.token != executionToken {
-			t.Errorf("partner call x-internal-token = %q, want the worker's internal token", c.token)
+		if c.aliasToken != aliasCallToken {
+			t.Errorf("partner call x-internal-token = %q, want the worker's alias-call token", c.aliasToken)
 		}
 		if c.tenant != tn.id.String() || c.user != automationPrincipal.Subject {
 			t.Errorf("partner call identity = tenant %q user %q, want the job's tenant %s and the automation principal's subject %s", c.tenant, c.user, tn.id, automationPrincipal.Subject)

@@ -27,7 +27,9 @@ type caller struct {
 	userID   uuid.UUID
 	roles    string
 	plan     string
-	token    string
+	// system names the reserved system caller, as the services and the event
+	// consumer call each other's internal routes.
+	system bool
 }
 
 type answer struct {
@@ -93,8 +95,9 @@ func (c caller) do(method, path string, body any) answer {
 	if c.plan != "" {
 		req.Header.Set("x-plan", c.plan)
 	}
-	if c.token != "" {
-		req.Header.Set("x-internal-token", c.token)
+	if c.system {
+		req.Header.Set("x-user-id", "iam-system")
+		req.Header.Set("x-tenant-roles", "iam-system")
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -202,7 +205,7 @@ func (e *env) startInstanceWith(t *testing.T, tn tenant, versionID uuid.UUID, va
 
 // forwardRelayed waits for the relay to publish an envelope of eventType that
 // match accepts, and posts it to Execution's category route with the
-// internal token, as the Workflow-Events Consumer does.
+// system caller identity, as the Workflow-Events Consumer does.
 func (e *env) forwardRelayed(t *testing.T, eventType, route string, match func(data map[string]any) bool) {
 	t.Helper()
 	deadline := time.Now().Add(pollTimeout)
@@ -215,7 +218,7 @@ func (e *env) forwardRelayed(t *testing.T, eventType, route string, match func(d
 			if err := json.Unmarshal(env.Payload, &data); err != nil || !match(data) {
 				continue
 			}
-			caller{t: t, baseURL: e.executionURL, token: executionToken}.must(http.MethodPost, route, env, http.StatusOK)
+			caller{t: t, baseURL: e.executionURL, system: true}.must(http.MethodPost, route, env, http.StatusOK)
 			return
 		}
 		if time.Now().After(deadline) {

@@ -108,7 +108,7 @@ func TestPublicContract_Instances_And_Tasks(t *testing.T) {
 	events := []*port.WorkflowEvent{{ID: uuid.New(), WorkflowInstanceID: instance.ID, TaskID: &eventTask, TenantID: tenant, EventType: port.EventTaskCreated, PayloadJSON: json.RawMessage(`{}`), OccurredAt: at}}
 
 	router := httpadapter.NewRouter(httpadapter.RouterConfig{
-		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"}, AppEnv: "test", InternalAPIToken: "internal-secret",
+		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"}, AppEnv: "test",
 		Handler: handler.New(handler.Services{
 			Instances: instanceFake{instance: instance, tasks: []*port.Task{task}, events: events},
 			Tasks:     taskFake{task: task, assignments: []*port.TaskAssignment{assignment}},
@@ -165,7 +165,7 @@ func TestPublicContract_BodyRoutesDeclareTheirRefusals(t *testing.T) {
 	spec := contract.Load(t, publicSpec)
 	gin.SetMode(gin.TestMode)
 	router := httpadapter.NewRouter(httpadapter.RouterConfig{
-		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"}, AppEnv: "test", InternalAPIToken: "internal-secret",
+		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"}, AppEnv: "test",
 		Handler: handler.New(handler.Services{IdempotencyTTL: time.Minute}),
 		DB:      upDB{}, Cache: upPinger{}, Temporal: upPinger{},
 	}).Handler()

@@ -115,7 +115,7 @@ func TestInternalBodies_ANewerSendersExtraFieldIsTolerated(t *testing.T) {
 
 type fakeUserTaskPauser struct{ called bool }
 
-func (f *fakeUserTaskPauser) PauseUserTasks(context.Context, uuid.UUID, uuid.UUID) error {
+func (f *fakeUserTaskPauser) PauseUserTasks(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID) error {
 	f.called = true
 	return nil
 }

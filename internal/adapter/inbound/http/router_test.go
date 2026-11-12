@@ -84,20 +84,19 @@ func TestNewRouter_Healthz(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-func TestNewRouter_InternalRoutesRequireToken(t *testing.T) {
+func TestNewRouter_InternalRoutesRequireTheSystemCaller(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := NewRouter(RouterConfig{
-		GinConfig:        testGinConfig,
-		AppEnv:           "test",
-		InternalAPIToken: "secret",
-		Handler:          handler.New(handler.Services{}),
-		DB:               fakeDBPinger{}, Cache: fakePinger{}, Temporal: fakePinger{},
+		GinConfig: testGinConfig,
+		AppEnv:    "test",
+		Handler:   handler.New(handler.Services{}),
+		DB:        fakeDBPinger{}, Cache: fakePinger{}, Temporal: fakePinger{},
 	})
 
 	w := httptest.NewRecorder()
 	router.engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/internal/events/workflow-task", nil))
 
-	assert.Equal(t, http.StatusUnauthorized, w.Code, "a missing x-internal-token must be rejected before reaching the handler")
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "a request without the system caller identity must be rejected before reaching the handler")
 }
 
 func TestNewRouter_DevMode_MountsAsyncAPIRoute(t *testing.T) {

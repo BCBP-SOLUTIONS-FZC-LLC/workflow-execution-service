@@ -72,7 +72,7 @@ func startRedeliveryWorker(t *testing.T, client *redis.Client, name string, conn
 			connectorType: conn.Type(), sem: make(chan struct{}, 2), timeout: timeout,
 			connector: conn,
 		}},
-		completion:    newCompletionClient(callbackURL, "token", 2*time.Second),
+		completion:    newCompletionClient(callbackURL, 2*time.Second),
 		streamKey:     redeliveryStream,
 		streamGroup:   redeliveryGroup,
 		consumerName:  name,
