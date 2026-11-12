@@ -13,24 +13,21 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-const (
-	maxDefinitionAttempts = 3
-	internalTokenHeader   = "x-internal-token"
-)
+const maxDefinitionAttempts = 3
 
 var _ port.DefinitionServiceClient = (*DefinitionClient)(nil)
 
 type DefinitionClient struct {
 	baseURL string
-	token   string
 	client  *http.Client
 }
 
-func NewDefinitionClient(baseURL, token string, timeout time.Duration) *DefinitionClient {
-	return &DefinitionClient{baseURL: baseURL, token: token, client: &http.Client{Timeout: timeout}}
+func NewDefinitionClient(baseURL string, timeout time.Duration) *DefinitionClient {
+	return &DefinitionClient{baseURL: baseURL, client: NewClient(timeout)}
 }
 
 type compiledPlanResp struct {
@@ -48,7 +45,7 @@ func (c *DefinitionClient) GetCompiledWorkflow(ctx context.Context, tenantID, wo
 
 	var lastErr error
 	for attempt := 1; attempt <= maxDefinitionAttempts; attempt++ {
-		cw, retryable, err := c.tryGet(ctx, rawURL)
+		cw, retryable, err := c.tryGet(ctx, tenantID, rawURL)
 		if err == nil {
 			return cw, nil
 		}
@@ -65,14 +62,14 @@ func (c *DefinitionClient) GetCompiledWorkflow(ctx context.Context, tenantID, wo
 	return nil, lastErr
 }
 
-func (c *DefinitionClient) tryGet(ctx context.Context, rawURL string) (*port.CompiledWorkflow, bool, error) {
+func (c *DefinitionClient) tryGet(ctx context.Context, tenantID uuid.UUID, rawURL string) (*port.CompiledWorkflow, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: build request: %w", port.ErrDefinitionRejected, err)
 	}
-	if c.token != "" {
-		req.Header.Set(internalTokenHeader, c.token)
-	}
+	req.Header.Set("x-user-id", domain.SystemCaller)
+	req.Header.Set("x-tenant-roles", domain.SystemCaller)
+	req.Header.Set("x-tenant-id", tenantID.String())
 	gincommon.InjectTraceContext(ctx, req.Header)
 	resp, err := c.client.Do(req)
 	if err != nil {

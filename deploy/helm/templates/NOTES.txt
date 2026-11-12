@@ -19,3 +19,17 @@ temporalMTLS.secretName once the target Temporal cluster requires it.
 Prometheus scraping/alerting (ServiceMonitor + PrometheusRule) is disabled
 (serviceMonitor.enabled=false) — requires the Prometheus Operator CRDs.
 {{- end }}
+
+{{- if .Values.authorizationPolicy.enabled }}
+
+The Istio AuthorizationPolicy needs a sidecar on the API pods and on every caller, with mutual TLS
+between them: the mesh names each caller by its service account, so a caller without a mesh identity
+is refused on the internal paths (/api/v1/internal/*). Enforcing mutual TLS mesh-wide
+(PeerAuthentication) is Platform's, not this chart's. The caller service accounts and namespaces in
+authorizationPolicy.internalRoutes and networkPolicy.allowedCallers are placeholders to confirm with Platform.
+{{- else }}
+
+authorizationPolicy.enabled=false: only the NetworkPolicy stands in front of the internal routes, and
+any pod it admits can send the x-user-id and x-tenant-roles headers the service checks (they are not a
+credential). The Istio policy needs a sidecar and mutual TLS; PeerAuthentication is Platform's.
+{{- end }}

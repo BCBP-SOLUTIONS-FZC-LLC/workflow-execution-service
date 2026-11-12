@@ -52,8 +52,8 @@ import (
 )
 
 const (
-	definitionToken = "compat-definition-token"
-	executionToken  = "compat-execution-token"
+	// aliasCallToken is the worker's CONNECTOR_ALIAS_CALL_TOKEN: the only token left, sent to alias targets.
+	aliasCallToken = "compat-alias-call-token"
 
 	// The Definition compiler stamps every plan with this queue, and it is
 	// Execution's TEMPORAL_TASK_QUEUE default, so the worker polls it here.
@@ -183,7 +183,7 @@ func startDefinitionPostgres(t *testing.T, definitionDir string) definitionDB {
 	return definitionDB{appDSN: dsn("workflow_definition_app"), migratorDSN: dsn("workflow_definition_migrator")}
 }
 
-func (e *env) definitionEnv(t *testing.T, httpPort int, executionToken string) []string {
+func (e *env) definitionEnv(t *testing.T, httpPort int) []string {
 	t.Helper()
 	return []string{
 		"PATH=" + os.Getenv("PATH"),
@@ -195,11 +195,9 @@ func (e *env) definitionEnv(t *testing.T, httpPort int, executionToken string) [
 		"MIGRATION_DATABASE_URL=" + e.definitionDB.migratorDSN,
 		"SYSTEM_DATABASE_URL=" + e.definitionDB.migratorDSN,
 		"VALKEY_ADDR=" + e.valkeyAddr,
-		"INTERNAL_API_TOKEN=" + definitionToken,
 		"ORG_MEMBERSHIP_BASE_URL=" + e.membershipURL,
 		"CATALOG_ADMIN_BASE_URL=" + e.catalogURL,
 		"EXECUTION_SERVICE_URL=" + e.executionURL,
-		"EXECUTION_SERVICE_TOKEN=" + executionToken,
 		"CONNECTOR_ALIAS_ALLOWED_HOSTS=" + aliasHost + ",127.0.0.1",
 		"SHUTDOWN_DRAIN_DELAY=0s",
 		"OTEL_SDK_DISABLED=true",
@@ -210,7 +208,7 @@ func (e *env) migrateDefinition(t *testing.T) {
 	t.Helper()
 	cmd := exec.Command(e.definitionBin, "migrate")
 	cmd.Dir = t.TempDir()
-	cmd.Env = e.definitionEnv(t, freePort(t), executionToken)
+	cmd.Env = e.definitionEnv(t, freePort(t))
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Definition migrate: %v\n%s", err, b)
 	}
@@ -218,12 +216,12 @@ func (e *env) migrateDefinition(t *testing.T) {
 
 // startDefinition runs one Definition server process and waits for /readyz.
 // Its working directory is empty so a developer's .env is never read.
-func (e *env) startDefinition(t *testing.T, httpPort int, executionToken string) string {
+func (e *env) startDefinition(t *testing.T, httpPort int) string {
 	t.Helper()
 	var logs bytes.Buffer
 	cmd := exec.Command(e.definitionBin)
 	cmd.Dir = t.TempDir()
-	cmd.Env = e.definitionEnv(t, httpPort, executionToken)
+	cmd.Env = e.definitionEnv(t, httpPort)
 	cmd.Stdout = &logs
 	cmd.Stderr = &logs
 	if err := cmd.Start(); err != nil {
@@ -396,11 +394,10 @@ func buildExecution(t *testing.T, pool *pgcommon.Pool, sdk client.Client, rdb *r
 		UserTaskPauser:       &service.UserTaskPauser{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal},
 	})
 	return httpadapter.NewRouter(httpadapter.RouterConfig{
-		GinConfig:        gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "compat", Domain: "workflow", Environment: "test"},
-		AppEnv:           "test",
-		InternalAPIToken: executionToken,
-		Handler:          h,
-		DB:               alwaysHealthy{}, Cache: alwaysHealthy{}, Temporal: alwaysHealthy{},
+		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "compat", Domain: "workflow", Environment: "test"},
+		AppEnv:    "test",
+		Handler:   h,
+		DB:        alwaysHealthy{}, Cache: alwaysHealthy{}, Temporal: alwaysHealthy{},
 	}).Handler()
 }
 
@@ -431,7 +428,7 @@ func setup(t *testing.T) *env {
 	e.startRelay(t, pool)
 
 	e.definitionURL = "http://127.0.0.1:" + strconv.Itoa(definitionPort)
-	definitions := outboundhttp.NewDefinitionClient(e.definitionURL, definitionToken, 5*time.Second)
+	definitions := outboundhttp.NewDefinitionClient(e.definitionURL, 5*time.Second)
 
 	validator, err := eventbus.NewSchemaValidator()
 	if err != nil {
@@ -446,7 +443,7 @@ func setup(t *testing.T) *env {
 	t.Cleanup(srv.Close)
 	e.executionURL = srv.URL
 
-	e.startDefinition(t, definitionPort, executionToken)
+	e.startDefinition(t, definitionPort)
 	return e
 }
 
@@ -495,8 +492,7 @@ func (e *env) startConnectorWorker(t *testing.T) {
 		"VALKEY_ADDR=" + e.valkeyAddr,
 		"CONNECTOR_STREAM_KEY=" + connectorStreamKey,
 		"DEFINITION_SERVICE_URL=" + e.definitionURL,
-		"DEFINITION_SERVICE_TOKEN=" + definitionToken,
-		"INTERNAL_API_TOKEN=" + executionToken,
+		"CONNECTOR_ALIAS_CALL_TOKEN=" + aliasCallToken,
 		"EXECUTION_SERVICE_INTERNAL_ADDR=" + e.executionURL,
 		"OPENBAO_ADDR=http://127.0.0.1:1",
 		"WORKER_HEALTH_PORT=" + strconv.Itoa(health),

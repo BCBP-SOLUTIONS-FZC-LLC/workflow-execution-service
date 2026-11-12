@@ -67,7 +67,6 @@ type Config struct {
 	LockDatabaseURL        string
 
 	DefinitionServiceURL    string
-	DefinitionServiceToken  string
 	DefinitionClientTimeout time.Duration
 
 	EligibilityBaseURL       string
@@ -76,10 +75,13 @@ type Config struct {
 	TokenServiceBaseURL       string
 	TokenServiceClientTimeout time.Duration
 
+	EntitlementsBaseURL        string
+	EntitlementsClientTimeout  time.Duration
+	EntitlementsCacheTTL       time.Duration
+	EntitlementsFreshnessBound time.Duration
+
 	QueueTopologyPollInterval time.Duration
 	WorkflowCacheSize         int
-
-	InternalAPIToken string
 
 	GlueRegistryName   string
 	GlueSchemaCacheTTL time.Duration
@@ -100,6 +102,8 @@ type Config struct {
 
 	ConnectorAliasFetchTimeout    time.Duration
 	ConnectorAliasRefreshInterval time.Duration
+	// ConnectorAliasCallToken is sent as x-internal-token on calls to alias targets only. Optional; see cmd/connector-worker aliasCallToken.
+	ConnectorAliasCallToken string
 
 	ConnectorPoolSizeStorage         int
 	ConnectorPoolSizeSendEmail       int
@@ -216,7 +220,6 @@ func Load() (*Config, error) {
 		LockDatabaseURL:            getEnvOrDefault("LOCK_DATABASE_URL", ""),
 
 		DefinitionServiceURL:    getEnvOrDefault("DEFINITION_SERVICE_URL", ""),
-		DefinitionServiceToken:  getEnvOrDefault("DEFINITION_SERVICE_TOKEN", ""),
 		DefinitionClientTimeout: envDuration("DEFINITION_CLIENT_TIMEOUT", 5*time.Second),
 
 		EligibilityBaseURL:       getEnvOrDefault("ELIGIBILITY_BASE_URL", ""),
@@ -225,10 +228,13 @@ func Load() (*Config, error) {
 		TokenServiceBaseURL:       getEnvOrDefault("TOKEN_SERVICE_BASE_URL", ""),
 		TokenServiceClientTimeout: envDuration("TOKEN_SERVICE_CLIENT_TIMEOUT", 5*time.Second),
 
+		EntitlementsBaseURL:        getEnvOrDefault("ENTITLEMENTS_BASE_URL", ""),
+		EntitlementsClientTimeout:  envDuration("ENTITLEMENTS_CLIENT_TIMEOUT", 5*time.Second),
+		EntitlementsCacheTTL:       envDuration("ENTITLEMENTS_CACHE_TTL", 60*time.Second),
+		EntitlementsFreshnessBound: envDuration("ENTITLEMENTS_FRESHNESS_BOUND", 10*time.Minute),
+
 		QueueTopologyPollInterval: envDuration("QUEUE_TOPOLOGY_POLL_INTERVAL", 60*time.Second),
 		WorkflowCacheSize:         envInt("WORKFLOW_CACHE_SIZE", 0),
-
-		InternalAPIToken: getEnvOrDefault("INTERNAL_API_TOKEN", ""),
 
 		GlueRegistryName:   getEnvOrDefault("GLUE_REGISTRY_NAME", ""),
 		GlueSchemaCacheTTL: envDuration("GLUE_SCHEMA_CACHE_TTL", 5*time.Minute),
@@ -249,6 +255,7 @@ func Load() (*Config, error) {
 
 		ConnectorAliasFetchTimeout:    envDuration("CONNECTOR_ALIAS_FETCH_TIMEOUT", 10*time.Second),
 		ConnectorAliasRefreshInterval: envDuration("CONNECTOR_ALIAS_REFRESH_INTERVAL", 5*time.Minute),
+		ConnectorAliasCallToken:       getEnvOrDefault("CONNECTOR_ALIAS_CALL_TOKEN", ""),
 
 		ConnectorPoolSizeStorage:         envInt("CONNECTOR_POOL_SIZE_STORAGE", 10),
 		ConnectorPoolSizeSendEmail:       envInt("CONNECTOR_POOL_SIZE_SEND_EMAIL", 5),
@@ -363,6 +370,15 @@ func (c *Config) validate() error {
 	if c.TokenServiceClientTimeout <= 0 {
 		return fmt.Errorf("TOKEN_SERVICE_CLIENT_TIMEOUT must be > 0")
 	}
+	if c.EntitlementsClientTimeout <= 0 {
+		return fmt.Errorf("ENTITLEMENTS_CLIENT_TIMEOUT must be > 0")
+	}
+	if c.EntitlementsCacheTTL <= 0 {
+		return fmt.Errorf("ENTITLEMENTS_CACHE_TTL must be > 0")
+	}
+	if c.EntitlementsFreshnessBound <= 0 || c.EntitlementsFreshnessBound < c.EntitlementsCacheTTL {
+		return fmt.Errorf("ENTITLEMENTS_FRESHNESS_BOUND must be > 0 and not below ENTITLEMENTS_CACHE_TTL")
+	}
 	if c.WorkflowCacheSize < 0 {
 		return fmt.Errorf("WORKFLOW_CACHE_SIZE must be >= 0")
 	}
@@ -404,12 +420,6 @@ func (c *Config) RequireServer() error {
 		}
 	}
 	if !c.IsDev() {
-		if c.InternalAPIToken == "" {
-			return fmt.Errorf("INTERNAL_API_TOKEN is required outside dev and local")
-		}
-		if c.DefinitionServiceToken == "" {
-			return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required outside dev and local")
-		}
 		if c.TokenServiceBaseURL == "" {
 			return fmt.Errorf("TOKEN_SERVICE_BASE_URL is required outside dev and local")
 		}
@@ -430,9 +440,6 @@ func (c *Config) RequireWorker() error {
 	if c.DefinitionServiceURL == "" {
 		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
 	}
-	if !c.IsDev() && c.DefinitionServiceToken == "" {
-		return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required outside dev and local")
-	}
 	return nil
 }
 
@@ -450,12 +457,6 @@ func (c *Config) RequireConnectorWorker() error {
 		return fmt.Errorf("CONNECTOR_RETRY_MAX_BACKOFF must not be below CONNECTOR_RETRY_INITIAL_BACKOFF, which must be positive")
 	}
 	if !c.IsDev() {
-		if c.DefinitionServiceToken == "" {
-			return fmt.Errorf("DEFINITION_SERVICE_TOKEN is required outside dev and local")
-		}
-		if c.InternalAPIToken == "" {
-			return fmt.Errorf("INTERNAL_API_TOKEN is required outside dev and local")
-		}
 		if c.OpenBaoToken == "" {
 			return fmt.Errorf("OPENBAO_TOKEN is required outside dev and local")
 		}

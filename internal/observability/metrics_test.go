@@ -85,6 +85,9 @@ func TestRegister_EveryMetricIsScrapable(t *testing.T) {
 	// assertion, since both tests share the process-global default registry.
 	observability.WFCacheHitsTotal.Inc()
 	observability.WFCacheMissesTotal.Inc()
+	observability.IncCounter(observability.EntitlementsStaleServedTotal)
+	observability.SetGauge(observability.EntitlementsOldestServedAgeSeconds, 1)
+	observability.IncCounter(observability.EntitlementsReadPanicsTotal)
 
 	body := scrape(t)
 
@@ -108,6 +111,11 @@ func TestRegister_EveryMetricIsScrapable(t *testing.T) {
 		"workflow_execution_service_upstream_dependency_errors_total",
 		"workflow_execution_service_wf_cache_hits_total",
 		"workflow_execution_service_wf_cache_misses_total",
+		"workflow_execution_service_entitlements_call_duration_seconds",
+		"workflow_execution_service_entitlements_call_errors_total",
+		"workflow_execution_service_entitlements_stale_served_total",
+		"workflow_execution_service_entitlements_oldest_served_age_seconds",
+		"workflow_execution_service_entitlements_read_panics_total",
 	}
 
 	for _, name := range metricNames {
@@ -142,9 +150,11 @@ func TestRegister_PreInitializesClosedLabelSets(t *testing.T) {
 	}
 
 	for name, label := range map[string][]string{
-		"workflow_execution_service_task_signal_duration_seconds":     {"operation=claim", "operation=complete", "operation=defer"},
-		"workflow_execution_service_rls_violations_total":             {"violation_type=missing_or_invalid_guc", "violation_type=cross_tenant_access"},
-		"workflow_execution_service_upstream_dependency_errors_total": {"dependency=definition_service", "dependency=iam"},
+		"workflow_execution_service_task_signal_duration_seconds":       {"operation=claim", "operation=complete", "operation=defer"},
+		"workflow_execution_service_rls_violations_total":               {"violation_type=missing_or_invalid_guc", "violation_type=cross_tenant_access"},
+		"workflow_execution_service_upstream_dependency_errors_total":   {"dependency=definition_service", "dependency=iam"},
+		"workflow_execution_service_entitlements_call_duration_seconds": {"outcome=success", "outcome=error"},
+		"workflow_execution_service_entitlements_call_errors_total":     {"reason=transport", "reason=status", "reason=response"},
 	} {
 		for _, l := range label {
 			require.Truef(t, series[name][l], "expected pre-initialized series %s{%s}", name, l)

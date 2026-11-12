@@ -92,6 +92,15 @@ The platform's APP_ENV vocabulary; any other value fails the render.
 {{- end -}}
 {{- end }}
 
+{{/*
+With the policy off, the NetworkPolicy alone fronts the internal routes: refused in staging and prod unless accepted.
+*/}}
+{{- define "workflow-execution-service.validateAuthorizationPolicy" -}}
+{{- if and (not .Values.authorizationPolicy.enabled) (has .Values.env.appEnv (list "prod" "staging")) (not .Values.authorizationPolicy.allowDisabled) -}}
+{{- fail (printf "authorizationPolicy.enabled is false while env.appEnv is %s: only the NetworkPolicy would stand in front of the internal routes. Enable the policy, or set authorizationPolicy.allowDisabled=true to accept that" .Values.env.appEnv) -}}
+{{- end -}}
+{{- end }}
+
 {{- define "workflow-execution-service.purgeAlertWindow" -}}
 {{- $interval := .Values.env.retentionSweepInterval | toString -}}
 {{- if not (regexMatch "^[0-9]+h$" $interval) -}}

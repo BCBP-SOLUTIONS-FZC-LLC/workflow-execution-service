@@ -39,8 +39,8 @@ func TestDefinitionClient_PropagatesTraceContext(t *testing.T) {
 	srv := captureTraceparent(&traceparent)
 	defer srv.Close()
 
-	c := NewDefinitionClient(srv.URL, "token", time.Second)
-	_, _, _ = c.tryGet(tracedContext(t), srv.URL+"/x")
+	c := NewDefinitionClient(srv.URL, time.Second)
+	_, _, _ = c.tryGet(tracedContext(t), uuid.New(), srv.URL+"/x")
 
 	if traceparent == "" {
 		t.Error("traceparent header missing on the Definition Service call")

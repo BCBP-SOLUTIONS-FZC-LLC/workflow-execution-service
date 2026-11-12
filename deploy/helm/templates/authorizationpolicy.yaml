@@ -1,0 +1,49 @@
+{{- if .Values.authorizationPolicy.enabled }}
+# Internal calls carry no shared secret: the mesh names the caller (mutual TLS) and this policy
+# decides who may reach which internal route group. Gateway traffic must keep working, so the first
+# rule admits every request outside /api/v1/internal/* (public routes, probes, metrics). Each
+# authorizationPolicy.internalRoutes entry then gets one rule that holds its callers and its paths
+# together; an entry with no caller gets no rule, so its paths stay closed. The headers the service
+# checks (x-user-id, x-tenant-roles) are not a credential. The policy selects the API pods only: the
+# Worker and the connector worker serve no internal routes.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "workflow-execution-service.apiFullname" . }}
+  labels:
+    {{- include "workflow-execution-service.apiSelectorLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "workflow-execution-service.apiSelectorLabels" . | nindent 6 }}
+  action: ALLOW
+  rules:
+    - to:
+        - operation:
+            notPaths:
+              - /api/v1/internal/*
+    {{- range .Values.authorizationPolicy.internalRoutes }}
+    {{- $principals := list }}
+    {{- range .callers }}
+    {{- $principals = append $principals (printf "%s/ns/%s/sa/%s" $.Values.authorizationPolicy.trustDomain .namespace .serviceAccount) }}
+    {{- end }}
+    {{- if and $.Values.connectorWorker.enabled (eq .name "connector-tasks") }}
+    {{- $principals = append $principals (printf "%s/ns/%s/sa/%s" $.Values.authorizationPolicy.trustDomain $.Release.Namespace (include "workflow-execution-service.connectorWorkerFullname" $)) }}
+    {{- end }}
+    {{- if $principals }}
+    # {{ .name }}
+    - from:
+        - source:
+            principals:
+              {{- range $principals }}
+              - {{ . | quote }}
+              {{- end }}
+      to:
+        - operation:
+            paths:
+              {{- range .paths }}
+              - {{ . | quote }}
+              {{- end }}
+    {{- end }}
+    {{- end }}
+{{- end }}

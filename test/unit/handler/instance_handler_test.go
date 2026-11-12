@@ -390,16 +390,18 @@ func TestGetInstance_Success(t *testing.T) {
 		get: func(_ context.Context, tenantID, instanceID uuid.UUID, _ port.ReadScope) (*port.Instance, []*port.Task, error) {
 			assert.Equal(t, testTenantID, tenantID)
 			assert.Equal(t, testInstID, instanceID)
-			return &port.Instance{
-					ID: testInstID, TenantID: tenantID, Status: port.InstanceStatusRunning,
-					StartedByUserID: testUserID, StartedAt: &now, CreatedAt: now, UpdatedAt: now,
-					ContextJSON: json.RawMessage(`{"a":1}`),
-					OverrideMap: json.RawMessage(`{"review":"` + uuid.New().String() + `"}`),
-				}, []*port.Task{{
-					ID: testTaskID, WorkflowInstanceID: testInstID, TenantID: tenantID, NodeKey: "review",
-					TaskType: "userTask", DepartmentID: deptID, Status: port.TaskStatusReady, RecordVersion: 1,
-					AssigneeMode: "single", AssigneeCount: 1, CreatedAt: now,
-				}}, nil
+			inst := &port.Instance{
+				ID: testInstID, TenantID: tenantID, Status: port.InstanceStatusRunning,
+				StartedByUserID: testUserID, StartedAt: &now, CreatedAt: now, UpdatedAt: now,
+				ContextJSON: json.RawMessage(`{"a":1}`),
+				OverrideMap: json.RawMessage(`{"review":"` + uuid.New().String() + `"}`),
+			}
+			tasks := []*port.Task{{
+				ID: testTaskID, WorkflowInstanceID: testInstID, TenantID: tenantID, NodeKey: "review",
+				TaskType: "userTask", DepartmentID: deptID, Status: port.TaskStatusReady, RecordVersion: 1,
+				AssigneeMode: "single", AssigneeCount: 1, CreatedAt: now,
+			}}
+			return inst, tasks, nil
 		},
 	}
 	router := newRouter(newInstanceHandler(fake))

@@ -8,8 +8,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## [Unreleased]
 
+### Fixed
+
+- The membership-revocation pause (`POST /api/v1/internal/users/{user_id}/pause-tasks`) attempts every instance and answers `503` when it could not read a task or an instance or could not signal one, so the Definition Service retries; it used to log a Warn and answer `204`. `workflow_execution_service_user_pause_failures_total{stage}` counts each failure.
+- The connector worker's callback error and log line carry the status and the first 200 bytes of the answer; the chart gains a `ConnectorDispatchDeadLettered` alert and a PodMonitor for the connector worker.
+- The connector worker skips an alias row the connector library refuses (logged by alias) instead of failing to start, keeps the previous registry when a refresh yields no usable alias, caps the registry answer at 1 MiB, and reports `workflow_execution_service_connector_alias_registry_age_seconds`.
+
+- The task queue choice at instance start keeps the registry in agreement with the grant: a grant that reads false also stops the tenant queue routing, a granted tenant whose queue is not registered yet starts on the plan queue and registers it for the next start (workers find new queues only on their topology interval), and a registered routable queue is used without a write on every start.
+
+- The `503` body for an unavailable upstream carries a fixed detail instead of the Go error text (host, port, path); the cause stays in the log. An event type the service does not handle is labelled `unknown` in the ingest and last-received metrics. The row-level-security tenant setting of the event handlers is built from the parsed tenant id.
+
+- A refused internal event (no timestamp, a schema payload that cannot be decoded) is counted under the `unknown` event type too; the type is request text until the type check has run.
+
+- The Entitlements grant cache serves a set past its TTL while a background read renews it only up to twice the entry's TTL (and never past the freshness bound). An older set makes the caller wait for the read and falls back to the held set, counted as a stale serve, only if the read fails inside the freshness bound. It used to serve the held set for the whole bound, so a revocation could stay visible for up to ten minutes after an idle period.
+
+- Tests only: a chart test reads the internal routes from the router (the internal group and the groups below it) and fails when one belongs to no `authorizationPolicy.internalRoutes` group or to more than one, so a new internal route is not left closed without notice.
+
+- The connector worker applies an empty alias registry answer after three in a row (the first two are held back with a Warn, as before), so deleting the last alias reaches running workers. A non-empty answer or a failed fetch starts the count again.
+
+- The connector worker's log line for a skipped alias row names the alias and the part of the row that failed (base URL, path, method, duplicate) and no longer carries the connector library's error text, which quoted the whole base URL with its userinfo.
+
+- The membership-revocation pause treats an instance whose workflow is already gone (Temporal answers not found) as paused: it is not counted as a pause failure and no longer makes the batch answer `503`, so a retry loop ends once only real failures are left.
+
+- Outbound clients that forward the system caller identity or a secret (Entitlements, Definition, token service, eligibility, OpenBao, the connector worker's completion callback and alias fetch) return a redirect as the answer instead of following it.
+
+- A request refused by the internal-route caller check is counted in `workflow_execution_service_internal_auth_rejected_total{reason}` (`missing_user` or `missing_role`). The caller identity `iam-system` is one constant (`domain.SystemCaller`) used by the check and by every sender.
+
 ### Changed
 
+- Contract copies: `make contract-check` no longer reads a branch name from `api/contracts/SOURCES` (its branch column is gone). It compares the copy with the Definition Service's branch named like the branch under test when that branch exists, and with `main` otherwise, the rule the compat job already uses; `CONTRACT_SRC_REF` overrides it. `make contract-check-test` tests the script and runs in `make check`.
+- Docs only: the in-repo LLD, the internal OpenAPI and the copy of the Definition internal spec match the design repository again. No code changed.
+- Docs only: the in-repo LLD is brought to 1.151 and the internal OpenAPI states that a pause signal that finds the workflow already gone counts as paused (the stale window of the flag cache ends at twice the TTL, the alias registry applies the third empty answer in a row, and the ingest metric labels refusals before the type check `unknown`). No code changed.
+- Chart: fixed names (`fullnameOverride: workflow-execution-service`), per-path caller rules (`authorizationPolicy.internalRoutes` replaces `internalCallers`: events, Definition calls, Org & Membership routes, connector-task callbacks), the NetworkPolicy admits the connector worker and Org & Membership, the render refuses a disabled policy in staging and prod unless `authorizationPolicy.allowDisabled`, `appProtocol: http` on the metrics ports, the Entitlements egress rule needs ports and pods, and the chart tests decode the rendered rules.
+- The in-repo LLD (revisions 1.146 and 1.147) states the dedicated queue from the grant and the system caller identity in place of the shared token; the Execution internal API spec copy matches the design repository. Both are copies of the design repository's documents.
+- The internal-route policy in the chart also admits Org & Membership (placeholder namespace `iam`, ServiceAccount `iam-org-membership`), which calls the workflow-client routes.
+- Internal routes admit the system caller identity (`x-tenant-roles` holds `iam-system` and `x-user-id` is set) instead of the shared `x-internal-token`: `INTERNAL_API_TOKEN` and `DEFINITION_SERVICE_TOKEN` are removed (settings, chart secret keys, requirements), the Definition and connector-worker clients send `x-user-id`, `x-tenant-roles` and, where the tenant is known, `x-tenant-id`, the chart ships an Istio `AuthorizationPolicy` (`authorizationPolicy.*`, caller service accounts are placeholders to confirm with Platform), and the two internal specs follow the design repository. Status codes are unchanged; the `401` detail is `missing or invalid internal caller identity`. The optional `CONNECTOR_ALIAS_CALL_TOKEN` is sent as `x-internal-token` on calls to alias targets only, because `workflow-connectors` v2 refuses an empty token; when it is unset the worker sends the text `unset` and logs one Info line at startup.
+- `POST /api/v1/internal/users/{user_id}/pause-tasks` takes an optional `department_id` (UUID; absent or null means every department): only the instances holding the user's task in that department are paused, so a department-membership revocation no longer pauses the user's work elsewhere; a malformed or all-zero id answers `400 BAD_REQUEST` (LLD revision 1.145).
 - The compat job runs against the Definition Service branch that has the same name as this one when it exists, otherwise against its `main`, and prints the ref it chose (`compat_peer_ref` still overrides it). `api/contracts/SOURCES` tracks `main`. Neither depends on a branch that gets deleted any more.
 - Dependency updates: `workflow-models` v2.1.1 and `workflow-connectors` v2.3.0 (the releases of the release candidates this service pinned), `platform-pgcommon/v2` v2.0.2, and the `golang.org/x` modules they pull in (`x/net` v0.62.0 among them).
 - CI: the coverage step runs `make cover-check-pkg`, so each package is held to its floor (it only printed the total before). The PR summary comment shows the total without a made-up limit.
@@ -160,6 +194,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Added
 
+- With `ENTITLEMENTS_BASE_URL` set, an instance start reads the tenant's `dedicated_workflow_queue` grant from the Entitlements effective set (cached per tenant, `ENTITLEMENTS_CLIENT_TIMEOUT`, `ENTITLEMENTS_CACHE_TTL`, `ENTITLEMENTS_FRESHNESS_BOUND`): a tenant with the grant starts on its own queue, one without it on the plan's queue; when the grant cannot be read the registry decides as before. Empty changes nothing; the chart passes the settings and opens egress to the `commercial` namespace only when the address is set.
 - A check that the documents this repository keeps in the design repository still match their copies there: `make design-sync-check` (`DESIGN_DIR` reads a local checkout, otherwise `GH_TOKEN` reads `Haroon-BCBP/design`) compares the pairs listed in `scripts/design-sync.manifest`, and `make design-sync-check-test` tests the script. CI does not run it: the design repository is a personal repository that CI does not read, so the check runs locally only.
 - The chart passes `PG_MAX_CONNS`, `PG_BOUNCER_MODE`, `QUEUE_TOPOLOGY_POLL_INTERVAL`, `WORKFLOW_CACHE_SIZE` and a per-process `GOMEMLIMIT` (`api.goMemLimit`, `worker.goMemLimit`), defaults unchanged, and a contract test fails if one is missing. `WORKFLOW_CACHE_SIZE` bounds the Temporal sticky workflow cache per Worker process (0 keeps the SDK default of 10,000). LLD rev 1.103.
 - The tenant's status is recorded in `tenant_state` as `TenantStateChanged` is applied (the latest change by its own time wins), and `START_REFUSED_STATUSES` names the statuses for which `POST /instances` answers `409 TENANT_NOT_ACTIVE`. The default is none, so nothing changes until a status is named; the choice for `suspended` and `trial_expired` is the product's. The tenant purge removes the row. The chart now passes `START_REFUSED_STATUSES`, `TENANT_PURGE_ENABLED` and `TENANT_HISTORY_RETENTION` to the API (the purge settings had no chart value), and a contract test fails if one is missing. LLD §5.5, rev 1.100.

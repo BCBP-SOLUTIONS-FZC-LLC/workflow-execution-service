@@ -153,7 +153,7 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*outboundtemporal.Deps, po
 		return nil, nil, nil, nil, fmt.Errorf("new schema validator: %w", err)
 	}
 
-	definitions := outboundhttp.NewDefinitionClient(cfg.DefinitionServiceURL, cfg.DefinitionServiceToken, cfg.DefinitionClientTimeout)
+	definitions := outboundhttp.NewDefinitionClient(cfg.DefinitionServiceURL, cfg.DefinitionClientTimeout)
 
 	deps := &outboundtemporal.Deps{
 		Instances:   postgres.NewInstanceRepo(pool),

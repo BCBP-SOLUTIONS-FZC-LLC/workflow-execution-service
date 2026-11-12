@@ -40,28 +40,31 @@ func (g *guard) CheckActiveInstances(_ context.Context, tenantID, workflowID uui
 }
 
 type pauser struct {
-	err error
-	got [2]uuid.UUID
+	err        error
+	got        [2]uuid.UUID
+	department *uuid.UUID
 }
 
-func (p *pauser) PauseUserTasks(_ context.Context, tenantID, userID uuid.UUID) error {
+func (p *pauser) PauseUserTasks(_ context.Context, tenantID, userID uuid.UUID, departmentID *uuid.UUID) error {
 	p.got = [2]uuid.UUID{tenantID, userID}
+	p.department = departmentID
 	return p.err
 }
 
 func internalRouter(g *guard, p *pauser) http.Handler {
 	gin.SetMode(gin.TestMode)
 	return httpadapter.NewRouter(httpadapter.RouterConfig{
-		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"}, AppEnv: "test", InternalAPIToken: "internal-secret",
+		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"}, AppEnv: "test",
 		Handler: handler.New(handler.Services{ArchiveGuard: g, UserTaskPauser: p}),
 		DB:      upDB{}, Cache: upPinger{}, Temporal: upPinger{},
 	}).Handler()
 }
 
 type exchange struct {
-	name, method, path, body, token string
-	want                            int
-	validReq                        bool
+	name, method, path, body string
+	identity                 bool // send the system caller identity headers
+	want                     int
+	validReq                 bool
 }
 
 func run(t *testing.T, spec *contract.Spec, router http.Handler, tc exchange) {
@@ -77,8 +80,9 @@ func run(t *testing.T, spec *contract.Spec, router http.Handler, tc exchange) {
 	} else {
 		req = httptest.NewRequest(tc.method, tc.path, nil)
 	}
-	if tc.token != "" {
-		req.Header.Set("x-internal-token", tc.token)
+	if tc.identity {
+		req.Header.Set("x-user-id", "iam-system")
+		req.Header.Set("x-tenant-roles", "iam-system")
 	}
 	if tc.validReq {
 		spec.Request(t, req)
@@ -99,10 +103,10 @@ func TestInternalContract_ActiveInstances(t *testing.T) {
 	router := internalRouter(g, &pauser{})
 
 	for _, tc := range []exchange{
-		{name: "active", method: http.MethodGet, path: path, token: "internal-secret", want: http.StatusOK, validReq: true},
-		{name: "bad workflow id", method: http.MethodGet, path: "/api/v1/internal/workflows/nope/active-instances?tenant_id=" + tenantID.String(), token: "internal-secret", want: http.StatusBadRequest},
-		{name: "no tenant", method: http.MethodGet, path: "/api/v1/internal/workflows/" + workflowID.String() + "/active-instances", token: "internal-secret", want: http.StatusBadRequest},
-		{name: "no token", method: http.MethodGet, path: path, want: http.StatusUnauthorized, validReq: true},
+		{name: "active", method: http.MethodGet, path: path, identity: true, want: http.StatusOK, validReq: true},
+		{name: "bad workflow id", method: http.MethodGet, path: "/api/v1/internal/workflows/nope/active-instances?tenant_id=" + tenantID.String(), identity: true, want: http.StatusBadRequest},
+		{name: "no tenant", method: http.MethodGet, path: "/api/v1/internal/workflows/" + workflowID.String() + "/active-instances", identity: true, want: http.StatusBadRequest},
+		{name: "no caller identity", method: http.MethodGet, path: path, want: http.StatusUnauthorized, validReq: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) { run(t, spec, router, tc) })
 	}
@@ -112,7 +116,7 @@ func TestInternalContract_ActiveInstances(t *testing.T) {
 
 	t.Run("guard failure", func(t *testing.T) {
 		run(t, spec, internalRouter(&guard{err: errors.New("db down")}, &pauser{}),
-			exchange{method: http.MethodGet, path: path, token: "internal-secret", want: http.StatusInternalServerError, validReq: true})
+			exchange{method: http.MethodGet, path: path, identity: true, want: http.StatusInternalServerError, validReq: true})
 	})
 }
 
@@ -125,10 +129,10 @@ func TestInternalContract_PauseTasks(t *testing.T) {
 	router := internalRouter(&guard{}, p)
 
 	for _, tc := range []exchange{
-		{name: "paused", method: http.MethodPost, path: path, body: body, token: "internal-secret", want: http.StatusNoContent, validReq: true},
-		{name: "bad user id", method: http.MethodPost, path: "/api/v1/internal/users/nope/pause-tasks", body: body, token: "internal-secret", want: http.StatusBadRequest},
-		{name: "no tenant", method: http.MethodPost, path: path, body: `{}`, token: "internal-secret", want: http.StatusBadRequest},
-		{name: "no token", method: http.MethodPost, path: path, body: body, want: http.StatusUnauthorized, validReq: true},
+		{name: "paused", method: http.MethodPost, path: path, body: body, identity: true, want: http.StatusNoContent, validReq: true},
+		{name: "bad user id", method: http.MethodPost, path: "/api/v1/internal/users/nope/pause-tasks", body: body, identity: true, want: http.StatusBadRequest},
+		{name: "no tenant", method: http.MethodPost, path: path, body: `{}`, identity: true, want: http.StatusBadRequest},
+		{name: "no caller identity", method: http.MethodPost, path: path, body: body, want: http.StatusUnauthorized, validReq: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) { run(t, spec, router, tc) })
 	}
@@ -138,7 +142,7 @@ func TestInternalContract_PauseTasks(t *testing.T) {
 
 	t.Run("pauser failure", func(t *testing.T) {
 		run(t, spec, internalRouter(&guard{}, &pauser{err: errors.New("db down")}),
-			exchange{method: http.MethodPost, path: path, body: body, token: "internal-secret", want: http.StatusInternalServerError, validReq: true})
+			exchange{method: http.MethodPost, path: path, body: body, identity: true, want: http.StatusInternalServerError, validReq: true})
 	})
 }
 

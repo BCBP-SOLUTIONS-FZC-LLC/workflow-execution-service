@@ -55,5 +55,5 @@ Collectors are built in `internal/observability` with `platform-gincommon` const
 | --- | --- | --- |
 | `docs/swagger/openapi.yaml` | Public REST API | a parity test against the router |
 | `api/internal-openapi.yaml` | Internal HTTP API | a parity test and `make contract-breaking` |
-| `api/contracts/` | The Definition Service's internal contract, copied | `make contract-check` |
+| `api/contracts/` | The Definition Service's internal contract, copied; checked against its same-named branch, else `main` | `make contract-check` |
 | `api/asyncapi.yaml` | Produced and consumed events | parity tests against the produced and handled event types, and schema governance |

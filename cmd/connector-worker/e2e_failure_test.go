@@ -119,7 +119,7 @@ func TestE2E_ConnectorWorker_DispatchFailsInstanceFails(t *testing.T) {
 		ConnectorStreamKey: streamKey, ConnectorStreamGroup: "connector-worker-e2e", ConnectorStreamBlockTimeout: time.Second,
 		ConnectorStreamClaimMinIdle: 30 * time.Second, ConnectorStreamBatchSize: 10,
 		DefinitionServiceURL: aliasSrv.URL, ConnectorAliasFetchTimeout: 5 * time.Second,
-		InternalAPIToken: e2eInternalToken, OpenBaoAddr: "http://unused.invalid", OpenBaoMount: "secret", OpenBaoTimeout: 5 * time.Second,
+		OpenBaoAddr: "http://unused.invalid", OpenBaoMount: "secret", OpenBaoTimeout: 5 * time.Second,
 		ExecutionServiceInternalAddr: execSrv.URL, ConnectorCompletionTimeout: 5 * time.Second,
 		ConnectorPoolSizeRestCall: 2, ConnectorTimeoutRestCall: 10 * time.Second,
 	}
@@ -223,7 +223,7 @@ func TestE2E_ConnectorWorker_RestCallRetriesIdempotentMethod(t *testing.T) {
 		ConnectorStreamKey: streamKey, ConnectorStreamGroup: "connector-worker-e2e", ConnectorStreamBlockTimeout: time.Second,
 		ConnectorStreamClaimMinIdle: 30 * time.Second, ConnectorStreamBatchSize: 10,
 		DefinitionServiceURL: aliasSrv.URL, ConnectorAliasFetchTimeout: 5 * time.Second,
-		InternalAPIToken: e2eInternalToken, OpenBaoAddr: "http://unused.invalid", OpenBaoMount: "secret", OpenBaoTimeout: 5 * time.Second,
+		OpenBaoAddr: "http://unused.invalid", OpenBaoMount: "secret", OpenBaoTimeout: 5 * time.Second,
 		ExecutionServiceInternalAddr: execSrv.URL, ConnectorCompletionTimeout: 5 * time.Second,
 		ConnectorPoolSizeRestCall: 2, ConnectorTimeoutRestCall: 10 * time.Second,
 	}

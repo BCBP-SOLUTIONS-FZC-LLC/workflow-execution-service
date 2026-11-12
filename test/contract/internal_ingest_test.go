@@ -46,7 +46,7 @@ func ingestRouter(services handler.Services) http.Handler {
 	gin.SetMode(gin.TestMode)
 	services.ProcessedEvents = fakeProcessed{}
 	return httpadapter.NewRouter(httpadapter.RouterConfig{
-		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"}, AppEnv: "test", InternalAPIToken: "internal-secret",
+		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"}, AppEnv: "test",
 		Handler: handler.New(services),
 		DB:      upDB{}, Cache: upPinger{}, Temporal: upPinger{},
 	}).Handler()
@@ -64,7 +64,6 @@ func delegationStarted(tenant string) string {
 
 func TestInternalContract_Events(t *testing.T) {
 	spec := contract.Load(t, internalSpec)
-	const token = "internal-secret"
 	tenant := uuid.NewString()
 	ok := ingestRouter(handler.Services{Delegation: fakeDelegation{}})
 	failing := ingestRouter(handler.Services{Delegation: fakeDelegation{err: errors.New("db down")}})
@@ -73,28 +72,27 @@ func TestInternalContract_Events(t *testing.T) {
 	noTime := `{"id":"` + uuid.NewString() + `","type":"DelegationStarted","tenant_id":"` + tenant + `","data":{}}`
 
 	for _, tc := range []exchange{
-		{name: "delegation started", method: http.MethodPost, path: delegation, body: delegationStarted(tenant), token: token, want: http.StatusOK, validReq: true},
-		{name: "unhandled type on delegation", method: http.MethodPost, path: delegation, body: envelope("UserDeleted", tenant, `{}`), token: token, want: http.StatusOK, validReq: true},
-		{name: "unhandled type on user-profile", method: http.MethodPost, path: "/api/v1/internal/events/user-profile", body: envelope("DelegationStarted", tenant, `{}`), token: token, want: http.StatusOK, validReq: true},
-		{name: "unhandled type on tenant", method: http.MethodPost, path: "/api/v1/internal/events/tenant", body: envelope("DelegationStarted", tenant, `{}`), token: token, want: http.StatusOK, validReq: true},
-		{name: "unhandled type on workflow-task", method: http.MethodPost, path: "/api/v1/internal/events/workflow-task", body: envelope("DelegationStarted", tenant, `{}`), token: token, want: http.StatusOK, validReq: true},
-		{name: "not json", method: http.MethodPost, path: delegation, body: `{`, token: token, want: http.StatusBadRequest},
-		{name: "bad payload", method: http.MethodPost, path: delegation, body: envelope("DelegationStarted", tenant, `{}`), token: token, want: http.StatusBadRequest, validReq: true},
-		{name: "no envelope time", method: http.MethodPost, path: delegation, body: noTime, token: token, want: http.StatusBadRequest},
-		{name: "schema id without a decoder", method: http.MethodPost, path: delegation, body: strings.Replace(delegationStarted(tenant), `"data"`, `"dataschema":"s","data"`, 1), token: token, want: http.StatusBadGateway, validReq: true},
-		{name: "no token", method: http.MethodPost, path: delegation, body: delegationStarted(tenant), want: http.StatusUnauthorized, validReq: true},
-		{name: "oversized body", method: http.MethodPost, path: delegation, body: oversized, token: token, want: http.StatusRequestEntityTooLarge},
+		{name: "delegation started", method: http.MethodPost, path: delegation, body: delegationStarted(tenant), identity: true, want: http.StatusOK, validReq: true},
+		{name: "unhandled type on delegation", method: http.MethodPost, path: delegation, body: envelope("UserDeleted", tenant, `{}`), identity: true, want: http.StatusOK, validReq: true},
+		{name: "unhandled type on user-profile", method: http.MethodPost, path: "/api/v1/internal/events/user-profile", body: envelope("DelegationStarted", tenant, `{}`), identity: true, want: http.StatusOK, validReq: true},
+		{name: "unhandled type on tenant", method: http.MethodPost, path: "/api/v1/internal/events/tenant", body: envelope("DelegationStarted", tenant, `{}`), identity: true, want: http.StatusOK, validReq: true},
+		{name: "unhandled type on workflow-task", method: http.MethodPost, path: "/api/v1/internal/events/workflow-task", body: envelope("DelegationStarted", tenant, `{}`), identity: true, want: http.StatusOK, validReq: true},
+		{name: "not json", method: http.MethodPost, path: delegation, body: `{`, identity: true, want: http.StatusBadRequest},
+		{name: "bad payload", method: http.MethodPost, path: delegation, body: envelope("DelegationStarted", tenant, `{}`), identity: true, want: http.StatusBadRequest, validReq: true},
+		{name: "no envelope time", method: http.MethodPost, path: delegation, body: noTime, identity: true, want: http.StatusBadRequest},
+		{name: "schema id without a decoder", method: http.MethodPost, path: delegation, body: strings.Replace(delegationStarted(tenant), `"data"`, `"dataschema":"s","data"`, 1), identity: true, want: http.StatusBadGateway, validReq: true},
+		{name: "no caller identity", method: http.MethodPost, path: delegation, body: delegationStarted(tenant), want: http.StatusUnauthorized, validReq: true},
+		{name: "oversized body", method: http.MethodPost, path: delegation, body: oversized, identity: true, want: http.StatusRequestEntityTooLarge},
 	} {
 		t.Run(tc.name, func(t *testing.T) { run(t, spec, ok, tc) })
 	}
 	t.Run("processing failure", func(t *testing.T) {
-		run(t, spec, failing, exchange{method: http.MethodPost, path: delegation, body: delegationStarted(tenant), token: token, want: http.StatusInternalServerError, validReq: true})
+		run(t, spec, failing, exchange{method: http.MethodPost, path: delegation, body: delegationStarted(tenant), identity: true, want: http.StatusInternalServerError, validReq: true})
 	})
 }
 
 func TestInternalContract_ConnectorTasks(t *testing.T) {
 	spec := contract.Load(t, internalSpec)
-	const token = "internal-secret"
 	tenantID, taskID := uuid.NewString(), uuid.NewString()
 	complete := "/api/v1/internal/connector-tasks/" + taskID + "/complete"
 	fail := "/api/v1/internal/connector-tasks/" + taskID + "/fail"
@@ -103,14 +101,14 @@ func TestInternalContract_ConnectorTasks(t *testing.T) {
 	ok := ingestRouter(handler.Services{ConnectorTasks: fakeConnectorTasks{}})
 
 	for _, tc := range []exchange{
-		{name: "complete", method: http.MethodPost, path: complete, body: completeBody, token: token, want: http.StatusNoContent, validReq: true},
-		{name: "complete without output", method: http.MethodPost, path: complete, body: `{"tenant_id":"` + tenantID + `"}`, token: token, want: http.StatusNoContent, validReq: true},
-		{name: "complete without tenant", method: http.MethodPost, path: complete, body: `{}`, token: token, want: http.StatusBadRequest},
-		{name: "complete bad task id", method: http.MethodPost, path: "/api/v1/internal/connector-tasks/nope/complete", body: completeBody, token: token, want: http.StatusBadRequest},
-		{name: "complete without token", method: http.MethodPost, path: complete, body: completeBody, want: http.StatusUnauthorized, validReq: true},
-		{name: "fail", method: http.MethodPost, path: fail, body: failBody, token: token, want: http.StatusNoContent, validReq: true},
-		{name: "fail without error class", method: http.MethodPost, path: fail, body: `{"tenant_id":"` + tenantID + `"}`, token: token, want: http.StatusBadRequest},
-		{name: "fail without token", method: http.MethodPost, path: fail, body: failBody, want: http.StatusUnauthorized, validReq: true},
+		{name: "complete", method: http.MethodPost, path: complete, body: completeBody, identity: true, want: http.StatusNoContent, validReq: true},
+		{name: "complete without output", method: http.MethodPost, path: complete, body: `{"tenant_id":"` + tenantID + `"}`, identity: true, want: http.StatusNoContent, validReq: true},
+		{name: "complete without tenant", method: http.MethodPost, path: complete, body: `{}`, identity: true, want: http.StatusBadRequest},
+		{name: "complete bad task id", method: http.MethodPost, path: "/api/v1/internal/connector-tasks/nope/complete", body: completeBody, identity: true, want: http.StatusBadRequest},
+		{name: "complete without caller identity", method: http.MethodPost, path: complete, body: completeBody, want: http.StatusUnauthorized, validReq: true},
+		{name: "fail", method: http.MethodPost, path: fail, body: failBody, identity: true, want: http.StatusNoContent, validReq: true},
+		{name: "fail without error class", method: http.MethodPost, path: fail, body: `{"tenant_id":"` + tenantID + `"}`, identity: true, want: http.StatusBadRequest},
+		{name: "fail without caller identity", method: http.MethodPost, path: fail, body: failBody, want: http.StatusUnauthorized, validReq: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) { run(t, spec, ok, tc) })
 	}
@@ -126,10 +124,10 @@ func TestInternalContract_ConnectorTasks(t *testing.T) {
 	} {
 		router := ingestRouter(handler.Services{ConnectorTasks: fakeConnectorTasks{err: tc.err}})
 		t.Run("complete: "+tc.name, func(t *testing.T) {
-			run(t, spec, router, exchange{method: http.MethodPost, path: complete, body: completeBody, token: token, want: tc.want, validReq: true})
+			run(t, spec, router, exchange{method: http.MethodPost, path: complete, body: completeBody, identity: true, want: tc.want, validReq: true})
 		})
 		t.Run("fail: "+tc.name, func(t *testing.T) {
-			run(t, spec, router, exchange{method: http.MethodPost, path: fail, body: failBody, token: token, want: tc.want, validReq: true})
+			run(t, spec, router, exchange{method: http.MethodPost, path: fail, body: failBody, identity: true, want: tc.want, validReq: true})
 		})
 	}
 }

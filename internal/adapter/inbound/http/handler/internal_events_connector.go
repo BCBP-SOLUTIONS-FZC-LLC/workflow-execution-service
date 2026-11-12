@@ -71,7 +71,7 @@ func (h *Handler) handleWorkflowTaskCreated(c *gin.Context, env events.Envelope[
 		return
 	}
 
-	ctx := guCtx(c.Request.Context(), env.TenantID)
+	ctx := guCtx(c.Request.Context(), tenantID)
 	var principal port.AutomationPrincipal
 	if h.principals != nil {
 		resolved, err := h.principals.AutomationPrincipal(ctx, tenantID)

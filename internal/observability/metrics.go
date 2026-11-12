@@ -18,6 +18,7 @@ var (
 	instanceStartBuckets     = []float64{.05, .1, .25, .5, .75, 1, 1.5, 2, 3, 5, 10}
 	delegationRerouteBuckets = []float64{.25, .5, 1, 2, 3, 4, 5, 6, 8, 10, 15, 20}
 	activityBuckets          = prometheus.DefBuckets
+	entitlementsCallBuckets  = []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}
 )
 
 var (
@@ -47,6 +48,15 @@ var (
 	ConnectorTaskFailuresTotal          *prometheus.CounterVec
 	OldestReadyTaskAgeSeconds           prometheus.Gauge
 	UpstreamDependencyErrorsTotal       *prometheus.CounterVec
+	UserPauseFailuresTotal              *prometheus.CounterVec
+	InternalAuthRejectedTotal           *prometheus.CounterVec
+	ConnectorAliasRegistryAgeSeconds    prometheus.Gauge
+
+	EntitlementsCallDurationSeconds    *prometheus.HistogramVec
+	EntitlementsCallErrorsTotal        *prometheus.CounterVec
+	EntitlementsStaleServedTotal       prometheus.Counter
+	EntitlementsOldestServedAgeSeconds prometheus.Gauge
+	EntitlementsReadPanicsTotal        prometheus.Counter
 
 	WFCacheHitsTotal   prometheus.Counter
 	WFCacheMissesTotal prometheus.Counter
@@ -136,6 +146,30 @@ func registerServiceMetrics() {
 	UpstreamDependencyErrorsTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_upstream_dependency_errors_total",
 		"Total upstream dependency call failures, by dependency.", "dependency"))
+	UserPauseFailuresTotal = must(gincommon.NewCounterVec(nil,
+		"workflow_execution_service_user_pause_failures_total",
+		"Instances the membership-revocation pause could not pause, by stage (read_task, read_instance or signal). The call answers 503 so the caller retries.", "stage"))
+	InternalAuthRejectedTotal = must(gincommon.NewCounterVec(nil,
+		"workflow_execution_service_internal_auth_rejected_total",
+		"Internal-route requests refused for lacking the system caller identity, by reason (missing_user or missing_role).", "reason"))
+	ConnectorAliasRegistryAgeSeconds = must(gincommon.NewGauge(nil,
+		"workflow_execution_service_connector_alias_registry_age_seconds",
+		"Seconds since the connector worker last applied a fresh alias registry, updated on every refresh tick (a failed or empty refresh lets it grow)."))
+	EntitlementsCallDurationSeconds = must(gincommon.NewHistogramVec(nil,
+		"workflow_execution_service_entitlements_call_duration_seconds",
+		"Latency of one Entitlements feature-flag read, by outcome (success or error).", entitlementsCallBuckets, "outcome"))
+	EntitlementsCallErrorsTotal = must(gincommon.NewCounterVec(nil,
+		"workflow_execution_service_entitlements_call_errors_total",
+		"Failed Entitlements feature-flag reads, by reason (transport, status or response).", "reason"))
+	EntitlementsStaleServedTotal = must(gincommon.NewCounter(nil,
+		"workflow_execution_service_entitlements_stale_served_total",
+		"Feature-flag answers served from a held set older than its TTL while a refresh runs or backs off."))
+	EntitlementsOldestServedAgeSeconds = must(gincommon.NewGauge(nil,
+		"workflow_execution_service_entitlements_oldest_served_age_seconds",
+		"Age in seconds of the oldest held feature-flag set served past its TTL, over the last TTL window; 0 when none was."))
+	EntitlementsReadPanicsTotal = must(gincommon.NewCounter(nil,
+		"workflow_execution_service_entitlements_read_panics_total",
+		"Entitlements reads that panicked and were recovered; each counts as a failed read."))
 	WFCacheHitsTotal = must(gincommon.NewCounter(nil,
 		"workflow_execution_service_wf_cache_hits_total",
 		"Total compiled-plan cache hits."))
@@ -152,6 +186,18 @@ func preInitializeClosedLabelSets() {
 	}
 	for _, violationType := range []string{"missing_or_invalid_guc", "cross_tenant_access"} {
 		RLSViolationsTotal.WithLabelValues(violationType)
+	}
+	for _, stage := range []string{"read_task", "read_instance", "signal"} {
+		UserPauseFailuresTotal.WithLabelValues(stage)
+	}
+	for _, reason := range []string{"missing_user", "missing_role"} {
+		InternalAuthRejectedTotal.WithLabelValues(reason)
+	}
+	for _, outcome := range []string{"success", "error"} {
+		EntitlementsCallDurationSeconds.WithLabelValues(outcome)
+	}
+	for _, reason := range []string{"transport", "status", "response"} {
+		EntitlementsCallErrorsTotal.WithLabelValues(reason)
 	}
 	for _, dep := range []string{"definition_service", "iam"} {
 		UpstreamDependencyErrorsTotal.WithLabelValues(dep)

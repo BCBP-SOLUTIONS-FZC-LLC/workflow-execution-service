@@ -119,4 +119,9 @@ func exerciseEveryCollector() {
 	observability.IncCounterVec(observability.UpstreamDependencyErrorsTotal, "iam")
 	observability.IncCounter(observability.WFCacheHitsTotal)
 	observability.IncCounter(observability.WFCacheMissesTotal)
+	observability.ObserveHistogramVec(observability.EntitlementsCallDurationSeconds, 0.1, "success")
+	observability.IncCounterVec(observability.EntitlementsCallErrorsTotal, "transport")
+	observability.IncCounter(observability.EntitlementsStaleServedTotal)
+	observability.SetGauge(observability.EntitlementsOldestServedAgeSeconds, 1)
+	observability.IncCounter(observability.EntitlementsReadPanicsTotal)
 }

@@ -37,7 +37,7 @@ func planServer(t *testing.T, status int, body string) *outboundtemporal.Deps {
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
-	return &outboundtemporal.Deps{Definitions: outboundhttp.NewDefinitionClient(srv.URL, "", 2*time.Second)}
+	return &outboundtemporal.Deps{Definitions: outboundhttp.NewDefinitionClient(srv.URL, 2*time.Second)}
 }
 
 func planBody(planJSON string) string {

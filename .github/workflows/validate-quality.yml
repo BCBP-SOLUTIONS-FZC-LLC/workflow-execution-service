@@ -103,10 +103,11 @@ jobs:
           CONTRACT_BASE_REF: origin/main
         run: make contract-breaking
 
-      # The copy of the Definition Service's spec must match its source.
+      # The copy of the Definition Service's spec must match its source: the same-named branch if it has one, otherwise main.
       - name: Contract copy check
         env:
           GH_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
         run: make contract-check
 
       - name: Dockerfile base image digest check

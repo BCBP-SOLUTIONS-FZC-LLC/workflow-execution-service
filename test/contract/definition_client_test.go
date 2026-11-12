@@ -28,8 +28,11 @@ func definitionServer(t *testing.T, spec *contract.Spec, replies ...func(w http.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := int(calls.Add(1))
 		spec.Request(t, r)
-		if got := r.Header.Get("x-internal-token"); got != "definition-token" {
-			t.Errorf("x-internal-token = %q, want the Definition Service's token", got)
+		if r.Header.Get("x-user-id") != "iam-system" || r.Header.Get("x-tenant-roles") != "iam-system" {
+			t.Errorf("caller identity = %q / %q, want iam-system on both", r.Header.Get("x-user-id"), r.Header.Get("x-tenant-roles"))
+		}
+		if r.Header.Get("x-tenant-id") == "" {
+			t.Error("x-tenant-id missing from a tenant-scoped call")
 		}
 		reply := replies[len(replies)-1]
 		if n <= len(replies) {
@@ -50,7 +53,7 @@ func jsonReply(status int, body []byte) func(http.ResponseWriter) {
 }
 
 func definitionClient(url string) *outboundhttp.DefinitionClient {
-	return outboundhttp.NewDefinitionClient(url, "definition-token", time.Second)
+	return outboundhttp.NewDefinitionClient(url, time.Second)
 }
 
 func TestDefinitionClient_ReadsTheSpecExample(t *testing.T) {

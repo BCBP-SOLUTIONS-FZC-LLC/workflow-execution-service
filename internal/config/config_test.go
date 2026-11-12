@@ -40,6 +40,52 @@ func TestLoad_Success(t *testing.T) {
 	}
 }
 
+func TestLoad_EntitlementsIsOffAndDefaultedWhenUnset(t *testing.T) {
+	setValidEnv(t)
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil: the Entitlements address is not required in any environment", err)
+	}
+	if cfg.EntitlementsBaseURL != "" {
+		t.Errorf("EntitlementsBaseURL = %q, want empty", cfg.EntitlementsBaseURL)
+	}
+	if cfg.EntitlementsClientTimeout != 5*time.Second || cfg.EntitlementsCacheTTL != 60*time.Second || cfg.EntitlementsFreshnessBound != 10*time.Minute {
+		t.Errorf("defaults = %v %v %v, want 5s 1m0s 10m0s", cfg.EntitlementsClientTimeout, cfg.EntitlementsCacheTTL, cfg.EntitlementsFreshnessBound)
+	}
+}
+
+func TestLoad_EntitlementsSettingsAreRead(t *testing.T) {
+	setValidEnv(t)
+	t.Setenv("ENTITLEMENTS_BASE_URL", "http://entitlements.commercial:8080")
+	t.Setenv("ENTITLEMENTS_CLIENT_TIMEOUT", "2s")
+	t.Setenv("ENTITLEMENTS_CACHE_TTL", "30s")
+	t.Setenv("ENTITLEMENTS_FRESHNESS_BOUND", "5m")
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.EntitlementsBaseURL != "http://entitlements.commercial:8080" || cfg.EntitlementsClientTimeout != 2*time.Second ||
+		cfg.EntitlementsCacheTTL != 30*time.Second || cfg.EntitlementsFreshnessBound != 5*time.Minute {
+		t.Errorf("settings not read: %+v", cfg)
+	}
+}
+
+func TestLoad_AFreshnessBoundBelowTheTTLFailsFast(t *testing.T) {
+	setValidEnv(t)
+	t.Setenv("ENTITLEMENTS_CACHE_TTL", "5m")
+	t.Setenv("ENTITLEMENTS_FRESHNESS_BOUND", "1m")
+
+	_, err := Load()
+
+	if err == nil || !strings.Contains(err.Error(), "ENTITLEMENTS_FRESHNESS_BOUND") {
+		t.Fatalf("Load() error = %v, want one naming ENTITLEMENTS_FRESHNESS_BOUND", err)
+	}
+}
+
 func TestLoad_InvalidIntEnvVarFailsFast(t *testing.T) {
 	setValidEnv(t)
 	t.Setenv("HTTP_PORT", "not-a-port")
@@ -97,6 +143,11 @@ func TestValidate(t *testing.T) {
 		{"processed event retention zero", func(c *Config) { c.ProcessedEventRetention = 0 }, true},
 		{"retention sweep interval zero", func(c *Config) { c.RetentionSweepInterval = 0 }, true},
 		{"retention sweep batch zero", func(c *Config) { c.RetentionSweepBatch = 0 }, true},
+		{"entitlements client timeout zero", func(c *Config) { c.EntitlementsClientTimeout = 0 }, true},
+		{"entitlements cache ttl zero", func(c *Config) { c.EntitlementsCacheTTL = 0 }, true},
+		{"entitlements freshness bound zero", func(c *Config) { c.EntitlementsFreshnessBound = 0 }, true},
+		{"entitlements freshness bound below the ttl", func(c *Config) { c.EntitlementsFreshnessBound = 30 * time.Second }, true},
+		{"entitlements freshness bound equal to the ttl", func(c *Config) { c.EntitlementsFreshnessBound = c.EntitlementsCacheTTL }, false},
 		{"queue topology poll interval zero", func(c *Config) { c.QueueTopologyPollInterval = 0 }, true},
 		{"queue topology poll interval beyond the alert's window", func(c *Config) { c.QueueTopologyPollInterval = 3 * time.Minute }, true},
 		{"queue topology poll interval at the limit", func(c *Config) { c.QueueTopologyPollInterval = 2 * time.Minute }, false},
@@ -122,6 +173,9 @@ func TestValidate(t *testing.T) {
 				EligibilityClientTimeout:   5 * time.Second,
 				QueueTopologyPollInterval:  60 * time.Second,
 				TokenServiceClientTimeout:  5 * time.Second,
+				EntitlementsClientTimeout:  5 * time.Second,
+				EntitlementsCacheTTL:       time.Minute,
+				EntitlementsFreshnessBound: 10 * time.Minute,
 				RLSViolationExportInterval: 30 * time.Second,
 				RLSViolationRetention:      time.Hour,
 				OperationalStatsInterval:   30 * time.Second,
@@ -255,19 +309,35 @@ func TestLoad_ConnectorWorkerEnvironment(t *testing.T) {
 	t.Setenv("SNS_TOPIC_ARN", "")
 	t.Setenv("GLUE_REGISTRY_NAME", "")
 	t.Setenv("DEFINITION_SERVICE_URL", "http://definition:8080")
-	t.Setenv("DEFINITION_SERVICE_TOKEN", "def-tok")
-	t.Setenv("INTERNAL_API_TOKEN", "tok")
 
 	if _, err := Load(); err != nil {
 		t.Fatalf("Load() error = %v, want nil for the connector-worker's environment", err)
 	}
 }
 
+// The alias-call token is optional everywhere: a production connector-worker
+// starts without it.
+func TestLoad_ConnectorAliasCallToken(t *testing.T) {
+	t.Setenv("DEFINITION_SERVICE_URL", "http://definition:8080")
+	t.Setenv("CONNECTOR_ALIAS_CALL_TOKEN", "alias-tok")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ConnectorAliasCallToken != "alias-tok" {
+		t.Errorf("ConnectorAliasCallToken = %q, want alias-tok", cfg.ConnectorAliasCallToken)
+	}
+
+	t.Setenv("CONNECTOR_ALIAS_CALL_TOKEN", "")
+	cfg, err = Load()
+	if err != nil || cfg.ConnectorAliasCallToken != "" {
+		t.Errorf("Load() = (%q, %v), want an empty token and no error", cfg.ConnectorAliasCallToken, err)
+	}
+}
+
 func TestRequire(t *testing.T) {
 	prod := func(c *Config) {
 		c.AppEnv = "prod"
-		c.InternalAPIToken = "tok"
-		c.DefinitionServiceToken = "def-tok"
 		c.OutboxRelayDatabaseURL = "postgres://relay"
 		c.TokenServiceBaseURL = "http://token-service"
 		c.AWSUseStub = false
@@ -302,8 +372,6 @@ func TestRequire(t *testing.T) {
 		{"server needs glue when not stubbed", (*Config).RequireServer, func(c *Config) { c.AWSUseStub = false; c.SNSTopicARN = "arn" }, "GLUE_REGISTRY_NAME"},
 		{"server refuses the stubbed publisher outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.AWSUseStub = true }, "AWS_USE_STUB"},
 		{"server allows the stubbed publisher in local", (*Config).RequireServer, func(c *Config) { c.AppEnv = "local" }, ""},
-		{"server needs its token outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.InternalAPIToken = "" }, "INTERNAL_API_TOKEN"},
-		{"server needs the definition token outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.DefinitionServiceToken = "" }, "DEFINITION_SERVICE_TOKEN"},
 		{"server needs the token service outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.TokenServiceBaseURL = "" }, "TOKEN_SERVICE_BASE_URL"},
 		{"server needs the relay dsn outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.OutboxRelayDatabaseURL = "" }, "OUTBOX_RELAY_DATABASE_URL"},
 		{"server behind a pooler needs a direct dsn for its locks outside dev", (*Config).RequireServer, func(c *Config) { prod(c); c.PGBouncerMode = true }, "LOCK_DATABASE_URL"},
@@ -311,31 +379,24 @@ func TestRequire(t *testing.T) {
 		{"server behind a pooler may share the database in dev", (*Config).RequireServer, func(c *Config) { c.PGBouncerMode = true }, ""},
 
 		{"worker valid in dev", (*Config).RequireWorker, func(c *Config) {}, ""},
-		{"worker valid in production without the api's settings", (*Config).RequireWorker, func(c *Config) { c.AppEnv = "prod"; c.DefinitionServiceToken = "def-tok" }, ""},
+		{"worker valid in production without the api's settings", (*Config).RequireWorker, func(c *Config) { c.AppEnv = "prod" }, ""},
 		{"worker needs a database", (*Config).RequireWorker, func(c *Config) { c.DatabaseURL = "" }, "DATABASE_URL"},
 		{"worker needs the definition service", (*Config).RequireWorker, func(c *Config) { c.DefinitionServiceURL = "" }, "DEFINITION_SERVICE_URL"},
-		{"worker needs the definition token outside dev", (*Config).RequireWorker, func(c *Config) { c.AppEnv = "prod" }, "DEFINITION_SERVICE_TOKEN"},
 
 		{"connector-worker valid in production", (*Config).RequireConnectorWorker, func(c *Config) {
 			c.AppEnv = "prod"
-			c.InternalAPIToken = "tok"
-			c.DefinitionServiceToken = "def-tok"
 			c.OpenBaoToken = "bao-tok"
 			c.ConnectorDocsBucket = "docs"
 			c.OutboxRelayDatabaseURL = "postgres://relay"
 		}, ""},
 		{"connector-worker needs the relay database outside dev", (*Config).RequireConnectorWorker, func(c *Config) {
 			c.AppEnv = "prod"
-			c.InternalAPIToken = "tok"
-			c.DefinitionServiceToken = "def-tok"
 			c.OpenBaoToken = "bao-tok"
 			c.ConnectorDocsBucket = "docs"
 		}, "OUTBOX_RELAY_DATABASE_URL"},
 		{"connector-worker needs a database", (*Config).RequireConnectorWorker, func(c *Config) { c.DatabaseURL = "" }, "DATABASE_URL"},
 		{"connector-worker needs the document bucket outside dev", (*Config).RequireConnectorWorker, func(c *Config) {
 			c.AppEnv = "prod"
-			c.InternalAPIToken = "tok"
-			c.DefinitionServiceToken = "def-tok"
 			c.OpenBaoToken = "bao-tok"
 			c.OutboxRelayDatabaseURL = "postgres://relay"
 		}, "CONNECTOR_DOCS_BUCKET"},
@@ -345,9 +406,7 @@ func TestRequire(t *testing.T) {
 			c.ConnectorRetryMaxBackoff = time.Second
 		}, "CONNECTOR_RETRY_MAX_BACKOFF"},
 		{"connector-worker needs the definition service", (*Config).RequireConnectorWorker, func(c *Config) { c.DefinitionServiceURL = "" }, "DEFINITION_SERVICE_URL"},
-		{"connector-worker needs the definition token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "prod"; c.InternalAPIToken = "tok"; c.OpenBaoToken = "bao-tok" }, "DEFINITION_SERVICE_TOKEN"},
-		{"connector-worker needs the internal token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "prod"; c.DefinitionServiceToken = "def-tok"; c.OpenBaoToken = "bao-tok" }, "INTERNAL_API_TOKEN"},
-		{"connector-worker needs the openbao token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "prod"; c.DefinitionServiceToken = "def-tok"; c.InternalAPIToken = "tok" }, "OPENBAO_TOKEN"},
+		{"connector-worker needs the openbao token outside dev", (*Config).RequireConnectorWorker, func(c *Config) { c.AppEnv = "prod" }, "OPENBAO_TOKEN"},
 
 		{"migrate needs only a database", (*Config).RequireMigrate, func(c *Config) { *c = Config{DatabaseURL: "postgres://x"} }, ""},
 		{"migrate prefers its direct dsn", (*Config).RequireMigrate, func(c *Config) { *c = Config{MigrationDatabaseURL: "postgres://direct"} }, ""},

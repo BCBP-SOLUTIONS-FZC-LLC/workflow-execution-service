@@ -288,6 +288,8 @@ func upstreamDependency(err error) string {
 
 func mapErr(err error) (status int, code ErrCode, detail string) {
 	switch {
+	case errors.Is(err, port.ErrUserPauseIncomplete):
+		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "some of the user's instances could not be paused; retry the call"
 	case errors.Is(err, port.ErrTaskNotFound):
 		return http.StatusNotFound, CodeTaskNotFound, err.Error()
 	case errors.Is(err, port.ErrNotAssignee):
@@ -343,7 +345,7 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 	case errors.Is(err, port.ErrNoAutomationPrincipal):
 		return http.StatusConflict, CodeNoAutomationPrincipal, err.Error()
 	case errors.Is(err, adapterhttp.ErrUpstreamUnavailable):
-		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, err.Error()
+		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "an upstream service could not serve the request"
 	case errors.Is(err, port.ErrDefinitionUnavailable), errors.Is(err, port.ErrDefinitionRejected):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "the Definition Service could not serve the workflow version"
 	case errors.Is(err, context.DeadlineExceeded):

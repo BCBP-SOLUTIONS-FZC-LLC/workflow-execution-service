@@ -692,8 +692,8 @@ func newRouter(h *handler.Handler) *gin.Engine {
 }
 
 // newInternalRouter builds a BARE router (no gincommon.ProtectedMiddlewares,
-// no middleware.RequireInternalToken) for the /internal group's routes —
-// these callers carry no gateway identity, and the token guard is a
+// no middleware.RequireSystemCaller) for the /internal group's routes —
+// these callers carry no gateway identity, and the caller-identity guard is a
 // separate middleware-package concern tested on its own. Kept in sync by
 // hand with router.go's /internal route table, for the same reason newRouter
 // is above.

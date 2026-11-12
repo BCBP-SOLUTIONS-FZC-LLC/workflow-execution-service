@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -69,7 +70,12 @@ func report(ctx context.Context, d *deps, job dispatchJob, outcome dispatchOutco
 		err = d.completion.Complete(ctx, job.tenantID, job.taskID, outcome.Output)
 	}
 	if err != nil {
-		wlog.Warn("connector-worker: callback failed, leaving entry unacked for redelivery", map[string]any{"task_id": job.taskID, "error": err.Error()})
+		fields := map[string]any{"task_id": job.taskID, "error": err.Error()}
+		var statusErr *callbackStatusError
+		if errors.As(err, &statusErr) {
+			fields["status"], fields["body"] = statusErr.Status, statusErr.Body
+		}
+		wlog.Warn("connector-worker: callback failed, leaving entry unacked for redelivery", fields)
 		return
 	}
 	ackEntry(ctx, d, entryID, wlog)

@@ -126,7 +126,7 @@ Platform libraries and what each owns:
 | Surface | Spec | Callers |
 | --- | --- | --- |
 | Public REST under `/api/v1` | [docs/swagger/openapi.yaml](docs/swagger/openapi.yaml) | The frontend, through the gateway |
-| Internal HTTP under `/api/v1/internal` | [api/internal-openapi.yaml](api/internal-openapi.yaml) | The Definition Service, IAM, the Workflow-Events Consumer, the connector worker; `x-internal-token` required |
+| Internal HTTP under `/api/v1/internal` | [api/internal-openapi.yaml](api/internal-openapi.yaml) | The Definition Service, IAM, the Workflow-Events Consumer, the connector worker; the system caller identity (`x-tenant-roles: iam-system` and an `x-user-id`) required |
 | Produced events | [api/asyncapi.yaml](api/asyncapi.yaml) | Subscribers of the `wf-workflow-events` SNS topic |
 | Consumed events | the same file | The Workflow-Events Consumer forwards each to `/api/v1/internal/events/{delegation,user-profile,tenant,workflow-task}` |
 
@@ -136,13 +136,15 @@ Tests fail when a router operation is missing from its spec or the reverse, and 
 
 ## Configuration
 
+`ENTITLEMENTS_BASE_URL` is optional in every environment: when set, an instance start asks Entitlements whether the tenant holds the `dedicated_workflow_queue` grant and chooses the tenant's own task queue from the answer (cache `ENTITLEMENTS_CACHE_TTL`, last answer kept up to `ENTITLEMENTS_FRESHNESS_BOUND`, read bounded by `ENTITLEMENTS_CLIENT_TIMEOUT`); when it is empty, or the grant cannot be read, the queue registry decides.
+
 `.env.example` lists every variable, including the ones with a product decision behind them: `START_REFUSED_STATUSES` (tenant statuses whose instance starts are refused: `suspended`, `trial_expired` and `cancelled` by default), the tenant purge settings (`TENANT_PURGE_ENABLED`, `TENANT_HISTORY_RETENTION`), `WORKFLOW_CACHE_SIZE` (sizing) and `LOCK_DATABASE_URL`; the chart also sets `GOMEMLIMIT` per process. `APP_ENV` is one of `local`, `dev`, `test`, `staging`, `prod`; outside `dev` and `local` each binary refuses to start without the settings it needs:
 
 | Binary | Required outside dev |
 | --- | --- |
-| API server | `DATABASE_URL`, `OUTBOX_RELAY_DATABASE_URL`, `VALKEY_ADDR`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL` and `_TOKEN`, `INTERNAL_API_TOKEN`, `ELIGIBILITY_BASE_URL`, `TOKEN_SERVICE_BASE_URL`, `SNS_TOPIC_ARN`, `GLUE_REGISTRY_NAME`, `AWS_USE_STUB=false`, `LOCK_DATABASE_URL` when `PG_BOUNCER_MODE` is true |
-| Worker | `DATABASE_URL`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL` and `_TOKEN` |
-| Connector worker | `DATABASE_URL`, `VALKEY_ADDR`, `DEFINITION_SERVICE_URL` and `_TOKEN`, `INTERNAL_API_TOKEN`, `EXECUTION_SERVICE_INTERNAL_ADDR`, `OPENBAO_TOKEN`, `CONNECTOR_DOCS_BUCKET`; `OPENBAO_ADDR` and `EXECUTION_SERVICE_INTERNAL_ADDR` in every environment, dev included |
+| API server | `DATABASE_URL`, `OUTBOX_RELAY_DATABASE_URL`, `VALKEY_ADDR`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL`, `ELIGIBILITY_BASE_URL`, `TOKEN_SERVICE_BASE_URL`, `SNS_TOPIC_ARN`, `GLUE_REGISTRY_NAME`, `AWS_USE_STUB=false`, `LOCK_DATABASE_URL` when `PG_BOUNCER_MODE` is true |
+| Worker | `DATABASE_URL`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL` |
+| Connector worker | `DATABASE_URL`, `VALKEY_ADDR`, `DEFINITION_SERVICE_URL`, `EXECUTION_SERVICE_INTERNAL_ADDR`, `OPENBAO_TOKEN`, `CONNECTOR_DOCS_BUCKET`; `OPENBAO_ADDR` and `EXECUTION_SERVICE_INTERNAL_ADDR` in every environment, dev included |
 
 ---
 
@@ -152,7 +154,7 @@ Three images from one multi-stage `Dockerfile` (`server`, `worker`, `connector-w
 
 The release runs in `workflow-app`, inside the Istio mesh with mTLS: Org & Membership and the Token Service admit Workflow callers by that namespace. The API's NetworkPolicy allows egress to both in `iam` on 8080, and the route-level `SecurityPolicy` sets `mergeType: StrategicMerge` (Envoy Gateway 1.8 or later) so it keeps the gateway's JWT validation and authorisation filter; on an older gateway, keep it disabled.
 
-Roll one process back with `kubectl rollout undo deployment/<name>`, not `helm rollback`, which reverts the whole release. mTLS between pods is the service mesh's job; the NetworkPolicies are L3/L4 defence in depth.
+Roll one process back with `kubectl rollout undo deployment/<name>`, not `helm rollback`, which reverts the whole release. The Services and ServiceAccounts have fixed names (`fullnameOverride: workflow-execution-service`: `workflow-execution-service-api`, `-worker`, `-connector-worker`), so install one release per namespace. mTLS between pods is the service mesh's job (`PeerAuthentication` is Platform's); a caller without a mesh identity is refused on the internal paths. The NetworkPolicies are L3/L4 only and admit the gateway, the event consumer, the Definition Service, Org & Membership and the connector worker onto the API port. The chart refuses to render with `authorizationPolicy.enabled: false` when `env.appEnv` is `staging` or `prod`, unless `authorizationPolicy.allowDisabled: true`.
 
 ---
 
@@ -173,7 +175,7 @@ Logs, metrics and traces go through `platform-gincommon`; every binary calls the
 ## Security
 
 - **Tenant isolation:** row-level security is forced on every tenant table, with a policy that checks the tenant GUC through a function that logs sampled violations.
-- **Internal API:** `x-internal-token`, compared in constant time; request bodies are capped at 10 MiB.
+- **Internal API:** a request is admitted only when `x-tenant-roles` lists `iam-system` and `x-user-id` is set, else `401 UNAUTHORIZED`. The headers are not a credential: mutual TLS in the mesh names the caller and the chart's Istio `AuthorizationPolicy` admits, per route group (`authorizationPolicy.internalRoutes`: events, Definition calls, Org & Membership workflow-client routes, connector-task callbacks), only that group's named caller service accounts on `/api/v1/internal/*`. With the policy off, the header check is the only gate besides the NetworkPolicy; the public gateway route exposes no internal path. A local run has no mesh and trusts the headers. Request bodies are capped at 10 MiB.
 - **Connector credentials:** read from OpenBao per tenant; a plan-supplied credential field is never trusted.
 - **Servers:** read-header, read, write and idle timeouts on every listener; the request timeout sits inside the observability middleware.
 - **Container:** distroless, non-root, read-only root filesystem, all capabilities dropped.
@@ -202,7 +204,7 @@ Logs, metrics and traces go through `platform-gincommon`; every binary calls the
 | `make test-e2e` / `make test-compat` | End to end, and compatibility with the Definition Service |
 | `make lint` / `make fix` | golangci-lint read-only or fixing |
 | `make arch-lint` / `make metrics-lint` / `make metrics-inventory` | Import graph, observability standard, regenerate the inventory |
-| `make contract-check` / `make contract-breaking` | Copied Definition contract, internal spec breaking-change gate |
+| `make contract-check` / `make contract-breaking` | Copied Definition contract (read from the Definition Service's same-named branch, else `main`), internal spec breaking-change gate |
 | `make design-sync-check` / `make design-sync-check-test` | Fail when a document kept here and in the design repository differs (`DESIGN_DIR=<checkout>`, or `GH_TOKEN` reads `Haroon-BCBP/design`); local only, because CI does not read the personal design repository |
 | `make docker-build` / `make pin-base-images` / `make lint-workflows` | The three images, base-image digests, `actionlint` on the workflows |
 | `make helm-lint` / `make vuln` / `make docker-check` | Chart, dependency vulnerabilities, Dockerfile lint and scan |

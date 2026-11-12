@@ -44,13 +44,13 @@ func (d *delegateClient) DelegateImpact(context.Context, port.DelegateImpactInpu
 func delegateRouter(d *delegateClient) http.Handler {
 	gin.SetMode(gin.TestMode)
 	return httpadapter.NewRouter(httpadapter.RouterConfig{
-		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"}, AppEnv: "test", InternalAPIToken: "internal-secret",
+		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"}, AppEnv: "test",
 		Handler: handler.New(handler.Services{WorkflowClient: d}),
 		DB:      upDB{}, Cache: upPinger{}, Temporal: upPinger{},
 	}).Handler()
 }
 
-func orgMembershipRequest(method, target string, body map[string]any, token string) *http.Request {
+func orgMembershipRequest(method, target string, body map[string]any, identity bool) *http.Request {
 	var req *http.Request
 	if body == nil {
 		req = httptest.NewRequest(method, target, nil)
@@ -60,10 +60,9 @@ func orgMembershipRequest(method, target string, body map[string]any, token stri
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("x-tenant-id", "t")
-	req.Header.Set("x-user-id", "iam-system")
-	req.Header.Set("x-tenant-roles", "iam-system")
-	if token != "" {
-		req.Header.Set("x-internal-token", token)
+	if identity {
+		req.Header.Set("x-user-id", "iam-system")
+		req.Header.Set("x-tenant-roles", "iam-system")
 	}
 	return req
 }
@@ -85,7 +84,7 @@ func TestOrgMembershipClient_DelegateImpact(t *testing.T) {
 
 	t.Run("the removal gate reads the fields it names", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, orgMembershipRequest(http.MethodGet, target, nil, "internal-secret"))
+		router.ServeHTTP(w, orgMembershipRequest(http.MethodGet, target, nil, true))
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 		var body struct {
@@ -97,9 +96,9 @@ func TestOrgMembershipClient_DelegateImpact(t *testing.T) {
 		assert.Equal(t, []uuid.UUID{workflowID}, body.WorkflowIDs)
 	})
 
-	t.Run("a call without the internal token is refused", func(t *testing.T) {
+	t.Run("a call without the system caller identity is refused", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, orgMembershipRequest(http.MethodGet, target, nil, ""))
+		router.ServeHTTP(w, orgMembershipRequest(http.MethodGet, target, nil, false))
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
 }
@@ -112,7 +111,7 @@ func TestOrgMembershipClient_ReassignAndCancel(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, orgMembershipRequest(http.MethodPost, "/api/v1/internal/workflows/reassign-delegate", map[string]any{
 		"tenant_id": tenantID, "old_delegate_id": oldDelegate, "new_delegate_id": newDelegate, "delegation_id": delegationID,
-	}, "internal-secret"))
+	}, true))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, oldDelegate, d.reassign.OldDelegateID)
 	assert.Equal(t, newDelegate, d.reassign.NewDelegateID)
@@ -122,7 +121,7 @@ func TestOrgMembershipClient_ReassignAndCancel(t *testing.T) {
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, orgMembershipRequest(http.MethodPost, "/api/v1/internal/workflows/cancel-by-delegate", map[string]any{
 		"tenant_id": tenantID, "delegate_user_id": oldDelegate, "delegation_id": delegationID,
-	}, "internal-secret"))
+	}, true))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, oldDelegate, d.cancelled.DelegateUserID)
 }

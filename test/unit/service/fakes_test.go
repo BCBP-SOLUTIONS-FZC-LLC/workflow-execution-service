@@ -377,14 +377,22 @@ type fakeAssignmentRepo struct {
 	listActiveByTaskErr          error
 	listActiveByUserPaginatedErr error
 	setLeadErr                   error
+	// order holds the IDs of rows added through add, so ListActiveByUser can
+	// answer in insertion order instead of Go's random map order.
+	order []uuid.UUID
 }
 
 func newFakeAssignmentRepo(assignments ...*domain.TaskAssignment) *fakeAssignmentRepo {
-	m := make(map[uuid.UUID]*domain.TaskAssignment, len(assignments))
+	r := &fakeAssignmentRepo{byID: make(map[uuid.UUID]*domain.TaskAssignment, len(assignments))}
 	for _, a := range assignments {
-		m[a.ID] = a
+		r.add(a)
 	}
-	return &fakeAssignmentRepo{byID: m}
+	return r
+}
+
+func (r *fakeAssignmentRepo) add(a *domain.TaskAssignment) {
+	r.byID[a.ID] = a
+	r.order = append(r.order, a.ID)
 }
 
 func (r *fakeAssignmentRepo) Create(_ context.Context, a *domain.TaskAssignment) error {
@@ -430,8 +438,15 @@ func (r *fakeAssignmentRepo) ListActiveByUser(_ context.Context, _, userID uuid.
 		return nil, r.listActiveByUserErr
 	}
 	var out []*domain.TaskAssignment
-	for _, a := range r.byID {
-		if a.UserID == userID && a.IsActive {
+	listed := make(map[uuid.UUID]struct{}, len(r.byID))
+	for _, id := range r.order {
+		if a, ok := r.byID[id]; ok && a.UserID == userID && a.IsActive {
+			out = append(out, a)
+		}
+		listed[id] = struct{}{}
+	}
+	for id, a := range r.byID {
+		if _, done := listed[id]; !done && a.UserID == userID && a.IsActive {
 			out = append(out, a)
 		}
 	}
@@ -526,6 +541,17 @@ type fakeActiveTaskQueueRepo struct {
 	byName         map[string]*domain.ActiveTaskQueue
 	registerErr    error
 	stopRoutingErr error
+	getErr         error
+
+	// registered and stopped record each write with its arguments, so a test
+	// can assert the tenant and the queue a start wrote for.
+	registered []registerCall
+	stopped    []string
+}
+
+type registerCall struct {
+	TenantID  uuid.UUID
+	QueueName string
 }
 
 func newFakeActiveTaskQueueRepo() *fakeActiveTaskQueueRepo {
@@ -541,6 +567,9 @@ func (r *fakeActiveTaskQueueRepo) ListActive(_ context.Context) ([]*domain.Activ
 }
 
 func (r *fakeActiveTaskQueueRepo) GetByQueueName(_ context.Context, queueName string) (*domain.ActiveTaskQueue, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
 	q, ok := r.byName[queueName]
 	if !ok {
 		return nil, domain.ErrNotFound
@@ -549,6 +578,7 @@ func (r *fakeActiveTaskQueueRepo) GetByQueueName(_ context.Context, queueName st
 }
 
 func (r *fakeActiveTaskQueueRepo) Register(_ context.Context, tenantID uuid.UUID, queueName string) (*domain.ActiveTaskQueue, error) {
+	r.registered = append(r.registered, registerCall{TenantID: tenantID, QueueName: queueName})
 	if r.registerErr != nil {
 		return nil, r.registerErr
 	}
@@ -562,6 +592,7 @@ func (r *fakeActiveTaskQueueRepo) Register(_ context.Context, tenantID uuid.UUID
 }
 
 func (r *fakeActiveTaskQueueRepo) StopRouting(_ context.Context, queueName string) error {
+	r.stopped = append(r.stopped, queueName)
 	if r.stopRoutingErr != nil {
 		return r.stopRoutingErr
 	}

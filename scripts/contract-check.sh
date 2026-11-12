@@ -1,23 +1,50 @@
 #!/usr/bin/env bash
 # Fails when a copied contract in api/contracts differs from its source file
-# on the branch api/contracts/SOURCES names. Each SOURCES line is:
-#   <copy> <owner/repo> <path in that repo> <branch> <commit the copy was taken at>
-# CONTRACT_SRC_REF reads another ref instead of the branch. CONTRACT_SRC_DIR
-# reads a local checkout with git; otherwise the file is fetched with gh,
-# which needs GH_TOKEN with read access to the source repo. A source file not
-# on the ref yet is reported as pending and passes: nothing published can
-# have drifted. A repo or ref that cannot be read fails.
+# in the neighbouring service's repository. Each SOURCES line is:
+#   <copy> <owner/repo> <path in that repo> <commit the copy was taken at>
+# The ref read in the source repository is, in order: CONTRACT_SRC_REF; the
+# branch of that repository named like the branch under test (HEAD_REF, else
+# the current git branch) when it exists; main. No branch name is written down.
+# CONTRACT_SRC_DIR reads a local checkout with git; otherwise the file is
+# fetched with gh, which needs GH_TOKEN with read access to the source repo.
+# A source file not on the ref yet is reported as pending and passes: nothing
+# published can have drifted. A repo or ref that cannot be read fails.
 set -euo pipefail
 
-dir="$(cd "$(dirname "$0")/.." && pwd)/api/contracts"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+dir="$root/api/contracts"
 if [[ -n "${CONTRACT_SRC_DIR:-}" ]] && ! git -C "$CONTRACT_SRC_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   echo "✗ CONTRACT_SRC_DIR=$CONTRACT_SRC_DIR is not a git checkout" >&2
   exit 1
 fi
+
+head_branch="${HEAD_REF:-$(git -C "$root" branch --show-current 2>/dev/null || true)}"
+
+branch_exists() {
+  local repo="$1" name="$2"
+  if [[ -n "${CONTRACT_SRC_DIR:-}" ]]; then
+    git -C "$CONTRACT_SRC_DIR" rev-parse --verify --quiet "refs/heads/$name^{commit}" >/dev/null ||
+      git -C "$CONTRACT_SRC_DIR" rev-parse --verify --quiet "refs/remotes/origin/$name^{commit}" >/dev/null
+  else
+    gh api "repos/$repo/git/ref/heads/$name" --silent 2>/dev/null
+  fi
+}
+
+resolve_ref() {
+  local repo="$1"
+  if [[ -n "${CONTRACT_SRC_REF:-}" ]]; then
+    printf '%s' "$CONTRACT_SRC_REF"
+  elif [[ -n "$head_branch" && "$head_branch" != main ]] && branch_exists "$repo" "$head_branch"; then
+    printf '%s' "$head_branch"
+  else
+    printf 'main'
+  fi
+}
+
 status=0
-while read -r copy repo path branch commit; do
+while read -r copy repo path commit; do
   [[ -z "${copy:-}" || "$copy" == \#* ]] && continue
-  ref="${CONTRACT_SRC_REF:-$branch}"
+  ref="$(resolve_ref "$repo")"
   if [[ -n "${CONTRACT_SRC_DIR:-}" ]]; then
     if ! git -C "$CONTRACT_SRC_DIR" rev-parse --verify --quiet "$ref^{commit}" >/dev/null; then
       echo "✗ $copy: $ref is not a ref in $CONTRACT_SRC_DIR" >&2

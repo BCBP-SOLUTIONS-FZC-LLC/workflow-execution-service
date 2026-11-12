@@ -16,20 +16,21 @@ var requiredEnv = map[string][]string{
 	"deployment-api.yaml": {
 		"APP_ENV", "BUILD_VERSION", "OTEL_SERVICE_NAME", "OTEL_EXPORTER_OTLP_ENDPOINT",
 		"DATABASE_URL", "OUTBOX_RELAY_DATABASE_URL", "VALKEY_ADDR", "TEMPORAL_HOST_PORT",
-		"DEFINITION_SERVICE_URL", "DEFINITION_SERVICE_TOKEN", "INTERNAL_API_TOKEN",
-		"ELIGIBILITY_BASE_URL", "TOKEN_SERVICE_BASE_URL", "SNS_TOPIC_ARN", "GLUE_REGISTRY_NAME", "AWS_USE_STUB",
+		"DEFINITION_SERVICE_URL",
+		"ELIGIBILITY_BASE_URL", "TOKEN_SERVICE_BASE_URL", "ENTITLEMENTS_BASE_URL", "ENTITLEMENTS_CLIENT_TIMEOUT",
+		"ENTITLEMENTS_CACHE_TTL", "ENTITLEMENTS_FRESHNESS_BOUND", "SNS_TOPIC_ARN", "GLUE_REGISTRY_NAME", "AWS_USE_STUB",
 		"START_REFUSED_STATUSES", "TENANT_PURGE_ENABLED", "TENANT_HISTORY_RETENTION", "LOCK_DATABASE_URL",
 		"PG_MAX_CONNS", "PG_BOUNCER_MODE", "GOMEMLIMIT",
 	},
 	"migrate-job.yaml": {"DATABASE_URL", "MIGRATION_DATABASE_URL", "PG_BOUNCER_MODE"},
 	"deployment-worker.yaml": {
 		"APP_ENV", "BUILD_VERSION", "OTEL_SERVICE_NAME", "OTEL_EXPORTER_OTLP_ENDPOINT",
-		"DATABASE_URL", "TEMPORAL_HOST_PORT", "DEFINITION_SERVICE_URL", "DEFINITION_SERVICE_TOKEN",
+		"DATABASE_URL", "TEMPORAL_HOST_PORT", "DEFINITION_SERVICE_URL",
 		"PG_MAX_CONNS", "PG_BOUNCER_MODE", "QUEUE_TOPOLOGY_POLL_INTERVAL", "WORKFLOW_CACHE_SIZE", "GOMEMLIMIT",
 	},
 	"deployment-connector-worker.yaml": {
 		"APP_ENV", "BUILD_VERSION", "OTEL_SERVICE_NAME", "OTEL_EXPORTER_OTLP_ENDPOINT",
-		"VALKEY_ADDR", "DEFINITION_SERVICE_URL", "DEFINITION_SERVICE_TOKEN", "INTERNAL_API_TOKEN",
+		"VALKEY_ADDR", "DEFINITION_SERVICE_URL", "CONNECTOR_ALIAS_CALL_TOKEN",
 		"EXECUTION_SERVICE_INTERNAL_ADDR", "OPENBAO_ADDR", "OPENBAO_TOKEN",
 		"CONNECTOR_STREAM_KEY", "CONNECTOR_STREAM_GROUP",
 	},
@@ -55,7 +56,7 @@ func TestHelmSecret_RefusesARenderWithoutTheValkeyAddress(t *testing.T) {
 		t.Skip("helm is not installed")
 	}
 	args := []string{"template", "x", "../../deploy/helm"}
-	for _, key := range []string{"DATABASE_URL", "TEMPORAL_HOST_PORT", "INTERNAL_API_TOKEN", "DEFINITION_SERVICE_TOKEN", "OUTBOX_RELAY_DATABASE_URL", "SNS_TOPIC_ARN", "OPENBAO_TOKEN"} {
+	for _, key := range []string{"DATABASE_URL", "TEMPORAL_HOST_PORT", "OUTBOX_RELAY_DATABASE_URL", "SNS_TOPIC_ARN", "OPENBAO_TOKEN"} {
 		args = append(args, "--set-string", "secret.secretValues."+key+"=placeholder")
 	}
 	args = append(args, "--set-string", "env.eligibilityBaseURL=http://eligibility.invalid", "--set-string", "env.tokenServiceBaseURL=http://token-service.invalid")
@@ -68,12 +69,17 @@ func TestHelmSecret_RefusesARenderWithoutTheValkeyAddress(t *testing.T) {
 
 func helmRender(t *testing.T, extra ...string) (string, error) {
 	t.Helper()
+	return helmRenderAs(t, "x", extra...)
+}
+
+func helmRenderAs(t *testing.T, release string, extra ...string) (string, error) {
+	t.Helper()
 	helm, err := exec.LookPath("helm")
 	if err != nil {
 		t.Skip("helm is not installed")
 	}
-	args := []string{"template", "x", "../../deploy/helm"}
-	for _, key := range []string{"DATABASE_URL", "TEMPORAL_HOST_PORT", "VALKEY_ADDR", "INTERNAL_API_TOKEN", "DEFINITION_SERVICE_TOKEN", "OUTBOX_RELAY_DATABASE_URL", "SNS_TOPIC_ARN", "OPENBAO_TOKEN"} {
+	args := []string{"template", release, "../../deploy/helm"}
+	for _, key := range []string{"DATABASE_URL", "TEMPORAL_HOST_PORT", "VALKEY_ADDR", "OUTBOX_RELAY_DATABASE_URL", "SNS_TOPIC_ARN", "OPENBAO_TOKEN"} {
 		args = append(args, "--set-string", "secret.secretValues."+key+"=placeholder")
 	}
 	args = append(args, "--set-string", "env.eligibilityBaseURL=http://eligibility.invalid", "--set-string", "env.tokenServiceBaseURL=http://token-service.invalid")
@@ -117,4 +123,21 @@ func TestHelmPurgeAlert_LooksBackOverTheSweepIntervalPlusTwoHours(t *testing.T) 
 
 	_, err = helmRender(t, "-s", "templates/prometheusrule.yaml", "--set", "serviceMonitor.enabled=true", "--set-string", "env.retentionSweepInterval=90m")
 	require.Error(t, err, "the alert window is set in whole hours")
+}
+
+func TestHelmEntitlements_TheSettingsReachTheAPIPod(t *testing.T) {
+	out, err := helmRender(t, "-s", "templates/deployment-api.yaml",
+		"--set-string", "env.entitlementsBaseURL=http://entitlements.commercial:8080",
+		"--set-string", "env.entitlementsCacheTTL=30s")
+	require.NoError(t, err, out)
+	assert.Regexp(t, `name: ENTITLEMENTS_BASE_URL\s+value: "http://entitlements.commercial:8080"`, out)
+	assert.Regexp(t, `name: ENTITLEMENTS_CACHE_TTL\s+value: "30s"`, out)
+	assert.Regexp(t, `name: ENTITLEMENTS_CLIENT_TIMEOUT\s+value: "5s"`, out)
+	assert.Regexp(t, `name: ENTITLEMENTS_FRESHNESS_BOUND\s+value: "10m"`, out)
+}
+
+func TestHelmConnectorWorker_PassesTheAliasCallTokenOptionally(t *testing.T) {
+	out, err := helmRender(t, "-s", "templates/deployment-connector-worker.yaml", "--set", "connectorWorker.enabled=true", "--set-string", "connectorWorker.docsBucket=docs")
+	require.NoError(t, err, out)
+	assert.Regexp(t, `name: CONNECTOR_ALIAS_CALL_TOKEN\s+valueFrom:\s+secretKeyRef:\s+name: workflow-execution-service\s+key: CONNECTOR_ALIAS_CALL_TOKEN\s+optional: true`, out)
 }

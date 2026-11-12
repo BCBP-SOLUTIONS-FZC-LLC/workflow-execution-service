@@ -145,10 +145,8 @@ func (e *env) startBus(t *testing.T) *bus {
 targets:
   - name: execution
     addr: %s
-    tokenEnv: EXECUTION_SERVICE_TOKEN
   - name: definition
     addr: %s
-    tokenEnv: DEFINITION_SERVICE_TOKEN
 queues:
   - name: membership
     url: %s
@@ -181,8 +179,6 @@ routes:
 		"AWS_EC2_METADATA_DISABLED=true",
 		"TOPOLOGY_CONFIG_PATH=" + topologyPath,
 		"HEALTH_PORT=" + strconv.Itoa(health),
-		"EXECUTION_SERVICE_TOKEN=" + executionToken,
-		"DEFINITION_SERVICE_TOKEN=" + definitionToken,
 		"RETRY_BACKOFF_BASE=1s",
 		"RETRY_BACKOFF_MAX=2s",
 		"OTEL_SDK_DISABLED=true",

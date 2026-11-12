@@ -46,7 +46,8 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
-const e2eInternalToken = "e2e-connector-worker-test-token"
+// e2eAliasCallToken is the worker's CONNECTOR_ALIAS_CALL_TOKEN: sent to alias targets only.
+const e2eAliasCallToken = "e2e-connector-worker-alias-token"
 
 // The tenant's automation principal, the actor a connector completion is
 // recorded under. Built per test, since each seeds its own tenant.
@@ -209,11 +210,10 @@ func e2eBuildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, valkey
 		AutomationPrincipals: e2ePrincipals{},
 	})
 	return httpadapter.NewRouter(httpadapter.RouterConfig{
-		GinConfig:        gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"},
-		AppEnv:           "dev",
-		InternalAPIToken: e2eInternalToken,
-		Handler:          h,
-		DB:               e2eAlwaysHealthy{}, Cache: e2eAlwaysHealthy{}, Temporal: e2eAlwaysHealthy{},
+		GinConfig: gincommon.Config{ServiceName: "workflow-execution-service", BuildVersion: "test", Domain: "workflow", Environment: "test"},
+		AppEnv:    "dev",
+		Handler:   h,
+		DB:        e2eAlwaysHealthy{}, Cache: e2eAlwaysHealthy{}, Temporal: e2eAlwaysHealthy{},
 	})
 }
 
@@ -296,7 +296,8 @@ func e2ePostWorkflowTaskCreated(t *testing.T, httpClient *http.Client, baseURL s
 		t.Fatalf("new request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-internal-token", e2eInternalToken)
+	req.Header.Set("x-user-id", "iam-system")
+	req.Header.Set("x-tenant-roles", "iam-system")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST /internal/events/workflow-task: %v", err)
@@ -387,7 +388,7 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 		ConnectorStreamBatchSize:     10,
 		DefinitionServiceURL:         aliasSrv.URL,
 		ConnectorAliasFetchTimeout:   5 * time.Second,
-		InternalAPIToken:             e2eInternalToken,
+		ConnectorAliasCallToken:      e2eAliasCallToken,
 		OpenBaoAddr:                  "http://unused.invalid",
 		OpenBaoMount:                 "secret",
 		OpenBaoTimeout:               5 * time.Second,
@@ -467,8 +468,8 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 		t.Error("connector task completed_at is unset on a COMPLETED task")
 	}
 
-	if gotToken != e2eInternalToken {
-		t.Errorf("rest-call dispatch's x-internal-token = %q, want %q", gotToken, e2eInternalToken)
+	if gotToken != e2eAliasCallToken {
+		t.Errorf("rest-call dispatch's x-internal-token = %q, want %q", gotToken, e2eAliasCallToken)
 	}
 	if gotUser != "e2e-principal-sub" || gotTenant == "" {
 		t.Errorf("rest-call dispatch's identity = tenant %q user %q, want the job's tenant and the automation principal's subject", gotTenant, gotUser)
