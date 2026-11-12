@@ -202,7 +202,7 @@ Logs, metrics and traces go through `platform-gincommon`; every binary calls the
 | `make test-e2e` / `make test-compat` | End to end, and compatibility with the Definition Service |
 | `make lint` / `make fix` | golangci-lint read-only or fixing |
 | `make arch-lint` / `make metrics-lint` / `make metrics-inventory` | Import graph, observability standard, regenerate the inventory |
-| `make contract-check` / `make contract-breaking` | Copied Definition contract, internal spec breaking-change gate |
+| `make contract-check` / `make contract-breaking` | Copied Definition contract (read from the Definition Service's same-named branch, else `main`), internal spec breaking-change gate |
 | `make design-sync-check` / `make design-sync-check-test` | Fail when a document kept here and in the design repository differs (`DESIGN_DIR=<checkout>`, or `GH_TOKEN` reads `Haroon-BCBP/design`); local only, because CI does not read the personal design repository |
 | `make docker-build` / `make pin-base-images` / `make lint-workflows` | The three images, base-image digests, `actionlint` on the workflows |
 | `make helm-lint` / `make vuln` / `make docker-check` | Chart, dependency vulnerabilities, Dockerfile lint and scan |

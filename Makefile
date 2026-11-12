@@ -68,7 +68,7 @@ COVER_THRESHOLD    := 95
 # its own identity, and the Search Attribute upsert failure.
 COVER_PKG_FLOORS   := internal/workflow:88 cmd/connector-worker:55 internal/observability:90
 
-.PHONY: alerts-test metrics-lint metrics-inventory all tools tools-integration generate generate-sqlc mock contract-check contract-breaking \
+.PHONY: alerts-test metrics-lint metrics-inventory all tools tools-integration generate generate-sqlc mock contract-check contract-check-test contract-breaking \
         build migrate dev test test-integration test-e2e test-compat test-ci merge-coverage \
         cover cover-func cover-gaps cover-html cover-check cover-check-pkg \
         arch-lint lint lint-fix vuln \
@@ -315,6 +315,8 @@ check:
 	$(MAKE) contract-breaking
 	@echo "==> design-sync-check-test"
 	$(MAKE) design-sync-check-test
+	@echo "==> contract-check-test"
+	$(MAKE) contract-check-test
 	@echo "==> test-ci (unit + integration, merged coverage gate)"
 	$(MAKE) cover-check
 	@echo "✓ all checks passed"
@@ -323,9 +325,13 @@ check:
 arch-lint:
 	$(GOARCHLINT) check --project-path .
 
-## contract-check: Fail if a copied contract in api/contracts differs from its source (CONTRACT_SRC_DIR=<checkout> reads it locally)
+## contract-check: Fail if a copied contract in api/contracts differs from its source; the source ref is the same-named branch of the source repo if it exists, else main (CONTRACT_SRC_REF overrides, CONTRACT_SRC_DIR=<checkout> reads it locally)
 contract-check:
 	@scripts/contract-check.sh
+
+## contract-check-test: Test the contract-check script against throwaway repositories
+contract-check-test:
+	@scripts/contract-check_test.sh
 
 ## contract-breaking: Fail on a breaking change to api/internal-openapi.yaml against CONTRACT_BASE_REF (default origin/main)
 contract-breaking:
