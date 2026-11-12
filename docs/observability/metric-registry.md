@@ -43,14 +43,21 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
+| `workflow_execution_service_connector_alias_registry_age_seconds` | gauge | - | Seconds since the connector worker last applied a fresh alias registry, updated on every refresh tick (a failed or empty refresh lets it grow). |
 | `workflow_execution_service_connector_dispatch_dead_lettered_total` | counter | `connector_type` | Connector stream entries moved to the dead-letter stream after exceeding their delivery cap, by connector_type. |
 | `workflow_execution_service_delegation_reroute_duration_seconds` | histogram | - | Envelope-time to reroute-commit latency for DelegationStarted handling (LLD §6.7 SLO, p99 <= 4s). |
 | `workflow_execution_service_delegation_scope_unhandled_total` | counter | `scope` | Delegations arriving with a scope this service has no case for, by scope. They match no assignment. |
+| `workflow_execution_service_entitlements_call_duration_seconds` | histogram | `outcome` | Latency of one Entitlements feature-flag read, by outcome (success or error). |
+| `workflow_execution_service_entitlements_call_errors_total` | counter | `reason` | Failed Entitlements feature-flag reads, by reason (transport, status or response). |
+| `workflow_execution_service_entitlements_oldest_served_age_seconds` | gauge | - | Age in seconds of the oldest held feature-flag set served past its TTL, over the last TTL window; 0 when none was. |
+| `workflow_execution_service_entitlements_read_panics_total` | counter | - | Entitlements reads that panicked and were recovered; each counts as a failed read. |
+| `workflow_execution_service_entitlements_stale_served_total` | counter | - | Feature-flag answers served from a held set older than its TTL while a refresh runs or backs off. |
 | `workflow_execution_service_instance_degraded_current` | gauge | - | Live count of instances currently DEGRADED. |
 | `workflow_execution_service_instance_degraded_oldest_age_seconds` | gauge | - | Age in seconds of the longest-parked DEGRADED instance. |
 | `workflow_execution_service_instance_degraded_total` | counter | - | Total instances that entered DEGRADED. |
 | `workflow_execution_service_instance_start_duration_seconds` | histogram | - | POST /instances received to 201-returned latency (LLD §7.6 SLO, p99 <= 1s). |
 | `workflow_execution_service_instances_by_queue` | gauge | `queue` | Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue, sampled by the API process. A queue with none is absent. |
+| `workflow_execution_service_internal_auth_rejected_total` | counter | `reason` | Internal-route requests refused for lacking the system caller identity, by reason (missing_user or missing_role). |
 | `workflow_execution_service_internal_events_ingest_total` | counter | `event_type`, `result` | Total internal event ingest calls, by event_type and result. |
 | `workflow_execution_service_internal_events_last_received_timestamp` | gauge | `event_type` | Unix timestamp of the last successfully dispatched POST /internal/events call, by event_type. |
 | `workflow_execution_service_oldest_ready_task_age_seconds` | gauge | - | Age in seconds of the oldest unclaimed READY task. |
@@ -61,6 +68,7 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 | `workflow_execution_service_task_signal_duration_seconds` | histogram | `operation` | HTTP-request-received to 202-returned latency for task claim/complete/defer (LLD §7.6 SLO, p99 <= 300ms). |
 | `workflow_execution_service_tenant_purge_failures_total` | counter | - | Tenant purges that failed part-way and will be retried on the next sweep. |
 | `workflow_execution_service_upstream_dependency_errors_total` | counter | `dependency` | Total upstream dependency call failures, by dependency. |
+| `workflow_execution_service_user_pause_failures_total` | counter | `stage` | Instances the membership-revocation pause could not pause, by stage (read_task, read_instance or signal). The call answers 503 so the caller retries. |
 | `workflow_execution_service_wf_cache_hits_total` | counter | - | Total compiled-plan cache hits. |
 | `workflow_execution_service_wf_cache_misses_total` | counter | - | Total compiled-plan cache misses. |
 | `workflow_execution_service_worker_active_queues` | gauge | - | Live count of dynamically-registered worker.Worker instances. |

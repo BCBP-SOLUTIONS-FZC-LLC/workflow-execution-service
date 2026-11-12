@@ -418,8 +418,6 @@ lint-workflows:
 ## helm-lint: Lint the Helm chart and validate its rendered manifests against the Kubernetes API schema
 HELM_LINT_VALUES := --set-string secret.secretValues.DATABASE_URL=placeholder \
 	  --set-string secret.secretValues.TEMPORAL_HOST_PORT=placeholder \
-	  --set-string secret.secretValues.INTERNAL_API_TOKEN=placeholder \
-	  --set-string secret.secretValues.DEFINITION_SERVICE_TOKEN=placeholder \
 	  --set-string secret.secretValues.OUTBOX_RELAY_DATABASE_URL=placeholder \
 	  --set-string secret.secretValues.SNS_TOPIC_ARN=placeholder \
 	  --set-string secret.secretValues.OPENBAO_TOKEN=placeholder \
@@ -438,7 +436,7 @@ helm-lint:
 		$(HELM) template $(HELM_CHART) $(HELM_LINT_VALUES) -s templates/$$t.yaml | grep -q '"helm.sh/hook-weight": "-10"' \
 			|| { echo "helm-lint: templates/$$t.yaml is not a pre-install hook, so the migration job cannot start on a first install"; exit 1; }; \
 	done
-	$(KUBECONFORM) -strict -skip PrometheusRule,ServiceMonitor $(TOOLS_DIR)/helm-rendered.yaml
+	$(KUBECONFORM) -strict -skip AuthorizationPolicy,PrometheusRule,ServiceMonitor,PodMonitor $(TOOLS_DIR)/helm-rendered.yaml
 	@echo "✓ helm chart valid"
 
 ## pin-base-images: Resolve current digests for Dockerfile base images and pin them (writes .docker-digests)

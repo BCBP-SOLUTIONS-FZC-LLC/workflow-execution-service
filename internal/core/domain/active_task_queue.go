@@ -18,3 +18,6 @@ type ActiveTaskQueue struct {
 func TenantTaskQueueName(tenantID uuid.UUID) string {
 	return "wf-queue-" + tenantID.String()
 }
+
+// FeatureDedicatedWorkflowQueue is the Commercial catalog grant that gives a tenant its own task queue.
+const FeatureDedicatedWorkflowQueue = "dedicated_workflow_queue"

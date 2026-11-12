@@ -33,6 +33,7 @@ type InstanceService struct {
 	Definitions port.DefinitionServiceClient
 	Eligibility port.EligibilityChecker
 	Queues      port.ActiveTaskQueueRepository
+	Grants      port.FeatureGrants
 	Gate        port.TenantGate
 	Validator   port.EventValidator
 	Cache       port.CacheStore
@@ -294,6 +295,54 @@ func (s *InstanceService) resolveTaskQueue(ctx context.Context, tenantID uuid.UU
 	if s.Queues == nil {
 		return "", errors.New("the tenant task queue registry is not configured")
 	}
+	if s.Grants != nil {
+		granted, err := s.Grants.HasFeature(ctx, tenantID, domain.FeatureDedicatedWorkflowQueue)
+		if err == nil {
+			return s.queueForGrant(ctx, tenantID, planQueue, granted)
+		}
+		s.logger().Warn("dedicated_workflow_queue grant not readable, deciding the task queue from the registry", map[string]any{
+			"tenant_id": tenantID.String(), "error": err.Error(),
+		})
+	}
+	return s.queueFromRegistry(ctx, tenantID, planQueue)
+}
+
+// queueForGrant follows the grant and keeps the registry in agreement with it,
+// so that if the grant later cannot be read the registry gives the same answer.
+// A granted tenant whose queue is not registered yet starts on the plan queue:
+// workers learn of a new queue only on their topology interval, so a start on
+// it would wait with no poller. The queue is registered for the next start.
+func (s *InstanceService) queueForGrant(ctx context.Context, tenantID uuid.UUID, planQueue string, granted bool) (string, error) {
+	name := domain.TenantTaskQueueName(tenantID)
+	queue, err := s.Queues.GetByQueueName(ctx, name)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return "", fmt.Errorf("look up the tenant task queue: %w", err)
+	}
+	found := err == nil
+
+	if !granted {
+		if found && queue.Routable {
+			if err := s.Queues.StopRouting(ctx, name); err != nil {
+				s.logger().Warn("could not stop routing to the tenant task queue after the grant read false", map[string]any{
+					"tenant_id": tenantID.String(), "queue": name, "error": err.Error(),
+				})
+			}
+		}
+		return planQueue, nil
+	}
+	if found && queue.Routable {
+		return name, nil
+	}
+	if _, err := s.Queues.Register(ctx, tenantID, name); err != nil {
+		return "", fmt.Errorf("register the tenant task queue: %w", err)
+	}
+	if found {
+		return name, nil
+	}
+	return planQueue, nil
+}
+
+func (s *InstanceService) queueFromRegistry(ctx context.Context, tenantID uuid.UUID, planQueue string) (string, error) {
 	name := domain.TenantTaskQueueName(tenantID)
 	queue, err := s.Queues.GetByQueueName(ctx, name)
 	if err != nil {

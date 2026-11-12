@@ -29,9 +29,8 @@ type DBPinger interface {
 }
 
 type RouterConfig struct {
-	GinConfig        gincommon.Config
-	AppEnv           string
-	InternalAPIToken string
+	GinConfig gincommon.Config
+	AppEnv    string
 
 	Handler *handler.Handler
 
@@ -71,7 +70,7 @@ func NewRouter(cfg RouterConfig) *Router {
 	r.GET("/readyz", readyzHandler(cfg.DB, cfg.Cache, cfg.Temporal))
 
 	internal := r.Group("/api/v1/internal")
-	internal.Use(middleware.RequireInternalToken(cfg.InternalAPIToken))
+	internal.Use(middleware.RequireSystemCaller())
 
 	internalWorkflows := internal.Group("/workflows")
 	internalWorkflows.POST("/reassign-delegate", h.Idempotent(h.ReassignDelegate))

@@ -36,7 +36,7 @@ type EligibilityClient struct {
 func NewEligibilityClient(baseURL string, timeout time.Duration) *EligibilityClient {
 	return &EligibilityClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Timeout: timeout},
+		client:  NewClient(timeout),
 	}
 }
 
@@ -44,8 +44,6 @@ func (c *EligibilityClient) WithLogger(log port.Logger) *EligibilityClient {
 	c.log = log
 	return c
 }
-
-const systemPrincipal = "iam-system"
 
 func (c *EligibilityClient) CheckEligibilityBatch(
 	ctx context.Context,
@@ -120,8 +118,8 @@ func (c *EligibilityClient) tryCheckEligibility(
 	if err != nil {
 		return eligibilityAnswer{}, false, fmt.Errorf("build eligibility request: %w", err)
 	}
-	req.Header.Set("x-user-id", systemPrincipal)
-	req.Header.Set("x-tenant-roles", systemPrincipal)
+	req.Header.Set("x-user-id", domain.SystemCaller)
+	req.Header.Set("x-tenant-roles", domain.SystemCaller)
 	req.Header.Set("x-tenant-id", tenantID.String())
 
 	gincommon.InjectTraceContext(ctx, req.Header)

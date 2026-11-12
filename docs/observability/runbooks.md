@@ -108,6 +108,14 @@ Common starting points:
 
 ## Outbox and events
 
+### ConnectorDispatchDeadLettered
+
+`runbook: workflow-execution-service/connector-dead-letter`
+
+**Meaning.** A connector task entry was delivered to the connector worker the maximum number of times without being acknowledged and was moved to the dead-letter stream. The task stays open, so its instance waits.
+
+**Triage.** Search the connector worker's logs for the task id. Each failed callback to the Execution API logs a Warn with the status and the first 200 bytes of the answer: a 401 or 403 is a wrong mesh principal or a policy denial, a 404 a missing route, a 5xx an Execution API fault. Fix the cause first; a dead-lettered entry is not redelivered by itself.
+
 ### OutboxDeadLettered
 
 `runbook: workflow-execution-service/outbox`

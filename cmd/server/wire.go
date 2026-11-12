@@ -181,7 +181,7 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, fmt.Errorf("new schema validator: %w", err)
 	}
 
-	definitions := outboundhttp.NewDefinitionClient(cfg.DefinitionServiceURL, cfg.DefinitionServiceToken, cfg.DefinitionClientTimeout)
+	definitions := outboundhttp.NewDefinitionClient(cfg.DefinitionServiceURL, cfg.DefinitionClientTimeout)
 
 	eligibility := outboundhttp.NewEligibilityClient(cfg.EligibilityBaseURL, cfg.EligibilityClientTimeout).WithLogger(log)
 	principals := outboundhttp.NewAutomationPrincipalClient(cfg.TokenServiceBaseURL, cfg.TokenServiceClientTimeout, automationPrincipalCacheTTL)
@@ -196,11 +196,15 @@ func newApp(cfg *config.Config) (*app, error) {
 	tenantStates := postgres.NewTenantStateRepo(appPool)
 	transactor := postgres.NewTransactor(appPool)
 
-	instanceService := &service.InstanceService{
+	instanceService, err := newInstanceService(cfg, log, service.InstanceService{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
 		Queues: queues, Gate: service.NewTenantStartGate(tenantStates, cfg.StartRefusedStatuses),
 		Validator: validator, Cache: cache, Log: log,
+	})
+	if err != nil {
+		unwind()
+		return nil, err
 	}
 	taskService := &service.TaskService{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides,
@@ -247,13 +251,12 @@ func newApp(cfg *config.Config) (*app, error) {
 	})
 
 	router := httpadapter.NewRouter(httpadapter.RouterConfig{
-		GinConfig:        ginCfg,
-		AppEnv:           cfg.AppEnv,
-		InternalAPIToken: cfg.InternalAPIToken,
-		Handler:          h,
-		DB:               dbPinger{pool: appPool},
-		Cache:            cache,
-		Temporal:         temporalPinger{sdk: sdkClient},
+		GinConfig: ginCfg,
+		AppEnv:    cfg.AppEnv,
+		Handler:   h,
+		DB:        dbPinger{pool: appPool},
+		Cache:     cache,
+		Temporal:  temporalPinger{sdk: sdkClient},
 	})
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.HTTPPort),

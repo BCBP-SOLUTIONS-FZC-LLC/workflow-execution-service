@@ -75,15 +75,15 @@ func (h *Handler) parseTenantID(c *gin.Context, eventType, raw string) (uuid.UUI
 func (h *Handler) decodeEnvelope(c *gin.Context) (events.Envelope[json.RawMessage], bool) {
 	var env events.Envelope[json.RawMessage]
 	if !bindInternalJSON(c, &env) {
-		incIngestTotal("unknown", "bad_payload")
+		incIngestTotal(unknownEventType, "bad_payload")
 		return env, false
 	}
 	if env.Type == "" {
-		h.badPayload(c, "unknown", "missing event type")
+		h.badPayload(c, unknownEventType, "missing event type")
 		return env, false
 	}
 	if env.Timestamp.IsZero() {
-		h.badPayload(c, env.Type, "missing or zero envelope timestamp")
+		h.badPayload(c, unknownEventType, "missing or zero envelope timestamp")
 		return env, false
 	}
 
@@ -97,10 +97,14 @@ func (h *Handler) decodeEnvelope(c *gin.Context) (events.Envelope[json.RawMessag
 	return env, true
 }
 
+// unknownEventType is the metric label for a type this service does not handle:
+// the type is request-controlled text, so it must not become a label value.
+const unknownEventType = "unknown"
+
 func (h *Handler) unhandledType(c *gin.Context, eventType string) {
 	h.logWarn("internal events: ignoring unhandled type", map[string]any{"event_type": eventType})
-	incIngestTotal(eventType, "unhandled_type")
-	markLastReceived(eventType)
+	incIngestTotal(unknownEventType, "unhandled_type")
+	markLastReceived(unknownEventType)
 	c.Status(http.StatusOK)
 }
 
@@ -192,18 +196,18 @@ func (h *Handler) decodeFailed(c *gin.Context, eventType, detail string) {
 func (h *Handler) decodeSchemaRegistryPayload(c *gin.Context, env events.Envelope[json.RawMessage]) (json.RawMessage, bool) {
 	var b64 string
 	if err := json.Unmarshal(env.Payload, &b64); err != nil {
-		h.decodeFailed(c, env.Type, "schema-registry payload is not a base64 JSON string")
+		h.decodeFailed(c, unknownEventType, "schema-registry payload is not a base64 JSON string")
 		return nil, false
 	}
 	raw, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
-		h.decodeFailed(c, env.Type, "schema-registry payload base64 decode failed")
+		h.decodeFailed(c, unknownEventType, "schema-registry payload base64 decode failed")
 		return nil, false
 	}
 
 	decoded, err := events.GlueDecodeCodec{}.Decode(c.Request.Context(), env.SchemaID, raw)
 	if err != nil {
-		h.decodeFailed(c, env.Type, "schema-registry payload decode failed")
+		h.decodeFailed(c, unknownEventType, "schema-registry payload decode failed")
 		return nil, false
 	}
 	return decoded, true
@@ -243,8 +247,8 @@ func detachRequest(c *gin.Context) context.CancelFunc {
 	return cancel
 }
 
-func guCtx(ctx context.Context, tenantID string) context.Context {
-	return pgcommon.WithGUCSet(ctx, pgdomain.GUCSet{TenantID: tenantID})
+func guCtx(ctx context.Context, tenantID uuid.UUID) context.Context {
+	return pgcommon.WithGUCSet(ctx, pgdomain.GUCSet{TenantID: tenantID.String()})
 }
 
 type delegationStartedPayload struct {
@@ -306,7 +310,7 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 		return
 	}
 
-	ctx := guCtx(c.Request.Context(), env.TenantID)
+	ctx := guCtx(c.Request.Context(), tenantID)
 	start := env.Timestamp
 	err = h.delegation.Reroute(ctx, port.DelegationRerouteInput{
 		TenantID:     tenantID,
@@ -375,7 +379,7 @@ func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json
 		})
 	}
 
-	ctx := guCtx(c.Request.Context(), env.TenantID)
+	ctx := guCtx(c.Request.Context(), tenantID)
 	if err := h.delegation.Reverse(ctx, port.DelegationReversalInput{
 		TenantID:     tenantID,
 		DelegationID: delegationID,
@@ -435,7 +439,7 @@ func (h *Handler) handleUserDeleted(c *gin.Context, env events.Envelope[json.Raw
 		return
 	}
 
-	ctx := guCtx(c.Request.Context(), env.TenantID)
+	ctx := guCtx(c.Request.Context(), tenantID)
 	if err := h.userSafetyNet.VacateAssignments(ctx, port.UserDeletedInput{
 		TenantID:  tenantID,
 		UserID:    userID,
@@ -523,7 +527,7 @@ func (h *Handler) applyUserAvailabilityLocked(
 			return nil
 		}
 
-		applyCtx := guCtx(ctx, env.TenantID)
+		applyCtx := guCtx(ctx, input.TenantID)
 		if err := h.oooAvailability.Apply(applyCtx, input); err != nil {
 			return err
 		}
@@ -588,7 +592,7 @@ func (h *Handler) handleMembershipRevoked(c *gin.Context, env events.Envelope[js
 		return
 	}
 
-	ctx := guCtx(c.Request.Context(), env.TenantID)
+	ctx := guCtx(c.Request.Context(), tenantID)
 	if err := h.userSafetyNet.VacateAssignments(ctx, port.UserDeletedInput{
 		TenantID:  tenantID,
 		UserID:    userID,
@@ -616,7 +620,7 @@ func (h *Handler) handleTenantMembershipsPurged(c *gin.Context, env events.Envel
 		return
 	}
 
-	ctx := guCtx(c.Request.Context(), env.TenantID)
+	ctx := guCtx(c.Request.Context(), tenantID)
 	if err := h.tenantLifecycle.Apply(ctx, port.TenantLifecycleInput{
 		TenantID:       tenantID,
 		Status:         "offboarded",
@@ -660,7 +664,7 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 	}
 
 	scopeKey := "tenant:" + tenantID.String()
-	if err := h.applyTenantStateChangeLocked(c, env, p, tenantID, scopeKey, changedAt); err != nil {
+	if err := h.applyTenantStateChangeLocked(c, p, tenantID, scopeKey, changedAt); err != nil {
 		h.reconcilerError(c, eventType, err)
 		return
 	}
@@ -669,7 +673,7 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 }
 
 func (h *Handler) applyTenantStateChangeLocked(
-	c *gin.Context, env events.Envelope[json.RawMessage], p tenantStateChangedPayload,
+	c *gin.Context, p tenantStateChangedPayload,
 	tenantID uuid.UUID, scopeKey string, changedAt time.Time,
 ) error {
 	return h.recency.WithLock(c.Request.Context(), scopeKey, func(ctx context.Context) error {
@@ -683,7 +687,7 @@ func (h *Handler) applyTenantStateChangeLocked(
 			}
 		}
 
-		applyCtx := guCtx(ctx, env.TenantID)
+		applyCtx := guCtx(ctx, tenantID)
 		if err := h.tenantLifecycle.Apply(applyCtx, port.TenantLifecycleInput{
 			TenantID:       tenantID,
 			Status:         p.Status,

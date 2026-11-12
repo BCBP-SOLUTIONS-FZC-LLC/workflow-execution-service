@@ -37,7 +37,7 @@ type cachedPrincipal struct {
 func NewAutomationPrincipalClient(baseURL string, timeout, cacheTTL time.Duration) *AutomationPrincipalClient {
 	return &AutomationPrincipalClient{
 		baseURL: baseURL,
-		client:  &http.Client{Timeout: timeout},
+		client:  NewClient(timeout),
 		ttl:     cacheTTL,
 		known:   make(map[uuid.UUID]cachedPrincipal),
 	}

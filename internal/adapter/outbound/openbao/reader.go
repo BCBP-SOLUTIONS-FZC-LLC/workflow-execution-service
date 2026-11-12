@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	adapterhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 )
 
 var (
@@ -22,7 +24,7 @@ type Reader struct {
 }
 
 func NewReader(addr, token, mount string, timeout time.Duration) *Reader {
-	return &Reader{addr: addr, token: token, mount: mount, client: &http.Client{Timeout: timeout}}
+	return &Reader{addr: addr, token: token, mount: mount, client: adapterhttp.NewClient(timeout)}
 }
 
 type openBaoReadResponse struct {

@@ -53,6 +53,9 @@ type deps struct {
 	openbao      *openbao.Reader
 	aliasMu      sync.RWMutex
 	aliases      aliasconfig.Config
+	aliasesAt    time.Time
+	// emptyAnswers counts the empty registry answers in a row; only the refresh loop reads or writes it.
+	emptyAnswers int
 	pools        map[string]*typePool
 	completion   *completionClient
 	pgPool       *pgcommon.Pool
@@ -74,7 +77,7 @@ type deps struct {
 }
 
 func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
-	aliases, err := fetchAliases(context.Background(), cfg.DefinitionServiceURL, cfg.DefinitionServiceToken, cfg.ConnectorAliasFetchTimeout)
+	aliases, err := fetchAliases(context.Background(), cfg.DefinitionServiceURL, cfg.ConnectorAliasFetchTimeout, wlog)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetch alias registry: %w", err)
 	}
@@ -146,7 +149,7 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
 
 	connectorSet, err := connectors.New(connectors.Config{
 		Aliases:       aliases,
-		InternalToken: cfg.InternalAPIToken,
+		InternalToken: aliasCallToken(cfg),
 		StorageProviders: map[string]storage.ProviderConstructor{
 			"aws-s3":       gocloud.NewProvider,
 			"azure-blob":   gocloud.NewProvider,
@@ -167,6 +170,10 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
 		return nil, nil, fmt.Errorf("build connectors: %w", err)
 	}
 
+	if cfg.ConnectorAliasCallToken == "" {
+		wlog.Info("connector-worker: CONNECTOR_ALIAS_CALL_TOKEN is not set; alias targets receive the placeholder x-internal-token", map[string]any{"placeholder": aliasCallPlaceholder})
+	}
+
 	consumerName := cfg.ConnectorStreamConsumerName
 	if consumerName == "" {
 		if host, hostErr := os.Hostname(); hostErr == nil && host != "" {
@@ -177,13 +184,14 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
 	}
 
 	d := &deps{
+		aliasesAt:    time.Now(),
 		valkeyClient: valkeyClient,
 		consumer:     consumer,
 		dedup:        valkey.NewCache(valkeyClient),
 		openbao:      openbao.NewReader(cfg.OpenBaoAddr, cfg.OpenBaoToken, cfg.OpenBaoMount, cfg.OpenBaoTimeout),
 		aliases:      aliases,
 		pools:        buildPools(cfg, connectorSet),
-		completion:   newCompletionClient(cfg.ExecutionServiceInternalAddr, cfg.InternalAPIToken, cfg.ConnectorCompletionTimeout),
+		completion:   newCompletionClient(cfg.ExecutionServiceInternalAddr, cfg.ConnectorCompletionTimeout),
 		pgPool:       pgPool,
 		documents:    documents,
 		pruner:       documentsql.New(prunePool),
@@ -249,6 +257,17 @@ func (d *deps) setAliases(aliases aliasconfig.Config) {
 	d.aliasMu.Lock()
 	defer d.aliasMu.Unlock()
 	d.aliases = aliases
+	d.aliasesAt = d.clock()
+}
+
+// aliasAge is how long the held registry has been the latest applied answer.
+func (d *deps) aliasAge() time.Duration {
+	d.aliasMu.RLock()
+	defer d.aliasMu.RUnlock()
+	if d.aliasesAt.IsZero() {
+		return 0
+	}
+	return d.clock().Sub(d.aliasesAt)
 }
 
 func (d *deps) clock() time.Time {
@@ -301,4 +320,19 @@ func buildPools(cfg *config.Config, connectorSet map[string]connectors.Connector
 		}
 	}
 	return pools
+}
+
+// aliasCallPlaceholder stands in for the x-internal-token the connectors attach
+// to calls to alias targets when no CONNECTOR_ALIAS_CALL_TOKEN is set:
+// workflow-connectors v2 refuses an empty InternalToken, and the Workflow
+// services no longer check one. It reads as what it is, not as a credential.
+const aliasCallPlaceholder = "unset"
+
+// aliasCallToken is the x-internal-token value for calls to alias targets
+// only; the worker's own calls to Execution and Definition carry none.
+func aliasCallToken(cfg *config.Config) string {
+	if cfg.ConnectorAliasCallToken != "" {
+		return cfg.ConnectorAliasCallToken
+	}
+	return aliasCallPlaceholder
 }
