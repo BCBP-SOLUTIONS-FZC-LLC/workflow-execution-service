@@ -9,10 +9,10 @@ name: Validate / Test
         required: false
         default: ''
       compat_consumer_ref:
-        description: 'Branch or tag of the Workflow-Events Consumer the compat job runs'
+        description: 'Branch or tag of the Workflow-Events Consumer the compat job runs; empty means the branch named like this one if the Workflow-Events Consumer has it, otherwise main'
         type: string
         required: false
-        default: main
+        default: ''
 
 permissions:
   contents: read
@@ -131,11 +131,29 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.CI_REPO_READ_TOKEN || secrets.GO_PRIVATE_TOKEN }}
 
+      - name: Resolve the Workflow-Events Consumer ref
+        id: consumer
+        env:
+          CONSUMER_REF: ${{ inputs.compat_consumer_ref }}
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
+          READ_TOKEN: ${{ secrets.CI_REPO_READ_TOKEN || secrets.GO_PRIVATE_TOKEN }}
+        run: |
+          set -euo pipefail
+          ref="$CONSUMER_REF"
+          if [ -z "$ref" ]; then
+            ref=main
+            if git ls-remote --exit-code --heads "https://x-access-token:${READ_TOKEN}@github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-event-consumer.git" "refs/heads/${HEAD_REF}" >/dev/null 2>&1; then
+              ref="$HEAD_REF"
+            fi
+          fi
+          echo "Workflow-Events Consumer ref: ${ref}"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout the Workflow-Events Consumer
         uses: actions/checkout@v7
         with:
           repository: BCBP-SOLUTIONS-FZC-LLC/workflow-event-consumer
-          ref: ${{ inputs.compat_consumer_ref }}
+          ref: ${{ steps.consumer.outputs.ref }}
           path: peer/event_consumer
           persist-credentials: false
           token: ${{ secrets.CI_REPO_READ_TOKEN || secrets.GO_PRIVATE_TOKEN }}

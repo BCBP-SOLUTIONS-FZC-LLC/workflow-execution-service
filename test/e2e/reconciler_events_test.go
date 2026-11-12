@@ -19,6 +19,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
 	temporaladapter "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
 )
@@ -97,7 +98,9 @@ func postInternalEvent(t *testing.T, client *apiClient, route, eventType string,
 		"id": uuid.NewString(), "type": eventType, "tenant_id": tenantID.String(),
 		"time": at.Format(time.RFC3339), "data": data,
 	}
-	return client.do(http.MethodPost, route, body, nil)
+	system := *client
+	system.tenantRoles = domain.SystemCaller
+	return system.do(http.MethodPost, route, body, nil)
 }
 
 // TestE2E_UserDeletedVacatesAssignment drives POST
@@ -325,7 +328,10 @@ func TestE2E_DuplicateInternalEventDeliveryIsDeduped(t *testing.T) {
 		},
 	}
 
-	if resp := f.admin.do(http.MethodPost, route, body, nil); resp.StatusCode != http.StatusOK {
+	system := *f.admin
+	system.tenantRoles = domain.SystemCaller
+
+	if resp := system.do(http.MethodPost, route, body, nil); resp.StatusCode != http.StatusOK {
 		t.Fatalf("first delivery status = %d, want 200", resp.StatusCode)
 	}
 	if n := countProcessedEvents(t, f.pool, "user-execution", &eventID); n != 1 {
@@ -333,7 +339,7 @@ func TestE2E_DuplicateInternalEventDeliveryIsDeduped(t *testing.T) {
 	}
 
 	// Byte-identical redelivery, exactly as SQS would repeat it.
-	if resp := f.admin.do(http.MethodPost, route, body, nil); resp.StatusCode != http.StatusOK {
+	if resp := system.do(http.MethodPost, route, body, nil); resp.StatusCode != http.StatusOK {
 		t.Fatalf("redelivery status = %d, want 200 — a duplicate must be acknowledged, not rejected", resp.StatusCode)
 	}
 	if n := countProcessedEvents(t, f.pool, "user-execution", &eventID); n != 1 {
@@ -343,7 +349,7 @@ func TestE2E_DuplicateInternalEventDeliveryIsDeduped(t *testing.T) {
 	// Control: a distinct event id must still be recorded, proving the
 	// assertions above measure dedup rather than a write path that never runs.
 	body["id"] = uuid.NewString()
-	if resp := f.admin.do(http.MethodPost, route, body, nil); resp.StatusCode != http.StatusOK {
+	if resp := system.do(http.MethodPost, route, body, nil); resp.StatusCode != http.StatusOK {
 		t.Fatalf("distinct-id delivery status = %d, want 200", resp.StatusCode)
 	}
 	if n := countProcessedEvents(t, f.pool, "user-execution", nil); n != 2 {
