@@ -52,9 +52,6 @@ import (
 )
 
 const (
-	// aliasCallToken is the worker's CONNECTOR_ALIAS_CALL_TOKEN: the only token left, sent to alias targets.
-	aliasCallToken = "compat-alias-call-token"
-
 	// The Definition compiler stamps every plan with this queue, and it is
 	// Execution's TEMPORAL_TASK_QUEUE default, so the worker polls it here.
 	defaultTaskQueue = "wf-queue-default"
@@ -492,7 +489,6 @@ func (e *env) startConnectorWorker(t *testing.T) {
 		"VALKEY_ADDR=" + e.valkeyAddr,
 		"CONNECTOR_STREAM_KEY=" + connectorStreamKey,
 		"DEFINITION_SERVICE_URL=" + e.definitionURL,
-		"CONNECTOR_ALIAS_CALL_TOKEN=" + aliasCallToken,
 		"EXECUTION_SERVICE_INTERNAL_ADDR=" + e.executionURL,
 		"OPENBAO_ADDR=http://127.0.0.1:1",
 		"WORKER_HEALTH_PORT=" + strconv.Itoa(health),

@@ -148,8 +148,7 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
 	documents := documentsql.New(pgPool)
 
 	connectorSet, err := connectors.New(connectors.Config{
-		Aliases:       aliases,
-		InternalToken: aliasCallToken(cfg),
+		Aliases: aliases,
 		StorageProviders: map[string]storage.ProviderConstructor{
 			"aws-s3":       gocloud.NewProvider,
 			"azure-blob":   gocloud.NewProvider,
@@ -168,10 +167,6 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
 	if err != nil {
 		closeAll()
 		return nil, nil, fmt.Errorf("build connectors: %w", err)
-	}
-
-	if cfg.ConnectorAliasCallToken == "" {
-		wlog.Info("connector-worker: CONNECTOR_ALIAS_CALL_TOKEN is not set; alias targets receive the placeholder x-internal-token", map[string]any{"placeholder": aliasCallPlaceholder})
 	}
 
 	consumerName := cfg.ConnectorStreamConsumerName
@@ -320,19 +315,4 @@ func buildPools(cfg *config.Config, connectorSet map[string]connectors.Connector
 		}
 	}
 	return pools
-}
-
-// aliasCallPlaceholder stands in for the x-internal-token the connectors attach
-// to calls to alias targets when no CONNECTOR_ALIAS_CALL_TOKEN is set:
-// workflow-connectors v2 refuses an empty InternalToken, and the Workflow
-// services no longer check one. It reads as what it is, not as a credential.
-const aliasCallPlaceholder = "unset"
-
-// aliasCallToken is the x-internal-token value for calls to alias targets
-// only; the worker's own calls to Execution and Definition carry none.
-func aliasCallToken(cfg *config.Config) string {
-	if cfg.ConnectorAliasCallToken != "" {
-		return cfg.ConnectorAliasCallToken
-	}
-	return aliasCallPlaceholder
 }

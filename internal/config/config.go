@@ -102,8 +102,6 @@ type Config struct {
 
 	ConnectorAliasFetchTimeout    time.Duration
 	ConnectorAliasRefreshInterval time.Duration
-	// ConnectorAliasCallToken is sent as x-internal-token on calls to alias targets only. Optional; see cmd/connector-worker aliasCallToken.
-	ConnectorAliasCallToken string
 
 	ConnectorPoolSizeStorage         int
 	ConnectorPoolSizeSendEmail       int
@@ -255,7 +253,6 @@ func Load() (*Config, error) {
 
 		ConnectorAliasFetchTimeout:    envDuration("CONNECTOR_ALIAS_FETCH_TIMEOUT", 10*time.Second),
 		ConnectorAliasRefreshInterval: envDuration("CONNECTOR_ALIAS_REFRESH_INTERVAL", 5*time.Minute),
-		ConnectorAliasCallToken:       getEnvOrDefault("CONNECTOR_ALIAS_CALL_TOKEN", ""),
 
 		ConnectorPoolSizeStorage:         envInt("CONNECTOR_POOL_SIZE_STORAGE", 10),
 		ConnectorPoolSizeSendEmail:       envInt("CONNECTOR_POOL_SIZE_SEND_EMAIL", 5),

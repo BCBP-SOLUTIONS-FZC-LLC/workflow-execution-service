@@ -436,8 +436,8 @@ func (e *env) connectorRoundTrip(t *testing.T) {
 		if c.method != http.MethodPost || c.path != "/orders" {
 			t.Errorf("partner call = %s %s, want POST /orders", c.method, c.path)
 		}
-		if c.aliasToken != aliasCallToken {
-			t.Errorf("partner call x-internal-token = %q, want the worker's alias-call token", c.aliasToken)
+		if c.aliasToken != "" {
+			t.Errorf("partner call x-internal-token = %q, want none", c.aliasToken)
 		}
 		if c.tenant != tn.id.String() || c.user != automationPrincipal.Subject {
 			t.Errorf("partner call identity = tenant %q user %q, want the job's tenant %s and the automation principal's subject %s", c.tenant, c.user, tn.id, automationPrincipal.Subject)

@@ -315,26 +315,6 @@ func TestLoad_ConnectorWorkerEnvironment(t *testing.T) {
 	}
 }
 
-// The alias-call token is optional everywhere: a production connector-worker
-// starts without it.
-func TestLoad_ConnectorAliasCallToken(t *testing.T) {
-	t.Setenv("DEFINITION_SERVICE_URL", "http://definition:8080")
-	t.Setenv("CONNECTOR_ALIAS_CALL_TOKEN", "alias-tok")
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if cfg.ConnectorAliasCallToken != "alias-tok" {
-		t.Errorf("ConnectorAliasCallToken = %q, want alias-tok", cfg.ConnectorAliasCallToken)
-	}
-
-	t.Setenv("CONNECTOR_ALIAS_CALL_TOKEN", "")
-	cfg, err = Load()
-	if err != nil || cfg.ConnectorAliasCallToken != "" {
-		t.Errorf("Load() = (%q, %v), want an empty token and no error", cfg.ConnectorAliasCallToken, err)
-	}
-}
-
 func TestRequire(t *testing.T) {
 	prod := func(c *Config) {
 		c.AppEnv = "prod"

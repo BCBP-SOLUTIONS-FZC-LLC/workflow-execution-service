@@ -30,7 +30,7 @@ var requiredEnv = map[string][]string{
 	},
 	"deployment-connector-worker.yaml": {
 		"APP_ENV", "BUILD_VERSION", "OTEL_SERVICE_NAME", "OTEL_EXPORTER_OTLP_ENDPOINT",
-		"VALKEY_ADDR", "DEFINITION_SERVICE_URL", "CONNECTOR_ALIAS_CALL_TOKEN",
+		"VALKEY_ADDR", "DEFINITION_SERVICE_URL",
 		"EXECUTION_SERVICE_INTERNAL_ADDR", "OPENBAO_ADDR", "OPENBAO_TOKEN",
 		"CONNECTOR_STREAM_KEY", "CONNECTOR_STREAM_GROUP",
 	},
@@ -136,8 +136,8 @@ func TestHelmEntitlements_TheSettingsReachTheAPIPod(t *testing.T) {
 	assert.Regexp(t, `name: ENTITLEMENTS_FRESHNESS_BOUND\s+value: "10m"`, out)
 }
 
-func TestHelmConnectorWorker_PassesTheAliasCallTokenOptionally(t *testing.T) {
+func TestHelmConnectorWorker_HasNoAliasCallToken(t *testing.T) {
 	out, err := helmRender(t, "-s", "templates/deployment-connector-worker.yaml", "--set", "connectorWorker.enabled=true", "--set-string", "connectorWorker.docsBucket=docs")
 	require.NoError(t, err, out)
-	assert.Regexp(t, `name: CONNECTOR_ALIAS_CALL_TOKEN\s+valueFrom:\s+secretKeyRef:\s+name: workflow-execution-service\s+key: CONNECTOR_ALIAS_CALL_TOKEN\s+optional: true`, out)
+	assert.NotContains(t, out, "CONNECTOR_ALIAS_CALL_TOKEN")
 }

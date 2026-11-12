@@ -252,9 +252,6 @@ secret:
     # The outbox relay's own DSN, a role with BYPASSRLS; required outside dev.
     OUTBOX_RELAY_DATABASE_URL: ""
     OPENBAO_TOKEN: ""
-    # Optional. Sent as x-internal-token on the connector worker's calls to alias targets only;
-    # empty sends the text "unset", because workflow-connectors refuses an empty token. The Workflow services' internal routes check no token.
-    CONNECTOR_ALIAS_CALL_TOKEN: ""
 
 # LLD §7.5's mTLS/namespace-bootstrap note: registering the Temporal
 # namespace and provisioning mTLS material are cluster-operator actions this
