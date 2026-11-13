@@ -57,7 +57,15 @@ jobs:
       - name: Verify modules
         run: go mod verify
 
+      - name: Cache dev tools
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: .tools
+          key: dev-tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
       - name: Install dev tools
+        if: steps.tools-cache.outputs.cache-hit != 'true'
         run: make tools
 
       - name: Generate (sqlc and mocks)
@@ -110,7 +118,8 @@ jobs:
           CONTRACT_BASE_REF: origin/main
         run: make contract-breaking
 
-      # The copy of the Definition Service's spec must match its source: the same-named branch if it has one, otherwise main.
+      # The copy of the Definition Service's spec must match its source (the same-named branch if it has one, otherwise main),
+      # or differ only in ways that cannot break the routes this service calls (oasdiff, routes in api/contracts/SOURCES).
       - name: Contract copy check
         env:
           GH_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}

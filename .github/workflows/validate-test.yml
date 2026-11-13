@@ -64,7 +64,15 @@ jobs:
       - name: Verify modules
         run: go mod verify
 
+      - name: Cache dev tools
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: .tools
+          key: dev-tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
       - name: Install dev tools
+        if: steps.tools-cache.outputs.cache-hit != 'true'
         run: make tools
 
       - name: Generate (sqlc)
@@ -184,9 +192,15 @@ jobs:
           echo "https://x-access-token:${GO_PRIVATE_TOKEN}@github.com" > ~/.git-credentials
           chmod 600 ~/.git-credentials
 
+      - name: Cache sqlc
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bin
+          key: sqlc-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
       - name: Generate (sqlc) for both services
         run: |
-          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          [ -x "$RUNNER_TEMP/bin/sqlc" ] || GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
           make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
           make -C peer/definition_service generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
 
@@ -227,9 +241,15 @@ jobs:
           echo "https://x-access-token:${GO_PRIVATE_TOKEN}@github.com" > ~/.git-credentials
           chmod 600 ~/.git-credentials
 
+      - name: Cache sqlc
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bin
+          key: sqlc-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
       - name: Generate (sqlc)
         run: |
-          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          [ -x "$RUNNER_TEMP/bin/sqlc" ] || GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
           make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
 
       - name: End-to-end (Temporal, Postgres, Valkey, HTTP)
