@@ -36,6 +36,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- Contract copies: a copy in `api/contracts/` that differs from its source no longer fails `make contract-check` unless the source has a breaking change (oasdiff) on a route this service calls (the compiled-plan read and the alias list, a fifth column in `api/contracts/SOURCES`). The copy of the Definition Service's internal spec is refreshed from its corrected version. LLD copy 1.154.
+- CI: a change that touches only documentation (Markdown, Mermaid, `.claude/`, `docs/` except `docs/swagger/`, `LICENSE`) runs the CI gate and reports the required checks as skipped, not pending; the workflow no longer uses `paths-ignore`. No job or check name changes.
 - CI: the `sqlc` binary and, in the test and quality jobs, the `.tools` directory are cached by the Makefile hash, so a job no longer compiles them on every run. `make test-ci` runs the unit and integration suites at the same time, then merges their coverage. No job, dependency or check name changes.
 - LLD copy 1.153: every browser-originated route requires `x-tenant-id` and `x-user-id`, administrative routes check `x-tenant-roles`, and task and instance reads use `x-departments`; `x-plan` and `x-feature-flags` are not read. The earlier text listed all six headers as validated.
 - The connector worker no longer sends an `x-internal-token` to connector alias targets. `workflow-connectors` v2.4.0 makes the token optional, so the worker builds the connectors without one; the placeholder text `unset`, its startup Info line and the `CONNECTOR_ALIAS_CALL_TOKEN` setting (configuration, chart values, connector worker Deployment) are removed. The caller identity headers are sent as before.
