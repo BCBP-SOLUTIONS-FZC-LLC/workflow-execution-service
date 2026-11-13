@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -12,49 +13,40 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/aliasconfig"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/restcall"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/registry"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
 )
 
-// workflow-connectors refuses an empty InternalToken, so an unset setting
-// yields a non-empty placeholder and a set one wins.
-func TestAliasCallToken(t *testing.T) {
-	t.Parallel()
+// The Workflow services authenticate each other by caller identity and no
+// longer have a shared token, so a call to an alias target carries none. This
+// is the only unit test that proves what reaches the wire.
+func TestAliasCall_SendsNoInternalTokenToTheAliasTarget(t *testing.T) {
+	var sawToken atomic.Bool
+	var calls atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		for name := range r.Header {
+			if http.CanonicalHeaderKey(name) == "X-Internal-Token" {
+				sawToken.Store(true)
+			}
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(target.Close)
+	var body atomic.Value
+	body.Store(fmt.Sprintf(`{"version":1,"restCall":[{"alias":"echo","method":"GET","baseURL":%q,"pathTemplate":"/echo"}]}`, target.URL))
+	d, cfg := aliasRefreshFixture(t, &body)
+	pool := &typePool{connectorType: registry.TypeRestCall, sem: make(chan struct{}, 1), timeout: 5 * time.Second}
+	d.pools[registry.TypeRestCall] = pool
+	d.retry = testBounds
 
-	assert.Equal(t, aliasCallPlaceholder, aliasCallToken(&config.Config{}))
-	assert.NotEmpty(t, aliasCallToken(&config.Config{}))
-	assert.Equal(t, "alias-tok", aliasCallToken(&config.Config{ConnectorAliasCallToken: "alias-tok"}))
-}
+	refreshAliases(context.Background(), d, &config.Config{DefinitionServiceURL: cfg.DefinitionServiceURL, ConnectorAliasFetchTimeout: time.Second}, noopLogger{})
+	job := dispatchJob{tenantID: uuid.New(), taskID: uuid.New(), departmentID: uuid.New(), principalSub: "sub", connectorType: registry.TypeRestCall, resolvedInputs: map[string]any{"endpointAlias": "echo"}}
 
-// With no CONNECTOR_ALIAS_CALL_TOKEN the worker sends the placeholder to an
-// alias target; this is the only unit test that proves what reaches the wire.
-func TestAliasCall_SendsThePlaceholderTokenWhenNoneIsConfigured(t *testing.T) {
-	for name, tc := range map[string]struct {
-		cfg  *config.Config
-		want string
-	}{
-		"none configured": {&config.Config{}, aliasCallPlaceholder},
-		"configured":      {&config.Config{ConnectorAliasCallToken: "alias-tok"}, "alias-tok"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			var got atomic.Value
-			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				got.Store(r.Header.Get("x-internal-token"))
-				_, _ = w.Write([]byte(`{}`))
-			}))
-			t.Cleanup(target.Close)
-			aliases := aliasconfig.Config{RestCall: []aliasconfig.Endpoint{{Alias: "echo", Method: "GET", BaseURL: target.URL, PathTemplate: "/echo", Timeout: time.Second}}}
-			pool := &typePool{connectorType: registry.TypeRestCall, sem: make(chan struct{}, 1), timeout: 5 * time.Second, connector: restcall.New(aliases, nil, aliasCallToken(tc.cfg))}
-			job := dispatchJob{tenantID: uuid.New(), taskID: uuid.New(), departmentID: uuid.New(), principalSub: "sub", connectorType: registry.TypeRestCall, resolvedInputs: map[string]any{"endpointAlias": "echo"}}
+	outcome := execute(context.Background(), d, pool, job, noopLogger{})
 
-			outcome := execute(context.Background(), &deps{retry: testBounds, aliases: aliases}, pool, job, noopLogger{})
-
-			require.Empty(t, outcome.ErrorClass)
-			assert.Equal(t, tc.want, got.Load())
-		})
-	}
-	assert.Equal(t, "unset", aliasCallPlaceholder, "the placeholder reads as what it is, not as a credential")
+	require.Empty(t, outcome.ErrorClass)
+	require.EqualValues(t, 1, calls.Load(), "the alias target was called once")
+	assert.False(t, sawToken.Load(), "no x-internal-token reaches the alias target")
 }

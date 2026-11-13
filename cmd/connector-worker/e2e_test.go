@@ -46,9 +46,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
-// e2eAliasCallToken is the worker's CONNECTOR_ALIAS_CALL_TOKEN: sent to alias targets only.
-const e2eAliasCallToken = "e2e-connector-worker-alias-token"
-
 // The tenant's automation principal, the actor a connector completion is
 // recorded under. Built per test, since each seeds its own tenant.
 const e2eConnectorActorUserID = "99999999-9999-4999-8999-999999999999"
@@ -388,7 +385,6 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 		ConnectorStreamBatchSize:     10,
 		DefinitionServiceURL:         aliasSrv.URL,
 		ConnectorAliasFetchTimeout:   5 * time.Second,
-		ConnectorAliasCallToken:      e2eAliasCallToken,
 		OpenBaoAddr:                  "http://unused.invalid",
 		OpenBaoMount:                 "secret",
 		OpenBaoTimeout:               5 * time.Second,
@@ -468,8 +464,8 @@ func TestE2E_ConnectorWorker_DispatchAndComplete(t *testing.T) {
 		t.Error("connector task completed_at is unset on a COMPLETED task")
 	}
 
-	if gotToken != e2eAliasCallToken {
-		t.Errorf("rest-call dispatch's x-internal-token = %q, want %q", gotToken, e2eAliasCallToken)
+	if gotToken != "" {
+		t.Errorf("rest-call dispatch's x-internal-token = %q, want none", gotToken)
 	}
 	if gotUser != "e2e-principal-sub" || gotTenant == "" {
 		t.Errorf("rest-call dispatch's identity = tenant %q user %q, want the job's tenant and the automation principal's subject", gotTenant, gotUser)

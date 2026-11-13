@@ -79,7 +79,7 @@ func refreshAliases(ctx context.Context, d *deps, cfg *config.Config, log port.L
 	if !ok {
 		return
 	}
-	pool.setConnector(restcall.New(fresh, nil, aliasCallToken(cfg)))
+	pool.setConnector(restcall.New(fresh, nil, ""))
 	d.setAliases(fresh)
 	log.Info("connector alias registry refreshed", map[string]any{"rest_call_aliases": len(fresh.RestCall)})
 }

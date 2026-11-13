@@ -97,13 +97,6 @@ spec:
                 secretKeyRef:
                   name: {{ include "workflow-execution-service.secretName" . }}
                   key: OPENBAO_TOKEN
-            - name: CONNECTOR_ALIAS_CALL_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "workflow-execution-service.secretName" . }}
-                  key: CONNECTOR_ALIAS_CALL_TOKEN
-                  {{- /* only for alias targets that still want an x-internal-token; empty by default */}}
-                  optional: true
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
