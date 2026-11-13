@@ -3,6 +3,11 @@ name: Validate / Test
 "on":
   workflow_call:
     inputs:
+      docs_only:
+        description: 'True when only documentation changed; every job then reports skipped'
+        type: boolean
+        required: false
+        default: false
       compat_peer_ref:
         description: 'Branch or tag of the Definition Service the compat job runs against; empty means the branch named like this one if the Definition Service has it, otherwise main'
         type: string
@@ -26,6 +31,7 @@ env:
 jobs:
   test:
     name: test
+    if: ${{ !inputs.docs_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -90,6 +96,7 @@ jobs:
 
   compat:
     name: compat
+    if: ${{ !inputs.docs_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -188,6 +195,7 @@ jobs:
 
   e2e:
     name: e2e
+    if: ${{ !inputs.docs_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:

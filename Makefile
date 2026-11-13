@@ -327,11 +327,11 @@ arch-lint:
 
 ## contract-check: Fail if a copied contract in api/contracts differs from its source; the source ref is the same-named branch of the source repo if it exists, else main (CONTRACT_SRC_REF overrides, CONTRACT_SRC_DIR=<checkout> reads it locally)
 contract-check:
-	@scripts/contract-check.sh
+	@OASDIFF=$(OASDIFF) scripts/contract-check.sh
 
 ## contract-check-test: Test the contract-check script against throwaway repositories
 contract-check-test:
-	@scripts/contract-check_test.sh
+	@OASDIFF=$(OASDIFF) scripts/contract-check_test.sh
 
 ## contract-breaking: Fail on a breaking change to api/internal-openapi.yaml against CONTRACT_BASE_REF (default origin/main)
 contract-breaking:

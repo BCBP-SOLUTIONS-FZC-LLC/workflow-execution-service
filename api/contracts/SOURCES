@@ -1,2 +1,2 @@
-# <copy> <owner/repo> <path in that repo> <commit the copy was taken at>
-definition-internal-openapi.yaml BCBP-SOLUTIONS-FZC-LLC/workflow-definition-service api/internal-openapi.yaml e6a1295
+# <copy> <owner/repo> <path in that repo> <commit the copy was taken at> [<routes this service calls, a regular expression>]
+definition-internal-openapi.yaml BCBP-SOLUTIONS-FZC-LLC/workflow-definition-service api/internal-openapi.yaml 1d7310f ^/api/v1/internal/(workflow-versions/\{version_id\}/compiled-plan|connector-aliases)$

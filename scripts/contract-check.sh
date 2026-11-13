@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# Fails when a copied contract in api/contracts differs from its source file
-# in the neighbouring service's repository. Each SOURCES line is:
-#   <copy> <owner/repo> <path in that repo> <commit the copy was taken at>
+# Checks each copied contract in api/contracts against its source file in the
+# neighbouring service's repository. Each SOURCES line is:
+#   <copy> <owner/repo> <path in that repo> <commit the copy was taken at> [<routes>]
+# An identical copy passes. With OASDIFF set, a copy that differs fails only
+# when the source has a breaking change (oasdiff breaking, copy to source) on
+# a path matching <routes>, a regular expression of the routes this service
+# calls (every path when absent); wording, examples and other routes pass.
+# Without OASDIFF any difference fails.
 # The ref read in the source repository is, in order: CONTRACT_SRC_REF; the
 # branch of that repository named like the branch under test (HEAD_REF, else
 # the current git branch) when it exists; main. No branch name is written down.
@@ -41,8 +46,15 @@ resolve_ref() {
   fi
 }
 
+if [[ -n "${OASDIFF:-}" && ! -x "$OASDIFF" ]]; then
+  echo "✗ oasdiff not found at $OASDIFF (run make tools)" >&2
+  exit 1
+fi
+source_tmp="$(mktemp)"
+trap 'rm -f "$source_tmp"' EXIT
+
 status=0
-while read -r copy repo path commit; do
+while read -r copy repo path commit routes; do
   [[ -z "${copy:-}" || "$copy" == \#* ]] && continue
   ref="$(resolve_ref "$repo")"
   if [[ -n "${CONTRACT_SRC_DIR:-}" ]]; then
@@ -68,10 +80,24 @@ while read -r copy repo path commit; do
     status=1
     continue
   fi
-  if diff -u <(printf '%s\n' "$source_file") "$dir/$copy"; then
+  if diff -q <(printf '%s\n' "$source_file") "$dir/$copy" >/dev/null; then
     echo "✓ $copy matches $repo:$path@$ref (copied at ${commit:0:7})"
-  else
+    continue
+  fi
+  if [[ -z "${OASDIFF:-}" ]]; then
+    diff -u <(printf '%s\n' "$source_file") "$dir/$copy" || true
     echo "✗ $copy differs from $repo:$path@$ref; copy it again, run the contract tests, and update SOURCES" >&2
+    status=1
+    continue
+  fi
+  printf '%s\n' "$source_file" >"$source_tmp"
+  args=(breaking "$dir/$copy" "$source_tmp" --fail-on ERR)
+  [[ -n "${routes:-}" ]] && args+=(--match-path "$routes")
+  if report="$("$OASDIFF" "${args[@]}" 2>&1)"; then
+    echo "✓ $copy differs from $repo:$path@$ref only in ways that cannot break the routes this service calls; refresh it when convenient"
+  else
+    printf '%s\n' "$report" >&2
+    echo "✗ $copy: $repo:$path@$ref has a breaking change for the routes this service calls; copy it again, run the contract tests, and update SOURCES" >&2
     status=1
   fi
 done < "$dir/SOURCES"

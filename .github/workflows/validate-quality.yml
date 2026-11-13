@@ -2,6 +2,12 @@ name: Validate / Quality
 
 "on":
   workflow_call:
+    inputs:
+      docs_only:
+        description: 'True when only documentation changed; every job then reports skipped'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -15,6 +21,7 @@ env:
 jobs:
   quality:
     name: quality
+    if: ${{ !inputs.docs_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
