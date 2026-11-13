@@ -36,6 +36,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- LLD copy 1.153: every browser-originated route requires `x-tenant-id` and `x-user-id`, administrative routes check `x-tenant-roles`, and task and instance reads use `x-departments`; `x-plan` and `x-feature-flags` are not read. The earlier text listed all six headers as validated.
 - The connector worker no longer sends an `x-internal-token` to connector alias targets. `workflow-connectors` v2.4.0 makes the token optional, so the worker builds the connectors without one; the placeholder text `unset`, its startup Info line and the `CONNECTOR_ALIAS_CALL_TOKEN` setting (configuration, chart values, connector worker Deployment) are removed. The caller identity headers are sent as before.
 - Contract copies: `make contract-check` no longer reads a branch name from `api/contracts/SOURCES` (its branch column is gone). It compares the copy with the Definition Service's branch named like the branch under test when that branch exists, and with `main` otherwise, the rule the compat job already uses; `CONTRACT_SRC_REF` overrides it. `make contract-check-test` tests the script and runs in `make check`.
 - Docs only: the in-repo LLD, the internal OpenAPI and the copy of the Definition internal spec match the design repository again. No code changed.
