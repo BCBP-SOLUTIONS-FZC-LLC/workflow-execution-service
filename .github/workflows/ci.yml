@@ -5,9 +5,7 @@ name: CI
 "on":
   push:
     branches: [main]
-    paths-ignore: ['**.md', 'docs/**']
   pull_request:
-    paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 
 permissions:
@@ -29,7 +27,36 @@ jobs:
     timeout-minutes: 2
     outputs:
       run: ${{ steps.decide.outputs.run }}
+      docs_only: ${{ steps.docs.outputs.docs_only }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # docs_only is true when every changed file is documentation: Markdown,
+      # Mermaid, .claude/, docs/ (except the API spec under docs/swagger/) or
+      # LICENSE. The required checks then report skipped instead of running.
+      - id: docs
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          docs_only=false
+          if [ -n "$BASE" ] && [ "$BASE" != 0000000000000000000000000000000000000000 ] &&
+            files="$(git diff --name-only "$BASE...$HEAD" 2>/dev/null)" && [ -n "$files" ]; then
+            code="$(while read -r f; do
+              case "$f" in
+                docs/swagger/*) echo "$f" ;;
+                *.md | *.mmd | .claude/* | docs/* | LICENSE) ;;
+                *) echo "$f" ;;
+              esac
+            done <<<"$files")"
+            [ -z "$code" ] && docs_only=true
+          fi
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "docs_only=$docs_only"
+
       - id: decide
         run: >
           echo "run=${{
@@ -44,6 +71,8 @@ jobs:
     if: needs.ci-gate.outputs.run == 'true'
     uses: ./.github/workflows/validate-quality.yml
     secrets: inherit
+    with:
+      docs_only: ${{ needs.ci-gate.outputs.docs_only == 'true' }}
 
   validate-test:
     name: Validate / Test
@@ -51,11 +80,13 @@ jobs:
     if: needs.ci-gate.outputs.run == 'true'
     uses: ./.github/workflows/validate-test.yml
     secrets: inherit
+    with:
+      docs_only: ${{ needs.ci-gate.outputs.docs_only == 'true' }}
 
   build-image-cache:
     name: Build image (cache)
     needs: [ci-gate]
-    if: needs.ci-gate.outputs.run == 'true'
+    if: needs.ci-gate.outputs.run == 'true' && needs.ci-gate.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -74,9 +105,15 @@ jobs:
             go.sum
             go.mod
 
+      - name: Cache sqlc
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bin
+          key: sqlc-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
       - name: Generate (sqlc)
         run: |
-          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          [ -x "$RUNNER_TEMP/bin/sqlc" ] || GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
           make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
 
       - name: Lint Dockerfile
@@ -150,9 +187,15 @@ jobs:
             go.sum
             go.mod
 
+      - name: Cache sqlc
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bin
+          key: sqlc-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
       - name: Generate (sqlc)
         run: |
-          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          [ -x "$RUNNER_TEMP/bin/sqlc" ] || GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
           make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
 
       - uses: docker/setup-buildx-action@v3
@@ -273,9 +316,15 @@ jobs:
             go.sum
             go.mod
 
+      - name: Cache sqlc
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bin
+          key: sqlc-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
       - name: Generate (sqlc)
         run: |
-          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          [ -x "$RUNNER_TEMP/bin/sqlc" ] || GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
           make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
 
       - uses: docker/setup-buildx-action@v3
@@ -338,9 +387,15 @@ jobs:
             go.sum
             go.mod
 
+      - name: Cache sqlc
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bin
+          key: sqlc-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
       - name: Generate (sqlc)
         run: |
-          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          [ -x "$RUNNER_TEMP/bin/sqlc" ] || GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
           make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
 
       - uses: docker/setup-buildx-action@v3

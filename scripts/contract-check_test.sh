@@ -27,7 +27,7 @@ fresh() {
 }
 
 run() {
-  out="$(env -u HEAD_REF -u CONTRACT_SRC_REF CONTRACT_SRC_DIR="$work/src" "$@" "$work/svc/scripts/contract-check.sh" 2>&1)"
+  out="$(env -u HEAD_REF -u CONTRACT_SRC_REF -u OASDIFF CONTRACT_SRC_DIR="$work/src" "$@" "$work/svc/scripts/contract-check.sh" 2>&1)"
   code=$?
 }
 
@@ -92,6 +92,75 @@ fresh
 printf '# note\n\n' >"$work/svc/api/contracts/SOURCES"
 run env
 expect "comments and blank lines are skipped" 0
+
+# Semantic comparison: with oasdiff, a copy that differs passes unless the
+# source breaks a route this service calls.
+if [[ -n "${OASDIFF:-}" && -x "$OASDIFF" ]]; then
+  spec() { # <description> <extra field on /a response, or empty> <keep /b: yes|no>
+    local extra=""
+    [[ -n "$2" ]] && extra="                  $2: { type: string }"
+    cat <<YAML
+openapi: 3.0.3
+info: { title: t, version: "1", description: "$1" }
+paths:
+  /a:
+    get:
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id${2:+, $2}]
+                properties:
+                  id: { type: string }
+$extra
+YAML
+    if [[ "$3" == yes ]]; then
+      cat <<'YAML'
+  /b:
+    get:
+      responses:
+        "200": { description: ok }
+YAML
+    fi
+  }
+  fresh_spec() { # <source spec> <copy spec> [<routes>]
+    fresh main
+    printf '%s\n' "$1" >"$work/src/spec.yaml"
+    git_quiet -C "$work/src" commit -am spec
+    printf '%s\n' "$2" >"$work/svc/api/contracts/copy.yaml"
+    printf 'copy.yaml acme/src spec.yaml 0123456789%s\n' "${3:+ $3}" >"$work/svc/api/contracts/SOURCES"
+  }
+
+  fresh_spec "$(spec one '' yes)" "$(spec one '' yes)" '^/a$'
+  run env OASDIFF="$OASDIFF"
+  expect "with oasdiff, an identical copy matches" 0 "matches"
+
+  fresh_spec "$(spec two '' yes)" "$(spec one '' yes)" '^/a$'
+  run env OASDIFF="$OASDIFF"
+  expect "with oasdiff, a wording-only difference passes" 0 "refresh it when convenient"
+
+  fresh_spec "$(spec one '' yes)" "$(spec one name yes)" '^/a$'
+  run env OASDIFF="$OASDIFF"
+  expect "with oasdiff, a breaking change on a called route fails" 1 "has a breaking change"
+
+  fresh_spec "$(spec one '' no)" "$(spec one '' yes)" '^/a$'
+  run env OASDIFF="$OASDIFF"
+  expect "with oasdiff, a breaking change on a route not called passes" 0 "refresh it when convenient"
+
+  fresh_spec "$(spec one '' no)" "$(spec one '' yes)"
+  run env OASDIFF="$OASDIFF"
+  expect "with oasdiff and no routes, every route is checked" 1 "has a breaking change"
+
+  fresh
+  printf 'v: main\n' >"$work/svc/api/contracts/copy.yaml"
+  run env OASDIFF="$work/no-oasdiff"
+  expect "an OASDIFF that is not executable fails" 1 "oasdiff not found"
+else
+  echo "skip: semantic cases (OASDIFF not set or not executable)"
+fi
 
 if [[ "$failures" -gt 0 ]]; then
   echo "$failures contract-check test(s) failed"

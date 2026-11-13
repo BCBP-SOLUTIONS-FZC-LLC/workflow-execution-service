@@ -23,19 +23,40 @@ info:
     - **Content type.** These routes do not check `Content-Type`; a JSON body is
       read whatever the header says.
     - **Errors.** Every error this service writes is an `application/problem+json`
-      `ProblemDetails` document. A recovered panic is answered by the shared HTTP
-      library with a `500` in its own problem format (`PlatformProblem`).
+      `ProblemDetails` document. The shared HTTP library writes a recovered panic
+      in its own problem format (`PlatformProblem`, `500`, errorCode
+      `INTERNAL_ERROR`), so the 500 responses declare both schemas (`oneOf`). It
+      also writes `503` `REQUEST_TIMEOUT` when the 30-second deadline has passed
+      and the handler wrote nothing; only the event ingest, whose 200 has no body,
+      can get it.
+    - **Planned change: one problem format.** A later release, shared with the Execution
+      Service and announced to its callers before it merges, renames the members
+      of `ProblemDetails` to those of `PlatformProblem`: `code` to `errorCode` (same
+      values), `invalid_params` to `validationErrors`, `trace_id` to `traceId`,
+      `request_id` dropped from the body (it stays in `X-Request-ID`), `tenantId`
+      and `timestamp` added, and `type` from the platform type registry. The
+      format stays RFC 9457 and status codes stay the same. The library's
+      `validationErrors` items are `{field, message}`, where `invalid_params`
+      items are `{name, reason, code}`; how the item `code` is carried is decided
+      with the release.
     - **Deadline.** Each request runs under a 30-second deadline. A database or
       cache call still running at the deadline fails, and the operation answers
-      `503 UPSTREAM_UNAVAILABLE` (detail `the request was cancelled or its
-      deadline passed`); the event ingest answers `500` instead.
-    - **Unknown paths.** A path or method no route serves is `404 NOT_FOUND`
-      (detail `no route matches this method and path`).
+      `503 UPSTREAM_UNAVAILABLE`, usually with the detail `an upstream dependency
+      is temporarily unavailable`; the event ingest answers `500` instead.
+    - **Unknown paths and methods.** A path no route serves is `404 NOT_FOUND`
+      (detail `no route matches this method and path`); a trailing slash is not
+      redirected. A known path called with a method it does not serve is
+      `405 METHOD_NOT_ALLOWED` (detail `the method is not allowed for this path`)
+      with an `Allow` header. Both are answered before the caller identity check.
+    - **Correlation headers.** Every response carries `X-Request-ID` (the caller's
+      `x-request-id` when it is 1 to 128 characters of `[a-zA-Z0-9._-]`, else a
+      new UUID) and `X-Trace-ID`.
 servers:
   - url: http://localhost:8080
     description: Local dev server
 security:
   - InternalServiceAuth: []
+    InternalCallerUser: []
 components:
 
   securitySchemes:
@@ -52,6 +73,15 @@ components:
         and `connector-alias-write` (the service that owns the aliases). A Kubernetes
         NetworkPolicy admits only the named caller pods. A request without both
         headers is 401 with a ProblemDetails body.
+
+    InternalCallerUser:
+      type: apiKey
+      in: header
+      name: x-user-id
+      description: >
+        The calling service's user id, sent with `x-tenant-roles: iam-system`. Any
+        value that is not blank is accepted; absent or blank is 401 with a
+        ProblemDetails body (detail `missing or invalid internal caller identity`).
 
   schemas:
 
@@ -138,12 +168,15 @@ components:
         A domain-event envelope forwarded unmodified by the shared workflow-events
         consumer to the internal ingest endpoint: the platform-events envelope. The
         tenant context is carried in tenant_id (the RLS GUC is set from this field).
-        The type is read first; an envelope of a type this service does not handle is
-        acknowledged with 200 and none of its other fields is checked. Fields not
-        listed here are accepted and ignored. The required list is what a sender
-        must send; which fields each handled type actually checks is given on each
-        property.
-      required: [id, type, tenant_id, data]
+        The whole envelope is decoded first: a typed member (`id`, `type`,
+        `tenant_id`, `time` and the other string members) of the wrong JSON type,
+        or a time that is not RFC 3339, is 400 `invalid event envelope` whatever the
+        type. `data` is checked only for a handled type.
+        Then the type is read; an envelope of a type this service does not handle is
+        acknowledged with 200 and none of its values is checked further. Fields not
+        listed here are accepted and ignored. The envelope has no required field; which
+        fields each handled type checks, and the answer when one is missing or
+        malformed, is given on each property.
       properties:
         id:
           type: string
@@ -202,10 +235,14 @@ components:
             DepartmentMembershipRevoked reads user_id and department_id (both UUIDs),
             MembershipRevoked reads user_id (a UUID), TenantStateChanged reads status
             (a string; any other status than offboarded marks the tenant returned),
-            and TenantMembershipsPurged does not read it at all. A payload a handled
-            type reads that is missing or not an object of those field types is 400
-            `invalid <type> payload`; a user_id or department_id that is not a UUID is
-            400 `invalid user_id in payload` or `invalid department_id in payload`.
+            and TenantMembershipsPurged does not read it (with a dataschema it is
+            still decoded, so a frame that cannot be decoded is 502 for it too). A
+            payload a handled type reads that is missing or not an object of those
+            field types is 400 `invalid <type> payload`; a user_id or department_id
+            that is not a UUID is 400 `invalid user_id in payload` or `invalid
+            department_id in payload`. A JSON null payload reads as an object with no
+            fields: a revocation then answers 400 for its user_id, and
+            TenantStateChanged reads an empty status and marks the tenant returned.
           oneOf:
             - { type: object, additionalProperties: true }
             - { type: string }
@@ -221,13 +258,13 @@ components:
 
     ProblemDetails:
       type: object
-      description: The RFC 9457 problem document every error this service writes carries (media type application/problem+json).
+      description: The RFC 9457 problem document every error this service writes carries (media type application/problem+json). A planned release renames its members to those of PlatformProblem (see the description at the top).
       required: [type, title, status, detail, instance, code]
       properties:
         type:
           type: string
           format: uri
-          description: "A URI reference that identifies the problem type: https://api.workflow.platform/errors/ followed by bad-request, unauthorized, not-found, payload-too-large, internal-error, service-unavailable or bad-gateway."
+          description: "A URI reference that identifies the problem type: https://api.workflow.platform/errors/ followed by bad-request, unauthorized, not-found, method-not-allowed, payload-too-large, internal-error, service-unavailable or bad-gateway."
         title:
           type: string
           description: A short, human-readable summary of the problem type, fixed per code.
@@ -236,13 +273,13 @@ components:
           description: The HTTP status code generated by the origin server for this occurrence of the problem.
         detail:
           type: string
-          description: A human-readable explanation specific to this occurrence of the problem. A NOT_FOUND detail is the internal error text, which can name the id looked up.
+          description: A human-readable explanation specific to this occurrence of the problem. A NOT_FOUND detail is a fixed text, `resource not found` or `alias not found` for a connector alias, and never carries internal error text.
         instance:
           type: string
           description: The request path, without the query string.
         code:
           type: string
-          description: "Service-specific error code for programmatic handling: BAD_REQUEST, INVALID_INPUT, UNAUTHORIZED, NOT_FOUND, PAYLOAD_TOO_LARGE, INTERNAL_ERROR, UPSTREAM_UNAVAILABLE or EVENT_DECODE_FAILED."
+          description: "Service-specific error code for programmatic handling: BAD_REQUEST, INVALID_INPUT, UNAUTHORIZED, NOT_FOUND, METHOD_NOT_ALLOWED, PAYLOAD_TOO_LARGE, INTERNAL_ERROR, UPSTREAM_UNAVAILABLE or EVENT_DECODE_FAILED."
         trace_id:
           type: string
           description: The OpenTelemetry trace id of the request, equal to the X-Trace-ID response header. Omitted when there is none.
@@ -269,34 +306,96 @@ components:
         type: "https://api.workflow.platform/errors/not-found"
         title: "Resource Not Found"
         status: 404
-        detail: "get version 11abcc22-0000-7000-8000-000000000001: resource not found"
+        detail: "resource not found"
         instance: "/api/v1/internal/workflow-versions/11abcc22-0000-7000-8000-000000000001/compiled-plan"
         code: "NOT_FOUND"
 
     PlatformProblem:
       type: object
       description: >-
-        The problem format of the shared HTTP library (platform-gincommon), used only
-        for a response the library writes itself: a recovered panic (500
-        INTERNAL_ERROR, no detail). Media type application/problem+json. It has
-        errorCode and traceId where ProblemDetails has code and trace_id.
-      required: [type, title, status]
+        The problem format of the shared HTTP library (platform-gincommon), used
+        only for the responses the library writes itself: a recovered panic (500
+        INTERNAL_ERROR, no detail) and, on the event ingest only, the deadline
+        answer (503 REQUEST_TIMEOUT, detail `The request timed out.`). Media type
+        application/problem+json. It has errorCode and traceId where ProblemDetails
+        has code and trace_id. After the planned format change (see the description at the top) every error of
+        this service has this shape.
+      required: [type, title, status, instance, traceId, errorCode, timestamp]
       properties:
-        type:        { type: string, description: "The library's type URI, {base}/platform/{error}." }
-        title:       { type: string, description: The fixed title of the type. }
+        type:        { type: string, description: "The library's type URI, https://errors.company.com/platform/{error}." }
+        title:       { type: string, description: "The fixed title of the type: Internal Server Error or Service Unavailable." }
         status:      { type: integer, description: The HTTP status. }
         detail:      { type: string, description: The explanation; omitted for an internal error. }
         instance:    { type: string, description: The request path. }
-        traceId:     { type: string, description: The request's trace id. }
-        errorCode:   { type: string, description: "The error code, for example INTERNAL_ERROR." }
-        timestamp:   { type: string, description: When the problem was written. }
+        traceId:     { type: string, description: "Always present: the trace id of a valid traceparent header, else the caller's x-request-id when it is usable, else the server span's trace id, else a new random id. It can therefore differ from X-Trace-ID." }
+        errorCode:   { type: string, description: "INTERNAL_ERROR or REQUEST_TIMEOUT." }
+        tenantId:    { type: string, description: "The verified tenant. Never set on these routes, which carry no gateway identity." }
+        timestamp:   { type: string, format: date-time, description: "When the problem was written, in UTC to the second." }
+      example:
+        type: "https://errors.company.com/platform/service-unavailable"
+        title: "Service Unavailable"
+        status: 503
+        detail: "The request timed out."
+        instance: "/api/v1/internal/events"
+        traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+        errorCode: "REQUEST_TIMEOUT"
+        timestamp: "2026-11-13T09:30:00Z"
+
+  headers:
+    XRequestId:
+      description: >-
+        The request id: the caller's `x-request-id` when it is 1 to 128 characters of
+        `[a-zA-Z0-9._-]`, else a new UUID. Sent on every response.
+      schema: { type: string }
+      example: 0198c0a2-5b1e-7c3d-8a11-2f4e6d9b7a99
+    XTraceId:
+      description: The OpenTelemetry trace id of the request. Sent on every response.
+      schema: { type: string }
+      example: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  parameters:
+    RequestId:
+      name: x-request-id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: >-
+        Optional caller request id, trimmed. A value of 1 to 128 characters of
+        `[a-zA-Z0-9._-]` is used and echoed in X-Request-ID; any other value is
+        replaced by a new UUID, never refused.
+      example: 0198c0a2-5b1e-7c3d-8a11-2f4e6d9b7a99
 
   responses:
+
+    MethodNotAllowed:
+      description: >-
+        METHOD_NOT_ALLOWED — the path exists but not for this method. The `Allow`
+        header lists the methods it serves. Answered before the caller identity check.
+      headers:
+        X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+        X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
+        Allow:
+          description: The methods the path serves, for example `GET`.
+          schema: { type: string }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+          example:
+            type: "https://api.workflow.platform/errors/method-not-allowed"
+            title: "Method Not Allowed"
+            status: 405
+            detail: "the method is not allowed for this path"
+            instance: "/api/v1/internal/connector-aliases"
+            code: "METHOD_NOT_ALLOWED"
 
     BadRequest:
       description: >-
         BAD_REQUEST: a path or query parameter is missing or malformed. Details:
         `invalid version_id: not a valid UUID`, `tenant_id must be a UUID`.
+      headers:
+        X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+        X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/ProblemDetails' }
@@ -310,6 +409,9 @@ components:
 
     Unauthorized:
       description: UNAUTHORIZED — missing or wrong internal caller identity (detail `missing or invalid internal caller identity`).
+      headers:
+        X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+        X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/ProblemDetails' }
@@ -322,13 +424,19 @@ components:
             code: "UNAUTHORIZED"
 
     NotFound:
-      description: NOT_FOUND — no such resource for this tenant.
+      description: NOT_FOUND — no such resource for this tenant (detail `resource not found`; `alias not found` for a connector alias).
+      headers:
+        X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+        X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/ProblemDetails' }
 
     PayloadTooLarge:
       description: PAYLOAD_TOO_LARGE — the request body exceeds the 10 MiB limit (detail `request body exceeds the 10 MB limit`). Not retryable.
+      headers:
+        X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+        X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/ProblemDetails' }
@@ -344,9 +452,13 @@ components:
       description: >-
         UPSTREAM_UNAVAILABLE — the database is unreachable or out of connections, a
         statement was cancelled, the transaction lost every retry, or the request
-        deadline passed (detail `an upstream dependency is temporarily unavailable`,
-        or `the request was cancelled or its deadline passed`). Nothing was changed;
+        deadline passed (detail `an upstream dependency is temporarily unavailable`;
+        `the request was cancelled or its deadline passed` when the deadline is
+        noticed outside a dependency call). Nothing was changed;
         safe to retry.
+      headers:
+        X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+        X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/ProblemDetails' }
@@ -360,16 +472,35 @@ components:
 
     InternalError:
       description: INTERNAL_ERROR — unexpected server error (detail `an unexpected error occurred`). A recovered panic is answered in the library format, PlatformProblem.
+      headers:
+        X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+        X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
       content:
         application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
-          example:
-            type: "https://api.workflow.platform/errors/internal-error"
-            title: "Internal Server Error"
-            status: 500
-            detail: "an unexpected error occurred"
-            instance: "/api/v1/internal/connector-aliases"
-            code: "INTERNAL_ERROR"
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/ProblemDetails'
+              - $ref: '#/components/schemas/PlatformProblem'
+          examples:
+            service:
+              summary: Written by this service (ProblemDetails)
+              value:
+                type: "https://api.workflow.platform/errors/internal-error"
+                title: "Internal Server Error"
+                status: 500
+                detail: "an unexpected error occurred"
+                instance: "/api/v1/internal/connector-aliases"
+                code: "INTERNAL_ERROR"
+            library:
+              summary: A recovered panic (PlatformProblem)
+              value:
+                type: "https://errors.company.com/platform/internal-error"
+                title: "Internal Server Error"
+                status: 500
+                instance: "/api/v1/internal/connector-aliases"
+                traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+                errorCode: "INTERNAL_ERROR"
+                timestamp: "2026-11-13T09:30:00Z"
 
 paths:
 
@@ -388,10 +519,12 @@ paths:
         - `400 BAD_REQUEST` — version_id is not a UUID, or tenant_id is absent, blank or not a UUID (checked in that order).
         - `401 UNAUTHORIZED` — missing or wrong internal caller identity.
         - `404 NOT_FOUND` — no version with this id in this tenant.
+        - `405 METHOD_NOT_ALLOWED` — a method other than GET.
         - `500 INTERNAL_ERROR` — unexpected failure.
         - `503 UPSTREAM_UNAVAILABLE` — database outage or the deadline passed.
       tags: [Internal]
       parameters:
+        - $ref: '#/components/parameters/RequestId'
         - in: path
           name: version_id
           required: true
@@ -405,12 +538,16 @@ paths:
       responses:
         "200":
           description: The version and its plan.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+            X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CompiledPlan' }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "405": { $ref: '#/components/responses/MethodNotAllowed' }
         "500": { $ref: '#/components/responses/InternalError' }
         "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
@@ -440,12 +577,17 @@ paths:
         - `200` — handled, or ignored because the type is not one this service handles. Empty body.
         - `400 BAD_REQUEST` — not retryable; the consumer routes it to its DLQ. Details: `invalid event envelope` (the body is not a JSON object of the envelope's field types, e.g. a `time` that is not RFC 3339), `invalid <type> payload`, `invalid event id`, `invalid tenant_id`, `invalid user_id in payload`, `invalid department_id in payload`.
         - `401 UNAUTHORIZED` — missing or wrong internal caller identity.
+        - `405 METHOD_NOT_ALLOWED` — a method other than POST.
         - `413 PAYLOAD_TOO_LARGE` — body over 10 MiB.
         - `500 INTERNAL_ERROR` — applying the event failed (detail `failed to process event`), whatever the cause: a database outage, a lost transaction, the Execution Service's pause call, a cache eviction or the request deadline. Retryable.
         - `502 EVENT_DECODE_FAILED` — the schema-registry payload could not be decoded. Retryable.
+        - `503 REQUEST_TIMEOUT` — the 30-second deadline passed before the bodiless 200 was sent; written by the shared library. Retryable.
       tags: [Internal]
       security:
         - InternalServiceAuth: []
+          InternalCallerUser: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
       requestBody:
         required: true
         content:
@@ -492,15 +634,21 @@ paths:
                   tenant_id: "7ca648b2-b432-4744-884c-35fd556a310c"
                   time: "2026-10-01T12:00:00Z"
                   dataschema: "5d1f6c0e-1b2a-4c3d-9e8f-0a1b2c3d4e5f"
-                  data: "AwBdH2wOGypMPZ6PAKGyw9TlX3sidXNlcl9pZCI6IjNmYTE4Y2RlLTcyNDQtNDdhYy05ODZjLTY2NWNkNDJjYWFhYSJ9"
+                  data: "AwBdH2wOGypMPZ6PChssPU5feyJ1c2VyX2lkIjoiM2ZhMThjZGUtNzI0NC00N2FjLTk4NmMtNjY1Y2Q0MmNhYWFhIn0="
       responses:
         "200":
           description: Event processed, or ignored when its type is not one this service handles. The body is empty. A redelivered envelope id is reprocessed and converges on the same state.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+            X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
         "400":
           description: >-
             BAD_REQUEST — malformed envelope or payload (non-retryable — the consumer routes it to
             its DLQ). Details: `invalid event envelope`, `invalid <type> payload`, `invalid event
             id`, `invalid tenant_id`, `invalid user_id in payload`, `invalid department_id in payload`.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+            X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetails' }
@@ -511,20 +659,24 @@ paths:
                 detail: "invalid department_id in payload"
                 instance: "/api/v1/internal/events"
                 code: "BAD_REQUEST"
-        "401":
-          description: UNAUTHORIZED — missing or invalid internal service credential.
-          content:
-            application/problem+json:
-              schema: { $ref: '#/components/schemas/ProblemDetails' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
         "413": { $ref: '#/components/responses/PayloadTooLarge' }
+        "405": { $ref: '#/components/responses/MethodNotAllowed' }
         "500":
           description: >-
             INTERNAL_ERROR — transient processing failure (detail `failed to process event`): a
             database or transaction failure, the Execution Service's pause call, a cache eviction or
-            the request deadline. The consumer retries and eventually DLQs.
+            the request deadline. The consumer retries and eventually DLQs. A recovered panic is
+            the shared library's 500 (PlatformProblem, errorCode INTERNAL_ERROR, no detail).
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+            X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
           content:
             application/problem+json:
-              schema: { $ref: '#/components/schemas/ProblemDetails' }
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ProblemDetails'
+                  - $ref: '#/components/schemas/PlatformProblem'
               example:
                 type: "https://api.workflow.platform/errors/internal-error"
                 title: "Internal Server Error"
@@ -540,6 +692,9 @@ paths:
             or an unreadable registry frame, a compressed or non-JSON frame (`schema-registry payload
             decode failed`). Retryable, so the consumer retries it and does not route it to its DLQ as
             a malformed event.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+            X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetails' }
@@ -550,6 +705,27 @@ paths:
                 detail: "schema-registry payload decode failed"
                 instance: "/api/v1/internal/events"
                 code: "EVENT_DECODE_FAILED"
+        "503":
+          description: >-
+            The 30-second deadline passed while the event was handled and its answer was the
+            bodiless 200 (applied or ignored), so the shared HTTP library answers 503 instead
+            (PlatformProblem, errorCode REQUEST_TIMEOUT). The event may have been applied;
+            it is retryable and a redelivery converges on the same state.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+            X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/PlatformProblem' }
+              example:
+                type: "https://errors.company.com/platform/service-unavailable"
+                title: "Service Unavailable"
+                status: 503
+                detail: "The request timed out."
+                instance: "/api/v1/internal/events"
+                traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+                errorCode: "REQUEST_TIMEOUT"
+                timestamp: "2026-11-13T09:30:00Z"
 
   /api/v1/internal/connector-aliases:
     get:
@@ -561,13 +737,19 @@ paths:
         starts becomes visible on that worker's next refresh. Aliases are not
         tenant-scoped; every alias is returned, ordered by name.
 
-        Responses: `200`; `401 UNAUTHORIZED`; `500 INTERNAL_ERROR`; `503 UPSTREAM_UNAVAILABLE` (database outage or deadline).
+        Responses: `200`; `401 UNAUTHORIZED`; `405 METHOD_NOT_ALLOWED`; `500 INTERNAL_ERROR`; `503 UPSTREAM_UNAVAILABLE` (database outage or deadline).
       tags: [Internal]
       security:
         - InternalServiceAuth: []
+          InternalCallerUser: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
       responses:
         "200":
           description: The full alias registry.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+            X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
           content:
             application/json:
               schema:
@@ -590,11 +772,8 @@ paths:
                     baseURL: "http://scoring.tender-app.svc.cluster.local:8080/v2"
                     pathTemplate: "/tenders/{tender_id}/score"
                     timeout: 5000000000
-        "401":
-          description: UNAUTHORIZED — missing or invalid internal service credential.
-          content:
-            application/problem+json:
-              schema: { $ref: '#/components/schemas/ProblemDetails' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "405": { $ref: '#/components/responses/MethodNotAllowed' }
         "500": { $ref: '#/components/responses/InternalError' }
         "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
@@ -613,11 +792,14 @@ paths:
         the path rules, then the host and port against the allowlist).
 
         Responses: `204`; `400 BAD_REQUEST` or `INVALID_INPUT`; `401 UNAUTHORIZED`;
-        `413 PAYLOAD_TOO_LARGE`; `500 INTERNAL_ERROR`; `503 UPSTREAM_UNAVAILABLE`
+        `405 METHOD_NOT_ALLOWED`; `413 PAYLOAD_TOO_LARGE`; `500 INTERNAL_ERROR`; `503 UPSTREAM_UNAVAILABLE`
         (database outage or deadline).
       tags: [Internal]
       security:
         - InternalServiceAuth: []
+          InternalCallerUser: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
       requestBody:
         required: true
         content:
@@ -635,9 +817,11 @@ paths:
                   description: The alias name; an existing alias of this name is replaced. Empty is 400 BAD_REQUEST; a pattern or length failure is 400 INVALID_INPUT.
                 method:
                   type: string
+                  minLength: 1
                   description: HTTP method, one of GET, POST, PUT, PATCH, DELETE, HEAD or OPTIONS in any letter case (stored as sent); anything else is 400 INVALID_INPUT.
                 baseURL:
                   type: string
+                  minLength: 1
                   description: >
                     Must be http(s) and its host must appear in the configured
                     internal-host allowlist. Dispatch sends the caller identity
@@ -659,6 +843,7 @@ paths:
                     double-encoded dot is refused.
                 pathTemplate:
                   type: string
+                  minLength: 1
                   maxLength: 2048
                   description: >
                     Must start with `/`, and must not contain `#`, whitespace or
@@ -681,7 +866,11 @@ paths:
               pathTemplate: "/tenders/{tender_id}/score"
               timeoutMs: 5000
       responses:
-        "204": { description: Alias written. No response body. }
+        "204":
+          description: Alias written. No response body.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+            X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
         "400":
           description: >
             BAD_REQUEST — unparseable JSON, an unknown field, a field of the wrong type, or a
@@ -689,6 +878,9 @@ paths:
             validation failure: an invalid alias, method or pathTemplate, a timeoutMs over the
             limit, or a baseURL whose scheme, credentials, query, fragment, host, port or path
             the allowlist or the path rules reject, or no allowlist configured.
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+            X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetails' }
@@ -699,12 +891,9 @@ paths:
                 detail: "invalid connector alias input: baseURL must not carry a query or fragment"
                 instance: "/api/v1/internal/connector-aliases/rest"
                 code: "INVALID_INPUT"
-        "401":
-          description: UNAUTHORIZED — missing or invalid internal service credential.
-          content:
-            application/problem+json:
-              schema: { $ref: '#/components/schemas/ProblemDetails' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
         "413": { $ref: '#/components/responses/PayloadTooLarge' }
+        "405": { $ref: '#/components/responses/MethodNotAllowed' }
         "500": { $ref: '#/components/responses/InternalError' }
         "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
@@ -717,24 +906,27 @@ paths:
         alias pattern; a name no alias has is 404.
 
         Responses: `204`; `401 UNAUTHORIZED`; `404 NOT_FOUND` (detail `alias not found`);
-        `500 INTERNAL_ERROR`; `503 UPSTREAM_UNAVAILABLE` (database outage or deadline).
+        `405 METHOD_NOT_ALLOWED`; `500 INTERNAL_ERROR`; `503 UPSTREAM_UNAVAILABLE` (database outage or deadline).
       tags: [Internal]
       security:
         - InternalServiceAuth: []
+          InternalCallerUser: []
       parameters:
+        - $ref: '#/components/parameters/RequestId'
         - in: path
           name: alias
           required: true
           description: The alias name, matched exactly.
           schema: { type: string }
       responses:
-        "204": { description: "Alias deleted. No response body." }
+        "204":
+          description: "Alias deleted. No response body."
+          headers:
+            X-Request-ID: { $ref: '#/components/headers/XRequestId' }
+            X-Trace-ID:   { $ref: '#/components/headers/XTraceId' }
         "404": { $ref: '#/components/responses/NotFound' }
-        "401":
-          description: UNAUTHORIZED — missing or invalid internal service credential.
-          content:
-            application/problem+json:
-              schema: { $ref: '#/components/schemas/ProblemDetails' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "405": { $ref: '#/components/responses/MethodNotAllowed' }
         "500": { $ref: '#/components/responses/InternalError' }
         "503": { $ref: '#/components/responses/ServiceUnavailable' }
 

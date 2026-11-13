@@ -3,6 +3,11 @@ name: Validate / Test
 "on":
   workflow_call:
     inputs:
+      docs_only:
+        description: 'True when only documentation changed; every job then reports skipped'
+        type: boolean
+        required: false
+        default: false
       compat_peer_ref:
         description: 'Branch or tag of the Definition Service the compat job runs against; empty means the branch named like this one if the Definition Service has it, otherwise main'
         type: string
@@ -26,6 +31,7 @@ env:
 jobs:
   test:
     name: test
+    if: ${{ !inputs.docs_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -58,7 +64,15 @@ jobs:
       - name: Verify modules
         run: go mod verify
 
+      - name: Cache dev tools
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: .tools
+          key: dev-tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
       - name: Install dev tools
+        if: steps.tools-cache.outputs.cache-hit != 'true'
         run: make tools
 
       - name: Generate (sqlc)
@@ -90,6 +104,7 @@ jobs:
 
   compat:
     name: compat
+    if: ${{ !inputs.docs_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -177,9 +192,15 @@ jobs:
           echo "https://x-access-token:${GO_PRIVATE_TOKEN}@github.com" > ~/.git-credentials
           chmod 600 ~/.git-credentials
 
+      - name: Cache sqlc
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bin
+          key: sqlc-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
       - name: Generate (sqlc) for both services
         run: |
-          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          [ -x "$RUNNER_TEMP/bin/sqlc" ] || GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
           make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
           make -C peer/definition_service generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
 
@@ -188,6 +209,7 @@ jobs:
 
   e2e:
     name: e2e
+    if: ${{ !inputs.docs_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -219,9 +241,15 @@ jobs:
           echo "https://x-access-token:${GO_PRIVATE_TOKEN}@github.com" > ~/.git-credentials
           chmod 600 ~/.git-credentials
 
+      - name: Cache sqlc
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bin
+          key: sqlc-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
       - name: Generate (sqlc)
         run: |
-          GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
+          [ -x "$RUNNER_TEMP/bin/sqlc" ] || GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
           make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
 
       - name: End-to-end (Temporal, Postgres, Valkey, HTTP)
