@@ -216,7 +216,7 @@ Logs, metrics and traces go through `platform-gincommon`; every binary calls the
 
 ## CI
 
-Pull requests and pushes run `ci.yml`: a `ci-gate` job skips draft pull requests and those labelled `skip-ci`, then code generation, `validate-quality`, `validate-test`, image builds, a Trivy scan and a smoke test. `validate-test` also runs the end-to-end tier in an `e2e` job, and in a `compat` job the compatibility suite against the Definition Service's `feat/service` branch, which that repository's CI runs against this one too. Pull requests that change only Markdown or `docs/` skip CI. `changelog-check.yml` requires a CHANGELOG entry on every pull request that touches code or contracts.
+Pull requests and pushes run `ci.yml`: a `ci-gate` job skips draft pull requests, then code generation, `validate-quality`, `validate-test`, image builds, a Trivy scan and a smoke test. `validate-test` also runs the end-to-end tier in an `e2e` job, and in a `compat` job the compatibility suite against the Definition Service's `feat/service` branch, which that repository's CI runs against this one too. Pull requests that change only Markdown or `docs/`, and those labelled `skip-ci`, report every required check as skipped (which counts as passed) instead of running it. In a stack of pull requests, label every pull request except the top one `skip-ci`: CI then runs in full only on the top one, which holds every change below it, and the stack is merged from the top. Adding or removing the label re-runs the gate. `changelog-check.yml` requires a CHANGELOG entry on every pull request that touches code or contracts.
 
 ## Versioning and releases
 
