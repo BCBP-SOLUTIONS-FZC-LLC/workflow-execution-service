@@ -48,6 +48,7 @@ type Handler struct {
 	oooAvailability port.OOOAvailabilityReconciler
 	connectorTasks  port.ConnectorTaskService
 	connectorEvents port.ConnectorEventPublisher
+	connectorGate   port.ConnectorDispatchGate
 	principals      port.AutomationPrincipalResolver
 	archiveGuard    port.ArchiveGuard
 	userTaskPauser  port.UserTaskPauser
@@ -70,6 +71,7 @@ type Services struct {
 	OOOAvailability      port.OOOAvailabilityReconciler
 	ConnectorTasks       port.ConnectorTaskService
 	ConnectorEvents      port.ConnectorEventPublisher
+	ConnectorDispatch    port.ConnectorDispatchGate
 	AutomationPrincipals port.AutomationPrincipalResolver
 	ArchiveGuard         port.ArchiveGuard
 	UserTaskPauser       port.UserTaskPauser
@@ -98,6 +100,7 @@ func New(s Services) *Handler {
 		oooAvailability: s.OOOAvailability,
 		connectorTasks:  s.ConnectorTasks,
 		connectorEvents: s.ConnectorEvents,
+		connectorGate:   s.ConnectorDispatch,
 		principals:      s.AutomationPrincipals,
 		archiveGuard:    s.ArchiveGuard,
 		userTaskPauser:  s.UserTaskPauser,

@@ -245,6 +245,7 @@ func newApp(cfg *config.Config) (*app, error) {
 		UserSafetyNet: userSafetyNetReconciler, OOOAvailability: oooAvailabilityReconciler,
 		ConnectorTasks:       connectorTaskService,
 		ConnectorEvents:      connectorEvents,
+		ConnectorDispatch:    &service.ConnectorDispatchGate{Instances: instances, Tasks: tasks},
 		AutomationPrincipals: principals,
 		ArchiveGuard:         guard, UserTaskPauser: pauser,
 		Log: log,

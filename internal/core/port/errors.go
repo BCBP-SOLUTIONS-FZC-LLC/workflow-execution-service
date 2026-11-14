@@ -39,6 +39,10 @@ var (
 	ErrTaskNotConnectorTyped = errors.New("task is not connector-typed")
 
 	ErrNoAutomationPrincipal = errors.New("tenant has no automation principal")
+
+	// ErrCallbackInFlight: an earlier attempt of the same connector callback has not delivered its
+	// signal yet; the caller retries later.
+	ErrCallbackInFlight = errors.New("an earlier attempt of this callback is still in progress")
 )
 
 type AssigneeIneligibleError struct {
