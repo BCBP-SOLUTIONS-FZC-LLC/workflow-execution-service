@@ -169,16 +169,16 @@ func TestE2E_Redelivery_SlowRunIsNotReclaimedFromALiveWorker(t *testing.T) {
 	assert.Zero(t, a.stream.reclaimed.Load()+b.stream.reclaimed.Load(), "an entry was reclaimed from a live worker")
 }
 
-// An outcome the callback keeps refusing is resent on every redelivery, past the delivery cap too: the recorded
-// outcome is never dead-lettered, the connector ran only once, and the entry is acknowledged when the callback
-// finally accepts.
+// An outcome the callback cannot take yet (503) is resent on every redelivery, past the delivery cap too: the
+// recorded outcome is not dead-lettered, the connector ran only once, and the entry is acknowledged when the
+// callback finally accepts.
 func TestE2E_Redelivery_RecordedOutcomeIsResentPastTheDeliveryCap(t *testing.T) {
 	client := newRedeliveryStream(t)
 	const refused, deliveryCap = 4, 2
 	var callbacks atomic.Int32
 	callbackSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if callbacks.Add(1) <= refused {
-			w.WriteHeader(http.StatusConflict)
+			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

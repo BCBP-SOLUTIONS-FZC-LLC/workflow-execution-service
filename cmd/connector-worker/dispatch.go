@@ -134,19 +134,23 @@ func handleEntry(ctx context.Context, d *deps, wg *sync.WaitGroup, entry valkeys
 		return
 	}
 
-	if resendRecordedOutcome(ctx, d, job, entry.ID, wlog) {
+	pastCap := d.maxDeliveries > 0 && entry.Deliveries > d.maxDeliveries
+	if found, refusal := resendRecordedOutcome(ctx, d, job, entry.ID, wlog); found {
+		if pastCap && refusedForGood(refusal) {
+			deadLetter(ctx, d, entry, job, deadLetterReasonCallbackRefused, wlog)
+		}
 		return
 	}
 
-	if d.maxDeliveries > 0 && entry.Deliveries > d.maxDeliveries {
-		deadLetter(ctx, d, entry, job, wlog)
+	if pastCap {
+		deadLetter(ctx, d, entry, job, deadLetterReasonMaxDeliveries, wlog)
 		return
 	}
 
 	pool, ok := d.pools[job.connectorType]
 	if !ok {
 		wlog.Error("connector-worker: unknown connector type", map[string]any{"connector_type": job.connectorType, "task_id": job.taskID})
-		report(ctx, d, job, dispatchOutcome{ErrorClass: "unknown_connector_type"}, entry.ID, wlog)
+		_ = report(ctx, d, job, dispatchOutcome{ErrorClass: "unknown_connector_type"}, entry.ID, wlog)
 		return
 	}
 
@@ -167,16 +171,19 @@ func handleEntry(ctx context.Context, d *deps, wg *sync.WaitGroup, entry valkeys
 	}()
 }
 
-func resendRecordedOutcome(ctx context.Context, d *deps, job dispatchJob, entryID string, wlog port.Logger) bool {
+// resendRecordedOutcome resends an outcome this worker already recorded: (true, callback error) when one was
+// found, (false, nil) when the connector has not run yet. An unreadable record counts as found (the connector
+// may have run) and is left pending.
+func resendRecordedOutcome(ctx context.Context, d *deps, job dispatchJob, entryID string, wlog port.Logger) (bool, error) {
 	outcome, found, err := recordedOutcome(ctx, d, job.taskID)
 	if err != nil {
 		wlog.Warn("connector-worker: recorded outcome unreadable, leaving entry pending", map[string]any{"task_id": job.taskID, "error": err.Error()})
-		return true
+		return true, nil //nolint:nilerr // the connector may have run: leave the entry pending, never run it again
 	}
-	if found {
-		report(ctx, d, job, outcome, entryID, wlog)
+	if !found {
+		return false, nil
 	}
-	return found
+	return true, report(ctx, d, job, outcome, entryID, wlog)
 }
 
 func runJob(ctx context.Context, d *deps, pool *typePool, job dispatchJob, entryID string, wlog port.Logger) {
@@ -189,13 +196,13 @@ func runJob(ctx context.Context, d *deps, pool *typePool, job dispatchJob, entry
 		return
 	}
 	d.inflight.setDeadline(entryID, d.clock().Add(leaseTTL))
-	if resendRecordedOutcome(ctx, d, job, entryID, wlog) {
+	if found, _ := resendRecordedOutcome(ctx, d, job, entryID, wlog); found {
 		return
 	}
 
 	outcome := execute(ctx, d, pool, job, wlog)
 	recordOutcome(ctx, d, job.taskID, outcome, wlog)
-	report(ctx, d, job, outcome, entryID, wlog)
+	_ = report(ctx, d, job, outcome, entryID, wlog) // a failed callback leaves the entry pending; report logs it
 }
 
 func execute(ctx context.Context, d *deps, pool *typePool, job dispatchJob, wlog port.Logger) dispatchOutcome {
@@ -223,7 +230,9 @@ func execute(ctx context.Context, d *deps, pool *typePool, job dispatchJob, wlog
 const (
 	deadLetterReasonMaxDeliveries = "max_deliveries_exceeded"
 	deadLetterReasonMalformed     = "malformed_entry"
-	unknownConnectorTypeLabel     = "unknown"
+	// deadLetterReasonCallbackRefused: past the cap, the server refused the recorded outcome for good.
+	deadLetterReasonCallbackRefused = "callback_refused"
+	unknownConnectorTypeLabel       = "unknown"
 )
 
 // deadLetterMalformed moves an entry the worker cannot read to the dead-letter stream (which also acknowledges it,
@@ -254,14 +263,14 @@ func countDeadLettered(connectorType string) {
 	}
 }
 
-func deadLetter(ctx context.Context, d *deps, entry valkeystream.Entry, job dispatchJob, wlog port.Logger) {
-	if err := d.consumer.DeadLetter(ctx, d.streamKey, d.streamGroup, d.deadLetterKey, entry, deadLetterReasonMaxDeliveries); err != nil {
+func deadLetter(ctx context.Context, d *deps, entry valkeystream.Entry, job dispatchJob, reason string, wlog port.Logger) {
+	if err := d.consumer.DeadLetter(ctx, d.streamKey, d.streamGroup, d.deadLetterKey, entry, reason); err != nil {
 		wlog.Warn("connector-worker: dead-letter failed, leaving entry pending", map[string]any{"entry_id": entry.ID, "task_id": job.taskID, "error": err.Error()})
 		return
 	}
 	countDeadLettered(connectorTypeLabel(d, job.connectorType))
-	wlog.Error("connector-worker: entry exceeded its delivery cap and was dead-lettered; the task stays open", map[string]any{
-		"entry_id": entry.ID, "task_id": job.taskID, "tenant_id": job.tenantID, "deliveries": entry.Deliveries,
+	wlog.Error("connector-worker: entry dead-lettered past its delivery cap; the task stays open", map[string]any{
+		"entry_id": entry.ID, "task_id": job.taskID, "tenant_id": job.tenantID, "deliveries": entry.Deliveries, "reason": reason,
 	})
 }
 

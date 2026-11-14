@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
@@ -62,7 +63,9 @@ func takeLease(ctx context.Context, d *deps, taskID uuid.UUID, ttl time.Duration
 	return ok
 }
 
-func report(ctx context.Context, d *deps, job dispatchJob, outcome dispatchOutcome, entryID string, wlog port.Logger) {
+// report sends the outcome to the server and acks the entry on success; a failed callback leaves the entry
+// pending and is returned.
+func report(ctx context.Context, d *deps, job dispatchJob, outcome dispatchOutcome, entryID string, wlog port.Logger) error {
 	var err error
 	if outcome.ErrorClass != "" {
 		err = d.completion.Fail(ctx, job.tenantID, job.taskID, outcome.ErrorClass, outcome.Output)
@@ -76,7 +79,19 @@ func report(ctx context.Context, d *deps, job dispatchJob, outcome dispatchOutco
 			fields["status"], fields["body"] = statusErr.Status, statusErr.Body
 		}
 		wlog.Warn("connector-worker: callback failed, leaving entry unacked for redelivery", fields)
-		return
+		return err
 	}
 	ackEntry(ctx, d, entryID, wlog)
+	return nil
+}
+
+// refusedForGood reports a callback the server answered with a 4xx that a retry cannot change (not a timeout
+// or throttling answer).
+func refusedForGood(err error) bool {
+	var statusErr *callbackStatusError
+	if !errors.As(err, &statusErr) {
+		return false
+	}
+	return statusErr.Status >= 400 && statusErr.Status < 500 &&
+		statusErr.Status != http.StatusRequestTimeout && statusErr.Status != http.StatusTooManyRequests
 }

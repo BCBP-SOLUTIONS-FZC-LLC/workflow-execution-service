@@ -66,10 +66,10 @@ func TestDispatch_PastDeliveryCap_RecordedFailureIsResentAsAFailure(t *testing.T
 	assert.Zero(t, conn.runs.Load())
 }
 
-// A callback the server keeps refusing leaves the entry pending past the cap, with its outcome still recorded;
-// it is neither acknowledged nor dead-lettered, and the next delivery resends again.
-func TestDispatch_PastDeliveryCap_RefusedResendStaysPending(t *testing.T) {
-	w, conn := newCapWorker(t, http.StatusConflict)
+// A callback the server cannot take yet (5xx) leaves the entry pending past the cap, with its outcome still
+// recorded; it is neither acknowledged nor dead-lettered, and the next delivery resends again.
+func TestDispatch_PastDeliveryCap_UnavailableResendStaysPending(t *testing.T) {
+	w, conn := newCapWorker(t, http.StatusServiceUnavailable)
 	entry, _, taskID := dspfixEntry("53-0", dspfixConnType, nil)
 	entry.Deliveries = dspfixCap + 1
 	w.record(t, taskID, dispatchOutcome{Output: map[string]any{"result": "kept"}})
