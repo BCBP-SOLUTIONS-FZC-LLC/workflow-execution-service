@@ -169,14 +169,7 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
 		return nil, nil, fmt.Errorf("build connectors: %w", err)
 	}
 
-	consumerName := cfg.ConnectorStreamConsumerName
-	if consumerName == "" {
-		if host, hostErr := os.Hostname(); hostErr == nil && host != "" {
-			consumerName = host
-		} else {
-			consumerName = "connector-worker"
-		}
-	}
+	consumerName := resolveConsumerName(cfg.ConnectorStreamConsumerName, os.Hostname)
 
 	d := &deps{
 		aliasesAt:    time.Now(),
@@ -236,7 +229,9 @@ func buildDocRefs(ctx context.Context, cfg *config.Config, valkeyClient *redis.C
 type typePool struct {
 	connectorType string
 	sem           chan struct{}
-	timeout       time.Duration
+	// parked holds one token per entry waiting behind a full pool, with the capacity of sem; nil means no parking.
+	parked  chan struct{}
+	timeout time.Duration
 
 	mu        sync.RWMutex
 	connector connectors.Connector
@@ -310,6 +305,7 @@ func buildPools(cfg *config.Config, connectorSet map[string]connectors.Connector
 		pools[typ] = &typePool{
 			connectorType: typ,
 			sem:           make(chan struct{}, size),
+			parked:        make(chan struct{}, size),
 			timeout:       timeouts[typ],
 			connector:     conn,
 		}

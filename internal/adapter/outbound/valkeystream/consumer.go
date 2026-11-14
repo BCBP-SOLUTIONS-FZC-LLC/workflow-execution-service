@@ -86,13 +86,11 @@ func (c *Consumer) DeadLetter(ctx context.Context, streamKey, group, deadLetterK
 	}
 	values["reason"] = reason
 	values["source_entry_id"] = entry.ID
-	_, err := c.client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-		pipe.XAdd(ctx, &redis.XAddArgs{Stream: deadLetterKey, Values: values})
-		pipe.XAck(ctx, streamKey, group, entry.ID)
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("valkeystream dead letter: %w", err)
+	if err := c.client.XAdd(ctx, &redis.XAddArgs{Stream: deadLetterKey, Values: values}).Err(); err != nil {
+		return fmt.Errorf("valkeystream dead letter: copy: %w", err)
+	}
+	if err := c.client.XAck(ctx, streamKey, group, entry.ID).Err(); err != nil {
+		return fmt.Errorf("valkeystream dead letter: ack: %w", err)
 	}
 	return nil
 }

@@ -6,6 +6,8 @@ name: CI
   push:
     branches: [main]
   pull_request:
+    # labeled and unlabeled re-run the gate when skip-ci is added to or taken off a PR.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
   workflow_dispatch:
 
 permissions:
@@ -27,7 +29,7 @@ jobs:
     timeout-minutes: 2
     outputs:
       run: ${{ steps.decide.outputs.run }}
-      docs_only: ${{ steps.docs.outputs.docs_only }}
+      skip: ${{ steps.decide.outputs.skip }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -57,13 +59,21 @@ jobs:
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "docs_only=$docs_only"
 
+      # A draft runs nothing. A documentation-only change or a PR with the skip-ci
+      # label (every PR of a stack except the top one) still calls each check, which
+      # then reports skipped: a required check that never reports would stay pending
+      # and block the merge, while a skipped one counts as passed. CI therefore runs
+      # in full only on the top PR of a stack, which holds every change below it.
       - id: decide
-        run: >
-          echo "run=${{
-            github.event_name != 'pull_request' ||
-            (github.event.pull_request.draft == false &&
-             !contains(github.event.pull_request.labels.*.name, 'skip-ci'))
-          }}" >> "$GITHUB_OUTPUT"
+        env:
+          SKIP_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'skip-ci') }}
+          DOCS_ONLY: ${{ steps.docs.outputs.docs_only }}
+        run: |
+          echo "run=${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}" >> "$GITHUB_OUTPUT"
+          skip=false
+          if [ "$DOCS_ONLY" = true ] || [ "$SKIP_LABEL" = true ]; then skip=true; fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "skip=$skip (docs_only=$DOCS_ONLY, skip-ci label=$SKIP_LABEL)"
 
   validate-quality:
     name: Validate / Quality
@@ -72,7 +82,7 @@ jobs:
     uses: ./.github/workflows/validate-quality.yml
     secrets: inherit
     with:
-      docs_only: ${{ needs.ci-gate.outputs.docs_only == 'true' }}
+      skip: ${{ needs.ci-gate.outputs.skip == 'true' }}
 
   validate-test:
     name: Validate / Test
@@ -81,12 +91,12 @@ jobs:
     uses: ./.github/workflows/validate-test.yml
     secrets: inherit
     with:
-      docs_only: ${{ needs.ci-gate.outputs.docs_only == 'true' }}
+      skip: ${{ needs.ci-gate.outputs.skip == 'true' }}
 
   build-image-cache:
     name: Build image (cache)
     needs: [ci-gate]
-    if: needs.ci-gate.outputs.run == 'true' && needs.ci-gate.outputs.docs_only != 'true'
+    if: needs.ci-gate.outputs.run == 'true' && needs.ci-gate.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

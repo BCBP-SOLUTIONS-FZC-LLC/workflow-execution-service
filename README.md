@@ -142,9 +142,11 @@ Tests fail when a router operation is missing from its spec or the reverse, and 
 
 | Binary | Required outside dev |
 | --- | --- |
-| API server | `DATABASE_URL`, `OUTBOX_RELAY_DATABASE_URL`, `VALKEY_ADDR`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL`, `ELIGIBILITY_BASE_URL`, `TOKEN_SERVICE_BASE_URL`, `SNS_TOPIC_ARN`, `GLUE_REGISTRY_NAME`, `AWS_USE_STUB=false`, `LOCK_DATABASE_URL` when `PG_BOUNCER_MODE` is true |
+| API server | `DATABASE_URL`, `OUTBOX_RELAY_DATABASE_URL`, `VALKEY_ADDR`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL`, `ELIGIBILITY_BASE_URL`, `TOKEN_SERVICE_BASE_URL`, `SNS_TOPIC_ARN`, `GLUE_REGISTRY_NAME`, `AWS_USE_STUB=false`, `LOCK_DATABASE_URL` when `PG_BOUNCER_MODE` is true; `TOKEN_SERVICE_BASE_URL` in every environment |
 | Worker | `DATABASE_URL`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL` |
 | Connector worker | `DATABASE_URL`, `VALKEY_ADDR`, `DEFINITION_SERVICE_URL`, `EXECUTION_SERVICE_INTERNAL_ADDR`, `OPENBAO_TOKEN`, `CONNECTOR_DOCS_BUCKET`; `OPENBAO_ADDR` and `EXECUTION_SERVICE_INTERNAL_ADDR` in every environment, dev included |
+
+Every binary also refuses to start on a zero or negative timeout, interval, retention or connector pool size, a `NaN` trace sampling ratio, two equal listen ports, or a `.env` file it cannot parse; the error names the variable.
 
 ---
 
@@ -214,7 +216,7 @@ Logs, metrics and traces go through `platform-gincommon`; every binary calls the
 
 ## CI
 
-Pull requests and pushes run `ci.yml`: a `ci-gate` job skips draft pull requests and those labelled `skip-ci`, then code generation, `validate-quality`, `validate-test`, image builds, a Trivy scan and a smoke test. `validate-test` also runs the end-to-end tier in an `e2e` job, and in a `compat` job the compatibility suite against the Definition Service's `feat/service` branch, which that repository's CI runs against this one too. Pull requests that change only Markdown or `docs/` skip CI. `changelog-check.yml` requires a CHANGELOG entry on every pull request that touches code or contracts.
+Pull requests and pushes run `ci.yml`: a `ci-gate` job skips draft pull requests, then code generation, `validate-quality`, `validate-test`, image builds, a Trivy scan and a smoke test. `validate-test` also runs the end-to-end tier in an `e2e` job, and in a `compat` job the compatibility suite against the Definition Service's `feat/service` branch, which that repository's CI runs against this one too. Pull requests that change only Markdown or `docs/`, and those labelled `skip-ci`, report every required check as skipped (which counts as passed) instead of running it. In a stack of pull requests, label every pull request except the top one `skip-ci`: CI then runs in full only on the top one, which holds every change below it, and the stack is merged from the top. Adding or removing the label re-runs the gate. `changelog-check.yml` requires a CHANGELOG entry on every pull request that touches code or contracts.
 
 ## Versioning and releases
 

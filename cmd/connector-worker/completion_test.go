@@ -101,7 +101,7 @@ func TestReport_FailedCallbackLogsStatusAndBody(t *testing.T) {
 
 	log := &recordingLogger{}
 	d := &deps{completion: newCompletionClient(srv.URL, 5*time.Second)}
-	report(context.Background(), d, dispatchJob{tenantID: uuid.New(), taskID: uuid.New()}, dispatchOutcome{}, "1-0", log)
+	require.Error(t, report(context.Background(), d, dispatchJob{tenantID: uuid.New(), taskID: uuid.New()}, dispatchOutcome{}, "1-0", log))
 
 	require.Len(t, log.warns, 1)
 	assert.Equal(t, http.StatusNotFound, log.warns[0]["status"])

@@ -40,12 +40,18 @@ module.exports = async function prSummary({ github, context }) {
     })
     .join("\n");
 
-  const allPassed = JOB_LABELS
+  const results = JOB_LABELS
     .filter(([id]) => jobResults[id])
-    .every(([id]) => jobResults[id].result === "success");
+    .map(([id]) => jobResults[id].result);
+  const allPassed = results.every((r) => r === "success");
+  // A PR with the skip-ci label (a lower PR of a stack) or a documentation-only
+  // change reports its checks as skipped; that is not a failure.
+  const nothingFailed = results.every((r) => r === "success" || r === "skipped");
   const headline = allPassed
     ? "✅ All checks passed — ready to merge"
-    : "❌ Some checks failed";
+    : nothingFailed
+      ? "⏭️ Checks skipped — CI runs on the top PR of the stack, or only documentation changed"
+      : "❌ Some checks failed";
 
   const body = [
     MARKER,

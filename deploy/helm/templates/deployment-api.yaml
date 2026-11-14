@@ -74,11 +74,7 @@ spec:
             - name: GLUE_REGISTRY_NAME
               value: {{ .Values.env.glueRegistryName | quote }}
             - name: TOKEN_SERVICE_BASE_URL
-              {{- if not (has .Values.env.appEnv (list "dev" "local")) }}
-              value: {{ required "env.tokenServiceBaseURL is required outside dev: the API reads each tenant's automation principal from it" .Values.env.tokenServiceBaseURL | quote }}
-              {{- else }}
-              value: {{ .Values.env.tokenServiceBaseURL | quote }}
-              {{- end }}
+              value: {{ required "env.tokenServiceBaseURL is required: the API reads each tenant's automation principal from it and refuses to start without it" .Values.env.tokenServiceBaseURL | quote }}
             - name: ELIGIBILITY_BASE_URL
               value: {{ required "env.eligibilityBaseURL is required: the API refuses to start without it" .Values.env.eligibilityBaseURL | quote }}
             - name: ENTITLEMENTS_BASE_URL

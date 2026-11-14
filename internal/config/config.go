@@ -1,8 +1,11 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
+	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -86,14 +89,15 @@ type Config struct {
 	GlueRegistryName   string
 	GlueSchemaCacheTTL time.Duration
 
-	ConnectorStreamKey           string
-	ConnectorStreamGroup         string
-	ConnectorStreamConsumerName  string
-	ConnectorStreamBlockTimeout  time.Duration
-	ConnectorStreamClaimMinIdle  time.Duration
-	ConnectorStreamBatchSize     int64
-	ConnectorStreamMaxDeliveries int64
-	ConnectorStreamDeadLetterKey string
+	ConnectorStreamKey                 string
+	ConnectorStreamGroup               string
+	ConnectorStreamConsumerName        string
+	ConnectorStreamBlockTimeout        time.Duration
+	ConnectorStreamClaimMinIdle        time.Duration
+	ConnectorStreamBatchSize           int64
+	ConnectorStreamMaxDeliveries       int64
+	ConnectorStreamDeadLetterKey       string
+	ConnectorStreamDeadLetterRetention time.Duration
 
 	OpenBaoAddr    string
 	OpenBaoToken   string
@@ -127,7 +131,9 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
-	_ = godotenv.Load()
+	if err := loadDotEnv(); err != nil {
+		return nil, err
+	}
 
 	var parseErrs []string
 	record := func(err error) {
@@ -208,7 +214,7 @@ func Load() (*Config, error) {
 		OutboxRetention:            envDuration("OUTBOX_RETENTION", 7*365*24*time.Hour),
 		TenantPurgeEnabled:         envBool("TENANT_PURGE_ENABLED", true),
 		TenantHistoryRetention:     envDuration("TENANT_HISTORY_RETENTION", 7*365*24*time.Hour),
-		StartRefusedStatuses:       csvLower(getEnvOrDefault("START_REFUSED_STATUSES", "suspended,trial_expired,cancelled")),
+		StartRefusedStatuses:       startRefusedStatuses(os.Getenv("START_REFUSED_STATUSES")),
 		ProcessedEventRetention:    envDuration("PROCESSED_EVENT_RETENTION", 7*24*time.Hour),
 		RetentionSweepInterval:     envDuration("RETENTION_SWEEP_INTERVAL", 24*time.Hour),
 		RetentionSweepBatch:        envInt("RETENTION_SWEEP_BATCH", 1000),
@@ -237,14 +243,15 @@ func Load() (*Config, error) {
 		GlueRegistryName:   getEnvOrDefault("GLUE_REGISTRY_NAME", ""),
 		GlueSchemaCacheTTL: envDuration("GLUE_SCHEMA_CACHE_TTL", 5*time.Minute),
 
-		ConnectorStreamKey:           getEnvOrDefault("CONNECTOR_STREAM_KEY", "connector-tasks"),
-		ConnectorStreamGroup:         getEnvOrDefault("CONNECTOR_STREAM_GROUP", "connector-worker"),
-		ConnectorStreamConsumerName:  getEnvOrDefault("CONNECTOR_STREAM_CONSUMER_NAME", ""),
-		ConnectorStreamBlockTimeout:  envDuration("CONNECTOR_STREAM_BLOCK_TIMEOUT", 5*time.Second),
-		ConnectorStreamClaimMinIdle:  envDuration("CONNECTOR_STREAM_CLAIM_MIN_IDLE", 30*time.Second),
-		ConnectorStreamBatchSize:     int64(envInt("CONNECTOR_STREAM_BATCH_SIZE", 10)),
-		ConnectorStreamMaxDeliveries: int64(envInt("CONNECTOR_STREAM_MAX_DELIVERIES", 10)),
-		ConnectorStreamDeadLetterKey: getEnvOrDefault("CONNECTOR_STREAM_DEAD_LETTER_KEY", "connector-tasks-dead"),
+		ConnectorStreamKey:                 getEnvOrDefault("CONNECTOR_STREAM_KEY", "connector-tasks"),
+		ConnectorStreamGroup:               getEnvOrDefault("CONNECTOR_STREAM_GROUP", "connector-worker"),
+		ConnectorStreamConsumerName:        getEnvOrDefault("CONNECTOR_STREAM_CONSUMER_NAME", ""),
+		ConnectorStreamBlockTimeout:        envDuration("CONNECTOR_STREAM_BLOCK_TIMEOUT", 5*time.Second),
+		ConnectorStreamClaimMinIdle:        envDuration("CONNECTOR_STREAM_CLAIM_MIN_IDLE", 30*time.Second),
+		ConnectorStreamBatchSize:           int64(envInt("CONNECTOR_STREAM_BATCH_SIZE", 10)),
+		ConnectorStreamMaxDeliveries:       int64(envInt("CONNECTOR_STREAM_MAX_DELIVERIES", 10)),
+		ConnectorStreamDeadLetterKey:       getEnvOrDefault("CONNECTOR_STREAM_DEAD_LETTER_KEY", "connector-tasks-dead"),
+		ConnectorStreamDeadLetterRetention: envDuration("CONNECTOR_STREAM_DEAD_LETTER_RETENTION", 30*24*time.Hour),
 
 		OpenBaoAddr:    getEnvOrDefault("OPENBAO_ADDR", ""),
 		OpenBaoToken:   getEnvOrDefault("OPENBAO_TOKEN", ""),
@@ -311,6 +318,12 @@ func (c *Config) validate() error {
 	if c.WorkerMetricsPort < 1 || c.WorkerMetricsPort > 65535 {
 		return fmt.Errorf("WORKER_METRICS_PORT must be in [1, 65535]")
 	}
+	if err := c.validateDistinctPorts(); err != nil {
+		return err
+	}
+	if err := c.validatePositiveSettings(); err != nil {
+		return err
+	}
 	if c.PGMaxConns <= 0 {
 		return fmt.Errorf("PG_MAX_CONNS must be > 0")
 	}
@@ -320,7 +333,7 @@ func (c *Config) validate() error {
 	if c.PGMinConns > c.PGMaxConns {
 		return fmt.Errorf("PG_MIN_CONNS must be <= PG_MAX_CONNS")
 	}
-	if c.OTELTracesSamplerRatio < 0.0 || c.OTELTracesSamplerRatio > 1.0 {
+	if math.IsNaN(c.OTELTracesSamplerRatio) || c.OTELTracesSamplerRatio < 0.0 || c.OTELTracesSamplerRatio > 1.0 {
 		return fmt.Errorf("OTEL_TRACES_SAMPLER_RATIO must be in [0.0, 1.0]")
 	}
 	if c.OutboxBatchSize <= 0 {
@@ -405,6 +418,9 @@ func (c *Config) RequireServer() error {
 	if c.EligibilityBaseURL == "" {
 		return fmt.Errorf("ELIGIBILITY_BASE_URL is required")
 	}
+	if err := c.requireIdentityServiceAddress(); err != nil {
+		return err
+	}
 	if c.AWSUseStub && !c.IsDev() {
 		return fmt.Errorf("AWS_USE_STUB must be false outside dev and local")
 	}
@@ -417,15 +433,23 @@ func (c *Config) RequireServer() error {
 		}
 	}
 	if !c.IsDev() {
-		if c.TokenServiceBaseURL == "" {
-			return fmt.Errorf("TOKEN_SERVICE_BASE_URL is required outside dev and local")
-		}
 		if c.OutboxRelayDatabaseURL == "" {
 			return fmt.Errorf("OUTBOX_RELAY_DATABASE_URL is required outside dev and local — a missing relay DSN would silently fall back to the RLS-enforced app role and see zero rows forever")
 		}
 		if c.PGBouncerMode && c.LockDatabaseURL == "" {
 			return fmt.Errorf("LOCK_DATABASE_URL is required outside dev and local when PG_BOUNCER_MODE is true — a session advisory lock taken through a transaction-pooling proxy can stay held on a server connection and block tenant events")
 		}
+	}
+	return nil
+}
+
+func (c *Config) requireIdentityServiceAddress() error {
+	if c.TokenServiceBaseURL == "" {
+		return fmt.Errorf("TOKEN_SERVICE_BASE_URL is required: the API reads each tenant's automation principal from the identity service")
+	}
+	u, err := url.Parse(c.TokenServiceBaseURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("TOKEN_SERVICE_BASE_URL must be an http or https URL with a host, got %q", c.TokenServiceBaseURL)
 	}
 	return nil
 }
@@ -486,6 +510,23 @@ func (c *Config) MigrationDSN() string {
 		return c.MigrationDatabaseURL
 	}
 	return c.DatabaseURL
+}
+
+const defaultStartRefusedStatuses = "suspended,trial_expired,cancelled"
+
+func startRefusedStatuses(raw string) []string {
+	if statuses := csvLower(raw); len(statuses) > 0 {
+		return statuses
+	}
+	return csvLower(defaultStartRefusedStatuses)
+}
+
+func loadDotEnv() error {
+	// The parser's message quotes the rest of the file, which can hold secrets, so it is not passed on.
+	if err := godotenv.Load(); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return errors.New("reading .env file: the file is malformed (content withheld)")
+	}
+	return nil
 }
 
 var knownTenantStatuses = []string{"trial", "active", "past_due", "cancelled", "suspended", "trial_expired", "offboarded"}

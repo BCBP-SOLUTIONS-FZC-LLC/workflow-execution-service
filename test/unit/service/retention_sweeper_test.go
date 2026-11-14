@@ -41,7 +41,7 @@ type fakeInboxPruner struct {
 	olderThan time.Duration
 }
 
-func (f *fakeInboxPruner) Prune(_ context.Context, olderThan time.Duration) (int64, error) {
+func (f *fakeInboxPruner) PruneBatch(_ context.Context, olderThan time.Duration, _ int) (int64, error) {
 	f.calls.Add(1)
 	f.olderThan = olderThan
 	return f.deleted, f.err
