@@ -18,6 +18,7 @@ func validConnectorWorkerConfig() *config.Config {
 		ConnectorStreamClaimMinIdle:  30 * time.Second,
 		ConnectorStreamMaxDeliveries: 10,
 		ConnectorStreamDeadLetterKey: "connector-tasks-dead",
+		ConnectorStreamBatchSize:     10,
 		ConnectorTimeoutStorage:      60 * time.Second,
 		ConnectorTimeoutRestCall:     30 * time.Second,
 	}

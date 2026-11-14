@@ -120,6 +120,8 @@ spec:
               value: {{ .Values.connectorWorker.retry.maxBackoff | quote }}
             - name: CONNECTOR_AUDIT_RETENTION
               value: {{ .Values.connectorWorker.auditRetention | quote }}
+            - name: CONNECTOR_STREAM_DEAD_LETTER_RETENTION
+              value: {{ .Values.connectorWorker.deadLetterRetention | quote }}
           livenessProbe:
             httpGet:
               path: /healthz

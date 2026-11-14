@@ -93,7 +93,7 @@ func registerServiceMetrics() {
 		"Tenant purges that failed part-way and will be retried on the next sweep."))
 	ConnectorDispatchDeadLetteredTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_connector_dispatch_dead_lettered_total",
-		"Connector stream entries moved to the dead-letter stream after exceeding their delivery cap, by connector_type.", "connector_type"))
+		"Connector stream entries moved to the dead-letter stream (delivery cap exceeded or entry unreadable), by connector_type.", "connector_type"))
 	ConnectorTaskFailuresTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_connector_task_failures_total",
 		"Failed connector calls, by connector_type, provider, error class (transient, permanent or unknown) and whether the call was retried.", "connector_type", "provider", "class", "retried"))

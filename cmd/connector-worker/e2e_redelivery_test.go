@@ -169,24 +169,54 @@ func TestE2E_Redelivery_SlowRunIsNotReclaimedFromALiveWorker(t *testing.T) {
 	assert.Zero(t, a.stream.reclaimed.Load()+b.stream.reclaimed.Load(), "an entry was reclaimed from a live worker")
 }
 
-// An outcome the callback keeps refusing can never be reported: the entry is
-// dead-lettered once past its delivery cap, and the connector ran only once.
-func TestE2E_Redelivery_UnreportableEntryIsDeadLettered(t *testing.T) {
+// An outcome the callback keeps refusing is resent on every redelivery, past the delivery cap too: the recorded
+// outcome is never dead-lettered, the connector ran only once, and the entry is acknowledged when the callback
+// finally accepts.
+func TestE2E_Redelivery_RecordedOutcomeIsResentPastTheDeliveryCap(t *testing.T) {
 	client := newRedeliveryStream(t)
-	callbackSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusConflict) }))
+	const refused, deliveryCap = 4, 2
+	var callbacks atomic.Int32
+	callbackSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if callbacks.Add(1) <= refused {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
 	t.Cleanup(callbackSrv.Close)
 	conn := &countingConnector{typ: "counting"}
-	startRedeliveryWorker(t, client, "worker-a", conn, time.Second, 2, callbackSrv.URL)
+	startRedeliveryWorker(t, client, "worker-a", conn, time.Second, deliveryCap, callbackSrv.URL)
 
 	publishConnectorEntry(t, client, uuid.New(), conn.typ)
+
+	require.Eventually(t, func() bool { return callbacks.Load() > refused && pendingCount(t, client) == 0 }, 90*time.Second, 200*time.Millisecond,
+		"the recorded outcome was not resent until the callback accepted it")
+	assert.Equal(t, int32(1), conn.calls.Load(), "a refused callback re-ran the connector")
+	dead, err := client.XLen(context.Background(), redeliveryDead).Result()
+	require.NoError(t, err)
+	assert.Zero(t, dead, "an entry with a recorded outcome was dead-lettered")
+}
+
+// An entry the worker cannot read is copied to the dead-letter stream and acknowledged on first delivery, so it
+// is neither redelivered in a loop nor dropped; the connector never runs.
+func TestE2E_Redelivery_MalformedEntryIsDeadLetteredAndAcknowledged(t *testing.T) {
+	client := newRedeliveryStream(t)
+	callbackSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	t.Cleanup(callbackSrv.Close)
+	conn := &countingConnector{typ: "counting"}
+	startRedeliveryWorker(t, client, "worker-a", conn, time.Second, 10, callbackSrv.URL)
+	_, err := client.XAdd(context.Background(), &redis.XAddArgs{Stream: redeliveryStream, Values: map[string]any{
+		"tenant_id": uuid.NewString(), "task_id": uuid.NewString(), "department_id": uuid.Nil.String(), "connector_type": conn.typ,
+	}}).Result()
+	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
 		n, err := client.XLen(context.Background(), redeliveryDead).Result()
 		return err == nil && n == 1
-	}, 40*time.Second, 200*time.Millisecond, "the entry was never dead-lettered")
+	}, 40*time.Second, 200*time.Millisecond, "the malformed entry was never dead-lettered")
 	assert.Zero(t, pendingCount(t, client))
-	assert.Equal(t, int32(1), conn.calls.Load(), "a refused callback re-ran the connector")
+	assert.Zero(t, conn.calls.Load())
 	dead, err := client.XRange(context.Background(), redeliveryDead, "-", "+").Result()
 	require.NoError(t, err)
-	assert.Equal(t, "max_deliveries_exceeded", dead[0].Values["reason"])
+	assert.Equal(t, "malformed_entry", dead[0].Values["reason"])
 }

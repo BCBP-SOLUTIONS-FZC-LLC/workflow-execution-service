@@ -62,8 +62,7 @@ func (r *Reader) Read(ctx context.Context, path, fieldName string) (string, erro
 	case http.StatusForbidden:
 		return "", fmt.Errorf("%w: openbao read %q", ErrUnauthorized, path)
 	default:
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("%w: openbao read %q: status %d: %s", ErrUpstreamUnavailable, path, resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("%w: openbao read %q field %q: status %d", ErrUpstreamUnavailable, path, fieldName, resp.StatusCode)
 	}
 }
 

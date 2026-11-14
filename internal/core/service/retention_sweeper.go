@@ -19,7 +19,7 @@ type OutboxPruner interface {
 }
 
 type ProcessedEventPruner interface {
-	Prune(ctx context.Context, olderThan time.Duration) (int64, error)
+	PruneBatch(ctx context.Context, olderThan time.Duration, batch int) (int64, error)
 }
 
 type RetentionSweeperDeps struct {
@@ -62,11 +62,11 @@ func (s *RetentionSweeper) pruneOutbox(ctx context.Context) error {
 }
 
 func (s *RetentionSweeper) pruneProcessedEvents(ctx context.Context) error {
-	deleted, err := s.deps.ProcessedEvents.Prune(ctx, s.deps.ProcessedEventRetention)
+	deleted, err := s.deps.ProcessedEvents.PruneBatch(ctx, s.deps.ProcessedEventRetention, s.deps.Batch)
+	s.deps.Record(retentionTableProcessedEvent, deleted)
 	if err != nil {
 		return fmt.Errorf("prune processed events: %w", err)
 	}
-	s.deps.Record(retentionTableProcessedEvent, deleted)
 	return nil
 }
 

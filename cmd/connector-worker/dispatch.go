@@ -43,7 +43,10 @@ func runDispatchLoop(ctx context.Context, d *deps, wg *sync.WaitGroup, wlog port
 				return
 			}
 			wlog.Warn("connector-worker: read group failed", map[string]any{"error": err.Error()})
-			time.Sleep(time.Second)
+			if recreateLostGroup(ctx, d, err, wlog) {
+				continue
+			}
+			waitReadBackoff(ctx)
 			continue
 		}
 		dispatchBatch(ctx, d, wg, entries, wlog)
@@ -102,6 +105,9 @@ func parseDispatchJob(entry valkeystream.Entry) (dispatchJob, error) {
 	if err != nil {
 		return dispatchJob{}, fmt.Errorf("parse department_id: %w", err)
 	}
+	if departmentID == uuid.Nil {
+		return dispatchJob{}, errors.New("department_id is the all-zero uuid")
+	}
 	var resolvedInputs map[string]any
 	if raw := entry.Fields["resolved_inputs"]; raw != "" {
 		if err := json.Unmarshal([]byte(raw), &resolvedInputs); err != nil {
@@ -124,17 +130,16 @@ func handleEntry(ctx context.Context, d *deps, wg *sync.WaitGroup, entry valkeys
 
 	job, err := parseDispatchJob(entry)
 	if err != nil {
-		wlog.Error("connector-worker: malformed stream entry, acking to avoid a poison-pill loop", map[string]any{"entry_id": entry.ID, "error": err.Error()})
-		ackEntry(ctx, d, entry.ID, wlog)
+		deadLetterMalformed(ctx, d, entry, err, wlog)
+		return
+	}
+
+	if resendRecordedOutcome(ctx, d, job, entry.ID, wlog) {
 		return
 	}
 
 	if d.maxDeliveries > 0 && entry.Deliveries > d.maxDeliveries {
 		deadLetter(ctx, d, entry, job, wlog)
-		return
-	}
-
-	if resendRecordedOutcome(ctx, d, job, entry.ID, wlog) {
 		return
 	}
 
@@ -145,12 +150,18 @@ func handleEntry(ctx context.Context, d *deps, wg *sync.WaitGroup, entry valkeys
 		return
 	}
 
+	slot := claimSlot(ctx, pool)
+	if slot == slotAbandoned {
+		return
+	}
 	wg.Add(1)
-	pool.sem <- struct{}{}
 	handedOff = true
 	go func() {
 		defer wg.Done()
 		defer d.inflight.remove(entry.ID)
+		if slot == slotParked && !waitParked(ctx, pool) {
+			return
+		}
 		defer func() { <-pool.sem }()
 		runJob(ctx, d, pool, job, entry.ID, wlog)
 	}()
@@ -209,14 +220,46 @@ func execute(ctx context.Context, d *deps, pool *typePool, job dispatchJob, wlog
 	return dispatchOutcome{Output: output}
 }
 
+const (
+	deadLetterReasonMaxDeliveries = "max_deliveries_exceeded"
+	deadLetterReasonMalformed     = "malformed_entry"
+	unknownConnectorTypeLabel     = "unknown"
+)
+
+// deadLetterMalformed moves an entry the worker cannot read to the dead-letter stream (which also acknowledges it,
+// so it is not redelivered in a loop) instead of dropping it; the task stays open for an operator (§S6.5 step 0).
+func deadLetterMalformed(ctx context.Context, d *deps, entry valkeystream.Entry, parseErr error, wlog port.Logger) {
+	if err := d.consumer.DeadLetter(ctx, d.streamKey, d.streamGroup, d.deadLetterKey, entry, deadLetterReasonMalformed); err != nil {
+		wlog.Warn("connector-worker: dead-letter failed, leaving entry pending", map[string]any{"entry_id": entry.ID, "error": err.Error()})
+		return
+	}
+	countDeadLettered(connectorTypeLabel(d, entry.Fields["connector_type"]))
+	wlog.Error("connector-worker: malformed stream entry was dead-lettered; the task stays open", map[string]any{
+		"entry_id": entry.ID, "task_id": entry.Fields["task_id"], "tenant_id": entry.Fields["tenant_id"], "error": parseErr.Error(),
+	})
+}
+
+// connectorTypeLabel keeps the metric label to a connector type the worker runs: an entry's own text must not
+// become a label value.
+func connectorTypeLabel(d *deps, connectorType string) string {
+	if _, ok := d.pools[connectorType]; ok {
+		return connectorType
+	}
+	return unknownConnectorTypeLabel
+}
+
+func countDeadLettered(connectorType string) {
+	if observability.ConnectorDispatchDeadLetteredTotal != nil {
+		observability.ConnectorDispatchDeadLetteredTotal.WithLabelValues(connectorType).Inc()
+	}
+}
+
 func deadLetter(ctx context.Context, d *deps, entry valkeystream.Entry, job dispatchJob, wlog port.Logger) {
-	if err := d.consumer.DeadLetter(ctx, d.streamKey, d.streamGroup, d.deadLetterKey, entry, "max_deliveries_exceeded"); err != nil {
+	if err := d.consumer.DeadLetter(ctx, d.streamKey, d.streamGroup, d.deadLetterKey, entry, deadLetterReasonMaxDeliveries); err != nil {
 		wlog.Warn("connector-worker: dead-letter failed, leaving entry pending", map[string]any{"entry_id": entry.ID, "task_id": job.taskID, "error": err.Error()})
 		return
 	}
-	if observability.ConnectorDispatchDeadLetteredTotal != nil {
-		observability.ConnectorDispatchDeadLetteredTotal.WithLabelValues(job.connectorType).Inc()
-	}
+	countDeadLettered(connectorTypeLabel(d, job.connectorType))
 	wlog.Error("connector-worker: entry exceeded its delivery cap and was dead-lettered; the task stays open", map[string]any{
 		"entry_id": entry.ID, "task_id": job.taskID, "tenant_id": job.tenantID, "deliveries": entry.Deliveries,
 	})

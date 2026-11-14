@@ -113,6 +113,10 @@ func checkRequiredConfig(cfg *config.Config) error {
 		return fmt.Errorf("CONNECTOR_STREAM_MAX_DELIVERIES must be >= 1")
 	case cfg.ConnectorStreamDeadLetterKey == "" || cfg.ConnectorStreamDeadLetterKey == cfg.ConnectorStreamKey:
 		return fmt.Errorf("CONNECTOR_STREAM_DEAD_LETTER_KEY is required and must differ from CONNECTOR_STREAM_KEY")
+	case cfg.ConnectorStreamBlockTimeout < 0:
+		return fmt.Errorf("CONNECTOR_STREAM_BLOCK_TIMEOUT must be >= 0 (0 waits for entries)")
+	case cfg.ConnectorStreamBatchSize < 1:
+		return fmt.Errorf("CONNECTOR_STREAM_BATCH_SIZE must be >= 1")
 	case cfg.ConnectorStreamClaimMinIdle < 3*time.Second:
 		return fmt.Errorf("CONNECTOR_STREAM_CLAIM_MIN_IDLE must be at least 3s, the heartbeat runs three times within it")
 	case 2*time.Duration(cfg.ConnectorStreamMaxDeliveries)*cfg.ConnectorStreamClaimMinIdle >= outcomeTTL:

@@ -44,7 +44,7 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `workflow_execution_service_connector_alias_registry_age_seconds` | gauge | - | Seconds since the connector worker last applied a fresh alias registry, updated on every refresh tick (a failed or empty refresh lets it grow). |
-| `workflow_execution_service_connector_dispatch_dead_lettered_total` | counter | `connector_type` | Connector stream entries moved to the dead-letter stream after exceeding their delivery cap, by connector_type. |
+| `workflow_execution_service_connector_dispatch_dead_lettered_total` | counter | `connector_type` | Connector stream entries moved to the dead-letter stream (delivery cap exceeded or entry unreadable), by connector_type. |
 | `workflow_execution_service_delegation_reroute_duration_seconds` | histogram | - | Envelope-time to reroute-commit latency for DelegationStarted handling (LLD §6.7 SLO, p99 <= 4s). |
 | `workflow_execution_service_delegation_scope_unhandled_total` | counter | `scope` | Delegations arriving with a scope this service has no case for, by scope. They match no assignment. |
 | `workflow_execution_service_entitlements_call_duration_seconds` | histogram | `outcome` | Latency of one Entitlements feature-flag read, by outcome (success or error). |

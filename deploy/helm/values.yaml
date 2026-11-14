@@ -96,6 +96,8 @@ connectorWorker:
     initialBackoff: 500ms
     maxBackoff: 10s
   auditRetention: 2160h
+  # How long a dead-letter entry is kept before the worker trims it; zero or negative refuses to start.
+  deadLetterRetention: 720h
   resources:
     requests:
       cpu: 100m
@@ -196,7 +198,7 @@ env:
   glueRegistryName: wf-workflow-events
   # The Org & Membership base URL; the API reads assignee eligibility under it. Required: the API refuses to start without it.
   eligibilityBaseURL: ""
-  # The identity subsystem's Token Service, read for each tenant's automation principal. Required outside dev.
+  # The identity subsystem's Token Service, read for each tenant's automation principal. Required: the API refuses to start without it.
   tokenServiceBaseURL: ""
   # The Entitlements service (commercial namespace). When set, the API reads the tenant's dedicated_workflow_queue
   # grant at instance start and routes the instance to the tenant's own queue only when it is held; empty keeps

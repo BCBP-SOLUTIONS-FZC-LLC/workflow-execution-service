@@ -184,6 +184,29 @@ func TestValidate(t *testing.T) {
 				RetentionSweepInterval:     time.Hour,
 				RetentionSweepBatch:        100,
 				TenantHistoryRetention:     time.Hour,
+
+				ValkeyDialTimeout:                  time.Second,
+				ValkeyReadTimeout:                  time.Second,
+				ValkeyWriteTimeout:                 time.Second,
+				IdempotencyTTL:                     time.Hour,
+				OpenBaoTimeout:                     time.Second,
+				ConnectorAliasFetchTimeout:         time.Second,
+				ConnectorAliasRefreshInterval:      time.Minute,
+				ConnectorCompletionTimeout:         time.Second,
+				ConnectorAuditRetention:            time.Hour,
+				ConnectorStreamDeadLetterRetention: time.Hour,
+				ConnectorTimeoutStorage:            time.Second,
+				ConnectorTimeoutSendEmail:          time.Second,
+				ConnectorTimeoutDocumentExtract:    time.Second,
+				ConnectorTimeoutRestCall:           time.Second,
+				ConnectorTimeoutSQLQuery:           time.Second,
+				ConnectorTimeoutChatNotify:         time.Second,
+				ConnectorPoolSizeStorage:           1,
+				ConnectorPoolSizeSendEmail:         1,
+				ConnectorPoolSizeDocumentExtract:   1,
+				ConnectorPoolSizeRestCall:          1,
+				ConnectorPoolSizeSQLQuery:          1,
+				ConnectorPoolSizeChatNotify:        1,
 			}
 			tt.mutate(cfg)
 
@@ -330,6 +353,7 @@ func TestRequire(t *testing.T) {
 			DatabaseURL:          "postgres://x",
 			DefinitionServiceURL: "http://definition:8080",
 			EligibilityBaseURL:   "http://eligibility",
+			TokenServiceBaseURL:  "http://token-service",
 			AWSUseStub:           true,
 
 			ConnectorRetryMaxAttempts:    5,

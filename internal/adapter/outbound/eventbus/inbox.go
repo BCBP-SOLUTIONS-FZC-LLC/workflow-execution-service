@@ -2,6 +2,7 @@ package eventbus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 var _ port.ProcessedEventRepository = (*Inbox)(nil)
 
 type Inbox struct {
+	order  []string
 	stores map[string]*inbox.Store
 }
 
@@ -27,7 +29,7 @@ func NewInbox(pool *pgcommon.Pool, consumers ...string) (*Inbox, error) {
 		}
 		stores[consumer] = store
 	}
-	return &Inbox{stores: stores}, nil
+	return &Inbox{order: consumers, stores: stores}, nil
 }
 
 func (i *Inbox) IsProcessed(ctx context.Context, eventID uuid.UUID, consumer string) (bool, error) {
@@ -54,15 +56,22 @@ func (i *Inbox) MarkProcessed(ctx context.Context, eventID uuid.UUID, consumer s
 }
 
 func (i *Inbox) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
+	return i.PruneBatch(ctx, olderThan, 0)
+}
+
+// PruneBatch prunes every consumer's rows in statements of at most batch rows (the library default when batch
+// is not positive). A consumer that fails does not stop the others; the errors come back joined.
+func (i *Inbox) PruneBatch(ctx context.Context, olderThan time.Duration, batch int) (int64, error) {
 	var total int64
-	for consumer, store := range i.stores {
-		deleted, err := store.Prune(ctx, olderThan, 0)
+	var errs []error
+	for _, consumer := range i.order {
+		deleted, err := i.stores[consumer].Prune(ctx, olderThan, batch)
 		total += deleted
 		if err != nil {
-			return total, fmt.Errorf("prune %q: %w", consumer, err)
+			errs = append(errs, fmt.Errorf("prune %q: %w", consumer, err))
 		}
 	}
-	return total, nil
+	return total, errors.Join(errs...)
 }
 
 func (i *Inbox) store(consumer string) (*inbox.Store, error) {
