@@ -74,13 +74,23 @@ func cachedCompiledWorkflow(
 			log.Warn("compiled-plan cache read failed, falling back to Definitions", map[string]any{"error": err.Error()})
 		} else if raw != "" {
 			var compiled port.CompiledWorkflow
-			if err := json.Unmarshal([]byte(raw), &compiled); err == nil {
+			if err := json.Unmarshal([]byte(raw), &compiled); err == nil && holdsMainPlan(&compiled) {
 				return &compiled, nil
 			}
-			log.Warn("compiled-plan cache hit failed to unmarshal, falling back to Definitions", nil)
+			log.Warn("compiled-plan cache entry is not a compiled plan, falling back to Definitions", nil)
 		}
 	}
 	return liveCompiledWorkflow(ctx, store, definitions, log, tenantID, versionID)
+}
+
+// holdsMainPlan tells a usable cache entry from one that is valid JSON but no compiled plan
+// (null, {}): such an entry is a miss, so the next read replaces it instead of failing until it expires.
+func holdsMainPlan(compiled *port.CompiledWorkflow) bool {
+	var collab dsl.CompiledCollaboration
+	if err := json.Unmarshal([]byte(compiled.CompiledPlanJSON), &collab); err != nil {
+		return false
+	}
+	return findPlan(&collab, collab.MainPlan) != nil
 }
 
 func liveCompiledWorkflow(

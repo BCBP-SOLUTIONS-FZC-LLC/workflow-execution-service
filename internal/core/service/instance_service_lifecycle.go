@@ -28,6 +28,9 @@ func (s *InstanceService) signalLifecycle(ctx context.Context, tenantID, instanc
 	if err != nil {
 		return wrapInstanceErr(err)
 	}
+	if isTerminalInstanceStatus(inst.Status) {
+		return port.ErrInstanceAlreadyTerminal
+	}
 	if inst.RecordVersion != recordVersion {
 		return port.ErrRecordVersionConflict
 	}

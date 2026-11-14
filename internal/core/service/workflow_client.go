@@ -23,6 +23,7 @@ type WorkflowClient struct {
 	Instances   port.InstanceRepository
 	Tasks       port.TaskRepository
 	Assignments port.TaskAssignmentRepository
+	Transactor  port.Transactor
 	Temporal    port.TemporalClient
 	Eligibility port.EligibilityChecker
 	Definitions port.DefinitionServiceClient
@@ -54,70 +55,121 @@ func matchingAssignments(assignments []*domain.TaskAssignment, delegationID *uui
 	return out
 }
 
+type delegateRow struct {
+	assignment *domain.TaskAssignment
+	task       *domain.Task
+	instance   *domain.Instance
+}
+
+// ReassignDelegate reads everything it needs first, so a failed read changes
+// nothing; it then moves the rows in one transaction and signals after the
+// commit (execution LLD §5.8).
 func (s *WorkflowClient) ReassignDelegate(ctx context.Context, in port.ReassignDelegateInput) (int, error) {
 	active, err := s.Assignments.ListActiveByUser(ctx, in.TenantID, in.OldDelegateID)
 	if err != nil {
 		return 0, err
 	}
-	matched := matchingAssignments(active, in.DelegationID)
+	rows, err := s.eligibleDelegateRows(ctx, in, matchingAssignments(active, in.DelegationID))
+	if err != nil {
+		return 0, err
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+	rows, err = s.moveToNewDelegate(ctx, in, rows)
+	if err != nil {
+		return 0, err
+	}
+	for _, r := range rows {
+		if err := s.signalReassign(ctx, r, in.NewDelegateID); err != nil {
+			s.logger().Warn("failed to signal instance-reassign, DB state already updated", map[string]any{"task_id": r.task.ID, "error": err.Error()})
+		}
+	}
+	return len(rows), nil
+}
 
+func (s *WorkflowClient) eligibleDelegateRows(ctx context.Context, in port.ReassignDelegateInput, matched []*domain.TaskAssignment) ([]delegateRow, error) {
 	plans := newCompiledPlanCache(s.Definitions, s.logger())
 	answered := map[eligibilityPair]bool{}
-	count := 0
+	rows := make([]delegateRow, 0, len(matched))
 	for _, a := range matched {
 		task, err := s.Tasks.GetByID(ctx, in.TenantID, a.TaskID)
 		if err != nil {
-			s.logger().Warn("skipping assignment with unreadable task", map[string]any{"assignment_id": a.ID, "error": err.Error()})
-			continue
+			return nil, fmt.Errorf("reassign delegate: read task of assignment %s: %w", a.ID, err)
 		}
-		eligible, err := s.checkAssigneeEligible(ctx, plans, answered, in.TenantID, task, in.NewDelegateID)
-		if errors.Is(err, errEligibilityRead) {
-			return count, err
-		}
+		inst, err := s.Instances.GetByID(ctx, in.TenantID, task.WorkflowInstanceID)
 		if err != nil {
-			s.logger().Warn("skipping assignment: eligibility check failed", map[string]any{"task_id": task.ID, "error": err.Error()})
-			continue
+			return nil, fmt.Errorf("reassign delegate: read instance of task %s: %w", task.ID, err)
+		}
+		eligible, err := s.checkAssigneeEligible(ctx, plans, answered, in.TenantID, task, inst, in.NewDelegateID)
+		if err != nil {
+			return nil, err
 		}
 		if !eligible {
 			s.logger().Warn("skipping assignment: new delegate ineligible for task", map[string]any{"task_id": task.ID})
 			continue
 		}
-		if _, err := s.Assignments.Vacate(ctx, in.TenantID, a.ID); err != nil {
-			s.logger().Warn("failed to vacate assignment during delegate reassignment", map[string]any{"assignment_id": a.ID, "error": err.Error()})
-			continue
-		}
-		newAssignment := &domain.TaskAssignment{
-			ID: uuid.New(), TenantID: in.TenantID, TaskID: a.TaskID,
-			UserID: in.NewDelegateID, Reason: a.Reason, IsLead: a.IsLead,
-		}
-		if err := s.Assignments.Create(ctx, newAssignment); err != nil {
-			s.logger().Warn("failed to create replacement assignment during delegate reassignment", map[string]any{"task_id": a.TaskID, "error": err.Error()})
-			continue
-		}
-		if err := s.signalReassignForTask(ctx, task, a.UserID, in.NewDelegateID); err != nil {
-			s.logger().Warn("failed to signal instance-reassign, DB state already updated", map[string]any{"task_id": a.TaskID, "error": err.Error()})
-		}
-		count++
+		rows = append(rows, delegateRow{assignment: a, task: task, instance: inst})
 	}
-	return count, nil
+	return rows, nil
 }
 
+// moveToNewDelegate returns the rows it moved: a row whose assignment ended
+// after it was read is left alone.
+func (s *WorkflowClient) moveToNewDelegate(ctx context.Context, in port.ReassignDelegateInput, rows []delegateRow) ([]delegateRow, error) {
+	moved := make([]delegateRow, 0, len(rows))
+	err := s.Transactor.RunInTx(withTenantGUC(ctx, in.TenantID), func(ctx context.Context) error {
+		moved = moved[:0]
+		for _, r := range rows {
+			active, ok, err := vacateIfActive(ctx, s.Assignments, in.TenantID, r.assignment)
+			if err != nil {
+				return fmt.Errorf("reassign delegate: vacate assignment %s: %w", r.assignment.ID, err)
+			}
+			if !ok {
+				continue
+			}
+			if err := handOver(ctx, s.Assignments, in.TenantID, r.assignment, active, r.task, in.NewDelegateID, r.assignment.Reason); err != nil {
+				return fmt.Errorf("reassign delegate: hand task %s to the new delegate: %w", r.task.ID, err)
+			}
+			moved = append(moved, r)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return moved, nil
+}
+
+// CancelByDelegate vacates every selected assignment in one transaction; a
+// failed write changes nothing and fails the call so the caller retries.
 func (s *WorkflowClient) CancelByDelegate(ctx context.Context, in port.CancelByDelegateInput) (int, error) {
 	active, err := s.Assignments.ListActiveByUser(ctx, in.TenantID, in.DelegateUserID)
 	if err != nil {
 		return 0, err
 	}
 	matched := matchingAssignments(active, in.DelegationID)
-
-	count := 0
-	for _, a := range matched {
-		if _, err := s.Assignments.Vacate(ctx, in.TenantID, a.ID); err != nil {
-			s.logger().Warn("failed to vacate assignment during delegate cancellation", map[string]any{"assignment_id": a.ID, "error": err.Error()})
-			continue
-		}
-		count++
+	if len(matched) == 0 {
+		return 0, nil
 	}
-	return count, nil
+	vacated := 0
+	err = s.Transactor.RunInTx(withTenantGUC(ctx, in.TenantID), func(ctx context.Context) error {
+		vacated = 0
+		for _, a := range matched {
+			_, ok, err := vacateIfActive(ctx, s.Assignments, in.TenantID, a)
+			if err != nil {
+				return fmt.Errorf("cancel by delegate: vacate assignment %s: %w", a.ID, err)
+			}
+			if ok {
+				vacated++
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return vacated, nil
 }
 
 func (s *WorkflowClient) DelegateImpact(ctx context.Context, in port.DelegateImpactInput) (port.DelegateImpactResult, error) {
@@ -187,17 +239,13 @@ func pageAffectedWorkflows(affected []affectedWorkflow, page port.Page) ([]uuid.
 	return ids, port.EncodeCursor(port.CursorPosition{CreatedAt: last.createdAt, ID: last.id})
 }
 
-func (s *WorkflowClient) checkAssigneeEligible(ctx context.Context, plans *compiledPlanCache, answered map[eligibilityPair]bool, tenantID uuid.UUID, task *domain.Task, newUserID uuid.UUID) (bool, error) {
+func (s *WorkflowClient) checkAssigneeEligible(ctx context.Context, plans *compiledPlanCache, answered map[eligibilityPair]bool, tenantID uuid.UUID, task *domain.Task, inst *domain.Instance, newUserID uuid.UUID) (bool, error) {
 	if s.Eligibility == nil || s.Definitions == nil {
 		return true, nil
 	}
-	inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
-	if err != nil {
-		return false, err
-	}
 	plan, err := plans.mainPlan(ctx, tenantID, inst.WorkflowVersionID)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("reassign delegate: read compiled plan of task %s: %w", task.ID, err)
 	}
 	level, ok := requiredLevelForTask(plan, task)
 	if !ok {
@@ -215,13 +263,9 @@ func (s *WorkflowClient) checkAssigneeEligible(ctx context.Context, plans *compi
 	return eligible, nil
 }
 
-func (s *WorkflowClient) signalReassignForTask(ctx context.Context, task *domain.Task, oldUserID, newUserID uuid.UUID) error {
-	inst, err := s.Instances.GetByID(ctx, task.TenantID, task.WorkflowInstanceID)
-	if err != nil {
-		return err
-	}
-	return s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, port.SignalInstanceReassign, reassignSignalWire{
-		TaskID: task.ID.String(), OldUserID: oldUserID.String(), NewUserID: newUserID.String(),
-		RecordVersion: task.RecordVersion,
+func (s *WorkflowClient) signalReassign(ctx context.Context, r delegateRow, newUserID uuid.UUID) error {
+	return s.Temporal.SignalWorkflow(ctx, r.instance.TemporalWorkflowID, r.instance.ID, port.SignalInstanceReassign, reassignSignalWire{
+		TaskID: r.task.ID.String(), OldUserID: r.assignment.UserID.String(), NewUserID: newUserID.String(),
+		RecordVersion: r.task.RecordVersion,
 	})
 }

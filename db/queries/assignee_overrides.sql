@@ -10,4 +10,9 @@ INSERT INTO assignee_overrides (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8
 )
+ON CONFLICT (id) DO NOTHING
 RETURNING *;
+
+-- name: GetAssigneeOverride :one
+SELECT * FROM assignee_overrides
+WHERE id = $1;

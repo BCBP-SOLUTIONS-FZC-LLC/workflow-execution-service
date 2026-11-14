@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -258,11 +259,15 @@ func (s *TaskService) Complete(ctx context.Context, tenantID, taskID, userID uui
 	if inst.Status != domain.InstanceStatusRunning && inst.Status != domain.InstanceStatusDegraded {
 		return nil, port.ErrInvalidInstanceState
 	}
+	if !s.reserveCompletion(ctx, task.ID) {
+		return nil, port.ErrRecordVersionConflict
+	}
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-transition", stageTransitionWire{
 		DeptID: deptID, NodeID: nodeID, UserID: userID.String(), ResultJSON: string(resultJSON), RecordVersion: recordVersion,
 		VisitCount: task.VisitCount,
 	}); err != nil {
+		s.releaseCompletion(ctx, task.ID)
 		return nil, fmt.Errorf("signal stage-transition: %w", err)
 	}
 	return toPortTask(task), nil
@@ -451,13 +456,24 @@ func (s *TaskService) OverrideAssignee(ctx context.Context, in port.AssigneeOver
 	}
 
 	override := &domain.AssigneeOverride{
-		ID: uuid.New(), TenantID: in.TenantID, WorkflowInstanceID: in.InstanceID, NodeKey: in.NodeKey,
+		ID: deterministicOverrideID(in, task.RecordVersion), TenantID: in.TenantID, WorkflowInstanceID: in.InstanceID, NodeKey: in.NodeKey,
 		PreviousUserID: previousUserID, NewUserID: in.NewUserID, Reason: in.Reason, ActorUserID: in.ActorUserID,
 	}
 	if err := s.Overrides.Create(ctx, override); err != nil {
 		return nil, err
 	}
 	return toPortAssigneeOverride(override, task.RecordVersion), nil
+}
+
+// deterministicOverrideID names the override by the action it records, so a retry after a failed
+// signal derives the same id and the insert ignores it. The record version separates a later,
+// genuinely new override of the same node to the same user.
+func deterministicOverrideID(in port.AssigneeOverrideInput, recordVersion int64) uuid.UUID {
+	name := strings.Join([]string{
+		"execution_service:assignee_override", in.TenantID.String(), in.InstanceID.String(), in.NodeKey,
+		in.NewUserID.String(), strconv.FormatInt(recordVersion, 10),
+	}, "/")
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(name))
 }
 
 func (s *TaskService) SignalReassign(ctx context.Context, tenantID, taskID, actorUserID, previousUserID, newUserID uuid.UUID, recordVersion int64) error {

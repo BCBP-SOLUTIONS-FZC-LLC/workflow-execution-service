@@ -34,7 +34,7 @@ func (e *csaEligibility) CheckEligibilityBatch(context.Context, uuid.UUID, []por
 	return nil, nil
 }
 
-func TestWorkflowClient_ReassignDelegate_APlanThatCannotBeReadIsReadAgainForTheNextAssignment(t *testing.T) {
+func TestWorkflowClient_ReassignDelegate_APlanThatCannotBeReadFailsTheCallAndIsNotRemembered(t *testing.T) {
 	obstest.Init(t)
 	const missesMetric = "workflow_execution_service_wf_cache_misses_total"
 	const hitsMetric = "workflow_execution_service_wf_cache_hits_total"
@@ -62,7 +62,7 @@ func TestWorkflowClient_ReassignDelegate_APlanThatCannotBeReadIsReadAgainForTheN
 		{"the main plan is missing", func(v uuid.UUID) (*port.CompiledWorkflow, error) { return withMainPlan(v, "ghost"), nil }, `main plan "ghost" not found in compiled collaboration`},
 	}
 	for _, tc := range failures {
-		t.Run(tc.name+", and the failure is not remembered", func(t *testing.T) {
+		t.Run(tc.name+", and the call fails before any row changes", func(t *testing.T) {
 			h := csaNewClientHarness()
 			log := &fakeLogger{}
 			h.svc.Log = log
@@ -83,10 +83,10 @@ func TestWorkflowClient_ReassignDelegate_APlanThatCannotBeReadIsReadAgainForTheN
 
 			count, err := h.svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
 
-			require.NoError(t, err, "an unreadable plan holds the row, it does not fail the call")
+			require.Error(t, err, "an unreadable plan fails the call so the caller retries")
 			assert.Zero(t, count)
-			assert.Equal(t, []csaIDCall{{tenantID, versionID}, {tenantID, versionID}}, definitions.reads, "each assignment reads the version again")
-			assert.Equal(t, 2.0, obstest.Sum(t, missesMetric, nil)-missesBefore, "every failed attempt is a miss")
+			assert.Equal(t, []csaIDCall{{tenantID, versionID}}, definitions.reads, "the call stops at the first failed read")
+			assert.Equal(t, 1.0, obstest.Sum(t, missesMetric, nil)-missesBefore, "the failed attempt is a miss")
 			assert.Zero(t, obstest.Sum(t, hitsMetric, nil)-hitsBefore, "a failure is never served as a hit")
 			unreadable := 0
 			for i, msg := range log.warnCalls {
@@ -96,7 +96,7 @@ func TestWorkflowClient_ReassignDelegate_APlanThatCannotBeReadIsReadAgainForTheN
 					assert.Contains(t, log.warnFields[i]["error"], tc.cause)
 				}
 			}
-			assert.Equal(t, 2, unreadable, "each attempt logs the unreadable plan with its cause")
+			assert.Equal(t, 1, unreadable, "the attempt logs the unreadable plan with its cause")
 			assert.Empty(t, eligibility.calls)
 			for _, hd := range held {
 				assert.True(t, hd.assignment.IsActive)
@@ -104,17 +104,12 @@ func TestWorkflowClient_ReassignDelegate_APlanThatCannotBeReadIsReadAgainForTheN
 		})
 	}
 
-	t.Run("a read that succeeds after a failure is kept for the rest of the call", func(t *testing.T) {
+	t.Run("a read that succeeds is kept for the rest of the call", func(t *testing.T) {
 		h := csaNewClientHarness()
 		eligibility := &csaEligibility{}
 		h.svc.Eligibility = eligibility
 		tenantID, oldDelegate, newDelegate, versionID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
-		definitions := &csaDefinitions{answer: func(call int) (*port.CompiledWorkflow, error) {
-			if call == 1 {
-				return nil, assert.AnError
-			}
-			return good(versionID), nil
-		}}
+		definitions := &csaDefinitions{answer: func(int) (*port.CompiledWorkflow, error) { return good(versionID), nil }}
 		h.svc.Definitions = definitions
 		instanceID := uuid.New()
 		var held []csaHeld
@@ -129,13 +124,13 @@ func TestWorkflowClient_ReassignDelegate_APlanThatCannotBeReadIsReadAgainForTheN
 		count, err := h.svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
 
 		require.NoError(t, err)
-		assert.Equal(t, 2, count, "the first assignment was held by the failure, the other two were moved")
-		assert.Len(t, definitions.reads, 2, "one failed read and one that succeeded; the third assignment is served from memory")
-		assert.Equal(t, 2.0, obstest.Sum(t, missesMetric, nil)-missesBefore)
-		assert.Equal(t, 1.0, obstest.Sum(t, hitsMetric, nil)-hitsBefore)
-		assert.True(t, held[0].assignment.IsActive)
-		assert.False(t, held[1].assignment.IsActive)
-		assert.False(t, held[2].assignment.IsActive)
+		assert.Equal(t, 3, count)
+		assert.Len(t, definitions.reads, 1, "one read; the other two assignments are served from memory")
+		assert.Equal(t, 1.0, obstest.Sum(t, missesMetric, nil)-missesBefore)
+		assert.Equal(t, 2.0, obstest.Sum(t, hitsMetric, nil)-hitsBefore)
+		for _, hd := range held {
+			assert.False(t, hd.assignment.IsActive)
+		}
 		require.Len(t, eligibility.calls, 1)
 		assert.Equal(t, tenantID, eligibility.calls[0].tenantID)
 		assert.Equal(t, newDelegate, eligibility.calls[0].userID)

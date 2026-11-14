@@ -24,7 +24,7 @@ func TestCancelByDelegate_ActiveAssignmentOnATerminalInstance_IsVacatedAndCounte
 	instanceRepo := postgres.NewInstanceRepo(appPool)
 	taskRepo := postgres.NewTaskRepo(appPool)
 	assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
-	client := &service.WorkflowClient{Assignments: assignmentRepo}
+	client := &service.WorkflowClient{Assignments: assignmentRepo, Transactor: postgres.NewTransactor(appPool)}
 	ctx := context.Background()
 
 	for _, status := range []domain.InstanceStatus{
