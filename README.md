@@ -142,9 +142,11 @@ Tests fail when a router operation is missing from its spec or the reverse, and 
 
 | Binary | Required outside dev |
 | --- | --- |
-| API server | `DATABASE_URL`, `OUTBOX_RELAY_DATABASE_URL`, `VALKEY_ADDR`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL`, `ELIGIBILITY_BASE_URL`, `TOKEN_SERVICE_BASE_URL`, `SNS_TOPIC_ARN`, `GLUE_REGISTRY_NAME`, `AWS_USE_STUB=false`, `LOCK_DATABASE_URL` when `PG_BOUNCER_MODE` is true |
+| API server | `DATABASE_URL`, `OUTBOX_RELAY_DATABASE_URL`, `VALKEY_ADDR`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL`, `ELIGIBILITY_BASE_URL`, `TOKEN_SERVICE_BASE_URL`, `SNS_TOPIC_ARN`, `GLUE_REGISTRY_NAME`, `AWS_USE_STUB=false`, `LOCK_DATABASE_URL` when `PG_BOUNCER_MODE` is true; `TOKEN_SERVICE_BASE_URL` in every environment |
 | Worker | `DATABASE_URL`, `TEMPORAL_HOST_PORT`, `DEFINITION_SERVICE_URL` |
 | Connector worker | `DATABASE_URL`, `VALKEY_ADDR`, `DEFINITION_SERVICE_URL`, `EXECUTION_SERVICE_INTERNAL_ADDR`, `OPENBAO_TOKEN`, `CONNECTOR_DOCS_BUCKET`; `OPENBAO_ADDR` and `EXECUTION_SERVICE_INTERNAL_ADDR` in every environment, dev included |
+
+Every binary also refuses to start on a zero or negative timeout, interval, retention or connector pool size, a `NaN` trace sampling ratio, two equal listen ports, or a `.env` file it cannot parse; the error names the variable.
 
 ---
 
