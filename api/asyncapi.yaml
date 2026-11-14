@@ -651,14 +651,15 @@ components:
         workflow_version_id:  { type: string, format: uuid }
         task_id:              { type: string, format: uuid }
         node_key:             { type: string }
-        department_id:        { type: string, format: uuid }
+        department_id:        { type: string, format: uuid, description: a connector-typed task is refused with 400 on the internal ingest route when this is the all-zero uuid }
         assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
         stage_type:           { type: string }
         due_at:               { type: ["string", "null"], format: date-time }
         follow_up_at:         { type: ["string", "null"], format: date-time }
         connector_type:       { type: ["string", "null"] }
-        resolved_inputs:      { type: ["object", "null"] }
+        resolved_inputs:      { type: ["object", "null"], description: absent or null is queued for the connector worker as an empty object }
         output_mapping:
+          description: absent or null is queued for the connector worker as an empty list
           type: ["array", "null"]
           items:
             type: object

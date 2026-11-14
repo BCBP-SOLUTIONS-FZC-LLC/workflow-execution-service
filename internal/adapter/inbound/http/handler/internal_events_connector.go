@@ -60,6 +60,10 @@ func (h *Handler) handleWorkflowTaskCreated(c *gin.Context, env events.Envelope[
 		h.badPayload(c, eventType, "invalid department_id in payload")
 		return
 	}
+	if departmentID == uuid.Nil {
+		h.badPayload(c, eventType, "department_id must not be the nil uuid")
+		return
+	}
 
 	if h.alreadyProcessed(c, eventID, port.ConsumerConnector, eventType) {
 		return
@@ -72,6 +76,9 @@ func (h *Handler) handleWorkflowTaskCreated(c *gin.Context, env events.Envelope[
 	}
 
 	ctx := guCtx(c.Request.Context(), tenantID)
+	if !h.connectorStillRuns(c, eventID, tenantID, taskID) {
+		return
+	}
 	var principal port.AutomationPrincipal
 	if h.principals != nil {
 		resolved, err := h.principals.AutomationPrincipal(ctx, tenantID)
@@ -84,7 +91,7 @@ func (h *Handler) handleWorkflowTaskCreated(c *gin.Context, env events.Envelope[
 	if err := h.connectorEvents.PublishTaskCreated(ctx, port.ConnectorTaskCreatedEvent{
 		EventID: eventID, TenantID: tenantID, InstanceID: instanceID, TaskID: taskID,
 		NodeKey: p.NodeKey, DepartmentID: departmentID, ConnectorType: *p.ConnectorType,
-		ResolvedInputs: p.ResolvedInputs, OutputMapping: p.OutputMapping,
+		ResolvedInputs: orEmptyObject(p.ResolvedInputs), OutputMapping: orEmptyList(p.OutputMapping),
 		PrincipalID: principal.ID, PrincipalSub: principal.Subject,
 	}); err != nil {
 		h.reconcilerError(c, eventType, err)
@@ -92,4 +99,38 @@ func (h *Handler) handleWorkflowTaskCreated(c *gin.Context, env events.Envelope[
 	}
 
 	h.respondOK(c, eventID, port.ConsumerConnector, eventType)
+}
+
+// connectorStillRuns answers false once it has replied: with 200 when the task
+// is finished or its instance has ended (the event is spent, not retried), with
+// 500 when the state could not be read (execution LLD §6.2).
+func (h *Handler) connectorStillRuns(c *gin.Context, eventID, tenantID, taskID uuid.UUID) bool {
+	if h.connectorGate == nil {
+		return true
+	}
+	dispatchable, err := h.connectorGate.Dispatchable(guCtx(c.Request.Context(), tenantID), tenantID, taskID)
+	if err != nil {
+		h.reconcilerError(c, eventTypeWorkflowTaskCreated, err)
+		return false
+	}
+	if dispatchable {
+		return true
+	}
+	h.logInfo("internal events: connector task finished or instance ended, not queuing", map[string]any{"task_id": taskID, "tenant_id": tenantID})
+	h.respondOK(c, eventID, port.ConsumerConnector, eventTypeWorkflowTaskCreated)
+	return false
+}
+
+func orEmptyObject(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
+}
+
+func orEmptyList(l []dsl.IOVar) []dsl.IOVar {
+	if l == nil {
+		return []dsl.IOVar{}
+	}
+	return l
 }

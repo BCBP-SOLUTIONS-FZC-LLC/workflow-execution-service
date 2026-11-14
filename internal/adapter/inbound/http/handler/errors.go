@@ -344,6 +344,8 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusConflict, CodeTaskNotConnectorTyped, err.Error()
 	case errors.Is(err, port.ErrNoAutomationPrincipal):
 		return http.StatusConflict, CodeNoAutomationPrincipal, err.Error()
+	case errors.Is(err, port.ErrCallbackInFlight):
+		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "an earlier attempt of this callback is still in progress; retry later"
 	case errors.Is(err, adapterhttp.ErrUpstreamUnavailable):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "an upstream service could not serve the request"
 	case errors.Is(err, port.ErrDefinitionUnavailable), errors.Is(err, port.ErrDefinitionRejected):

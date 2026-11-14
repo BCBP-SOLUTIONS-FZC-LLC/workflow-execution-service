@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"slices"
 	"strconv"
 	"time"
 
@@ -62,9 +63,7 @@ func withJitter(d time.Duration) time.Duration {
 
 func observeFailures(wlog port.Logger, job dispatchJob, input map[string]any) func(int, connectors.RetryDecision) {
 	provider, _ := input["provider"].(string)
-	if provider == "" {
-		provider = "none"
-	}
+	label := providerLabel(job.connectorType, provider)
 	return func(attempt int, decision connectors.RetryDecision) {
 		fields := map[string]any{"task_id": job.taskID, "tenant_id": job.tenantID, "connector_type": job.connectorType, "provider": provider, "attempt": attempt}
 		for _, attr := range decision.LogAttrs() {
@@ -72,7 +71,26 @@ func observeFailures(wlog port.Logger, job dispatchJob, input map[string]any) fu
 		}
 		wlog.Warn("connector-worker: connector call failed", fields)
 		if observability.ConnectorTaskFailuresTotal != nil {
-			observability.ConnectorTaskFailuresTotal.WithLabelValues(job.connectorType, provider, decision.Class.String(), strconv.FormatBool(decision.Retry)).Inc()
+			observability.ConnectorTaskFailuresTotal.WithLabelValues(job.connectorType, label, decision.Class.String(), strconv.FormatBool(decision.Retry)).Inc()
 		}
 	}
+}
+
+// providerLabel bounds the metric label: resolved_inputs.provider is text a
+// workflow author controls, so only a provider the connector registry lists for
+// the type is used as is, and anything else is "other".
+func providerLabel(connectorType, provider string) string {
+	if provider == "" {
+		return "none"
+	}
+	def, ok := registry.Lookup(connectorType)
+	if !ok {
+		return "other"
+	}
+	for _, field := range def.Inputs {
+		if field.Name == "provider" && slices.Contains(field.EnumValues, provider) {
+			return provider
+		}
+	}
+	return "other"
 }

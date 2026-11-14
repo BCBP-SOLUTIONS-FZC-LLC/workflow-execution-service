@@ -580,7 +580,10 @@ paths:
       description: >
         Service-to-service ingest of an envelope forwarded by the shared Workflow-Events Consumer (§6.1); sets the RLS GUC from the tenant_id, is idempotent per envelope id, and is scoped to
         WorkflowTaskCreated. A type outside this category is accepted and
-        ignored with 200.
+        ignored with 200. A connector task is queued for the connector worker only
+        while the task is still open (READY or IN_PROGRESS) on an instance that has
+        not ended; otherwise the event is acknowledged with 200 and nothing is queued.
+        A connector task whose department_id is the all-zero uuid is refused with 400.
       security:
         - InternalServiceAuth: []
       requestBody:
@@ -893,7 +896,14 @@ paths:
                   description: Connector output values, mapped onto the compiled stage's io_mapping.outputs before the stage-transition signal is sent.
       responses:
         "204":
-          description: Task resolved as completed; the stage-transition signal has been sent.
+          description: >
+            The callback was acted on (the stage-transition signal has been sent), or it was
+            acknowledged and ignored with no assignment and no signal: the task is no longer
+            open (COMPLETED, FAILED, SUPERSEDED or DEFERRED), the instance has ended, or an
+            identical callback, or the fail callback, already delivered its signal. A task
+            whose stored output mapping cannot be read is failed instead: the stage-fail
+            signal is sent with error_class output_mapping_invalid and no connector output
+            reaches the workflow.
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -904,14 +914,20 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
         "409":
-          description: Task is not connector-typed, or is no longer in a resolvable state.
+          description: Task is not connector-typed, the instance is in a state that cannot take the callback, or the tenant has no automation principal.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
         "500":
           $ref: "#/components/responses/InternalError"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: >
+            An earlier callback for this task, or the other callback (complete or fail), is
+            still in flight and has not delivered its signal. Nothing was acted on; retry
+            later. Also returned when a dependency is unavailable.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
 
   /api/v1/internal/connector-tasks/{id}/fail:
     post:
@@ -955,7 +971,11 @@ paths:
                     failure log; not part of the stage-fail signal.
       responses:
         "204":
-          description: Task resolved as failed; the stage-fail signal has been sent.
+          description: >
+            The callback was acted on (the stage-fail signal has been sent), or it was
+            acknowledged and ignored with no assignment and no signal: the task is no longer
+            open (COMPLETED, FAILED, SUPERSEDED or DEFERRED), the instance has ended, or an
+            identical callback, or the complete callback, already delivered its signal.
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -966,11 +986,17 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
         "409":
-          description: Task is not connector-typed, or is no longer in a resolvable state.
+          description: Task is not connector-typed, the instance is in a state that cannot take the callback, or the tenant has no automation principal.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
         "500":
           $ref: "#/components/responses/InternalError"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: >
+            An earlier callback for this task, or the other callback (complete or fail), is
+            still in flight and has not delivered its signal. Nothing was acted on; retry
+            later. Also returned when a dependency is unavailable.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
