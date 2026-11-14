@@ -35,7 +35,11 @@ func TestFatal_LogsTheErrorThenRunsTheFlushThenExitsOneWithoutRunningDeferredCal
 
 	exe, err := os.Executable()
 	require.NoError(t, err)
-	cmd := exec.Command(exe, "-test.run=^TestFatal_LogsTheErrorThenRunsTheFlushThenExitsOneWithoutRunningDeferredCalls$")
+	args := []string{"-test.run=^TestFatal_LogsTheErrorThenRunsTheFlushThenExitsOneWithoutRunningDeferredCalls$"}
+	if dir := wkbootCoverDir(); dir != "" {
+		args = append(args, "-test.gocoverdir="+dir)
+	}
+	cmd := exec.Command(exe, args...)
 	cmd.Env = []string{wkactFatalChildMarker + "=1"}
 	out, err := cmd.Output()
 

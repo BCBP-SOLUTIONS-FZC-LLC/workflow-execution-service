@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -47,7 +48,12 @@ func wkbootWorkerBinary(t *testing.T) string {
 		bin := filepath.Join(dir, "worker")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, "go", "build", "-ldflags", "-X main.version="+wkbootBuildVersion, "-o", bin, ".").CombinedOutput()
+		build := []string{"build", "-ldflags", "-X main.version=" + wkbootBuildVersion, "-o", bin}
+		if wkbootCoverDir() != "" {
+			// Under a per-test coverage run the child's lines count for the test that runs it.
+			build = append(build, "-cover", "-covermode="+testing.CoverMode())
+		}
+		out, err := exec.CommandContext(ctx, "go", append(build, ".")...).CombinedOutput()
 		if err != nil {
 			wkbootBinaryErr = fmt.Errorf("go build ./cmd/worker: %w\n%s", err, out)
 			return
@@ -60,6 +66,16 @@ func wkbootWorkerBinary(t *testing.T) string {
 	return wkbootBinaryPath
 }
 
+// wkbootCoverDir is the coverage directory of this test run, empty unless the test binary was
+// started with -test.gocoverdir (as per-test coverage tools do). Children that write there count
+// for the test that started them.
+func wkbootCoverDir() string {
+	if f := flag.Lookup("test.gocoverdir"); f != nil {
+		return f.Value.String()
+	}
+	return ""
+}
+
 // wkbootRunWorker runs the binary with exactly the given environment and
 // arguments.
 func wkbootRunWorker(t *testing.T, bin string, env []string, args ...string) wkbootRunResult {
@@ -68,6 +84,9 @@ func wkbootRunWorker(t *testing.T, bin string, env []string, args ...string) wkb
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = env
+	if dir := wkbootCoverDir(); dir != "" {
+		cmd.Env = append(append([]string{}, env...), "GOCOVERDIR="+dir)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
