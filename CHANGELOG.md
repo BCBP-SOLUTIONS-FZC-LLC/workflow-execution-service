@@ -32,7 +32,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 - A refused internal event (no timestamp, a schema payload that cannot be decoded) is counted under the `unknown` event type too; the type is request text until the type check has run.
 
-- Tests only: the core services gain tests for delegation and assignment reconciliation, delegation-paused instances, plan-cache failures, tenant lifecycle and purging, the user-task pauser, concurrent task completion, instance start (cancelled, plan, race), outside answers, instance visibility, the RLS violation exporter, and lifecycle signal guards and terminate states.
+- Tests only: the core services gain tests for delegation and assignment reconciliation, delegation-paused instances, plan-cache failures, tenant lifecycle and purging, the user-task pauser, concurrent task completion, instance start (cancelled, plan, race), outside answers, instance visibility, the RLS violation exporter, lifecycle signal guards and terminate states, task claim and complete guards, task action scope, two cancels with one record version (workflow and service), and Postgres paths for a failed instance insert, a closed connection pool, inactive assignments and terminal instances.
 
 - The Entitlements grant cache serves a set past its TTL while a background read renews it only up to twice the entry's TTL (and never past the freshness bound). An older set makes the caller wait for the read and falls back to the held set, counted as a stale serve, only if the read fails inside the freshness bound. It used to serve the held set for the whole bound, so a revocation could stay visible for up to ten minutes after an idle period.
 
