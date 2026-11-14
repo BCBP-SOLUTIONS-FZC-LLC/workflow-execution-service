@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -28,6 +31,8 @@ const (
 	departmentsHeader = "x-departments"
 
 	maxBodyBytes = 10 << 20
+
+	reasonNotValid = "is not valid"
 )
 
 const defaultIdempotencyTTL = 24 * time.Hour
@@ -174,35 +179,72 @@ func callerDepartments(c *gin.Context) []port.DepartmentRole {
 }
 
 func bindJSON(c *gin.Context, req any) bool {
-	if ct := c.GetHeader("Content-Type"); ct != "" && !strings.HasPrefix(ct, "application/json") {
-		writeProblem(c, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "request body must be application/json", nil)
-		return false
-	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
-	if err := bindStrictJSON(c, req); err != nil {
-		bindErrResponse(c, err)
-		return false
-	}
-	return true
+	return bindBody(c, req, bindStrictJSON)
 }
 
 func bindInternalJSON(c *gin.Context, req any) bool {
+	return bindBody(c, req, func(c *gin.Context, obj any) error { return c.ShouldBindJSON(obj) })
+}
+
+func bindBody(c *gin.Context, req any, bind func(*gin.Context, any) error) bool {
 	if ct := c.GetHeader("Content-Type"); ct != "" && !strings.HasPrefix(ct, "application/json") {
 		writeProblem(c, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "request body must be application/json", nil)
 		return false
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
-	if err := c.ShouldBindJSON(req); err != nil {
+	if c.Request.Body == nil {
+		c.Request.Body = http.NoBody
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes))
+	if err != nil {
 		bindErrResponse(c, err)
 		return false
 	}
-	return true
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	err = bind(c, req)
+	if err == nil {
+		return true
+	}
+	if _, unknown := errors.AsType[*unknownFieldsError](err); !unknown {
+		if names := invalidUUIDFields(body, req); len(names) > 0 {
+			writeInvalidFields(c, names)
+			return false
+		}
+	}
+	bindErrResponse(c, err)
+	return false
+}
+
+func writeInvalidFields(c *gin.Context, names []string) {
+	params := make([]invalidParam, len(names))
+	for i, name := range names {
+		params[i] = invalidParam{Name: name, Reason: reasonNotValid}
+	}
+	writeProblem(c, http.StatusBadRequest, CodeBadRequest, "request body has missing or invalid fields", params)
+}
+
+func writeInvalidParam(c *gin.Context, name, detail string) {
+	writeProblem(c, http.StatusBadRequest, CodeBadRequest, detail, []invalidParam{{Name: name, Reason: reasonNotValid}})
+}
+
+// requestBodyPresent reports whether the request carries any body at all,
+// whatever its framing: an empty or whitespace-only body counts as absent.
+func requestBodyPresent(c *gin.Context) (present, ok bool) {
+	if c.Request.Body == nil || c.Request.Body == http.NoBody {
+		return false, true
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes))
+	if err != nil {
+		bindErrResponse(c, err)
+		return false, false
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	return len(bytes.TrimSpace(body)) > 0, true
 }
 
 func parseIDParam(c *gin.Context) (uuid.UUID, bool) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		writeProblem(c, http.StatusBadRequest, CodeBadRequest, "invalid id path parameter", nil)
+		writeInvalidParam(c, "id", "invalid id path parameter")
 		return uuid.Nil, false
 	}
 	return id, true
@@ -264,5 +306,8 @@ func registerJSONFieldNames() {
 			return f.Name
 		}
 		return name
+	})
+	_ = engine.RegisterValidation("notblank", func(fl validator.FieldLevel) bool {
+		return strings.TrimSpace(fl.Field().String()) != ""
 	})
 }

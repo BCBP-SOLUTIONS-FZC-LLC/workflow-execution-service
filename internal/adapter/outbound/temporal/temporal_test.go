@@ -72,6 +72,10 @@ func (r *fakeInstanceRepo) RecordRunID(context.Context, uuid.UUID, uuid.UUID, st
 	return nil
 }
 
+func (r *fakeInstanceRepo) FailUnstarted(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 func (r *fakeInstanceRepo) CountActiveByWorkflow(_ context.Context, _, _ uuid.UUID) (int64, error) {
 	return 0, nil
 }

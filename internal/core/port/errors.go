@@ -32,6 +32,20 @@ var (
 	ErrNotWaiting              = errors.New("instance is not waiting there")
 	ErrOverrideMapInvalid      = errors.New("override_map references an unknown node key or invalid value")
 
+	// ErrTemporalUnavailable: the Temporal Cluster could not take a workflow start or a signal;
+	// the request can be sent again.
+	ErrTemporalUnavailable = errors.New("the workflow engine could not take the request")
+
+	// ErrExecutionHeld: the execution id of a start is held by an open execution that another
+	// instance's start created.
+	ErrExecutionHeld = errors.New("the execution id is held by another open execution")
+
+	// ErrVersionNotFound: the Definition Service has no such workflow version for the tenant.
+	ErrVersionNotFound = errors.New("workflow version not found")
+
+	// ErrDefinitionNotFound marks a Definition Service answer of 404 for a compiled-plan read.
+	ErrDefinitionNotFound = errors.New("definition service has no such workflow version")
+
 	ErrAssigneeIneligible = errors.New("the user does not satisfy the task's department and role level")
 
 	ErrTaskNotHumanActionable = errors.New("task is connector-typed and has no human assignee to act on")

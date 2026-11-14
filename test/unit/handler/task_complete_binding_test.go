@@ -108,7 +108,7 @@ func TestCompleteTask_NonUUIDTaskID_Returns400(t *testing.T) {
 			prob := hreDecodeProblem(t, w)
 			assert.Equal(t, "BAD_REQUEST", prob.Code)
 			assert.Equal(t, "invalid id path parameter", prob.Detail)
-			assert.Empty(t, prob.InvalidParams)
+			assert.Equal(t, []hreParam{{Name: "id", Reason: "is not valid"}}, prob.InvalidParams)
 			assert.Empty(t, *calls, "a refused request must not reach the service")
 			hreAssertNoInternalText(t, w)
 		})

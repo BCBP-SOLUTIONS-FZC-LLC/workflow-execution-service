@@ -216,7 +216,7 @@ func (h *Handler) GetTask(c *gin.Context) {
 }
 
 type claimReq struct {
-	RecordVersion int64 `json:"record_version" binding:"required"`
+	RecordVersion int64 `json:"record_version" binding:"required,gte=1"`
 }
 
 func (h *Handler) ClaimTask(c *gin.Context) {
@@ -245,7 +245,7 @@ func (h *Handler) ClaimTask(c *gin.Context) {
 
 type completeReq struct {
 	ResultJSON    json.RawMessage `json:"result_json"`
-	RecordVersion int64           `json:"record_version" binding:"required"`
+	RecordVersion int64           `json:"record_version" binding:"required,gte=1"`
 }
 
 func (h *Handler) CompleteTask(c *gin.Context) {
@@ -274,7 +274,7 @@ func (h *Handler) CompleteTask(c *gin.Context) {
 
 type deferReq struct {
 	Reason        string `json:"reason" binding:"max=500"`
-	RecordVersion int64  `json:"record_version" binding:"required"`
+	RecordVersion int64  `json:"record_version" binding:"required,gte=1"`
 }
 
 func (h *Handler) DeferTask(c *gin.Context) {
@@ -303,7 +303,7 @@ func (h *Handler) DeferTask(c *gin.Context) {
 
 type reassignReq struct {
 	NewUserID     uuid.UUID `json:"new_user_id" binding:"required"`
-	RecordVersion int64     `json:"record_version" binding:"required"`
+	RecordVersion int64     `json:"record_version" binding:"required,gte=1"`
 }
 
 func (h *Handler) ReassignTask(c *gin.Context) {

@@ -27,8 +27,12 @@ func (h *Handler) answerOutsideWait(c *gin.Context, key string) {
 	if !ok {
 		return
 	}
+	present, ok := requestBodyPresent(c)
+	if !ok {
+		return
+	}
 	var req outsideAnswerReq
-	if c.Request.ContentLength != 0 && !bindJSON(c, &req) {
+	if present && !bindJSON(c, &req) {
 		return
 	}
 	if err := h.instances.AnswerOutsideWait(c.Request.Context(), tenantID, instanceID, readScope(c, userID), key, req.Variables); err != nil {

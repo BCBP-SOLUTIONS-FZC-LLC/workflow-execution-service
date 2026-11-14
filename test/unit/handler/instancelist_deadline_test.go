@@ -28,7 +28,7 @@ func TestListInstances_QueryDeadlineExceeded_Returns503(t *testing.T) {
 	p := hrdDecodeProblem(t, w, http.StatusServiceUnavailable)
 	assert.Equal(t, "UPSTREAM_UNAVAILABLE", p.Code)
 	assert.Equal(t, "request timed out", p.Detail)
-	assert.Contains(t, w.Body.String(), "/temporal-unavailable", "the problem type names the unavailable upstream")
+	assert.Contains(t, w.Body.String(), "/upstream-unavailable", "the problem type names the unavailable upstream, not the workflow engine")
 	assert.NotContains(t, w.Body.String(), "list instances", "the wrapped error text stays out of the body")
 	require.Equal(t, []uuid.UUID{testTenantID}, gotTenants)
 }

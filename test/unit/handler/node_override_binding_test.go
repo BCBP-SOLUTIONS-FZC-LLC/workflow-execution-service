@@ -150,7 +150,7 @@ func TestOverrideNodeAssignee_NonUUIDInstanceID_Returns400(t *testing.T) {
 			prob := hreDecodeProblem(t, w)
 			assert.Equal(t, "BAD_REQUEST", prob.Code)
 			assert.Equal(t, "invalid id path parameter", prob.Detail)
-			assert.Empty(t, prob.InvalidParams)
+			assert.Equal(t, []hreParam{{Name: "id", Reason: "is not valid"}}, prob.InvalidParams)
 			assert.Empty(t, rec.lookups, "no lookup for a refused request")
 			assert.Empty(t, rec.overrides)
 			hreAssertNoInternalText(t, w)

@@ -7,11 +7,16 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 const maxReportedUnknownFields = 20
 
-var rawMessageType = reflect.TypeFor[json.RawMessage]()
+var (
+	rawMessageType = reflect.TypeFor[json.RawMessage]()
+	uuidType       = reflect.TypeFor[uuid.UUID]()
+)
 
 type unknownFieldsError struct {
 	names []string
@@ -125,4 +130,65 @@ func truncateFieldName(name string) string {
 		return string(runes[:maxEchoedFieldName])
 	}
 	return name
+}
+
+// invalidUUIDFields names every string value that sits where a uuid.UUID is
+// expected but does not parse as one, so a malformed id is reported as a bad
+// field rather than as a body that is not JSON.
+func invalidUUIDFields(body []byte, obj any) []string {
+	var doc any
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&doc); err != nil {
+		return nil
+	}
+	var names []string
+	collectInvalidUUIDs(doc, reflect.TypeOf(obj), "", &names)
+	sort.Strings(names)
+	if len(names) > maxReportedUnknownFields {
+		names = names[:maxReportedUnknownFields]
+	}
+	return names
+}
+
+func collectInvalidUUIDs(doc any, t reflect.Type, path string, names *[]string) {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t == rawMessageType {
+		return
+	}
+	switch value := doc.(type) {
+	case string:
+		if t == uuidType {
+			if _, err := uuid.Parse(value); err != nil {
+				*names = append(*names, truncateFieldName(path))
+			}
+		}
+	case map[string]any:
+		collectInvalidUUIDsInObject(value, t, path, names)
+	case []any:
+		if t.Kind() != reflect.Slice && t.Kind() != reflect.Array {
+			return
+		}
+		for i, item := range value {
+			collectInvalidUUIDs(item, t.Elem(), fmt.Sprintf("%s[%d]", path, i), names)
+		}
+	}
+}
+
+func collectInvalidUUIDsInObject(obj map[string]any, t reflect.Type, path string, names *[]string) {
+	if t.Kind() == reflect.Map {
+		for key, item := range obj {
+			collectInvalidUUIDs(item, t.Elem(), joinPath(path, key), names)
+		}
+		return
+	}
+	if t.Kind() != reflect.Struct {
+		return
+	}
+	fields := jsonFields(t)
+	for key, item := range obj {
+		if field, ok := fields[key]; ok {
+			collectInvalidUUIDs(item, field, joinPath(path, key), names)
+		}
+	}
 }

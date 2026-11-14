@@ -75,6 +75,9 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 		return s.resumeStart(ctx, existing)
 	}
 	compiled, err := s.readCompiledWorkflow(ctx, in.TenantID, in.WorkflowVersionID)
+	if errors.Is(err, port.ErrDefinitionNotFound) {
+		return nil, port.ErrVersionNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -166,11 +169,24 @@ func (s *InstanceService) matchingStart(ctx context.Context, in port.StartInstan
 	if existing.Status != domain.InstanceStatusRunning ||
 		existing.WorkflowVersionID != in.WorkflowVersionID ||
 		existing.StartedByUserID != in.StartedByUserID ||
-		!sameContext(existing.ContextJSON, in.ContextJSON) ||
-		!sameOverrideMap(existing.OverrideMap, in.OverrideMap) {
+		!sameContext(existing.ContextJSON, in.ContextJSON) {
+		return nil, nil
+	}
+	same, err := sameOverrideMap(existing.OverrideMap, in.OverrideMap)
+	if err != nil {
+		return nil, s.unreadableStart(existing, err)
+	}
+	if !same {
 		return nil, nil
 	}
 	return existing, nil
+}
+
+func (s *InstanceService) unreadableStart(inst *domain.Instance, cause error) error {
+	s.logger().Error("the stored override_map of an instance cannot be read", map[string]any{
+		"instance_id": inst.ID, "tenant_id": inst.TenantID, "business_key": inst.BusinessKey, "error": cause.Error(),
+	})
+	return fmt.Errorf("decode override_map of instance %s: %w", inst.ID, cause)
 }
 
 func (s *InstanceService) resumeStart(ctx context.Context, existing *domain.Instance) (*port.Instance, error) {
@@ -200,30 +216,30 @@ func decodeContext(raw []byte) (any, bool) {
 	return v, true
 }
 
-func sameOverrideMap(stored []byte, requested map[string]uuid.UUID) bool {
+func sameOverrideMap(stored []byte, requested map[string]uuid.UUID) (bool, error) {
 	var have map[string]string
 	if len(stored) > 0 {
 		if err := json.Unmarshal(stored, &have); err != nil {
-			return false
+			return false, fmt.Errorf("not a JSON object of strings: %w", err)
 		}
 	}
 	want := overrideMapToStrings(requested)
 	if len(have) != len(want) {
-		return false
+		return false, nil
 	}
 	for k, v := range want {
 		if have[k] != v {
-			return false
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
 func (s *InstanceService) launchWorkflow(ctx context.Context, inst *domain.Instance) (*port.Instance, error) {
 	var overrides map[string]string
 	if len(inst.OverrideMap) > 0 {
 		if err := json.Unmarshal(inst.OverrideMap, &overrides); err != nil {
-			return nil, fmt.Errorf("decode override_map: %w", err)
+			return nil, s.unreadableStart(inst, err)
 		}
 	}
 	out, err := s.startWorkflowWithRetry(ctx, port.StartWorkflowInput{
@@ -235,6 +251,9 @@ func (s *InstanceService) launchWorkflow(ctx context.Context, inst *domain.Insta
 		ContextJSON:        string(inst.ContextJSON),
 		OverrideMap:        overrides,
 	})
+	if errors.Is(err, port.ErrExecutionHeld) {
+		return nil, s.refuseHeldExecution(ctx, inst)
+	}
 	if err != nil {
 		s.logger().Error("StartWorkflow failed after workflow_instance was committed", map[string]any{
 			"instance_id": inst.ID, "tenant_id": inst.TenantID, "business_key": inst.BusinessKey, "error": err.Error(),
@@ -270,7 +289,44 @@ func (s *InstanceService) afterWorkflowStarted(ctx context.Context, tenantID uui
 	return toPortInstance(current)
 }
 
-const startWorkflowMaxAttempts = 3
+// refuseHeldExecution answers a start whose execution id an open execution of another instance
+// holds. The row is closed because no retry can start it while that execution is open, and an
+// open row would hold the business key; a start sent again after the execution ends is a new one.
+func (s *InstanceService) refuseHeldExecution(ctx context.Context, inst *domain.Instance) error {
+	s.logger().Warn("a start was refused: its execution id is held by another open instance", map[string]any{
+		"instance_id": inst.ID, "tenant_id": inst.TenantID, "business_key": inst.BusinessKey,
+	})
+	if err := s.failHeldInstance(ctx, inst); err != nil {
+		s.logger().Error("could not close the row of a start refused for its held execution id", map[string]any{
+			"instance_id": inst.ID, "tenant_id": inst.TenantID, "error": err.Error(),
+		})
+	}
+	return port.ErrDuplicateBusinessKey
+}
+
+// failHeldInstance closes the row and publishes its Failed event together, so the Started event
+// the start already committed is matched. Only a row that is still RUNNING with no run id is
+// closed, and the event follows only a close that changed it: a repeated refusal, a row terminated
+// meanwhile, or one whose workflow a retry started, is left as it is.
+func (s *InstanceService) failHeldInstance(ctx context.Context, inst *domain.Instance) error {
+	return s.Transactor.RunInTx(withTenantGUC(ctx, inst.TenantID), func(ctx context.Context) error {
+		changed, err := s.Instances.FailUnstarted(ctx, inst.TenantID, inst.ID)
+		if err != nil {
+			return wrapInstanceErr(err)
+		}
+		if !changed {
+			return nil
+		}
+		sink := instanceEventSink{Outbox: s.Outbox, Validator: s.Validator}
+		return sink.enqueueInstanceEvent(ctx, inst.TenantID.String(), domain.EventWorkflowInstanceFailed, inst.ID.String(),
+			inst.StartedByUserID.String(), domain.NewWorkflowInstanceFailedPayload(instanceCore(inst), inst.StartedByUserID, errorClassExecutionIDHeld))
+	})
+}
+
+const (
+	startWorkflowMaxAttempts  = 3
+	errorClassExecutionIDHeld = "execution_id_held"
+)
 
 func (s *InstanceService) startWorkflowWithRetry(ctx context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
 	var lastErr error
@@ -280,6 +336,9 @@ func (s *InstanceService) startWorkflowWithRetry(ctx context.Context, in port.St
 			return out, nil
 		}
 		lastErr = err
+		if errors.Is(err, port.ErrExecutionHeld) {
+			return port.StartWorkflowOutput{}, err
+		}
 		if attempt < startWorkflowMaxAttempts {
 			select {
 			case <-ctx.Done():

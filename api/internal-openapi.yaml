@@ -206,7 +206,7 @@ components:
             BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_ASSIGNEE, NOT_AUTHORIZED_FOR_RESOURCE,
             TENANT_MISMATCH, NOT_FOUND, INSTANCE_NOT_FOUND, TASK_NOT_FOUND,
             TARGET_NODE_NOT_FOUND, OVERRIDE_NO_OP, DUPLICATE_BUSINESS_KEY,
-            VERSION_NOT_PUBLISHED, VERSION_INVALID,
+            VERSION_NOT_PUBLISHED, VERSION_INVALID, VERSION_NOT_FOUND,
             RECORD_VERSION_CONFLICT, INSTANCE_ALREADY_TERMINAL, INVALID_INSTANCE_STATE,
             TASK_ALREADY_CLAIMED, CLAIM_NOT_APPLICABLE, INVALID_TASK_STATE,
             FORCE_BACK_NO_SAVED_BRANCH, NODE_ALREADY_RESOLVED, IDEMPOTENCY_KEY_REPLAY,
@@ -326,16 +326,18 @@ components:
             code: "PAYLOAD_TOO_LARGE"
 
     ServiceUnavailable:
-      description: An upstream dependency (Temporal or Definition Service) is unavailable.
+      description: >
+        An upstream dependency (the workflow engine or the Definition Service) could not serve the request.
+        The detail is fixed and carries no text of the failed call; the same request can be sent again.
       content:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/ProblemDetails"
           example:
-            type: "https://errors.bcbp.io/execution/temporal-unavailable"
+            type: "https://errors.bcbp.io/execution/upstream-unavailable"
             title: "Service Unavailable"
             status: 503
-            detail: "Temporal cluster is unreachable; retry after a short delay"
+            detail: "the workflow engine could not take the request; retry it"
             instance: "/api/v1/instances"
             code: "UPSTREAM_UNAVAILABLE"
 
@@ -362,7 +364,9 @@ paths:
       description: >
         The Definition Service's archive guard: it refuses to archive a
         workflow while this reports an instance RUNNING or PAUSED. Writes
-        nothing.
+        nothing. A workflow_id or tenant_id that is not a UUID, or is the all-zero UUID, is
+        refused 400 BAD_REQUEST naming the field in invalid_params, so a malformed request
+        never reads as "no live instances".
       parameters:
         - in: path
           name: workflow_id

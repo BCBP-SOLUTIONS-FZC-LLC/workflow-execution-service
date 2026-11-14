@@ -14,13 +14,17 @@ type activeInstancesResp struct {
 
 func (h *Handler) ActiveInstances(c *gin.Context) {
 	workflowID, err := uuid.Parse(c.Param("workflow_id"))
-	if err != nil {
-		writeProblem(c, http.StatusBadRequest, CodeBadRequest, "invalid workflow_id path parameter", nil)
+	if err != nil || workflowID == uuid.Nil {
+		writeInvalidParam(c, "workflow_id", "invalid workflow_id path parameter")
 		return
 	}
 	tenantID, err := uuid.Parse(c.Query("tenant_id"))
 	if err != nil {
-		writeProblem(c, http.StatusBadRequest, CodeBadRequest, "tenant_id must be a UUID", nil)
+		writeInvalidParam(c, "tenant_id", "tenant_id must be a UUID")
+		return
+	}
+	if tenantID == uuid.Nil {
+		writeInvalidParam(c, "tenant_id", "tenant_id must be a non-zero UUID")
 		return
 	}
 	hasActive, count, err := h.archiveGuard.CheckActiveInstances(c.Request.Context(), tenantID, workflowID)
@@ -39,7 +43,7 @@ type pauseUserTasksReq struct {
 func (h *Handler) PauseUserTasks(c *gin.Context) {
 	userID, err := uuid.Parse(c.Param("user_id"))
 	if err != nil {
-		writeProblem(c, http.StatusBadRequest, CodeBadRequest, "invalid user_id path parameter", nil)
+		writeInvalidParam(c, "user_id", "invalid user_id path parameter")
 		return
 	}
 	var req pauseUserTasksReq
