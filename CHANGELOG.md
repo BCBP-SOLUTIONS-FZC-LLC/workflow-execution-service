@@ -22,6 +22,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 - The Entitlements grant cache serves a set past its TTL while a background read renews it only up to twice the entry's TTL (and never past the freshness bound). An older set makes the caller wait for the read and falls back to the held set, counted as a stale serve, only if the read fails inside the freshness bound. It used to serve the held set for the whole bound, so a revocation could stay visible for up to ten minutes after an idle period.
 
+- Tests only: the connector worker gains tests for startup (a failed first alias fetch, the stream consumer name, the version flag and config errors), alias refresh, dispatch and reclaim, heartbeats, callback redelivery, the health server and shutdown order; the Valkey stream consumer and publisher, the event inbox and its prune, the OpenBao reader, the Definition and automation-principal clients and the slow-query log gain edge-case tests.
+
 - Tests only: a chart test reads the internal routes from the router (the internal group and the groups below it) and fails when one belongs to no `authorizationPolicy.internalRoutes` group or to more than one, so a new internal route is not left closed without notice.
 
 - The connector worker applies an empty alias registry answer after three in a row (the first two are held back with a Warn, as before), so deleting the last alias reaches running workers. A non-empty answer or a failed fetch starts the count again.
