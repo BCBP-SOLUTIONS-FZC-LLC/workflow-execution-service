@@ -32,6 +32,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 - Tests only: the connector worker gains tests for startup (a failed first alias fetch, the stream consumer name, the version flag and config errors), alias refresh, dispatch and reclaim, heartbeats, callback redelivery, the health server and shutdown order; the Valkey stream consumer and publisher, the event inbox and its prune, the OpenBao reader, the Definition and automation-principal clients and the slow-query log gain edge-case tests.
 
+- Tests only: the Temporal worker gains tests for startup and registration, the queue-topology poller, health and readiness, and its exit paths (run as a built binary); the activities gain tests for tenant scope, instance nodes, event arrays, cancel and defer, and lifecycle versions; the workflow gains tests for activity retry policy, boundary timers, degraded status writes, exclusive gateways, external answers, force-back node writes, older histories and sub-workflows; the alert tests cover `WorkerQueuePollingStalled` and `InstancesOnUnpolledQueue`. The architecture check exempts `cmd/worker`'s integration-tagged tests from the fixtures import rule, as it already does for the connector worker's end-to-end tests.
+
 - Tests only: a chart test reads the internal routes from the router (the internal group and the groups below it) and fails when one belongs to no `authorizationPolicy.internalRoutes` group or to more than one, so a new internal route is not left closed without notice.
 
 - The connector worker applies an empty alias registry answer after three in a row (the first two are held back with a Warn, as before), so deleting the last alias reaches running workers. A non-empty answer or a failed fetch starts the count again.

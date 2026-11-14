@@ -107,3 +107,76 @@ tests:
               runbook: workflow-execution-service/connector-dead-letter
               summary: "Connector task entry dead-lettered for rest-call"
               description: "A connector stream entry exceeded its delivery cap, so its task stays open and its instance waits; the worker's callback Warn lines name the status the Execution API answered."
+
+  - name: a queue whose poll timestamp stops advancing pages once it is more than 300 seconds old while a polled queue stays quiet
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="stalled-queue"}'
+        values: '0x30'
+      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="polled-queue"}'
+        values: '0+60x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: WorkerQueuePollingStalled
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: WorkerQueuePollingStalled
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              queue: stalled-queue
+            exp_annotations:
+              runbook: workflow-execution-service/queue-polling
+              summary: "Queue stalled-queue has not been polled in 5 minutes"
+              description: "A Worker silently failing to poll one tenant-isolated queue is invisible to the aggregate workflow_execution_service_worker_active_queues gauge alone (LLD §7.6)."
+
+  - name: instances on a queue with no poll timestamp series page after five minutes
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_instances_by_queue{queue="unpolled-queue"}'
+        values: '3x30'
+      - series: 'workflow_execution_service_instances_by_queue{queue="polled-queue"}'
+        values: '3x30'
+      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="polled-queue"}'
+        values: '0+60x30'
+      - series: 'workflow_execution_service_instances_by_queue{queue="empty-queue"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: InstancesOnUnpolledQueue
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: InstancesOnUnpolledQueue
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              queue: unpolled-queue
+            exp_annotations:
+              runbook: workflow-execution-service/queue-polling
+              summary: "Queue unpolled-queue has instances and no Worker polling it"
+              description: "A Worker that could not start the worker for a queue only logs, so its instances wait with no task and no other signal (LLD §3.2, §7.6)."
+
+  - name: instances on a queue whose poll timestamp froze page only after it is 300 seconds old and five more minutes have passed
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_instances_by_queue{queue="frozen-queue"}'
+        values: '3x40'
+      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="frozen-queue"}'
+        values: '0+60x4 240x35'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: InstancesOnUnpolledQueue
+        exp_alerts: []
+      - eval_time: 13m
+        alertname: InstancesOnUnpolledQueue
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: InstancesOnUnpolledQueue
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              queue: frozen-queue
+            exp_annotations:
+              runbook: workflow-execution-service/queue-polling
+              summary: "Queue frozen-queue has instances and no Worker polling it"
+              description: "A Worker that could not start the worker for a queue only logs, so its instances wait with no task and no other signal (LLD §3.2, §7.6)."

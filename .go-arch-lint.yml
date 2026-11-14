@@ -19,6 +19,10 @@ exclude:
 # narrow exemption rather than loosening cmd's real dependency rules below.
 excludeFiles:
   - "cmd/connector-worker/e2e.*_test\\.go$"
+  # cmd/worker's integration-tagged tests need package main internals (buildDeps,
+  # main's startup path) and the same container fixtures, so the same narrow
+  # file-name exemption applies.
+  - "cmd/worker/.*_integration_test\\.go$"
 
 allow:
   # Only check inter-component project imports; vendor packages are unrestricted.
