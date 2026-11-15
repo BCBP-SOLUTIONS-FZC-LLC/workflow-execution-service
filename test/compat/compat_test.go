@@ -298,8 +298,8 @@ func (e *env) unstartable(t *testing.T) {
 		if a.status == http.StatusCreated {
 			t.Fatalf("tenant %s started tenant %s's version", tn.id, other.id)
 		}
-		if a.status != http.StatusServiceUnavailable || a.code(t) != "UPSTREAM_UNAVAILABLE" {
-			t.Fatalf("start on another tenant's version = %d %s, want 503 UPSTREAM_UNAVAILABLE (LLD §10.2)", a.status, a.body)
+		if a.status != http.StatusNotFound || a.code(t) != "VERSION_NOT_FOUND" {
+			t.Fatalf("start on another tenant's version = %d %s, want 404 VERSION_NOT_FOUND", a.status, a.body)
 		}
 	})
 }
