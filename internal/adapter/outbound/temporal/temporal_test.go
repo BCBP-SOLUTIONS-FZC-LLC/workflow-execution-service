@@ -72,10 +72,6 @@ func (r *fakeInstanceRepo) RecordRunID(context.Context, uuid.UUID, uuid.UUID, st
 	return nil
 }
 
-func (r *fakeInstanceRepo) FailUnstarted(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
-	return false, nil
-}
-
 func (r *fakeInstanceRepo) CountActiveByWorkflow(_ context.Context, _, _ uuid.UUID) (int64, error) {
 	return 0, nil
 }
@@ -325,6 +321,18 @@ func (r *fakeAssignmentRepo) Vacate(_ context.Context, _, id uuid.UUID) (*domain
 	}
 	a, ok := r.byID[id]
 	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	a.IsActive = false
+	return a, nil
+}
+
+func (r *fakeAssignmentRepo) VacateActive(_ context.Context, _, id uuid.UUID) (*domain.TaskAssignment, error) {
+	if r.vacateErr != nil {
+		return nil, r.vacateErr
+	}
+	a, ok := r.byID[id]
+	if !ok || !a.IsActive {
 		return nil, domain.ErrNotFound
 	}
 	a.IsActive = false

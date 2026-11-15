@@ -191,6 +191,9 @@ func runJob(ctx context.Context, d *deps, pool *typePool, job dispatchJob, entry
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
+	if !stillRuns(ctx, d, job, entryID, wlog) {
+		return
+	}
 	leaseTTL := pool.timeout + executionLeaseMargin
 	if !takeLease(ctx, d, job.taskID, leaseTTL, wlog) {
 		return

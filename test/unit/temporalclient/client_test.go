@@ -126,7 +126,7 @@ func TestClient_StartWorkflow(t *testing.T) {
 
 		assert.Equal(t, "tenant:biz-key", gotOptions.ID)
 		assert.Equal(t, "wf-queue-default", gotOptions.TaskQueue)
-		assert.Equal(t, enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE, gotOptions.WorkflowIDReusePolicy)
+		assert.Equal(t, enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE, gotOptions.WorkflowIDReusePolicy)
 		assert.Equal(t, port.WorkflowTypeExecute, gotWorkflowType)
 
 		// gotArg is the adapter's own unexported executeWorkflowInput mirror

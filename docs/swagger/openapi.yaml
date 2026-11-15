@@ -339,7 +339,7 @@ components:
           description: Pinned at instance creation; immutable.
         temporal_workflow_id:
           type: string
-          description: Temporal workflow execution ID (typically the instance UUID as a string).
+          description: Temporal workflow id of this instance's execution, `tenant:<tenant id>:instance:<instance id>`. It is unique per instance, so a reused subject_id and business_key never shares an execution with an earlier instance.
         current_node_keys:
           type: array
           items:
@@ -1000,7 +1000,7 @@ paths:
           description: >
             State conflict. See code field:
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body;
-            DUPLICATE_BUSINESS_KEY — a live instance for this subject_id and business_key already exists and is not this caller's own unfinished start (a RUNNING instance of the same version started by the same caller with the same context_json and override_map is the same start sent again and is returned with 201), or the execution id built from tenant, subject_id and business_key is held by the open execution of another instance;
+            DUPLICATE_BUSINESS_KEY — a live instance for this subject_id and business_key already exists and is not this caller's own unfinished start (a RUNNING instance of the same version started by the same caller with the same context_json and override_map is the same start sent again and is returned with 201);
             TENANT_NOT_ACTIVE — the tenant is offboarded, or its recorded status is one the service is configured to refuse starts for (no other status by default);
             VERSION_NOT_PUBLISHED — the referenced version is DRAFT or ARCHIVED;
             VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked).

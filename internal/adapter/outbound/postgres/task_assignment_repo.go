@@ -183,6 +183,20 @@ func (r *TaskAssignmentRepo) Vacate(ctx context.Context, tenantID, id uuid.UUID)
 	return assignment, err
 }
 
+func (r *TaskAssignmentRepo) VacateActive(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var assignment *domain.TaskAssignment
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		row, err := db.New(dbtx).VacateActiveWorkflowTaskAssignment(ctx, id)
+		if err != nil {
+			return mapErr(err)
+		}
+		assignment = taskAssignmentFromDB(row)
+		return nil
+	})
+	return assignment, err
+}
+
 func (r *TaskAssignmentRepo) Complete(
 	ctx context.Context,
 	tenantID, id uuid.UUID,

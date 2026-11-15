@@ -125,7 +125,8 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 			return stepOutcome{Terminated: true}, in.cancelInstanceOnSignal(ctx, sig)
 
 		case SignalInstanceForceFwd:
-			in.recordAndRedirect(ctx, abandonedNodes, sig.TargetNodeKey, domain.ForceRouteDirectionForward, sig)
+			entry := departmentEntryNode(plan, deptFromNodeKey(sig.TargetNodeKey), sig.TargetNodeKey)
+			in.recordAndRedirect(ctx, abandonedNodes, entry, domain.ForceRouteDirectionForward, sig)
 			steps = redirectSteps(plan, deptFromNodeKey(sig.TargetNodeKey))
 
 		case SignalInstanceForceBack:
@@ -136,7 +137,7 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 				continue
 			}
 			in.msgBuf.ResetSpan(popped)
-			in.recordAndRedirect(ctx, abandonedNodes, target, domain.ForceRouteDirectionBack, sig)
+			in.recordAndRedirect(ctx, abandonedNodes, departmentEntryNode(plan, deptFromNodeKey(target), target), domain.ForceRouteDirectionBack, sig)
 			steps = redirectSteps(plan, deptFromNodeKey(target))
 		}
 		in.routing = false
@@ -158,6 +159,16 @@ func (in *interpreter) recordForceRouteAudit(ctx wf.Context, oldNodeKeys []domai
 		OldNodeKeys: oldNodeKeys, TargetNodeID: string(target), Direction: direction,
 		AdminUserID: sig.AdminUserID, RecordVersion: sig.RecordVersion,
 	})
+}
+
+// departmentEntryNode is the node a department starts at when it is re-entered:
+// its first stage. fallback stands when the department has no stages.
+func departmentEntryNode(plan *dsl.CompiledPlan, deptID string, fallback domain.NodeKey) domain.NodeKey {
+	dept := findDepartment(plan, deptID)
+	if dept == nil || len(dept.Stages) == 0 {
+		return fallback
+	}
+	return domain.NodeKey(dsl.NodeKey(deptID, &dept.Stages[0]))
 }
 
 func redirectSteps(plan *dsl.CompiledPlan, deptID string) []dsl.ExecutionStep {

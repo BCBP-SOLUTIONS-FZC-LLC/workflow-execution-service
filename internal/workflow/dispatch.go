@@ -154,22 +154,22 @@ func deptUUID(iamDeptID string) uuid.UUID {
 	return id
 }
 
-func (in *interpreter) currentPendingNode(deptID string) domain.NodeKey {
-	var first domain.NodeKey
-	for key := range in.pending {
-		if deptFromNodeKey(key.Node) == deptID && (first == "" || key.Node < first) {
-			first = key.Node
-		}
-	}
-	return first
-}
-
 func (in *interpreter) currentPendingNodes() []domain.NodeKey {
 	keys := make([]domain.NodeKey, 0, len(in.pending))
 	for key := range in.pending {
 		keys = append(keys, key.Node)
 	}
 	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	return keys
+}
+
+func (in *interpreter) pendingNodesIn(steps []dsl.ExecutionStep) []domain.NodeKey {
+	var keys []domain.NodeKey
+	for _, key := range in.currentPendingNodes() {
+		if stepsRun(steps, deptFromNodeKey(key)) {
+			keys = append(keys, key)
+		}
+	}
 	return keys
 }
 

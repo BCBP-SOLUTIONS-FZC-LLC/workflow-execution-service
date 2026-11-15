@@ -69,7 +69,7 @@ func dlgfixNewRecon() *dlgfixRecon {
 	}
 	h.svc = &service.DelegationReconciler{
 		Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments, Outbox: h.outbox,
-		Transactor: fakeTransactor{}, Temporal: h.temporal, Definitions: h.definitions, Eligibility: h.eligibility,
+		Transactor: fakeTransactor{}, Temporal: h.temporal, Signals: h.outbox, Definitions: h.definitions, Eligibility: h.eligibility,
 		Validator: realValidator(), Availability: h.store, Locks: h.locker, Log: h.log,
 	}
 	return h
@@ -126,6 +126,7 @@ func (h *dlgfixRecon) requireNothingMoved(t *testing.T, rows ...dlgfixRecRow) {
 		assert.NotEqual(t, h.delegate, a.UserID, "the delegate was given nothing")
 	}
 	assert.Empty(t, h.outbox.enqueued)
+	assert.Empty(t, h.outbox.signals)
 	assert.Empty(t, h.temporal.signals)
 }
 
@@ -319,7 +320,7 @@ func (r *dlgfixSnapshotInstances) GetByID(ctx context.Context, tenantID, id uuid
 // transactional gives the reconciler a transactor that rolls back and aborts on
 // a unique violation, with the assignment repository wired to it.
 func (h *dlgfixRecon) transactional() (*dlgfixTx, *dlgfixAssignments) {
-	tx := &dlgfixTx{repo: h.assignments}
+	tx := &dlgfixTx{repo: h.assignments, outbox: h.outbox}
 	repo := &dlgfixAssignments{fakeAssignmentRepo: h.assignments, tx: tx, vacateFails: map[uuid.UUID]error{}, createFails: map[uuid.UUID]error{}}
 	h.svc.Assignments = repo
 	h.svc.Transactor = tx
@@ -357,8 +358,8 @@ func TestDelegationReroute_AnAssignmentThatEndedBetweenTheReadAndTheWriteIsLeftA
 	}
 	assert.False(t, live.assignment.IsActive)
 	assert.Len(t, h.outbox.enqueued, 1, "one event, for the row that moved")
-	require.Len(t, h.temporal.signals, 1)
-	assert.Equal(t, live.instance.ID, h.temporal.signals[0].InstanceID)
+	require.Len(t, h.outbox.signals, 1)
+	assert.Equal(t, live.instance.ID, h.outbox.signals[0].InstanceID)
 }
 
 func TestDelegationReverse_AnAssignmentThatEndedBetweenTheReadAndTheWriteIsLeftAlone(t *testing.T) {

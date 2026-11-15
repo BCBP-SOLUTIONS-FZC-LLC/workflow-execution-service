@@ -111,18 +111,6 @@ func (r *fakeInstanceRepo) RecordRunID(_ context.Context, _, id uuid.UUID, runID
 	return nil
 }
 
-func (r *fakeInstanceRepo) FailUnstarted(_ context.Context, tenantID, id uuid.UUID) (bool, error) {
-	inst, ok := r.byID[id]
-	if !ok || inst.TenantID != tenantID || inst.Status != domain.InstanceStatusRunning || inst.TemporalRunID != "" {
-		return false, nil
-	}
-	now := time.Now().UTC()
-	inst.Status = domain.InstanceStatusFailed
-	inst.CompletedAt = &now
-	inst.RecordVersion++
-	return true, nil
-}
-
 func isTerminalForTest(s domain.InstanceStatus) bool {
 	return s == domain.InstanceStatusCompleted || s == domain.InstanceStatusTerminated || s == domain.InstanceStatusFailed
 }
@@ -504,6 +492,18 @@ func (r *fakeAssignmentRepo) VacateAllActiveByUser(_ context.Context, _, userID 
 	return out, nil
 }
 
+func (r *fakeAssignmentRepo) VacateActive(_ context.Context, _, id uuid.UUID) (*domain.TaskAssignment, error) {
+	if r.vacateErr != nil {
+		return nil, r.vacateErr
+	}
+	a, ok := r.byID[id]
+	if !ok || !a.IsActive {
+		return nil, domain.ErrNotFound
+	}
+	a.IsActive = false
+	return a, nil
+}
+
 func (r *fakeAssignmentRepo) Complete(_ context.Context, _, id uuid.UUID, resultJSON json.RawMessage, _ int64) (*domain.TaskAssignment, error) {
 	a, ok := r.byID[id]
 	if !ok {
@@ -621,6 +621,35 @@ type fakeOutbox struct {
 	enqueueErr error
 	records    []*domain.OutboxEventRecord
 	listErr    error
+
+	// signals are the workflow signals recorded for the relay; signalErr fails
+	// the recording and onSignal runs as each one is recorded.
+	signals       []signalCall
+	signalTenants []uuid.UUID
+	signalErr     error
+	onSignal      func()
+}
+
+func (o *fakeOutbox) EnqueueSignal(_ context.Context, sig port.WorkflowSignal) error {
+	if o.onSignal != nil {
+		o.onSignal()
+	}
+	if o.signalErr != nil {
+		return o.signalErr
+	}
+	o.signals = append(o.signals, signalCall{TemporalWorkflowID: sig.TemporalWorkflowID, InstanceID: sig.InstanceID, SignalName: sig.Name, Payload: sig.Payload})
+	o.signalTenants = append(o.signalTenants, sig.TenantID)
+	return nil
+}
+
+func (o *fakeOutbox) signalsNamed(name string) []signalCall {
+	var out []signalCall
+	for _, s := range o.signals {
+		if s.SignalName == name {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func (o *fakeOutbox) Enqueue(_ context.Context, env events.Envelope[json.RawMessage]) error {
@@ -679,6 +708,16 @@ type terminateCall struct {
 	TemporalWorkflowID string
 	RunID              string
 	Reason             string
+}
+
+func (c *fakeTemporalClient) signalsNamed(name string) []signalCall {
+	var out []signalCall
+	for _, s := range c.signals {
+		if s.SignalName == name {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func (c *fakeTemporalClient) terminateCalls() []terminateCall {

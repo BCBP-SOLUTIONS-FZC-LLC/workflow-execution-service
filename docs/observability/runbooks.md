@@ -116,6 +116,20 @@ Common starting points:
 
 **Triage.** Search the connector worker's logs for the task id. Each failed callback to the Execution API logs a Warn with the status and the first 200 bytes of the answer: a 401 or 403 is a wrong mesh principal or a policy denial, a 404 a missing route, a 5xx an Execution API fault. Fix the cause first; a dead-lettered entry is not redelivered by itself.
 
+### ConnectorTaskStuckReady
+
+`runbook: workflow-execution-service/connector-task-stuck-ready`
+
+**Meaning.** A connector task of a running or degraded instance has been READY for longer than the threshold (30 minutes by default; chart value `alerts.connectorTaskReadyAgeSeconds`): its connector has not run or has not reported, so its instance waits. The gauge `workflow_execution_service_oldest_ready_connector_task_age_seconds` is the age of the oldest such task.
+
+**Triage.** Three causes, in order of likelihood:
+
+1. **The dispatch event never reached the worker.** Search the API logs for the task id: an ingest route that refused the event (for example a stage whose department is not in the plan) logs it with the reason.
+2. **The stream entry was dead-lettered.** `ConnectorDispatchDeadLettered` fires as well; follow its runbook.
+3. **The connector worker is stopped or stuck.** Check its pods and its logs for the connector type; a pool that never frees (a connector that does not return) holds its type's entries.
+
+Fix the cause first. A task whose entry was lost is not redispatched by itself.
+
 ### OutboxDeadLettered
 
 `runbook: workflow-execution-service/outbox`
@@ -130,7 +144,7 @@ Common starting points:
 
 **Meaning.** The oldest pending outbox row is more than 10 minutes old, so the relay is not publishing. A relay that has stopped produces no attempts and no dead letters.
 
-**Triage.** The relay runs inside the API process, so look at the API pods' logs for relay errors or for no relay lines at all (`outbox relay starting` is logged at boot), and for a long lock or a stuck transaction on the outbox table. The Worker only writes outbox rows.
+**Triage.** The relay runs inside the API process, so look at the API pods' logs for relay errors or for no relay lines at all (`outbox relay starting` is logged at boot), and for a long lock or a stuck transaction on the outbox table. The relay also delivers the workflow signals that delegation changes record (`WorkflowSignalPending` rows go to Temporal, every other row to SNS), so a Temporal outage holds those rows too; it retries them without using up their attempts.
 
 ### InboundEventIngestErrors
 

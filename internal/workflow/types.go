@@ -65,6 +65,8 @@ type interpreter struct {
 
 	taskVisits map[domain.NodeKey]int64
 
+	taskAssignees map[string]assigneeNote
+
 	pauseGates map[string]wf.Channel
 
 	status         domain.InstanceStatus
@@ -93,6 +95,7 @@ func newInterpreter(tenantID, instanceID, initialContextJSON string, collab *dsl
 		pending:         make(map[nodeVisitKey]wf.Channel),
 		pendingSignals:  make(map[nodeVisitKey]stageTransitionSignal),
 		taskVisits:      make(map[domain.NodeKey]int64),
+		taskAssignees:   make(map[string]assigneeNote),
 		pauseGates:      make(map[string]wf.Channel),
 		status:          domain.InstanceStatusRunning,
 	}

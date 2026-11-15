@@ -36,10 +36,11 @@ func (r *OperationalStatsRepo) Read(ctx context.Context) (domain.OperationalStat
 			byQueue[q.TaskQueue] = q.Instances
 		}
 		stats = domain.OperationalStats{
-			DegradedInstances:         row.DegradedInstances,
-			OldestDegradedAgeSeconds:  row.OldestDegradedAgeSeconds,
-			OldestReadyTaskAgeSeconds: row.OldestReadyTaskAgeSeconds,
-			InstancesByQueue:          byQueue,
+			DegradedInstances:                  row.DegradedInstances,
+			OldestDegradedAgeSeconds:           row.OldestDegradedAgeSeconds,
+			OldestReadyTaskAgeSeconds:          row.OldestReadyTaskAgeSeconds,
+			OldestReadyConnectorTaskAgeSeconds: row.OldestReadyConnectorTaskAgeSeconds,
+			InstancesByQueue:                   byQueue,
 		}
 		return nil
 	})

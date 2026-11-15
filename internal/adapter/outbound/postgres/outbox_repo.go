@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
@@ -16,7 +17,10 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-var _ port.OutboxRepository = (*OutboxRepo)(nil)
+var (
+	_ port.OutboxRepository     = (*OutboxRepo)(nil)
+	_ port.WorkflowSignalOutbox = (*OutboxRepo)(nil)
+)
 
 type OutboxRepo struct {
 	pool *pgcommon.Pool
@@ -31,6 +35,27 @@ func (r *OutboxRepo) Enqueue(ctx context.Context, env events.Envelope[json.RawMe
 	if !ok {
 		return errors.New("outbox: Enqueue must be called inside a transaction — use Transactor.RunInTx")
 	}
+	return mapErr(outbox.Enqueue(ctx, tx, env))
+}
+
+// EnqueueSignal records the signal as an outbox record for the relay to deliver.
+// The record is not ordered (ordering needs a sequence the application role is
+// not granted), so the workflow reads the time each signal carries.
+func (r *OutboxRepo) EnqueueSignal(ctx context.Context, sig port.WorkflowSignal) error {
+	tx, ok := txFromContext(ctx)
+	if !ok {
+		return errors.New("outbox: EnqueueSignal must be called inside a transaction — use Transactor.RunInTx")
+	}
+	data, err := json.Marshal(port.WorkflowSignalMessage{
+		TargetInstanceID: sig.InstanceID.String(), TemporalWorkflowID: sig.TemporalWorkflowID,
+		SignalName: sig.Name, SignalPayload: sig.Payload,
+	})
+	if err != nil {
+		return fmt.Errorf("outbox: marshal %s signal: %w", sig.Name, err)
+	}
+	subject := "instances/" + sig.InstanceID.String()
+	env := events.NewEnvelope[json.RawMessage](port.WorkflowSignalEventType, domain.EventSource, data,
+		events.WithTenantID(sig.TenantID.String()), events.WithSubject(subject))
 	return mapErr(outbox.Enqueue(ctx, tx, env))
 }
 

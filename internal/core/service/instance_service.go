@@ -116,7 +116,7 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 	}
 
 	instanceID := uuid.New()
-	temporalWorkflowID := in.TenantID.String() + ":" + in.SubjectID + ":" + in.BusinessKey
+	temporalWorkflowID := temporalWorkflowIDFor(in.TenantID, instanceID)
 	inst := &domain.Instance{
 		ID:                 instanceID,
 		TenantID:           in.TenantID,
@@ -156,6 +156,13 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 	}
 
 	return s.launchWorkflow(ctx, inst)
+}
+
+// temporalWorkflowIDFor names the Temporal execution of one instance. It is built from the
+// instance id, never from the subject and business key, so a reused key starts its own execution
+// and opaque text that happens to join alike cannot share one.
+func temporalWorkflowIDFor(tenantID, instanceID uuid.UUID) string {
+	return "tenant:" + tenantID.String() + ":instance:" + instanceID.String()
 }
 
 func (s *InstanceService) matchingStart(ctx context.Context, in port.StartInstanceInput) (*domain.Instance, error) {
@@ -258,9 +265,6 @@ func (s *InstanceService) launchWorkflow(ctx context.Context, inst *domain.Insta
 		ContextJSON:        string(inst.ContextJSON),
 		OverrideMap:        overrides,
 	})
-	if errors.Is(err, port.ErrExecutionHeld) {
-		return nil, s.refuseHeldExecution(ctx, inst)
-	}
 	if err != nil {
 		s.logger().Error("StartWorkflow failed after workflow_instance was committed", map[string]any{
 			"instance_id": inst.ID, "tenant_id": inst.TenantID, "business_key": inst.BusinessKey, "error": err.Error(),
@@ -296,44 +300,7 @@ func (s *InstanceService) afterWorkflowStarted(ctx context.Context, tenantID uui
 	return toPortInstance(current)
 }
 
-// refuseHeldExecution answers a start whose execution id an open execution of another instance
-// holds. The row is closed because no retry can start it while that execution is open, and an
-// open row would hold the business key; a start sent again after the execution ends is a new one.
-func (s *InstanceService) refuseHeldExecution(ctx context.Context, inst *domain.Instance) error {
-	s.logger().Warn("a start was refused: its execution id is held by another open instance", map[string]any{
-		"instance_id": inst.ID, "tenant_id": inst.TenantID, "business_key": inst.BusinessKey,
-	})
-	if err := s.failHeldInstance(ctx, inst); err != nil {
-		s.logger().Error("could not close the row of a start refused for its held execution id", map[string]any{
-			"instance_id": inst.ID, "tenant_id": inst.TenantID, "error": err.Error(),
-		})
-	}
-	return port.ErrDuplicateBusinessKey
-}
-
-// failHeldInstance closes the row and publishes its Failed event together, so the Started event
-// the start already committed is matched. Only a row that is still RUNNING with no run id is
-// closed, and the event follows only a close that changed it: a repeated refusal, a row terminated
-// meanwhile, or one whose workflow a retry started, is left as it is.
-func (s *InstanceService) failHeldInstance(ctx context.Context, inst *domain.Instance) error {
-	return s.Transactor.RunInTx(withTenantGUC(ctx, inst.TenantID), func(ctx context.Context) error {
-		changed, err := s.Instances.FailUnstarted(ctx, inst.TenantID, inst.ID)
-		if err != nil {
-			return wrapInstanceErr(err)
-		}
-		if !changed {
-			return nil
-		}
-		sink := instanceEventSink{Outbox: s.Outbox, Validator: s.Validator}
-		return sink.enqueueInstanceEvent(ctx, inst.TenantID.String(), domain.EventWorkflowInstanceFailed, inst.ID.String(),
-			inst.StartedByUserID.String(), domain.NewWorkflowInstanceFailedPayload(instanceCore(inst), inst.StartedByUserID, errorClassExecutionIDHeld))
-	})
-}
-
-const (
-	startWorkflowMaxAttempts  = 3
-	errorClassExecutionIDHeld = "execution_id_held"
-)
+const startWorkflowMaxAttempts = 3
 
 func (s *InstanceService) startWorkflowWithRetry(ctx context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
 	var lastErr error
@@ -343,9 +310,6 @@ func (s *InstanceService) startWorkflowWithRetry(ctx context.Context, in port.St
 			return out, nil
 		}
 		lastErr = err
-		if errors.Is(err, port.ErrExecutionHeld) {
-			return port.StartWorkflowOutput{}, err
-		}
 		if attempt < startWorkflowMaxAttempts {
 			select {
 			case <-ctx.Done():

@@ -98,20 +98,6 @@ func (r *InstanceRepo) RecordRunID(ctx context.Context, tenantID, id uuid.UUID, 
 	})
 }
 
-func (r *InstanceRepo) FailUnstarted(ctx context.Context, tenantID, id uuid.UUID) (bool, error) {
-	ctx = withTenantGUC(ctx, tenantID)
-	var changed bool
-	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
-		n, err := db.New(dbtx).FailUnstartedWorkflowInstance(ctx, db.FailUnstartedWorkflowInstanceParams{ID: id, TenantID: tenantID})
-		if err != nil {
-			return mapErr(err)
-		}
-		changed = n > 0
-		return nil
-	})
-	return changed, err
-}
-
 func (r *InstanceRepo) UpdateStatus(
 	ctx context.Context,
 	tenantID, id uuid.UUID,

@@ -371,7 +371,7 @@ func buildExecution(t *testing.T, pool *pgcommon.Pool, sdk client.Client, rdb *r
 		},
 		Eligibility: eligibility, Cache: cache, ProcessedEvents: processedEvents, Recency: recency,
 		Delegation: &service.DelegationReconciler{
-			Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
+			Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo, Signals: outboxRepo,
 			Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
 			Validator: validator, Availability: postgres.NewUserAvailabilityRepo(pool), Locks: recency,
 		},

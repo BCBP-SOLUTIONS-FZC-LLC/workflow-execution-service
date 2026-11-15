@@ -45,7 +45,7 @@ func newDelegationReconcilerHarness() (*service.DelegationReconciler, *fakeInsta
 
 	svc := &service.DelegationReconciler{
 		Instances: instances, Tasks: tasks, Assignments: assignments,
-		Outbox: outbox, Transactor: fakeTransactor{}, Temporal: temporal,
+		Outbox: outbox, Signals: outbox, Transactor: fakeTransactor{}, Temporal: temporal,
 		Definitions: definitions, Eligibility: eligibility, Validator: realValidator(),
 		Availability: newFakeUserAvailability(), Locks: &fakeLocker{},
 	}
@@ -83,8 +83,9 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, assignments.byID[a.ID].IsActive)
 		require.Len(t, outbox.enqueued, 1)
-		require.Len(t, temporal.signals, 1)
-		assert.Equal(t, port.SignalInstanceReassign, temporal.signals[0].SignalName)
+		require.Len(t, outbox.signals, 1)
+		assert.Equal(t, port.SignalInstanceReassign, outbox.signals[0].SignalName)
+		assert.Empty(t, temporal.signals, "the relay delivers it, nothing is sent directly")
 
 		var found *domain.TaskAssignment
 		for _, na := range assignments.byID {
@@ -117,7 +118,7 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 	})
 
 	t.Run("one read per distinct department and level, answered back to every row of the pair", func(t *testing.T) {
-		svc, instances, tasks, assignments, outbox, temporal, definitions, eligibility := newDelegationReconcilerHarness()
+		svc, instances, tasks, assignments, outbox, _, definitions, eligibility := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 		inst, _, _ := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-pairs", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), inst.WorkflowVersionID, compiledPlanJSON(t,
@@ -153,7 +154,7 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		assert.True(t, assignments.byID[rows["approve-1"].ID].IsActive, "an approver row is held when its pair is ineligible")
 		assert.True(t, assignments.byID[rows["approve-2"].ID].IsActive)
 		assert.Len(t, outbox.enqueued, 3, "the seeded row and the two other reviewer rows are rerouted")
-		assert.Len(t, temporal.signals, 3)
+		assert.Len(t, outbox.signals, 3)
 	})
 
 	t.Run("ineligible delegate holds the row at the delegator", func(t *testing.T) {
@@ -377,7 +378,8 @@ func TestDelegationReconciler_Reverse(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, assignments.byID[a.ID].IsActive)
 		require.Len(t, outbox.enqueued, 1)
-		require.Len(t, temporal.signals, 1)
+		require.Len(t, outbox.signals, 1)
+		assert.Empty(t, temporal.signals)
 
 		var restored *domain.TaskAssignment
 		for _, na := range assignments.byID {
@@ -548,7 +550,7 @@ func TestDelegationReconciler_CommitReassignments(t *testing.T) {
 		outbox, temporal, definitions, eligibility := &fakeOutbox{}, &fakeTemporalClient{}, &fakeDefinitionClient{}, &fakeEligibilityChecker{}
 		svc := &service.DelegationReconciler{
 			Instances: instances, Tasks: tasks, Assignments: assignments,
-			Outbox: outbox, Transactor: fakeTransactor{}, Temporal: temporal,
+			Outbox: outbox, Signals: outbox, Transactor: fakeTransactor{}, Temporal: temporal,
 			Definitions: definitions, Eligibility: eligibility, Validator: failingValidator{},
 			Availability: newFakeUserAvailability(), Locks: &fakeLocker{},
 		}
@@ -570,18 +572,14 @@ func TestDelegationReconciler_CommitReassignments(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("a post-commit signal failure is logged, not returned, DB state already updated", func(t *testing.T) {
-		svc, instances, tasks, assignments, _, temporal, definitions, _ := newDelegationReconcilerHarness()
-		log := &fakeLogger{}
-		svc.Log = log
-		temporal.signalFunc = func(context.Context, string, uuid.UUID, string, any) error { return assert.AnError }
+	t.Run("a signal that cannot be recorded propagates and rolls back the batch", func(t *testing.T) {
+		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
+		outbox.signalErr = assert.AnError
 		tenantID, delegatorID, delegateID := uuid.New(), uuid.New(), uuid.New()
-		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+		seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
 
 		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{TenantID: tenantID, DelegationID: uuid.New(), DelegatorID: delegatorID, DelegateID: delegateID, Scope: "all"})
-		require.NoError(t, err)
-		assert.False(t, assignments.byID[a.ID].IsActive, "DB state already committed despite the signal failure")
-		assert.NotEmpty(t, log.warnCalls)
+		require.ErrorIs(t, err, assert.AnError)
 	})
 }
 

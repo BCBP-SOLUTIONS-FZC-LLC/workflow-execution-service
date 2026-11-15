@@ -81,8 +81,9 @@ func TestDelegationReconciler_Reroute_PausedInstanceGetsTheReassignSignal(t *tes
 	})
 
 	require.NoError(t, err)
-	require.Len(t, temporal.signals, 1, "only the reassign signal is sent")
-	sent := temporal.signals[0]
+	assert.Empty(t, temporal.signals, "no pause or resume is sent directly; the reassign signal goes through the outbox")
+	require.Len(t, outbox.signals, 1)
+	sent := outbox.signals[0]
 	assert.Equal(t, port.SignalInstanceReassign, sent.SignalName)
 	assert.Equal(t, inst.ID, sent.InstanceID)
 	assert.Equal(t, inst.TemporalWorkflowID, sent.TemporalWorkflowID)

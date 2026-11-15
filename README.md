@@ -20,7 +20,7 @@ Definition Service ◄── compiled plan, connector aliases
 
 | Binary | What it owns | What it does NOT own |
 | --- | --- | --- |
-| **API server** (`cmd/server`) | The public and internal HTTP API, the Temporal client, the outbox relay, the compiled-plan cache, the RLS-violation exporter and the operational gauges | Interpreting a plan: the worker does |
+| **API server** (`cmd/server`) | The public and internal HTTP API, the Temporal client, the outbox relay (events to SNS, delegation signals to Temporal), the compiled-plan cache, the RLS-violation exporter and the operational gauges | Interpreting a plan: the worker does |
 | **Worker** (`cmd/worker`) | The Temporal workflow function and its Activities, one worker per active tenant task queue | Any business HTTP surface; it serves health and metrics only |
 | **Connector worker** (`cmd/connector-worker`) | Consuming connector-typed tasks from a Valkey Stream and running them through `workflow-connectors` | The Temporal SDK: it reports outcomes over the API server's internal HTTP endpoints. It keeps the Drive document registry and send-email intents in PostgreSQL and document references in S3 and Valkey |
 

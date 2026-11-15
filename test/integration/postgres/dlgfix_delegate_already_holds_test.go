@@ -7,24 +7,40 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/fixtures"
 )
 
-type dlgfixSignals struct {
-	port.TemporalClient
-	signals []string
-}
-
-func (c *dlgfixSignals) SignalWorkflow(_ context.Context, _ string, _ uuid.UUID, name string, _ any) error {
-	c.signals = append(c.signals, name)
-	return nil
+// recordedSignalNames lists the names of the signals waiting in the outbox for
+// the relay, oldest first.
+func recordedSignalNames(t *testing.T, superPool *pgcommon.Pool) []string {
+	t.Helper()
+	var names []string
+	require.NoError(t, superPool.WithConn(context.Background(), func(ctx context.Context, conn *pgxpool.Conn) error {
+		rows, err := conn.Query(ctx, "SELECT payload -> 'data' ->> 'signal_name' FROM outbox_events WHERE event_type = $1 ORDER BY created_at, id", port.WorkflowSignalEventType)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				return err
+			}
+			names = append(names, name)
+		}
+		return rows.Err()
+	}))
+	return names
 }
 
 // A delegate who already holds the task must not make the move fail: a second
@@ -35,10 +51,12 @@ func TestReassignDelegate_ADelegateWhoAlreadyHoldsTheTaskKeepsOneActiveRow(t *te
 	instanceRepo := postgres.NewInstanceRepo(appPool)
 	taskRepo := postgres.NewTaskRepo(appPool)
 	assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
-	temporal := &dlgfixSignals{}
+	validator, err := eventbus.NewSchemaValidator()
+	require.NoError(t, err)
 	client := &service.WorkflowClient{
 		Instances: instanceRepo, Tasks: taskRepo, Assignments: assignmentRepo,
-		Transactor: postgres.NewTransactor(appPool), Temporal: temporal,
+		Transactor: postgres.NewTransactor(appPool), Outbox: postgres.NewOutboxRepo(appPool),
+		Signals: postgres.NewOutboxRepo(appPool), Validator: validator,
 	}
 	ctx := context.Background()
 
@@ -62,5 +80,5 @@ func TestReassignDelegate_ADelegateWhoAlreadyHoldsTheTaskKeepsOneActiveRow(t *te
 	require.NoError(t, err)
 	require.Len(t, active, 1)
 	assert.Equal(t, newDelegate, active[0].UserID)
-	assert.Equal(t, []string{port.SignalInstanceReassign}, temporal.signals)
+	assert.Equal(t, []string{port.SignalInstanceReassign}, recordedSignalNames(t, superPool), "the signal is recorded with the move, for the relay to deliver")
 }

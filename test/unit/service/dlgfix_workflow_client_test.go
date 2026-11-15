@@ -22,6 +22,7 @@ import (
 // tell what happened before and after the commit.
 type dlgfixTx struct {
 	repo      *fakeAssignmentRepo
+	outbox    *fakeOutbox
 	tenants   []string
 	running   bool
 	commits   int
@@ -54,6 +55,10 @@ func (t *dlgfixTx) RunInTx(ctx context.Context, fn func(context.Context) error) 
 	for id, a := range t.repo.byID {
 		saved[id] = dlgfixRow{row: *a, target: a}
 	}
+	recorded, events := 0, 0
+	if t.outbox != nil {
+		recorded, events = len(t.outbox.signals), len(t.outbox.enqueued)
+	}
 	t.running = true
 	err := fn(ctx)
 	t.running = false
@@ -65,6 +70,11 @@ func (t *dlgfixTx) RunInTx(ctx context.Context, fn func(context.Context) error) 
 		return nil
 	}
 	t.rollbacks++
+	if t.outbox != nil {
+		t.outbox.signals = t.outbox.signals[:recorded]
+		t.outbox.signalTenants = t.outbox.signalTenants[:recorded]
+		t.outbox.enqueued = t.outbox.enqueued[:events]
+	}
 	for id := range t.repo.byID {
 		if _, kept := saved[id]; !kept {
 			delete(t.repo.byID, id)
@@ -89,6 +99,9 @@ type dlgfixAssignments struct {
 	createFails map[uuid.UUID]error
 	vacated     []uuid.UUID
 	created     []*domain.TaskAssignment
+	// afterList runs once the active rows of a task were read, so a test can end
+	// one before the caller writes, as a concurrent complete would.
+	afterList func(taskID uuid.UUID)
 }
 
 func (r *dlgfixAssignments) inAbortedTx() bool { return r.tx != nil && r.tx.aborted }
@@ -97,7 +110,11 @@ func (r *dlgfixAssignments) ListActiveByTask(ctx context.Context, tenantID, task
 	if r.inAbortedTx() {
 		return nil, errTxAborted
 	}
-	return r.fakeAssignmentRepo.ListActiveByTask(ctx, tenantID, taskID)
+	rows, err := r.fakeAssignmentRepo.ListActiveByTask(ctx, tenantID, taskID)
+	if r.afterList != nil {
+		r.afterList(taskID)
+	}
+	return rows, err
 }
 
 func (r *dlgfixAssignments) SetLead(ctx context.Context, tenantID, taskID, id uuid.UUID, version int64) (*domain.TaskAssignment, error) {
@@ -107,7 +124,7 @@ func (r *dlgfixAssignments) SetLead(ctx context.Context, tenantID, taskID, id uu
 	return r.fakeAssignmentRepo.SetLead(ctx, tenantID, taskID, id, version)
 }
 
-func (r *dlgfixAssignments) Vacate(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error) {
+func (r *dlgfixAssignments) VacateActive(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error) {
 	if r.inAbortedTx() {
 		return nil, errTxAborted
 	}
@@ -115,7 +132,7 @@ func (r *dlgfixAssignments) Vacate(ctx context.Context, tenantID, id uuid.UUID) 
 	if err := r.vacateFails[id]; err != nil {
 		return nil, err
 	}
-	return r.fakeAssignmentRepo.Vacate(ctx, tenantID, id)
+	return r.fakeAssignmentRepo.VacateActive(ctx, tenantID, id)
 }
 
 func (r *dlgfixAssignments) Create(ctx context.Context, a *domain.TaskAssignment) error {
@@ -153,7 +170,7 @@ type dlgfixClient struct {
 	instances   *fakeInstanceRepo
 	tasks       *fakeTaskRepo
 	assignments *dlgfixAssignments
-	temporal    *fakeTemporalClient
+	outbox      *fakeOutbox
 	tx          *dlgfixTx
 	definitions *dlgfixDefinitions
 	tenantID    uuid.UUID
@@ -175,15 +192,16 @@ func dlgfixNewClient(t *testing.T) *dlgfixClient {
 		instances:   newFakeInstanceRepo(),
 		tasks:       newFakeTaskRepo(),
 		assignments: &dlgfixAssignments{fakeAssignmentRepo: repo, vacateFails: map[uuid.UUID]error{}, createFails: map[uuid.UUID]error{}},
-		temporal:    &fakeTemporalClient{},
+		outbox:      &fakeOutbox{},
 		tx:          &dlgfixTx{repo: repo},
 		definitions: &dlgfixDefinitions{byVersion: map[uuid.UUID]*port.CompiledWorkflow{}, failing: map[uuid.UUID]error{}},
 		tenantID:    uuid.New(), oldDelegate: uuid.New(), newDelegate: uuid.New(),
 	}
 	h.assignments.tx = h.tx
+	h.tx.outbox = h.outbox
 	h.svc = &service.WorkflowClient{
 		Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments,
-		Transactor: h.tx, Temporal: h.temporal, Log: &fakeLogger{},
+		Transactor: h.tx, Outbox: h.outbox, Signals: h.outbox, Validator: realValidator(), Log: &fakeLogger{},
 	}
 	return h
 }
@@ -242,7 +260,7 @@ func (h *dlgfixClient) requireUntouched(t *testing.T, rows ...dlgfixHeld) {
 		assert.True(t, h.holdsActive(held.task.ID, h.oldDelegate), "the old delegate keeps the task")
 		assert.False(t, h.holdsActive(held.task.ID, h.newDelegate), "the new delegate was given nothing")
 	}
-	assert.Empty(t, h.temporal.signals, "no instance is told about a change that did not happen")
+	assert.Empty(t, h.outbox.signals, "no instance is told about a change that did not happen")
 }
 
 func TestDelegationCancel_VacatesEveryRowInOneTransactionOnTheTenantContext(t *testing.T) {
@@ -273,15 +291,14 @@ func TestDelegationCancel_AFailedVacateChangesNothingAndFailsTheCall(t *testing.
 	assert.Equal(t, 1, h.tx.rollbacks)
 }
 
-func TestDelegationReassign_MovesEveryRowInOneTransactionThenSignals(t *testing.T) {
+func TestDelegationReassign_MovesEveryRowAndRecordsEverySignalInOneTransaction(t *testing.T) {
 	h := dlgfixNewClient(t)
 	first, second := h.seed(t, "reviewer"), h.seed(t, "reviewer")
-	var runningAtSignal []bool
-	var commitsAtSignal []int
-	h.temporal.signalFunc = func(context.Context, string, uuid.UUID, string, any) error {
-		runningAtSignal = append(runningAtSignal, h.tx.running)
-		commitsAtSignal = append(commitsAtSignal, h.tx.commits)
-		return nil
+	var runningAtRecord []bool
+	var commitsAtRecord []int
+	h.outbox.onSignal = func() {
+		runningAtRecord = append(runningAtRecord, h.tx.running)
+		commitsAtRecord = append(commitsAtRecord, h.tx.commits)
 	}
 
 	count, err := h.reassign()
@@ -291,8 +308,9 @@ func TestDelegationReassign_MovesEveryRowInOneTransactionThenSignals(t *testing.
 	assert.Equal(t, []string{h.tenantID.String()}, h.tx.tenants, "one transaction on a tenant context")
 	assert.True(t, h.holdsActive(first.task.ID, h.newDelegate))
 	assert.True(t, h.holdsActive(second.task.ID, h.newDelegate))
-	assert.Equal(t, []bool{false, false}, runningAtSignal, "no signal leaves while the transaction is open")
-	assert.Equal(t, []int{1, 1}, commitsAtSignal, "every signal leaves after the commit")
+	assert.Equal(t, []bool{true, true}, runningAtRecord, "every signal is recorded while the transaction is open")
+	assert.Equal(t, []int{0, 0}, commitsAtRecord, "and before it commits, so a rollback takes the signals with it")
+	assert.Equal(t, []uuid.UUID{h.tenantID, h.tenantID}, h.outbox.signalTenants)
 }
 
 func TestDelegationReassign_AFailedWriteChangesNothingAndFailsTheCall(t *testing.T) {
@@ -395,20 +413,21 @@ func TestDelegationReassign_AnIneligibleRowStaysAndTheRestMove(t *testing.T) {
 	assert.Equal(t, 1, count, "the count is the number of assignments the call vacated")
 	assert.True(t, h.holdsActive(moved.task.ID, h.newDelegate))
 	assert.True(t, h.holdsActive(held.task.ID, h.oldDelegate), "a row stays only because the new delegate is ineligible for it")
-	require.Len(t, h.temporal.signals, 1)
-	assert.Equal(t, moved.instance.ID, h.temporal.signals[0].InstanceID)
+	require.Len(t, h.outbox.signals, 1)
+	assert.Equal(t, moved.instance.ID, h.outbox.signals[0].InstanceID)
 }
 
-func TestDelegationReassign_AFailedSignalDoesNotChangeTheAnswer(t *testing.T) {
+func TestDelegationReassign_AFailedSignalRecordingChangesNothingAndFailsTheCall(t *testing.T) {
 	h := dlgfixNewClient(t)
-	held := h.seed(t, "reviewer")
-	h.temporal.signalFunc = func(context.Context, string, uuid.UUID, string, any) error { return errors.New("temporal down") }
+	first, second := h.seed(t, "reviewer"), h.seed(t, "reviewer")
+	h.outbox.signalErr = assert.AnError
 
 	count, err := h.reassign()
 
-	require.NoError(t, err, "the database already holds the change")
-	assert.Equal(t, 1, count)
-	assert.True(t, h.holdsActive(held.task.ID, h.newDelegate))
+	require.ErrorIs(t, err, assert.AnError, "a move whose signal cannot be recorded is not committed, so the caller retries it")
+	assert.Zero(t, count)
+	h.requireUntouched(t, first, second)
+	assert.Equal(t, 1, h.tx.rollbacks)
 }
 
 func TestDelegationReassign_ADelegateWhoAlreadyHoldsTheTaskKeepsOneRow(t *testing.T) {
@@ -457,8 +476,8 @@ func TestDelegationReassign_AnAssignmentThatEndedBetweenTheReadAndTheWriteIsLeft
 	assert.NotContains(t, h.assignments.vacated, ended.assignment.ID, "an assignment that is no longer active is not vacated again")
 	assert.False(t, h.holdsActive(ended.task.ID, h.newDelegate), "no row is created for a task whose assignment ended")
 	assert.True(t, h.holdsActive(live.task.ID, h.newDelegate))
-	require.Len(t, h.temporal.signals, 1, "only the moved assignment is signalled")
-	assert.Equal(t, live.instance.ID, h.temporal.signals[0].InstanceID)
+	require.Len(t, h.outbox.signals, 1, "only the moved assignment is signalled")
+	assert.Equal(t, live.instance.ID, h.outbox.signals[0].InstanceID)
 }
 
 func TestDelegationCancel_AnAssignmentThatEndedBetweenTheReadAndTheWriteIsNotVacatedOrCounted(t *testing.T) {

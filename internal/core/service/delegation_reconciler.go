@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -21,6 +22,7 @@ type DelegationReconciler struct {
 	Outbox       port.OutboxRepository
 	Transactor   port.Transactor
 	Temporal     port.TemporalClient
+	Signals      port.WorkflowSignalOutbox
 	Definitions  port.DefinitionServiceClient
 	Eligibility  port.EligibilityChecker
 	Validator    port.EventValidator
@@ -135,25 +137,12 @@ func (s *DelegationReconciler) eligibleCandidates(ctx context.Context, plans *co
 	return out, nil
 }
 
-func (s *DelegationReconciler) enqueueTaskReassigned(ctx context.Context, c delegationCandidate, oldUserID, newUserID uuid.UUID, delegationID *uuid.UUID) error {
-	core := domain.CommonCore{WorkflowInstanceID: c.instance.ID, SubjectID: c.instance.SubjectID, BusinessKey: c.instance.BusinessKey, WorkflowVersionID: c.instance.WorkflowVersionID}
-	taskCore := domain.TaskScopedCore{TaskID: c.task.ID, NodeKey: c.task.NodeKey, DepartmentID: c.task.DepartmentID, AssigneeUserIDs: []uuid.UUID{newUserID}}
-	payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, oldUserID, newUserID, domain.ReassignInitiatorDelegation, delegationID)
-	subject := "instances/" + c.instance.ID.String() + "/tasks/" + c.task.ID.String()
-	envelope, err := BuildEnvelope(ctx, s.Validator, domain.EventWorkflowTaskReassigned, c.instance.TenantID.String(), subject, "", payload)
-	if err != nil {
-		return err
-	}
-	return s.Outbox.Enqueue(ctx, envelope)
-}
-
-// commitReassignments moves the rows in one transaction and returns nothing
-// for a row whose assignment ended after it was read: that row gets no new
+// commitReassignments moves the rows in one transaction and records, with each
+// move, its event and its signal; the outbox relay delivers the signal after
+// the commit. A row whose assignment ended after it was read gets no new
 // assignment, no event and no signal.
 func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID uuid.UUID, rows []delegationCandidate, newUserID uuid.UUID, reason string, delegationID *uuid.UUID) error {
-	var moved []delegationCandidate
-	txErr := s.Transactor.RunInTx(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
-		moved = moved[:0]
+	return s.Transactor.RunInTx(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
 		for _, c := range rows {
 			active, ok, err := vacateIfActive(ctx, s.Assignments, tenantID, c.assignment)
 			if err != nil {
@@ -165,25 +154,17 @@ func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID
 			if err := handOver(ctx, s.Assignments, tenantID, c.assignment, active, c.task, newUserID, reason); err != nil {
 				return err
 			}
-			if err := s.enqueueTaskReassigned(ctx, c, c.assignment.UserID, newUserID, delegationID); err != nil {
+			if err := enqueueTaskReassigned(ctx, s.Outbox, s.Validator, c.instance, c.task, c.assignment.UserID, newUserID, delegationID); err != nil {
 				return err
 			}
-			moved = append(moved, c)
+			if err := recordWorkflowSignal(ctx, s.Signals, c.instance, port.SignalInstanceReassign, reassignSignalWire{
+				TaskID: c.task.ID.String(), OldUserID: c.assignment.UserID.String(), NewUserID: newUserID.String(), RecordVersion: c.task.RecordVersion, RecordedAt: time.Now().UTC(),
+			}); err != nil {
+				return fmt.Errorf("delegation reconciler: record the signal of task %s: %w", c.task.ID, err)
+			}
 		}
 		return nil
 	})
-	if txErr != nil {
-		return txErr
-	}
-
-	for _, c := range moved {
-		if err := s.Temporal.SignalWorkflow(ctx, c.instance.TemporalWorkflowID, c.instance.ID, port.SignalInstanceReassign, reassignSignalWire{
-			TaskID: c.task.ID.String(), OldUserID: c.assignment.UserID.String(), NewUserID: newUserID.String(), RecordVersion: c.task.RecordVersion,
-		}); err != nil {
-			s.logger().Warn("delegation reconciler: failed to signal instance-reassign, DB state already updated", map[string]any{"task_id": c.task.ID, "error": err.Error()})
-		}
-	}
-	return nil
 }
 
 func (s *DelegationReconciler) Reroute(ctx context.Context, in port.DelegationRerouteInput) error {

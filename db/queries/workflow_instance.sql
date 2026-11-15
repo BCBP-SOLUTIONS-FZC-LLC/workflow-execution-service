@@ -81,15 +81,6 @@ SET status = $2,
 WHERE id = $1 AND record_version = $3
 RETURNING *;
 
--- name: FailUnstartedWorkflowInstance :execrows
--- Closes the row of a start that was refused before its workflow ever ran. It changes the row only
--- while it is RUNNING with no run id, so a row that was terminated meanwhile, whose workflow a
--- retry started, or that an earlier refusal already closed, is left alone (0 rows).
-UPDATE workflow_instance
-SET status = 'FAILED', completed_at = now(), updated_at = now(), record_version = record_version + 1
-WHERE id = $1 AND tenant_id = $2 AND status = 'RUNNING'
-  AND (temporal_run_id IS NULL OR temporal_run_id = '');
-
 -- name: CountActiveInstancesByWorkflow :one
 -- Backs ArchiveGuard.CheckActiveInstances(tenant_id, workflow_id) -- uses
 -- idx_workflow_instance_workflow_active.

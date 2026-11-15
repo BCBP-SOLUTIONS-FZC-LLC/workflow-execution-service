@@ -180,3 +180,44 @@ tests:
               runbook: workflow-execution-service/queue-polling
               summary: "Queue frozen-queue has instances and no Worker polling it"
               description: "A Worker that could not start the worker for a queue only logs, so its instances wait with no task and no other signal (LLD §3.2, §7.6)."
+
+  - name: a connector task READY for more than 30 minutes warns, and clears once it is resolved
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_oldest_ready_connector_task_age_seconds'
+        values: '0 600 1200 1800 1860 2400 3600 0 0'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ConnectorTaskStuckReady
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: ConnectorTaskStuckReady
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              runbook: workflow-execution-service/connector-task-stuck-ready
+              summary: A connector task has been READY for over 30 minutes
+              description: "A connector task was created but its connector has not run or reported: the oldest has been READY for 31m 0s. Look for an event the ingest route refused (a stage whose department is not in the plan), a dead-lettered stream entry or a stopped connector worker."
+      - eval_time: 6m
+        alertname: ConnectorTaskStuckReady
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              runbook: workflow-execution-service/connector-task-stuck-ready
+              summary: A connector task has been READY for over 30 minutes
+              description: "A connector task was created but its connector has not run or reported: the oldest has been READY for 1h 0m 0s. Look for an event the ingest route refused (a stage whose department is not in the plan), a dead-lettered stream entry or a stopped connector worker."
+      - eval_time: 8m
+        alertname: ConnectorTaskStuckReady
+        exp_alerts: []
+
+  - name: connector tasks that have been READY for under 30 minutes do not warn
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_oldest_ready_connector_task_age_seconds'
+        values: '60+60x28'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: ConnectorTaskStuckReady
+        exp_alerts: []

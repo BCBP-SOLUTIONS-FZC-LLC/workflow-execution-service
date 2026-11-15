@@ -9,7 +9,6 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/temporal"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -37,10 +36,7 @@ func (c *Client) StartWorkflow(ctx context.Context, in port.StartWorkflowInput) 
 	run, err := c.sdk.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:                    in.TemporalWorkflowID,
 		TaskQueue:             in.TaskQueue,
-		WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
-		// Without this the SDK hands back the run of any open execution with the id,
-		// so a second instance whose id collides would silently share the first's.
-		WorkflowExecutionErrorWhenAlreadyStarted: true,
+		WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
 	}, port.WorkflowTypeExecute, executeWorkflowInput{
 		TenantID:    in.TenantID.String(),
 		InstanceID:  in.InstanceID.String(),
@@ -48,11 +44,11 @@ func (c *Client) StartWorkflow(ctx context.Context, in port.StartWorkflowInput) 
 		ContextJSON: in.ContextJSON,
 		OverrideMap: in.OverrideMap,
 	})
+	var started *serviceerror.WorkflowExecutionAlreadyStarted
+	if errors.As(err, &started) {
+		return port.StartWorkflowOutput{TemporalWorkflowID: in.TemporalWorkflowID, TemporalRunID: started.RunId}, nil
+	}
 	if err != nil {
-		var started *serviceerror.WorkflowExecutionAlreadyStarted
-		if errors.As(err, &started) {
-			return c.ownOpenExecution(ctx, in, started.RunId)
-		}
 		return port.StartWorkflowOutput{}, clusterFailure("start workflow", err)
 	}
 	return port.StartWorkflowOutput{TemporalWorkflowID: run.GetID(), TemporalRunID: run.GetRunID()}, nil
@@ -82,39 +78,6 @@ func retryable(err error) bool {
 	)
 	return errors.As(err, &unavailable) || errors.As(err, &nsDown) || errors.As(err, &deadline) || errors.As(err, &exhausted) ||
 		errors.As(err, &aborted) || errors.As(err, &internal)
-}
-
-// ownOpenExecution accepts an open execution only when this same instance started it, which is
-// what a repeat of an earlier start whose answer was lost finds.
-func (c *Client) ownOpenExecution(ctx context.Context, in port.StartWorkflowInput, runID string) (port.StartWorkflowOutput, error) {
-	owner, err := c.startedInstance(ctx, in.TemporalWorkflowID, runID)
-	if err != nil {
-		return port.StartWorkflowOutput{}, clusterFailure("start workflow", err)
-	}
-	if owner != in.InstanceID.String() {
-		return port.StartWorkflowOutput{}, fmt.Errorf("start workflow: %w", port.ErrExecutionHeld)
-	}
-	return port.StartWorkflowOutput{TemporalWorkflowID: in.TemporalWorkflowID, TemporalRunID: runID}, nil
-}
-
-func (c *Client) startedInstance(ctx context.Context, temporalWorkflowID, runID string) (string, error) {
-	history := c.sdk.GetWorkflowHistory(ctx, temporalWorkflowID, runID, false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
-	if !history.HasNext() {
-		return "", errors.New("the open execution has no history")
-	}
-	event, err := history.Next()
-	if err != nil {
-		return "", fmt.Errorf("read the open execution's start: %w", err)
-	}
-	attrs := event.GetWorkflowExecutionStartedEventAttributes()
-	if attrs == nil {
-		return "", errors.New("the first event of the open execution is not its start")
-	}
-	var input executeWorkflowInput
-	if err := converter.GetDefaultDataConverter().FromPayloads(attrs.GetInput(), &input); err != nil {
-		return "", fmt.Errorf("decode the open execution's input: %w", err)
-	}
-	return input.InstanceID, nil
 }
 
 func (c *Client) SignalWorkflow(ctx context.Context, temporalWorkflowID string, instanceID uuid.UUID, signalName string, payload any) error {

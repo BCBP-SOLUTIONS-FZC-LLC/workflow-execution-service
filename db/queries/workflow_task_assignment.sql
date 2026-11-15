@@ -49,6 +49,15 @@ SET is_active = false, vacated_at = now(), updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: VacateActiveWorkflowTaskAssignment :one
+-- Backs TaskAssignmentRepo.VacateActive -- the delegation moves vacate a row
+-- they re-read earlier in the same transaction, so a row completed or vacated
+-- in between matches nothing (no row) instead of being vacated again.
+UPDATE workflow_task_assignment
+SET is_active = false, vacated_at = now(), updated_at = now()
+WHERE id = $1 AND is_active
+RETURNING *;
+
 -- name: CompleteWorkflowTaskAssignment :one
 UPDATE workflow_task_assignment
 SET completed_at = now(), result_json = $2, is_active = false, updated_at = now()
