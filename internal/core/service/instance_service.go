@@ -168,13 +168,18 @@ func (s *InstanceService) matchingStart(ctx context.Context, in port.StartInstan
 	}
 	if existing.Status != domain.InstanceStatusRunning ||
 		existing.WorkflowVersionID != in.WorkflowVersionID ||
-		existing.StartedByUserID != in.StartedByUserID ||
-		!sameContext(existing.ContextJSON, in.ContextJSON) {
+		existing.StartedByUserID != in.StartedByUserID {
+		return nil, nil
+	}
+	if _, ok := decodeContext(existing.ContextJSON); !ok {
+		return nil, s.unreadableStart(existing, "context_json", errStoredContextNotJSON)
+	}
+	if !sameContext(existing.ContextJSON, in.ContextJSON) {
 		return nil, nil
 	}
 	same, err := sameOverrideMap(existing.OverrideMap, in.OverrideMap)
 	if err != nil {
-		return nil, s.unreadableStart(existing, err)
+		return nil, s.unreadableStart(existing, "override_map", err)
 	}
 	if !same {
 		return nil, nil
@@ -182,11 +187,13 @@ func (s *InstanceService) matchingStart(ctx context.Context, in port.StartInstan
 	return existing, nil
 }
 
-func (s *InstanceService) unreadableStart(inst *domain.Instance, cause error) error {
-	s.logger().Error("the stored override_map of an instance cannot be read", map[string]any{
+var errStoredContextNotJSON = errors.New("not valid JSON")
+
+func (s *InstanceService) unreadableStart(inst *domain.Instance, field string, cause error) error {
+	s.logger().Error("the stored "+field+" of an instance cannot be read", map[string]any{
 		"instance_id": inst.ID, "tenant_id": inst.TenantID, "business_key": inst.BusinessKey, "error": cause.Error(),
 	})
-	return fmt.Errorf("decode override_map of instance %s: %w", inst.ID, cause)
+	return fmt.Errorf("decode %s of instance %s: %w", field, inst.ID, cause)
 }
 
 func (s *InstanceService) resumeStart(ctx context.Context, existing *domain.Instance) (*port.Instance, error) {
@@ -239,7 +246,7 @@ func (s *InstanceService) launchWorkflow(ctx context.Context, inst *domain.Insta
 	var overrides map[string]string
 	if len(inst.OverrideMap) > 0 {
 		if err := json.Unmarshal(inst.OverrideMap, &overrides); err != nil {
-			return nil, s.unreadableStart(inst, err)
+			return nil, s.unreadableStart(inst, "override_map", err)
 		}
 	}
 	out, err := s.startWorkflowWithRetry(ctx, port.StartWorkflowInput{

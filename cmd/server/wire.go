@@ -215,7 +215,7 @@ func newApp(cfg *config.Config) (*app, error) {
 		Temporal: temporal, Cache: cache, Principals: principals, Log: log,
 	}
 	workflowClient := &service.WorkflowClient{
-		Instances: instances, Tasks: tasks, Assignments: assignments, Temporal: temporal,
+		Instances: instances, Tasks: tasks, Assignments: assignments, Transactor: transactor, Temporal: temporal,
 		Eligibility: eligibility, Definitions: definitions, Log: log,
 	}
 	guard := &service.ArchiveGuard{Instances: instances}

@@ -187,7 +187,7 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		assert.Empty(t, outbox.enqueued)
 	})
 
-	t.Run("department scope with an unreadable compiled plan is logged and excludes the row", func(t *testing.T) {
+	t.Run("department scope with an unreadable compiled plan fails the event and leaves the row", func(t *testing.T) {
 		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
 		log := &fakeLogger{}
 		svc.Log = log
@@ -199,7 +199,7 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{
 			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, Scope: "department", ScopeID: &deptID,
 		})
-		require.NoError(t, err)
+		require.ErrorIs(t, err, assert.AnError)
 		assert.True(t, assignments.byID[a.ID].IsActive, "a row whose compiled plan can't be read must survive untouched")
 		assert.Empty(t, outbox.enqueued)
 		assert.Equal(t, 1, warnsWithCause(log, assert.AnError.Error()), "the cause is logged once")
@@ -434,7 +434,7 @@ func TestDelegationReconciler_Reroute_ListActiveByUserError(t *testing.T) {
 }
 
 func TestDelegationReconciler_ResolveCandidates(t *testing.T) {
-	t.Run("an unreadable instance is logged and skipped, not a batch failure", func(t *testing.T) {
+	t.Run("an unreadable instance fails the event and leaves the row", func(t *testing.T) {
 		svc, _, tasks, assignments, _, _, _, _ := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID := uuid.New(), uuid.New(), uuid.New()
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
@@ -443,25 +443,25 @@ func TestDelegationReconciler_ResolveCandidates(t *testing.T) {
 		assignments.byID[a.ID] = a
 
 		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{TenantID: tenantID, DelegationID: uuid.New(), DelegatorID: delegatorID, DelegateID: delegateID, Scope: "all"})
-		require.NoError(t, err)
+		require.ErrorIs(t, err, domain.ErrNotFound)
 		assert.True(t, assignments.byID[a.ID].IsActive, "an unreadable instance leaves the row untouched")
 	})
 }
 
 func TestDelegationReconciler_EligibleCandidates(t *testing.T) {
-	t.Run("an unreadable compiled plan holds the row, doesn't fail the batch", func(t *testing.T) {
+	t.Run("an unreadable compiled plan fails the event and leaves the row", func(t *testing.T) {
 		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID := uuid.New(), uuid.New(), uuid.New()
 		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
 		definitions.err = assert.AnError
 
 		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{TenantID: tenantID, DelegationID: uuid.New(), DelegatorID: delegatorID, DelegateID: delegateID, Scope: "all"})
-		require.NoError(t, err)
+		require.ErrorIs(t, err, assert.AnError)
 		assert.True(t, assignments.byID[a.ID].IsActive)
 		assert.Empty(t, outbox.enqueued)
 	})
 
-	t.Run("an unmarshalable compiled plan holds the row, doesn't fail the batch", func(t *testing.T) {
+	t.Run("an unmarshalable compiled plan fails the event and leaves the row", func(t *testing.T) {
 		svc, instances, tasks, assignments, _, _, definitions, _ := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID := uuid.New(), uuid.New(), uuid.New()
 		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
@@ -470,19 +470,19 @@ func TestDelegationReconciler_EligibleCandidates(t *testing.T) {
 		svc.Log = log
 
 		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{TenantID: tenantID, DelegationID: uuid.New(), DelegatorID: delegatorID, DelegateID: delegateID, Scope: "all"})
-		require.NoError(t, err)
+		require.ErrorContains(t, err, "unmarshal compiled plan")
 		assert.True(t, assignments.byID[a.ID].IsActive)
 		assert.Equal(t, 1, warnsWithCause(log, "invalid character"), "the decode cause is logged once")
 	})
 
-	t.Run("a main plan missing from the collaboration holds the row, doesn't fail the batch", func(t *testing.T) {
+	t.Run("a main plan missing from the collaboration fails the event and leaves the row", func(t *testing.T) {
 		svc, instances, tasks, assignments, _, _, definitions, _ := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID := uuid.New(), uuid.New(), uuid.New()
 		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
 		definitions.resp.CompiledPlanJSON = `{"main_plan":"does-not-exist","plans":[]}`
 
 		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{TenantID: tenantID, DelegationID: uuid.New(), DelegatorID: delegatorID, DelegateID: delegateID, Scope: "all"})
-		require.NoError(t, err)
+		require.ErrorContains(t, err, "does-not-exist")
 		assert.True(t, assignments.byID[a.ID].IsActive)
 	})
 
@@ -550,7 +550,7 @@ func TestDelegationReconciler_CommitReassignments(t *testing.T) {
 			Instances: instances, Tasks: tasks, Assignments: assignments,
 			Outbox: outbox, Transactor: fakeTransactor{}, Temporal: temporal,
 			Definitions: definitions, Eligibility: eligibility, Validator: failingValidator{},
-			Availability: newFakeUserAvailability(),
+			Availability: newFakeUserAvailability(), Locks: &fakeLocker{},
 		}
 		tenantID, delegatorID, delegateID := uuid.New(), uuid.New(), uuid.New()
 		seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)

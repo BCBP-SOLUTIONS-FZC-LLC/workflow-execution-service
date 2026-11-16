@@ -20,7 +20,7 @@ func newWorkflowClientHarness() (*service.WorkflowClient, *fakeInstanceRepo, *fa
 	tasks := newFakeTaskRepo()
 	assignments := newFakeAssignmentRepo()
 	temporal := &fakeTemporalClient{}
-	return &service.WorkflowClient{Instances: instances, Tasks: tasks, Assignments: assignments, Temporal: temporal}, instances, tasks, assignments, temporal
+	return &service.WorkflowClient{Instances: instances, Tasks: tasks, Assignments: assignments, Transactor: fakeTransactor{}, Temporal: temporal}, instances, tasks, assignments, temporal
 }
 
 func TestWorkflowClient_ReassignDelegate(t *testing.T) {
@@ -51,11 +51,13 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 	})
 
 	t.Run("delegation_id filters to only that delegation's tagged rows", func(t *testing.T) {
-		svc, _, tasks, assignments, _ := newWorkflowClientHarness()
+		svc, instances, tasks, assignments, _ := newWorkflowClientHarness()
 		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
 		delegationID := uuid.New()
 
-		taggedTask := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
+		taggedInstanceID := uuid.New()
+		instances.byID[taggedInstanceID] = &domain.Instance{ID: taggedInstanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:tagged"}
+		taggedTask := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: taggedInstanceID, RecordVersion: 1}
 		tasks.byID[taggedTask.ID] = taggedTask
 		tagged := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: taggedTask.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + delegationID.String()}
 		assignments.byID[tagged.ID] = tagged
@@ -88,21 +90,21 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("an unreadable task is logged and skipped, not counted", func(t *testing.T) {
-		svc, _, _, assignments, _ := newWorkflowClientHarness()
+	t.Run("an unreadable task fails the call and changes nothing", func(t *testing.T) {
+		svc, _, _, assignments, temporal := newWorkflowClientHarness()
 		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
 		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: uuid.New(), UserID: oldDelegate, IsActive: true}
 		assignments.byID[a.ID] = a
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
-		require.NoError(t, err)
+		require.Error(t, err)
 		assert.Zero(t, count)
+		assert.True(t, assignments.byID[a.ID].IsActive)
+		assert.Empty(t, temporal.signals)
 	})
 
-	t.Run("a vacate failure is logged and skipped, not counted", func(t *testing.T) {
+	t.Run("a vacate failure fails the call, nothing is counted", func(t *testing.T) {
 		svc, instances, tasks, assignments, _ := newWorkflowClientHarness()
-		log := &fakeLogger{}
-		svc.Log = log
 		assignments.vacateErr = assert.AnError
 		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
 		instanceID := uuid.New()
@@ -113,12 +115,12 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		assignments.byID[a.ID] = a
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
-		require.NoError(t, err)
+		require.ErrorIs(t, err, assert.AnError)
 		assert.Zero(t, count)
-		assert.NotEmpty(t, log.warnCalls)
+		assert.True(t, assignments.byID[a.ID].IsActive)
 	})
 
-	t.Run("a create failure is logged and skipped, not counted", func(t *testing.T) {
+	t.Run("a create failure fails the call, nothing is counted", func(t *testing.T) {
 		svc, instances, tasks, assignments, _ := newWorkflowClientHarness()
 		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
 		instanceID := uuid.New()
@@ -130,9 +132,8 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		assignments.createErr = assert.AnError
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
-		require.NoError(t, err)
+		require.ErrorIs(t, err, assert.AnError)
 		assert.Zero(t, count)
-		assert.False(t, assignments.byID[a.ID].IsActive, "the old assignment is already vacated even though the replacement failed to create")
 	})
 
 	t.Run("a signal failure is logged but still counted, DB state already updated", func(t *testing.T) {
@@ -252,7 +253,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		assert.Empty(t, temporal.signals)
 	})
 
-	t.Run("Instances.GetByID error during eligibility check is logged and skipped", func(t *testing.T) {
+	t.Run("Instances.GetByID error during eligibility check fails the call", func(t *testing.T) {
 		svc, _, tasks, assignments, _ := newWorkflowClientHarness()
 		svc.Definitions = &fakeDefinitionClient{}
 		svc.Eligibility = &fakeEligibilityChecker{}
@@ -265,7 +266,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		assignments.byID[a.ID] = a
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
-		require.NoError(t, err)
+		require.ErrorIs(t, err, domain.ErrNotFound)
 		assert.Zero(t, count)
 		assert.True(t, assignments.byID[a.ID].IsActive)
 	})
@@ -320,10 +321,8 @@ func TestWorkflowClient_CancelByDelegate_Errors(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("a vacate failure is logged and skipped, not counted", func(t *testing.T) {
+	t.Run("a vacate failure fails the call, nothing is counted", func(t *testing.T) {
 		svc, _, tasks, assignments, _ := newWorkflowClientHarness()
-		log := &fakeLogger{}
-		svc.Log = log
 		assignments.vacateErr = assert.AnError
 		tenantID, delegate := uuid.New(), uuid.New()
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: uuid.New()}
@@ -332,9 +331,8 @@ func TestWorkflowClient_CancelByDelegate_Errors(t *testing.T) {
 		assignments.byID[a.ID] = a
 
 		count, err := svc.CancelByDelegate(context.Background(), port.CancelByDelegateInput{TenantID: tenantID, DelegateUserID: delegate})
-		require.NoError(t, err)
+		require.ErrorIs(t, err, assert.AnError)
 		assert.Zero(t, count)
-		assert.NotEmpty(t, log.warnCalls)
 	})
 }
 

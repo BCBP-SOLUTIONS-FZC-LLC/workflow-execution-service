@@ -68,3 +68,46 @@ func TestAssigneeOverrideRepo_CreateAndListByInstance(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestAssigneeOverrideRepo_RepeatedInsertOfTheSameIDAddsNoRow(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	instanceRepo := postgres.NewInstanceRepo(appPool)
+	overrideRepo := postgres.NewAssigneeOverrideRepo(appPool)
+	ctx := context.Background()
+
+	tenantID := uuid.New()
+	inst := newInstance(tenantID, time.Now().UTC())
+	require.NoError(t, instanceRepo.Create(ctx, inst))
+
+	newOverride := func() *domain.AssigneeOverride {
+		return &domain.AssigneeOverride{
+			ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, NodeKey: "finance/review",
+			PreviousUserID: uuid.New(), NewUserID: uuid.New(), Reason: "on leave", ActorUserID: uuid.New(),
+		}
+	}
+	first := newOverride()
+	require.NoError(t, overrideRepo.Create(ctx, first))
+
+	t.Run("a retry with the same id adds no row and returns the stored one", func(t *testing.T) {
+		retry := newOverride()
+		retry.ID = first.ID
+		retry.Reason = "retry wording"
+		require.NoError(t, overrideRepo.Create(ctx, retry))
+
+		assert.Equal(t, first.NewUserID, retry.NewUserID, "the caller gets the stored row, not the retry's values")
+		assert.Equal(t, "on leave", retry.Reason)
+		assert.True(t, first.CreatedAt.Equal(retry.CreatedAt))
+
+		overrides, err := overrideRepo.ListByInstance(ctx, tenantID, inst.ID)
+		require.NoError(t, err)
+		assert.Len(t, overrides, 1)
+	})
+
+	t.Run("a different id still adds a row", func(t *testing.T) {
+		require.NoError(t, overrideRepo.Create(ctx, newOverride()))
+		overrides, err := overrideRepo.ListByInstance(ctx, tenantID, inst.ID)
+		require.NoError(t, err)
+		assert.Len(t, overrides, 2)
+	})
+}

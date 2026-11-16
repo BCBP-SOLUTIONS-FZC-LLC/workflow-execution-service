@@ -266,7 +266,7 @@ func TestInstanceService_StartRetry(t *testing.T) {
 		assert.Empty(t, instances.byID)
 	})
 
-	t.Run("a stored context that cannot be read is not the same start", func(t *testing.T) {
+	t.Run("a stored context that cannot be read fails the start, it is not a duplicate", func(t *testing.T) {
 		svc, instances, _, _, _, _, definitions, _ := newInstanceServiceHarness()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
 		_, err := svc.Start(context.Background(), input(caller, versionID))
@@ -275,7 +275,8 @@ func TestInstanceService_StartRetry(t *testing.T) {
 			inst.ContextJSON = []byte(`{`)
 		}
 		_, err = svc.Start(context.Background(), input(caller, versionID))
-		assert.ErrorIs(t, err, port.ErrDuplicateBusinessKey)
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, port.ErrDuplicateBusinessKey)
 	})
 
 	t.Run("a close of an instance terminated while starting names the run", func(t *testing.T) {

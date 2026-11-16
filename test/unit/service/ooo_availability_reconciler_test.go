@@ -134,7 +134,7 @@ func TestOOOAvailabilityReconciler_Apply(t *testing.T) {
 		assert.NotEmpty(t, log.warnCalls)
 	})
 
-	t.Run("a signal failure is logged, not returned", func(t *testing.T) {
+	t.Run("a signal failure fails the event so it is redelivered", func(t *testing.T) {
 		svc, instances, tasks, assignments, temporal := newOOOAvailabilityHarness()
 		log := &fakeLogger{}
 		svc.Log = log
@@ -147,8 +147,8 @@ func TestOOOAvailabilityReconciler_Apply(t *testing.T) {
 		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
 
 		err := svc.Apply(context.Background(), port.UserAvailabilityInput{TenantID: tenantID, UserID: userID, Status: "ooo"})
-		require.NoError(t, err)
-		assert.NotEmpty(t, log.warnCalls)
+		require.ErrorIs(t, err, assert.AnError)
+		assert.Len(t, temporal.signals, 1)
 	})
 
 	t.Run("ListActiveByUser error propagates", func(t *testing.T) {

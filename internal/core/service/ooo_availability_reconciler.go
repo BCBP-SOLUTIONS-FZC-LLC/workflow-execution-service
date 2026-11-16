@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 
@@ -53,17 +55,28 @@ func (s *OOOAvailabilityReconciler) record(ctx context.Context, in port.UserAvai
 	return s.Availability.Record(ctx, in.TenantID, in.UserID, in.Status, in.ChangedAt)
 }
 
+// signalActiveInstances tells every instance the user holds work on. It
+// attempts all of them and returns the joined failures, so the event fails
+// before the recency value moves and the consumer redelivers it (execution LLD
+// §6.3). A task, instance or workflow that no longer exists is skipped: a
+// repeated signal to an instance already in the target state is dropped by the
+// workflow.
 func (s *OOOAvailabilityReconciler) signalActiveInstances(ctx context.Context, tenantID, userID uuid.UUID, signalName string) error {
 	assignments, err := s.Assignments.ListActiveByUser(ctx, tenantID, userID)
 	if err != nil {
 		return err
 	}
 
+	var failures []error
 	seen := make(map[uuid.UUID]struct{})
 	for _, a := range assignments {
 		task, err := s.Tasks.GetByID(ctx, tenantID, a.TaskID)
+		if errors.Is(err, domain.ErrNotFound) {
+			s.logger().Warn("ooo availability: skipping assignment whose task no longer exists", map[string]any{"assignment_id": a.ID})
+			continue
+		}
 		if err != nil {
-			s.logger().Warn("ooo availability: skipping assignment with unreadable task", map[string]any{"assignment_id": a.ID, "error": err.Error()})
+			failures = append(failures, fmt.Errorf("ooo availability: read task of assignment %s: %w", a.ID, err))
 			continue
 		}
 		if _, ok := seen[task.WorkflowInstanceID]; ok {
@@ -72,15 +85,24 @@ func (s *OOOAvailabilityReconciler) signalActiveInstances(ctx context.Context, t
 		seen[task.WorkflowInstanceID] = struct{}{}
 
 		inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
-		if err != nil {
-			s.logger().Warn("ooo availability: skipping unreadable instance", map[string]any{"instance_id": task.WorkflowInstanceID, "error": err.Error()})
+		if errors.Is(err, domain.ErrNotFound) {
+			s.logger().Warn("ooo availability: skipping instance that no longer exists", map[string]any{"instance_id": task.WorkflowInstanceID})
 			continue
 		}
-		if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, signalName, adminSignalWire{
+		if err != nil {
+			failures = append(failures, fmt.Errorf("ooo availability: read instance %s: %w", task.WorkflowInstanceID, err))
+			continue
+		}
+		err = s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, signalName, adminSignalWire{
 			Initiator: domain.InitiatorOOO, RecordVersion: inst.RecordVersion,
-		}); err != nil {
-			s.logger().Warn("ooo availability: failed to signal instance", map[string]any{"instance_id": inst.ID, "signal": signalName, "error": err.Error()})
+		})
+		if errors.Is(err, port.ErrWorkflowNotFound) {
+			s.logger().Info("ooo availability: workflow no longer exists", map[string]any{"instance_id": inst.ID, "signal": signalName})
+			continue
+		}
+		if err != nil {
+			failures = append(failures, fmt.Errorf("ooo availability: signal %s to instance %s: %w", signalName, inst.ID, err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }

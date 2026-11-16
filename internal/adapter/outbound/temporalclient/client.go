@@ -74,12 +74,13 @@ func retryable(err error) bool {
 	}
 	var (
 		unavailable *serviceerror.Unavailable
+		nsDown      *serviceerror.NamespaceUnavailable
 		deadline    *serviceerror.DeadlineExceeded
 		exhausted   *serviceerror.ResourceExhausted
 		aborted     *serviceerror.Aborted
 		internal    *serviceerror.Internal
 	)
-	return errors.As(err, &unavailable) || errors.As(err, &deadline) || errors.As(err, &exhausted) ||
+	return errors.As(err, &unavailable) || errors.As(err, &nsDown) || errors.As(err, &deadline) || errors.As(err, &exhausted) ||
 		errors.As(err, &aborted) || errors.As(err, &internal)
 }
 
@@ -157,7 +158,7 @@ func (c *Client) TerminateWorkflow(ctx context.Context, temporalWorkflowID, runI
 	err := c.sdk.TerminateWorkflow(ctx, temporalWorkflowID, runID, reason)
 	var notFound *serviceerror.NotFound
 	if err != nil && !errors.As(err, &notFound) {
-		return fmt.Errorf("terminate workflow: %w", err)
+		return clusterFailure("terminate workflow", err)
 	}
 	return nil
 }

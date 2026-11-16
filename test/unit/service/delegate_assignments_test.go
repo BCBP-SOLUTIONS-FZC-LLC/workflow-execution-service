@@ -134,7 +134,7 @@ func csaNewClientHarness() *csaClientHarness {
 		assignments: csaWrapAssignments(newFakeAssignmentRepo()),
 		temporal:    &fakeTemporalClient{},
 	}
-	h.svc = &service.WorkflowClient{Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments, Temporal: h.temporal}
+	h.svc = &service.WorkflowClient{Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments, Transactor: fakeTransactor{}, Temporal: h.temporal}
 	return h
 }
 

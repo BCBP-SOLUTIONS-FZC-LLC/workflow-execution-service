@@ -177,15 +177,15 @@ func TestDelegationReconciler_Reroute_PlanReadsPerEvent(t *testing.T) {
 		assert.Equal(t, 1.0, hits)
 	})
 
-	t.Run("a department scope builds a second plan cache, so the version is read twice", func(t *testing.T) {
+	t.Run("a department scope shares one plan cache between the scope and eligibility checks, so the version is read once", func(t *testing.T) {
 		h, iamDeptID := setup(t)
 
 		misses, hits := run(t, h, "department", &iamDeptID)
 
-		assert.Equal(t, []csaIDCall{{h.tenantID, h.versionID}, {h.tenantID, h.versionID}}, h.definitions.reads,
-			"the scope check and the eligibility check each read the plan")
-		assert.Equal(t, 2.0, misses)
-		assert.Equal(t, 2.0, hits, "each cache answers its second task from memory")
+		assert.Equal(t, []csaIDCall{{h.tenantID, h.versionID}}, h.definitions.reads,
+			"the read made before the scope is matched serves the scope and the eligibility checks")
+		assert.Equal(t, 1.0, misses)
+		assert.Equal(t, 4.0, hits, "two tasks in the scope check and two in the eligibility check are answered from memory")
 	})
 }
 
