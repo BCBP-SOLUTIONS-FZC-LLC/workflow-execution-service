@@ -210,7 +210,7 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, err
 	}
 	taskService := &service.TaskService{
-		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides,
+		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides, Transactor: transactor, Signals: outboxRepo,
 		Temporal: temporal, Eligibility: eligibility, Definitions: definitions, Cache: cache, Log: log,
 	}
 	connectorTaskService := &service.ConnectorTaskService{

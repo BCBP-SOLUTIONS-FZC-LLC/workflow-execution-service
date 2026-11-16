@@ -124,10 +124,23 @@ func readScope(c *gin.Context, callerUserID uuid.UUID) port.ReadScope {
 	}
 }
 
+var knownTaskStatuses = map[port.TaskStatus]bool{
+	port.TaskStatusReady:      true,
+	port.TaskStatusInProgress: true,
+	port.TaskStatusCompleted:  true,
+	port.TaskStatusDeferred:   true,
+	port.TaskStatusFailed:     true,
+	port.TaskStatusSuperseded: true,
+}
+
 func parseTaskFilter(c *gin.Context) (port.TaskFilter, bool) {
 	var filter port.TaskFilter
 	if v := c.Query("status"); v != "" {
 		s := port.TaskStatus(v)
+		if !knownTaskStatuses[s] {
+			writeInvalidParam(c, "status", "invalid status query parameter")
+			return filter, false
+		}
 		filter.Status = &s
 	}
 	if v := c.Query("instance_id"); v != "" {
@@ -262,6 +275,10 @@ func (h *Handler) CompleteTask(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
+	if len(req.ResultJSON) > 0 && !isJSONObject(req.ResultJSON) {
+		writeInvalidParam(c, "result_json", "result_json must be a JSON object")
+		return
+	}
 
 	task, err := h.tasks.Complete(c.Request.Context(), tenantID, taskID, userID, req.ResultJSON, req.RecordVersion)
 	if err != nil {
@@ -270,6 +287,10 @@ func (h *Handler) CompleteTask(c *gin.Context) {
 	}
 	observability.ObserveHistogramVec(observability.TaskSignalDurationSeconds, time.Since(start).Seconds(), "complete")
 	c.JSON(http.StatusAccepted, toTaskResp(task))
+}
+
+func isJSONObject(raw json.RawMessage) bool {
+	return len(raw) > 0 && raw[0] == '{'
 }
 
 type deferReq struct {

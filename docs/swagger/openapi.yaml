@@ -118,7 +118,8 @@ components:
       description: >
         Optional client-supplied key for safe retry of this request. A replay with the same
         key and an identical request body returns the original cached response. A replay with
-        the same key and a different body returns 409 IDEMPOTENCY_KEY_REPLAY.
+        the same key and a different body returns 409 IDEMPOTENCY_KEY_REPLAY. A key belongs to the
+        calling user within the tenant: another user sending the same key is a separate request.
     InstanceIdPath:
       name: id
       in: path
@@ -565,6 +566,10 @@ components:
         previous_user_id:
           type: string
           format: uuid
+          description: >
+            The user the node was taken from (the lead on a multi-assignee task). The all-zero
+            UUID when no one is replaced: a task with no active assignee, or a multi-assignee
+            task with no lead yet, where the new user is added beside the current assignees.
         new_user_id:
           type: string
           format: uuid
@@ -576,6 +581,10 @@ components:
           format: uuid
         record_version:
           type: integer
+          description: >
+            The task's record_version once the override is stored (the request's version plus
+            one). The workflow bumps it again when it applies the move, so read the task before
+            the next action on it.
 
     ActiveUserTask:
       type: object
@@ -1017,6 +1026,14 @@ paths:
                     detail: "an active instance for business_key 'tender-abc-001' already exists"
                     instance: "/api/v1/instances"
                     code: "DUPLICATE_BUSINESS_KEY"
+                TenantNotActive:
+                  value:
+                    type: "https://errors.bcbp.io/execution/tenant-not-active"
+                    title: "Tenant Not Active"
+                    status: 409
+                    detail: "the tenant's status does not allow starting an instance"
+                    instance: "/api/v1/instances"
+                    code: "TENANT_NOT_ACTIVE"
                 VersionNotPublished:
                   value:
                     type: "https://errors.bcbp.io/execution/version-not-published"
@@ -1971,6 +1988,11 @@ paths:
         Admin override: replaces the default/current assignee for the given BPMN node with
         new_user_id, independent of the compiled plan's default assignment. Applies only to
         the node's current or future assignment; does not affect already-completed assignments.
+        A task with no active assignee (for example after its only assignee was removed) is
+        accepted and given to new_user_id. The new user's eligibility is checked once, against
+        the compiled plan, before anything is stored. The task's record_version is bumped in the
+        same transaction as the override record, so of two admins overriding the same version only
+        the first succeeds.
         Returns 400 OVERRIDE_NO_OP if new_user_id is already the effective assignee for this node.
       security:
         - GatewayTenantContext: []
@@ -2055,8 +2077,10 @@ paths:
         "409":
           description: >
             State conflict. See code field: NODE_ALREADY_RESOLVED — the node has already
-            completed or advanced past; RECORD_VERSION_CONFLICT — a concurrent change raced
-            this request; IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
+            completed or advanced past; INVALID_INSTANCE_STATE — the instance is not RUNNING or
+            DEGRADED; RECORD_VERSION_CONFLICT — record_version is stale, including the losing
+            admin of two concurrent overrides; IDEMPOTENCY_KEY_REPLAY — same key reused with a
+            different request body.
           content:
             application/problem+json:
               schema:
@@ -2087,7 +2111,9 @@ paths:
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
                     code: "IDEMPOTENCY_KEY_REPLAY"
         "422":
-          description: The specified new_user_id is not an eligible assignee for this node.
+          description: >
+            The specified new_user_id is not an eligible assignee for this node, or the node has
+            no stage in the compiled plan.
           content:
             application/problem+json:
               schema:
@@ -2302,7 +2328,8 @@ paths:
         Sets claimed_at on the assignment row and increments task.record_version.
         Sends a task-claim signal to the Temporal workflow.
         Returns 403 if the user has no active assignment.
-        Returns 409 TASK_ALREADY_CLAIMED if the user's assignment is already claimed.
+        Returns 409 TASK_ALREADY_CLAIMED if another assignee already holds the lead; the lead
+        repeating its own claim at the current record_version gets the task back.
         Returns 409 RECORD_VERSION_CONFLICT if the supplied record_version is stale.
         Returns 409 CLAIM_NOT_APPLICABLE if the task's assignee_mode is single — claim exists
         only to establish a lead among multiple assignees (assignee_mode=all).
@@ -2349,7 +2376,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProblemDetails"
               example:
-                type: "https://errors.bcbp.io/execution/assignee-not-assigned"
+                type: "https://errors.bcbp.io/execution/not-assignee"
                 title: "Not Assigned"
                 status: 403
                 detail: "caller does not have an active assignment for this task"
@@ -2360,7 +2387,7 @@ paths:
         "409":
           description: >
             State conflict. See code field:
-            TASK_ALREADY_CLAIMED — the caller's assignment is already claimed;
+            TASK_ALREADY_CLAIMED — another assignee already holds the lead;
             RECORD_VERSION_CONFLICT — the supplied version is stale (another claim beat you);
             INVALID_TASK_STATE — the task is not in READY or IN_PROGRESS status;
             CLAIM_NOT_APPLICABLE — the task's assignee_mode is single, so claim does not apply.
@@ -2486,7 +2513,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProblemDetails"
               example:
-                type: "https://errors.bcbp.io/execution/assignee-not-assigned"
+                type: "https://errors.bcbp.io/execution/not-assignee"
                 title: "Not Assigned"
                 status: 403
                 detail: "caller does not have an active claimed assignment for this task"
@@ -2598,7 +2625,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProblemDetails"
               example:
-                type: "https://errors.bcbp.io/execution/assignee-not-assigned"
+                type: "https://errors.bcbp.io/execution/not-assignee"
                 title: "Not Assigned"
                 status: 403
                 detail: "caller does not have an active claimed assignment for this task"
@@ -2658,6 +2685,8 @@ paths:
         node-override (§5.4): 422 ASSIGNEE_INELIGIBLE when the Org & Membership read answers
         ineligible or the node has no stage in the compiled plan, 503 UPSTREAM_UNAVAILABLE when
         the read fails.
+        A task with no active assignee (for example after its only assignee was removed) is
+        accepted and given to the new user; the reassign then names no previous user.
         Returns 400 OVERRIDE_NO_OP if new_assignee_user_id is already the current assignee.
       security:
         - GatewayTenantContext: []
@@ -2737,6 +2766,7 @@ paths:
           description: >
             State conflict. See code field:
             INVALID_TASK_STATE — task is already COMPLETED, DEFERRED, or FAILED;
+            INVALID_INSTANCE_STATE — the instance is not RUNNING or DEGRADED;
             RECORD_VERSION_CONFLICT — record_version is stale;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:

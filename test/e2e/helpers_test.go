@@ -163,7 +163,7 @@ func buildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, definitio
 		Queues: queues, Validator: validator,
 	}
 	taskService := &service.TaskService{
-		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides,
+		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides, Transactor: transactor, Signals: outboxRepo,
 		Temporal: temporal, Eligibility: eligibility, Definitions: definitions,
 	}
 	tenantLifecycleReconciler := &service.TenantLifecycleReconciler{

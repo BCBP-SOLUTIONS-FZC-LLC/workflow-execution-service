@@ -46,6 +46,7 @@ func toPortTask(task *domain.Task) *port.Task {
 		DepartmentID:       task.DepartmentID,
 		Status:             port.TaskStatus(task.Status),
 		RecordVersion:      task.RecordVersion,
+		TaskType:           taskTypeOf(task),
 		AssigneeMode:       task.AssigneeMode,
 		ConnectorType:      task.ConnectorType,
 		ExtrasJSON:         task.ExtrasJSON,
@@ -199,9 +200,29 @@ func toWorkflowEvent(rec *domain.OutboxEventRecord, tenantID, instanceID uuid.UU
 		EventType:          eventType,
 		ActorUserID:        actorUserID,
 		NodeKey:            nodeKey,
-		PayloadJSON:        envelope.Data,
+		PayloadJSON:        redactedPayload(eventType, envelope.Data),
 		OccurredAt:         rec.CreatedAt,
 	}, nil
+}
+
+var connectorOnlyTaskCreatedFields = []string{"resolved_inputs", "output_mapping"}
+
+func redactedPayload(eventType port.WorkflowEventType, data json.RawMessage) json.RawMessage {
+	if eventType != port.EventTaskCreated {
+		return data
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return data
+	}
+	for _, name := range connectorOnlyTaskCreatedFields {
+		delete(fields, name)
+	}
+	redacted, err := json.Marshal(fields)
+	if err != nil {
+		return data
+	}
+	return redacted
 }
 
 func wrapInstanceErr(err error) error {

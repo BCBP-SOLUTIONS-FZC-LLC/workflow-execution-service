@@ -15,12 +15,16 @@ import (
 type tskfixOverrideWorld struct {
 	in        port.AssigneeOverrideInput
 	overrides *fakeAssigneeOverrideRepo
+	outbox    *fakeOutbox
 	run       func(port.AssigneeOverrideInput) (*port.AssigneeOverride, error)
 }
 
 func newTskfixOverrideWorld() *tskfixOverrideWorld {
-	svc, _, tasks, assignments, overrides, _ := newTaskServiceHarness()
+	svc, instances, tasks, assignments, overrides, _ := newTaskServiceHarness()
+	outbox := &fakeOutbox{}
+	svc.Signals = outbox
 	tenantID, instanceID := uuid.New(), uuid.New()
+	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 	task := newReadyTask(tenantID, instanceID)
 	task.RecordVersion = 4
 	tasks.byID[task.ID] = task
@@ -31,38 +35,23 @@ func newTskfixOverrideWorld() *tskfixOverrideWorld {
 			NewUserID: uuid.New(), Reason: "on leave", ActorUserID: uuid.New(), RecordVersion: 4,
 		},
 		overrides: overrides,
+		outbox:    outbox,
 		run: func(in port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
 			return svc.OverrideAssignee(context.Background(), in)
 		},
 	}
 }
 
-func TestTaskService_OverrideAssignee_RetryUsesTheSameOverrideID(t *testing.T) {
+func TestTaskService_OverrideAssignee_RetryOnTheOldVersionAfterTheCommit_AnswersConflictAndStoresNoSecondRow(t *testing.T) {
 	w := newTskfixOverrideWorld()
 
-	first, err := w.run(w.in)
+	_, err := w.run(w.in)
 	require.NoError(t, err)
-	second, err := w.run(w.in)
-	require.NoError(t, err)
+	_, err = w.run(w.in)
 
-	require.Len(t, w.overrides.created, 2)
-	assert.Equal(t, w.overrides.created[0].ID, w.overrides.created[1].ID, "a retried override must carry the id the insert ignores")
-	assert.Equal(t, first.ID, second.ID)
-	assert.NotEqual(t, uuid.Nil, first.ID)
-}
-
-func TestTaskService_OverrideAssignee_IDIgnoresReasonAndActor(t *testing.T) {
-	w := newTskfixOverrideWorld()
-	first, err := w.run(w.in)
-	require.NoError(t, err)
-
-	retry := w.in
-	retry.Reason = "different wording"
-	retry.ActorUserID = uuid.New()
-	second, err := w.run(retry)
-	require.NoError(t, err)
-
-	assert.Equal(t, first.ID, second.ID)
+	require.ErrorIs(t, err, port.ErrRecordVersionConflict)
+	assert.Len(t, w.overrides.created, 1, "the retry writes no second audit row")
+	assert.Len(t, w.outbox.signals, 1, "the move was queued with the first call, so the retry needs no second signal")
 }
 
 func TestTaskService_OverrideAssignee_DistinctActionsGetDistinctIDs(t *testing.T) {
@@ -76,7 +65,8 @@ func TestTaskService_OverrideAssignee_DistinctActionsGetDistinctIDs(t *testing.T
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
-			svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+			svc, instances, tasks, assignments, _, _ := newTaskServiceHarness()
+			instances.byID[base.in.InstanceID] = &domain.Instance{ID: base.in.InstanceID, TenantID: base.in.TenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 			task := newReadyTask(base.in.TenantID, base.in.InstanceID)
 			in := base.in
 			mutate(&in)

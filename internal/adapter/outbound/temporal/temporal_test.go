@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -292,6 +293,16 @@ func (r *fakeAssignmentRepo) ListActiveByUser(_ context.Context, _, userID uuid.
 		}
 	}
 	return out, nil
+}
+
+func (r *fakeAssignmentRepo) CountActiveByTasks(_ context.Context, _ uuid.UUID, taskIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	counts := map[uuid.UUID]int{}
+	for _, a := range r.byID {
+		if a.IsActive && slices.Contains(taskIDs, a.TaskID) {
+			counts[a.TaskID]++
+		}
+	}
+	return counts, nil
 }
 
 func (r *fakeAssignmentRepo) ListActiveByUserPaginated(_ context.Context, _, userID uuid.UUID, _ port.PageRequest) ([]port.ActiveUserTaskRow, *port.Cursor, error) {

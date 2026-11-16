@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -77,16 +78,23 @@ func WithIdempotency(cache port.CacheStore, ttl time.Duration, log port.Logger, 
 
 		rec := &bodyRecorder{ResponseWriter: c.Writer, buf: &bytes.Buffer{}}
 		c.Writer = rec
+		stored := false
+		defer func() {
+			if !stored {
+				releaseClaim(c, cache, cacheKey, log)
+			}
+		}()
 		h(c)
-		storeResult(c, cache, cacheKey, incomingHash, ttl, rec, log)
+		stored = storeResult(c, cache, cacheKey, incomingHash, ttl, rec, log)
 	}
 }
 
 func idempotencyScopePrefix(c *gin.Context) string {
-	if rc, ok := gincommon.RequestContext(c); ok && rc.TenantID != "" {
-		return rc.TenantID + ":"
+	rc, ok := gincommon.RequestContext(c)
+	if !ok || rc.TenantID == "" {
+		return ""
 	}
-	return ""
+	return rc.TenantID + ":" + rc.UserID + ":"
 }
 
 func idempotencyLogWarn(log port.Logger, msg string, fields map[string]any) {
@@ -129,15 +137,18 @@ func replayIfCached(c *gin.Context, cache port.CacheStore, cacheKey, incomingHas
 	return true
 }
 
-func storeResult(c *gin.Context, cache port.CacheStore, cacheKey, incomingHash string, ttl time.Duration, rec *bodyRecorder, log port.Logger) {
+func releaseClaim(c *gin.Context, cache port.CacheStore, cacheKey string, log port.Logger) {
+	if err := cache.Del(context.WithoutCancel(c.Request.Context()), cacheKey); err != nil {
+		idempotencyLogWarn(log, "idempotency: failed to release the claim of an attempt that stored no answer", map[string]any{
+			"cache_key": cacheKey, "error": err.Error(),
+		})
+	}
+}
+
+func storeResult(c *gin.Context, cache port.CacheStore, cacheKey, incomingHash string, ttl time.Duration, rec *bodyRecorder, log port.Logger) bool {
 	status := rec.Status()
 	if status < http.StatusOK || status >= http.StatusMultipleChoices {
-		if err := cache.Del(c.Request.Context(), cacheKey); err != nil {
-			idempotencyLogWarn(log, "idempotency: failed to release claim after a non-2xx response", map[string]any{
-				"cache_key": cacheKey, "error": err.Error(),
-			})
-		}
-		return
+		return false
 	}
 	entry := cachedResp{Status: status, Body: rec.buf.Bytes(), BodyHash: incomingHash}
 	b, _ := json.Marshal(entry)
@@ -145,5 +156,7 @@ func storeResult(c *gin.Context, cache port.CacheStore, cacheKey, incomingHash s
 		idempotencyLogWarn(log, "idempotency: cache set failed, response not cached for replay", map[string]any{
 			"cache_key": cacheKey, "error": err.Error(),
 		})
+		return false
 	}
+	return true
 }

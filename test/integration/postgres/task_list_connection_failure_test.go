@@ -23,7 +23,7 @@ func TestTaskList_ClosedPool_ReturnsTheFailureWithNoItems(t *testing.T) {
 	appPool := newAppRolePool(t, superPool, superDSN)
 	instanceRepo := postgres.NewInstanceRepo(appPool)
 	taskRepo := postgres.NewTaskRepo(appPool)
-	svc := &service.TaskService{Tasks: taskRepo}
+	svc := &service.TaskService{Tasks: taskRepo, Assignments: postgres.NewTaskAssignmentRepo(appPool)}
 	ctx := context.Background()
 
 	tenantID := uuid.New()

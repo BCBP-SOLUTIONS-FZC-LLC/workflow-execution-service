@@ -183,7 +183,7 @@ func bindJSON(c *gin.Context, req any) bool {
 }
 
 func bindInternalJSON(c *gin.Context, req any) bool {
-	return bindBody(c, req, func(c *gin.Context, obj any) error { return c.ShouldBindJSON(obj) })
+	return bindBody(c, req, bindInternalStrictJSON)
 }
 
 func bindBody(c *gin.Context, req any, bind func(*gin.Context, any) error) bool {

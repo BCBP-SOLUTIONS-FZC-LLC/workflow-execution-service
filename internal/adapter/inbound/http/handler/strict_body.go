@@ -26,7 +26,34 @@ func (e *unknownFieldsError) Error() string {
 	return "request body has fields this endpoint does not define: " + strings.Join(e.names, ", ")
 }
 
+type keyPolicy func(fields map[string]reflect.Type, key string) bool
+
+func unknownKey(fields map[string]reflect.Type, key string) bool {
+	_, ok := fields[key]
+	return !ok
+}
+
+func caseVariantKey(fields map[string]reflect.Type, key string) bool {
+	if _, ok := fields[key]; ok {
+		return false
+	}
+	for name := range fields {
+		if strings.EqualFold(name, key) {
+			return true
+		}
+	}
+	return false
+}
+
 func checkKnownFields(body []byte, obj any) error {
+	return checkFields(body, obj, unknownKey)
+}
+
+func checkFieldCase(body []byte, obj any) error {
+	return checkFields(body, obj, caseVariantKey)
+}
+
+func checkFields(body []byte, obj any, reject keyPolicy) error {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
 	var doc any
@@ -34,7 +61,7 @@ func checkKnownFields(body []byte, obj any) error {
 		return fmt.Errorf("decode request body: %w", err)
 	}
 	var names []string
-	collectUnknown(doc, reflect.TypeOf(obj), "", &names)
+	collectUnknown(doc, reflect.TypeOf(obj), "", reject, &names)
 	if len(names) == 0 {
 		return nil
 	}
@@ -45,7 +72,7 @@ func checkKnownFields(body []byte, obj any) error {
 	return &unknownFieldsError{names: names}
 }
 
-func collectUnknown(doc any, t reflect.Type, path string, names *[]string) {
+func collectUnknown(doc any, t reflect.Type, path string, reject keyPolicy, names *[]string) {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -54,21 +81,21 @@ func collectUnknown(doc any, t reflect.Type, path string, names *[]string) {
 	}
 	switch value := doc.(type) {
 	case map[string]any:
-		collectObject(value, t, path, names)
+		collectObject(value, t, path, reject, names)
 	case []any:
 		if t.Kind() != reflect.Slice && t.Kind() != reflect.Array {
 			return
 		}
 		for i, item := range value {
-			collectUnknown(item, t.Elem(), fmt.Sprintf("%s[%d]", path, i), names)
+			collectUnknown(item, t.Elem(), fmt.Sprintf("%s[%d]", path, i), reject, names)
 		}
 	}
 }
 
-func collectObject(obj map[string]any, t reflect.Type, path string, names *[]string) {
+func collectObject(obj map[string]any, t reflect.Type, path string, reject keyPolicy, names *[]string) {
 	if t.Kind() == reflect.Map {
 		for key, item := range obj {
-			collectUnknown(item, t.Elem(), joinPath(path, key), names)
+			collectUnknown(item, t.Elem(), joinPath(path, key), reject, names)
 		}
 		return
 	}
@@ -79,10 +106,12 @@ func collectObject(obj map[string]any, t reflect.Type, path string, names *[]str
 	for key, item := range obj {
 		field, ok := fields[key]
 		if !ok {
-			*names = append(*names, truncateFieldName(joinPath(path, key)))
+			if reject(fields, key) {
+				*names = append(*names, truncateFieldName(joinPath(path, key)))
+			}
 			continue
 		}
-		collectUnknown(item, field, joinPath(path, key), names)
+		collectUnknown(item, field, joinPath(path, key), reject, names)
 	}
 }
 

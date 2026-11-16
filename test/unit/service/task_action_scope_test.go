@@ -229,14 +229,14 @@ func TestTaskService_Defer_TheTaskReadAfterTheUpdate(t *testing.T) {
 		assert.Equal(t, cseLookup{Tenant: w.tenant, ID: w.task.ID}, w.tasks.getCalls[1])
 	})
 
-	t.Run("any other read failure is returned as it is", func(t *testing.T) {
+	t.Run("any other read failure is retried and does not undo the applied defer", func(t *testing.T) {
 		w := cseNewTaskWorld()
 
 		err := deferred(w, fmt.Errorf("read task: %w", assert.AnError))
 
-		require.ErrorIs(t, err, assert.AnError)
-		assert.NotErrorIs(t, err, port.ErrTaskNotFound)
-		assert.Len(t, w.temporal.updates, 1)
+		require.NoError(t, err)
+		assert.Len(t, w.temporal.updates, 1, "the defer is applied once")
+		assert.Len(t, w.tasks.getCalls, 3, "the precheck read, the failed read-back and one retry")
 	})
 }
 

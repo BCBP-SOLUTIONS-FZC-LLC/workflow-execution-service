@@ -10,6 +10,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- Error answers: a start refused for a suspended tenant carries its own problem type `tenant-not-active` and title "Tenant Not Active" (it had the internal-error type and an empty title), and `NOT_ASSIGNEE`'s problem type is `not-assignee` (it was `assignee-not-assigned`).
+- Idempotency: the key now includes the calling user, so another user of the same tenant sending the same key no longer receives the first user's stored answer. An attempt that panics, or whose 2xx answer could not be stored, releases its claim, so a retry runs again (it used to get 409 `IDEMPOTENCY_KEY_REPLAY` for 24 hours).
+- Internal routes: a body or event envelope with a second JSON value after the first is refused with 400, and a key in the wrong case (`Tenant_ID`) is refused instead of being bound to `tenant_id`; unknown fields are still ignored.
+- Task list and completion:
+  - every task in the task list, `GET /tasks/:id`, the node lookup, the instance detail and the claim, complete, defer and reassign answers carries `task_type` (`serviceTask` for a connector task, otherwise `userTask`) and `assignee_count` (its active assignments); both used to be `""` and `0`;
+  - an unknown `status` filter answers 400 naming `status` (it answered 500);
+  - a `result_json` that is not an object answers 400 naming `result_json` (it was accepted and signalled as raw text).
+- Task reassign and node override:
+  - both answer 409 `INVALID_INSTANCE_STATE` on an instance that is not running or degraded (they used to succeed while the workflow dropped the change);
+  - both accept a task with no active assignee and give it to the new user, with no previous user in the signal (override used to answer 403 `NOT_ASSIGNEE`, and reassign sent the all-zero id);
+  - override checks eligibility once against the plan before storing anything, refuses a node missing from the plan with 422, and records the lead as the previous user;
+  - of two admins overriding the same version only the first succeeds, and the other gets 409 `RECORD_VERSION_CONFLICT` (both used to get 200);
+  - the override's workflow signal is queued in the same transaction as the override record and delivered by the signal relay, so a Temporal outage no longer loses the move after the record is stored (the caller used to get an error with the record kept and the move never applied).
+- Task claim and defer:
+  - the lead repeating its own claim gets the task back (`TASK_ALREADY_CLAIMED` now means another assignee holds the lead);
+  - a claim or defer that took effect answers success even when the read-back fails;
+  - every stale `record_version` refusal on instance and task actions now moves `workflow_execution_service_record_version_conflict_total`.
+- Instances:
+  - a new instance records `started_at` at creation (the 201 showed `0001-01-01T00:00:00Z`);
+  - the `started_after` list filter includes an instance started exactly at that time;
+  - a repeat of a start that already launched returns the existing instance even after the tenant is suspended, while a repeat of one whose workflow never launched is still refused 409 `TENANT_NOT_ACTIVE` for a suspended tenant;
+  - the activity log of a missing or other-tenant instance answers 404 `INSTANCE_NOT_FOUND` to everyone (admins got an empty 200, others 403), and no longer returns a connector task's `resolved_inputs` and `output_mapping`.
 - Delegation: reassigning or cancelling a delegate's work reads everything first, changes nothing when a read or write fails (it used to skip rows and answer 200 with a lower count), keeps one row when the delegate already holds the task, skips an assignment that ended meanwhile, and signals the workflow after the commit; a delegation start or end event whose task, instance or plan cannot be read is retried instead of acknowledged; a failed pause or resume signal on an out-of-office change is retried; a malformed eligibility answer no longer crashes the handler; starting a delegation resumes an instance paused only for the delegator's absence.
 - Tasks: two simultaneous completions of one task send one signal (the second gets 409 `RECORD_VERSION_CONFLICT`); retrying a node assignee override after a failed signal no longer records a second audit row.
 - Instances: a shared plan-cache entry that is not a compiled plan is refreshed instead of failing reads until it expires; a stale pause, resume or cancel on a finished instance answers 409 `INSTANCE_ALREADY_TERMINAL`; a repeat start whose stored context cannot be read fails with 500 and an Error log; a Temporal terminate failure a retry can cure answers 503, and an unavailable namespace counts as retryable.

@@ -16,7 +16,6 @@ import (
 type hreOverrideRecorder struct {
 	lookups   []string
 	overrides []port.AssigneeOverrideInput
-	signals   []hreSignalCall
 	eligible  []hreEligibilityCall
 }
 
@@ -27,46 +26,25 @@ type hreEligibilityCall struct {
 	level        string
 }
 
-type hreSignalCall struct {
-	tenantID       uuid.UUID
-	taskID         uuid.UUID
-	actorUserID    uuid.UUID
-	previousUserID uuid.UUID
-	newUserID      uuid.UUID
-	recordVersion  int64
-}
-
-var (
-	hreDepartmentID   = uuid.MustParse("66666666-6666-4666-8666-666666666666")
-	hrePreviousUserID = uuid.MustParse("77777777-7777-4777-8777-777777777777")
-)
-
-const hreRequiredLevel = "reviewer"
+var hrePreviousUserID = uuid.MustParse("77777777-7777-4777-8777-777777777777")
 
 // hreOverrideFake looks a task up per node key, records every later step and
 // answers an override with the reason it was given.
 func hreOverrideFake(t *testing.T, lookupErr error) (*fakeTaskService, *fakeEligibilityChecker, *hreOverrideRecorder) {
 	rec := &hreOverrideRecorder{}
 	fake := &fakeTaskService{
-		getByNode: func(_ context.Context, tenantID, instanceID uuid.UUID, nodeKey string) (*port.Task, error) {
-			assert.Equal(t, testTenantID, tenantID)
-			assert.Equal(t, testInstID, instanceID)
-			rec.lookups = append(rec.lookups, nodeKey)
+		overrideAssignee: func(_ context.Context, in port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
+			assert.Equal(t, testTenantID, in.TenantID)
+			assert.Equal(t, testInstID, in.InstanceID)
+			rec.lookups = append(rec.lookups, in.NodeKey)
 			if lookupErr != nil {
 				return nil, lookupErr
 			}
-			return &port.Task{ID: testTaskID, WorkflowInstanceID: instanceID, NodeKey: nodeKey, DepartmentID: hreDepartmentID, RequiredLevel: hreRequiredLevel, Status: port.TaskStatusReady, RecordVersion: 4}, nil
-		},
-		overrideAssignee: func(_ context.Context, in port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
 			rec.overrides = append(rec.overrides, in)
 			return &port.AssigneeOverride{
 				WorkflowInstanceID: in.InstanceID, NodeKey: in.NodeKey, PreviousUserID: hrePreviousUserID,
 				NewUserID: in.NewUserID, Reason: in.Reason, ActorUserID: in.ActorUserID, RecordVersion: in.RecordVersion + 1,
 			}, nil
-		},
-		signalReassign: func(_ context.Context, tenantID, taskID, actorUserID, previousUserID, newUserID uuid.UUID, recordVersion int64) error {
-			rec.signals = append(rec.signals, hreSignalCall{tenantID: tenantID, taskID: taskID, actorUserID: actorUserID, previousUserID: previousUserID, newUserID: newUserID, recordVersion: recordVersion})
-			return nil
 		},
 	}
 	elig := &fakeEligibilityChecker{check: func(_ context.Context, tenantID, newUserID, departmentID uuid.UUID, level string) (bool, error) {
@@ -100,9 +78,7 @@ func TestOverrideNodeAssignee_ReasonOfExactlyTheLimit_IsPassedAndEchoedInFull(t 
 				TenantID: testTenantID, InstanceID: testInstID, NodeKey: "review_finance",
 				NewUserID: newUser, Reason: tc.reason, ActorUserID: testUserID, RecordVersion: 4,
 			}, rec.overrides[0])
-			assert.Equal(t, []hreEligibilityCall{{tenantID: testTenantID, newUserID: newUser, departmentID: hreDepartmentID, level: hreRequiredLevel}}, rec.eligible)
-			assert.Equal(t, []hreSignalCall{{tenantID: testTenantID, taskID: testTaskID, actorUserID: testUserID, previousUserID: hrePreviousUserID, newUserID: newUser, recordVersion: 4}}, rec.signals,
-				"the signal carries the version checked at lookup, not the post-persist one")
+			assert.Empty(t, rec.eligible, "the service asks eligibility, once, before it stores anything")
 			var body struct {
 				Reason string `json:"reason"`
 			}
@@ -127,7 +103,6 @@ func TestOverrideNodeAssignee_NodeSegmentWithSQLMetacharacters_Returns404(t *tes
 	assert.Equal(t, []string{hostileKey}, rec.lookups, "the lookup receives the segment verbatim, as data")
 	assert.Empty(t, rec.eligible)
 	assert.Empty(t, rec.overrides, "nothing is changed for an unknown node")
-	assert.Empty(t, rec.signals)
 	hreAssertNoInternalText(t, w)
 }
 

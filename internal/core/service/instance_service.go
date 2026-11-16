@@ -64,15 +64,13 @@ func (s *InstanceService) readCompiledWorkflow(ctx context.Context, tenantID, ve
 }
 
 func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput) (*port.Instance, error) {
-	if s.Gate != nil {
-		if err := s.Gate.Allow(ctx, in.TenantID); err != nil {
-			return nil, err
-		}
-	}
 	if existing, err := s.matchingStart(ctx, in); err != nil {
 		return nil, err
 	} else if existing != nil {
 		return s.resumeStart(ctx, existing)
+	}
+	if err := s.allowStart(ctx, in.TenantID); err != nil {
+		return nil, err
 	}
 	compiled, err := s.readCompiledWorkflow(ctx, in.TenantID, in.WorkflowVersionID)
 	if errors.Is(err, port.ErrDefinitionNotFound) {
@@ -117,6 +115,7 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 
 	instanceID := uuid.New()
 	temporalWorkflowID := temporalWorkflowIDFor(in.TenantID, instanceID)
+	startedAt := time.Now().UTC()
 	inst := &domain.Instance{
 		ID:                 instanceID,
 		TenantID:           in.TenantID,
@@ -131,6 +130,7 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 		OverrideMap:        overrideMapJSON,
 		TaskQueue:          taskQueue,
 		StartedByUserID:    in.StartedByUserID,
+		StartedAt:          &startedAt,
 	}
 
 	txErr := s.Transactor.RunInTx(withTenantGUC(ctx, in.TenantID), func(ctx context.Context) error {
@@ -207,7 +207,17 @@ func (s *InstanceService) resumeStart(ctx context.Context, existing *domain.Inst
 	if existing.TemporalRunID != "" {
 		return toPortInstance(existing), nil
 	}
+	if err := s.allowStart(ctx, existing.TenantID); err != nil {
+		return nil, err
+	}
 	return s.launchWorkflow(ctx, existing)
+}
+
+func (s *InstanceService) allowStart(ctx context.Context, tenantID uuid.UUID) error {
+	if s.Gate == nil {
+		return nil
+	}
+	return s.Gate.Allow(ctx, tenantID)
 }
 
 func sameContext(stored, requested []byte) bool {

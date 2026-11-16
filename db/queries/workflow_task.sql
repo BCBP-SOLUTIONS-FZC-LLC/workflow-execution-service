@@ -85,3 +85,10 @@ UPDATE workflow_task
 SET updated_at = now(), record_version = record_version + 1
 WHERE id = $1 AND record_version = $2
 RETURNING *;
+
+-- name: CountActiveAssignmentsByTasks :many
+-- One row per task that has an active assignment; backs the assignee_count of task reads.
+SELECT task_id, count(*)::int AS assignee_count
+FROM workflow_task_assignment
+WHERE tenant_id = $1 AND task_id = ANY(sqlc.arg('task_ids')::uuid[]) AND is_active
+GROUP BY task_id;

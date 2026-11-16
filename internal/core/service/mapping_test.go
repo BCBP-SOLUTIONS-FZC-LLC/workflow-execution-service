@@ -58,7 +58,8 @@ func TestToPortTask(t *testing.T) {
 	assert.Equal(t, port.TaskStatus(task.Status), got.Status)
 	assert.Equal(t, &connectorType, got.ConnectorType)
 	assert.Equal(t, task.ExtrasJSON, got.ExtrasJSON)
-	assert.Empty(t, got.TaskType, "TaskType has no real source yet -- must stay zero-valued, not fabricated")
+	assert.Equal(t, "serviceTask", got.TaskType, "a task with a connector type is a service task")
+	assert.Equal(t, "userTask", toPortTask(&domain.Task{}).TaskType, "a task without one is a user task")
 	assert.Empty(t, got.RequiredLevel, "RequiredLevel has no real source yet -- must stay zero-valued, not fabricated")
 }
 
