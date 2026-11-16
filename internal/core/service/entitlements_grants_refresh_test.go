@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"math/rand/v2"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -736,9 +737,12 @@ func TestEntitlementsGrants_NothingIsLoggedWhileTheCacheLockIsHeld(t *testing.T)
 	h := newHarness(t, reader)
 	var locked atomic.Bool
 	h.log.onLog = func() {
-		if h.g.mu.TryLock() {
-			h.g.mu.Unlock()
-			return
+		for range 10000 {
+			if h.g.mu.TryLock() {
+				h.g.mu.Unlock()
+				return
+			}
+			runtime.Gosched()
 		}
 		locked.Store(true)
 	}
