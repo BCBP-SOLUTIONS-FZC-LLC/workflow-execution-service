@@ -94,7 +94,7 @@ CREATE TABLE assignee_overrides (
     tenant_id             UUID        NOT NULL,
     workflow_instance_id  UUID        NOT NULL REFERENCES workflow_instance(id) ON DELETE RESTRICT,
     node_key              TEXT        NOT NULL,
-    previous_user_id      UUID        NOT NULL,
+    previous_user_id      UUID,
     new_user_id           UUID        NOT NULL,
     reason                TEXT,
     actor_user_id         UUID        NOT NULL,

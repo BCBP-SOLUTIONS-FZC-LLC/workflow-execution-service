@@ -77,7 +77,7 @@ func handOver(ctx context.Context, repo port.TaskAssignmentRepository, tenantID 
 func enqueueTaskReassigned(ctx context.Context, outbox port.OutboxRepository, validator port.EventValidator, inst *domain.Instance, task *domain.Task, oldUserID, newUserID uuid.UUID, delegationID *uuid.UUID) error {
 	core := domain.CommonCore{WorkflowInstanceID: inst.ID, SubjectID: inst.SubjectID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}
 	taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{newUserID}}
-	payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, oldUserID, newUserID, domain.ReassignInitiatorDelegation, delegationID)
+	payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, &oldUserID, newUserID, domain.ReassignInitiatorDelegation, delegationID)
 	subject := "instances/" + inst.ID.String() + "/tasks/" + task.ID.String()
 	envelope, err := BuildEnvelope(ctx, validator, domain.EventWorkflowTaskReassigned, inst.TenantID.String(), subject, "", payload)
 	if err != nil {

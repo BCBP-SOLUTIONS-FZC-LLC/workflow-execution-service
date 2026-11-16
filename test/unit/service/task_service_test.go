@@ -958,7 +958,8 @@ func TestTaskService_OverrideAssignee(t *testing.T) {
 			NewUserID: newUserID, Reason: "on leave", ActorUserID: uuid.New(), RecordVersion: 4,
 		})
 		require.NoError(t, err)
-		assert.Equal(t, previousUserID, got.PreviousUserID)
+		require.NotNil(t, got.PreviousUserID)
+		assert.Equal(t, previousUserID, *got.PreviousUserID)
 		assert.Equal(t, newUserID, got.NewUserID)
 		assert.Equal(t, int64(5), got.RecordVersion)
 		assert.Equal(t, int64(5), task.RecordVersion)

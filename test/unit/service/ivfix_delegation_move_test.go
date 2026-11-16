@@ -129,7 +129,8 @@ func TestDelegationReassign_RecordsOneReassignedEventPerMovedRowInTheMoveTransac
 	for _, held := range []dlgfixHeld{first, second} {
 		p := byTask[held.task.ID]
 		assert.Equal(t, held.instance.ID, p.WorkflowInstanceID)
-		assert.Equal(t, h.oldDelegate, p.OldUserID)
+		require.NotNil(t, p.OldUserID)
+		assert.Equal(t, h.oldDelegate, *p.OldUserID)
 		assert.Equal(t, h.newDelegate, p.NewUserID)
 		assert.Equal(t, []uuid.UUID{h.newDelegate}, p.AssigneeUserIDs)
 		assert.Equal(t, domain.ReassignInitiatorDelegation, p.Initiator)

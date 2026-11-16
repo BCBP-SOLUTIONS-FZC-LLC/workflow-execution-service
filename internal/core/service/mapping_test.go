@@ -85,7 +85,7 @@ func TestToPortActiveUserTask(t *testing.T) {
 func TestToPortAssigneeOverride(t *testing.T) {
 	o := &domain.AssigneeOverride{
 		ID: uuid.New(), WorkflowInstanceID: uuid.New(), NodeKey: "finance/review",
-		PreviousUserID: uuid.New(), NewUserID: uuid.New(), Reason: "on leave", ActorUserID: uuid.New(),
+		PreviousUserID: domain.OptionalUserID(uuid.New()), NewUserID: uuid.New(), Reason: "on leave", ActorUserID: uuid.New(),
 	}
 	got := toPortAssigneeOverride(o, 5)
 	assert.Equal(t, o.NewUserID, got.NewUserID)

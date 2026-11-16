@@ -18,13 +18,13 @@ type overrideReq struct {
 }
 
 type overrideResp struct {
-	WorkflowInstanceID uuid.UUID `json:"workflow_instance_id"`
-	NodeKey            string    `json:"node_key"`
-	PreviousUserID     uuid.UUID `json:"previous_user_id"`
-	NewUserID          uuid.UUID `json:"new_user_id"`
-	Reason             string    `json:"reason,omitempty"`
-	ActorUserID        uuid.UUID `json:"actor_user_id"`
-	RecordVersion      int64     `json:"record_version"`
+	WorkflowInstanceID uuid.UUID  `json:"workflow_instance_id"`
+	NodeKey            string     `json:"node_key"`
+	PreviousUserID     *uuid.UUID `json:"previous_user_id"`
+	NewUserID          uuid.UUID  `json:"new_user_id"`
+	Reason             string     `json:"reason,omitempty"`
+	ActorUserID        uuid.UUID  `json:"actor_user_id"`
+	RecordVersion      int64      `json:"record_version"`
 }
 
 func toOverrideResp(o *port.AssigneeOverride) overrideResp {

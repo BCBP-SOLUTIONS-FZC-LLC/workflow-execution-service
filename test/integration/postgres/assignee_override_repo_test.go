@@ -32,7 +32,7 @@ func TestAssigneeOverrideRepo_CreateAndListByInstance(t *testing.T) {
 		TenantID:           tenantA,
 		WorkflowInstanceID: inst.ID,
 		NodeKey:            "finance/review",
-		PreviousUserID:     uuid.New(),
+		PreviousUserID:     domain.OptionalUserID(uuid.New()),
 		NewUserID:          uuid.New(),
 		Reason:             "primary reviewer on leave",
 		ActorUserID:        uuid.New(),
@@ -60,7 +60,7 @@ func TestAssigneeOverrideRepo_CreateAndListByInstance(t *testing.T) {
 			TenantID:           tenantA,
 			WorkflowInstanceID: uuid.New(),
 			NodeKey:            "finance/review",
-			PreviousUserID:     uuid.New(),
+			PreviousUserID:     domain.OptionalUserID(uuid.New()),
 			NewUserID:          uuid.New(),
 			ActorUserID:        uuid.New(),
 		}
@@ -83,7 +83,7 @@ func TestAssigneeOverrideRepo_RepeatedInsertOfTheSameIDAddsNoRow(t *testing.T) {
 	newOverride := func() *domain.AssigneeOverride {
 		return &domain.AssigneeOverride{
 			ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, NodeKey: "finance/review",
-			PreviousUserID: uuid.New(), NewUserID: uuid.New(), Reason: "on leave", ActorUserID: uuid.New(),
+			PreviousUserID: domain.OptionalUserID(uuid.New()), NewUserID: uuid.New(), Reason: "on leave", ActorUserID: uuid.New(),
 		}
 	}
 	first := newOverride()

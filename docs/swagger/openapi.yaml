@@ -569,10 +569,11 @@ components:
         previous_user_id:
           type: string
           format: uuid
+          nullable: true
           description: >
-            The user the node was taken from (the lead on a multi-assignee task). The all-zero
-            UUID when no one is replaced: a task with no active assignee, or a multi-assignee
-            task with no lead yet, where the new user is added beside the current assignees.
+            The user the node was taken from (the lead on a multi-assignee task). Null when no
+            one is replaced: a task with no active assignee, or a multi-assignee task with no
+            lead yet, where the new user is added beside the current assignees.
         new_user_id:
           type: string
           format: uuid

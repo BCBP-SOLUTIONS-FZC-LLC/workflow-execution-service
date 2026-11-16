@@ -11,6 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 ### Fixed
 
 - Tasks: a second defer of a task whose first defer is being or was applied answers 409 and routes nothing (the instance could go back two steps); claiming a task answers 409 `INVALID_INSTANCE_STATE` when the instance is not running or degraded, as completing already did.
+- When a task had no holder, the `workflow.task.reassigned` event leaves out `old_user_id`, and a node override's stored record and 200 answer carry `previous_user_id: null`; both used to carry the all-zero UUID (`previous_user_id` is now nullable in the schema, the event schema and both specs).
 - Node override and reassign to a user who already holds the task as a co-assignee make that user the lead and remove the replaced lead; the override used to be recorded and answered 200 while the lead never changed.
 - Safety-net pause: a user-revocation pause takes over an instance already paused by out-of-office, so a later "available" resume no longer restarts an instance whose user lost access; only an administrator's resume lifts it.
 - Instance start: `context_json: null` is stored as an empty object and runs normally (the workflow task used to panic and retry for ever, leaving the instance running with no task).

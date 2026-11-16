@@ -245,7 +245,7 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 			return err
 		}
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{newUserID}}
-		payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, oldUserID, newUserID, domain.ReassignInitiatorAdmin, nil)
+		payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, domain.OptionalUserID(oldUserID), newUserID, domain.ReassignInitiatorAdmin, nil)
 		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskReassigned, payload)
 	}))
 }
@@ -269,7 +269,7 @@ func (d *Deps) makeHolderLead(ctx context.Context, tenantID uuid.UUID, task *dom
 		return err
 	}
 	taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{holder.UserID}}
-	payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, oldUserID, holder.UserID, domain.ReassignInitiatorAdmin, nil)
+	payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, domain.OptionalUserID(oldUserID), holder.UserID, domain.ReassignInitiatorAdmin, nil)
 	return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskReassigned, payload)
 }
 

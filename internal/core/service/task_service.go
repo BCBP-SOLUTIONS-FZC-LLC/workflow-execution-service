@@ -569,7 +569,7 @@ func (s *TaskService) OverrideAssignee(ctx context.Context, in port.AssigneeOver
 func (s *TaskService) storeOverride(ctx context.Context, in port.AssigneeOverrideInput, inst *domain.Instance, task *domain.Task, previousUserID uuid.UUID) (*domain.AssigneeOverride, int64, error) {
 	override := &domain.AssigneeOverride{
 		ID: deterministicOverrideID(in, task.RecordVersion), TenantID: in.TenantID, WorkflowInstanceID: in.InstanceID, NodeKey: in.NodeKey,
-		PreviousUserID: previousUserID, NewUserID: in.NewUserID, Reason: in.Reason, ActorUserID: in.ActorUserID,
+		PreviousUserID: domain.OptionalUserID(previousUserID), NewUserID: in.NewUserID, Reason: in.Reason, ActorUserID: in.ActorUserID,
 	}
 	var bumped *domain.Task
 	err := s.Transactor.RunInTx(withTenantGUC(ctx, in.TenantID), func(ctx context.Context) error {
