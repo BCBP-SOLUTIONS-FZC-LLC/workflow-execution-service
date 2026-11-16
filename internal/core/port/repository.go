@@ -41,9 +41,6 @@ type InstanceRepository interface {
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.Instance, error)
 	GetLiveByBusinessKey(ctx context.Context, tenantID uuid.UUID, subjectID, businessKey string) (*domain.Instance, error)
 	RecordRunID(ctx context.Context, tenantID, id uuid.UUID, runID string) error
-	// FailUnstarted sets the instance FAILED only while it is RUNNING and has no run id. It reports
-	// whether a row changed; a row that moved on (terminated, or its workflow started) is left alone.
-	FailUnstarted(ctx context.Context, tenantID, id uuid.UUID) (bool, error)
 	UpdateStatus(
 		ctx context.Context,
 		tenantID, id uuid.UUID,
@@ -120,6 +117,9 @@ type TaskAssignmentRepository interface {
 		page PageRequest,
 	) ([]ActiveUserTaskRow, *Cursor, error)
 	Vacate(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error)
+	// VacateActive vacates the assignment only while it is still active and returns
+	// domain.ErrNotFound when it has already ended.
+	VacateActive(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error)
 	VacateAllActiveByUser(ctx context.Context, tenantID, userID uuid.UUID) ([]*domain.TaskAssignment, error)
 	Complete(ctx context.Context, tenantID, id uuid.UUID, resultJSON json.RawMessage, taskRecordVersion int64) (*domain.TaskAssignment, error)
 	SetLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error)

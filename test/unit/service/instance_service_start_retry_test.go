@@ -240,7 +240,7 @@ func TestInstanceService_StartRetry(t *testing.T) {
 		assert.JSONEq(t, `{"amount":100}`, sent.ContextJSON)
 		assert.Equal(t, map[string]string{"finance/review": assignee.String()}, sent.OverrideMap)
 		assert.Equal(t, "wf-queue-default", sent.TaskQueue)
-		assert.Equal(t, tenantID.String()+":SUBJ-1:TND-001", sent.TemporalWorkflowID)
+		assert.Equal(t, "tenant:"+tenantID.String()+":instance:"+sent.InstanceID.String(), sent.TemporalWorkflowID)
 	})
 
 	t.Run("a row whose run id was never recorded is closed by the current execution", func(t *testing.T) {

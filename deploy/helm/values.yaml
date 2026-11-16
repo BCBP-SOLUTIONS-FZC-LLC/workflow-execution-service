@@ -384,6 +384,11 @@ authorizationPolicy:
         - /api/v1/internal/connector-tasks/*
       callers: []
 
+# Alert thresholds the chart's PrometheusRule renders (deploy/monitoring/app-alerts.yml carries the defaults).
+alerts:
+  # A connector task READY for longer than this many seconds warns: its connector has not run or reported.
+  connectorTaskReadyAgeSeconds: 1800
+
 # Requires the Prometheus Operator CRDs (ServiceMonitor, PodMonitor, PrometheusRule).
 # Left disabled by default since neither this repo nor either reference repo
 # assumes the Operator is installed in every target cluster.

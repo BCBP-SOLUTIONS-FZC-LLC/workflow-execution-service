@@ -102,7 +102,7 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 			return stepOutcome{Terminated: true}, in.cancelInstanceOnSignal(ctx, envelope.Signal)
 
 		case SignalInstanceForceFwd:
-			if cb, ok := in.handleParallelForceForward(ctx, keys, branchSteps, cancels, resolved, envelope.Signal); ok {
+			if cb, ok := in.handleParallelForceForward(ctx, plan, keys, branchSteps, cancels, resolved, envelope.Signal); ok {
 				remaining--
 				completed = append(completed, cb)
 			}
@@ -249,10 +249,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 			c.Receive(ctx, &out)
 			respawning--
 			if out.Err != nil {
-				fb := failedBranch{DeptID: out.DeptID, LastCompletedNode: out.LastNode, Err: out.Err}
-				if getVersion(ctx, forceRouteByNodeKeyChangeID) != wf.DefaultVersion {
-					fb.Steps = out.Steps
-				}
+				fb := failedBranch{DeptID: out.DeptID, Steps: out.Steps, LastCompletedNode: out.LastNode, Err: out.Err}
 				failed = append(failed, fb)
 				p.depts[fb.DeptID] = true
 			} else {
@@ -309,7 +306,7 @@ func (in *interpreter) leaveParkPaused(ctx wf.Context) {
 	}
 }
 
-func (in *interpreter) handleParallelForceForward(ctx wf.Context, keys []string, branchSteps map[string][]dsl.ExecutionStep, cancels map[string]wf.CancelFunc, resolved map[string]bool, sig adminSignal) (completedBranch, bool) {
+func (in *interpreter) handleParallelForceForward(ctx wf.Context, plan *dsl.CompiledPlan, keys []string, branchSteps map[string][]dsl.ExecutionStep, cancels map[string]wf.CancelFunc, resolved map[string]bool, sig adminSignal) (completedBranch, bool) {
 	deptID := sig.TargetDeptID
 	key := branchRunning(keys, branchSteps, resolved, deptID)
 	if key == "" {
@@ -317,11 +314,12 @@ func (in *interpreter) handleParallelForceForward(ctx wf.Context, keys []string,
 			"target_dept_id", deptID)
 		return completedBranch{}, false
 	}
-	var oldKeys []domain.NodeKey
-	if node := in.currentPendingNode(deptID); node != "" {
-		oldKeys = []domain.NodeKey{node}
+	oldKeys := in.pendingNodesIn(branchSteps[key])
+	reached := departmentEntryNode(plan, deptID, sig.TargetNodeKey)
+	if len(oldKeys) > 0 {
+		reached = oldKeys[0]
 	}
-	in.recordAndRedirect(ctx, oldKeys, sig.TargetNodeKey, domain.ForceRouteDirectionForward, sig)
+	in.recordAndRedirect(ctx, oldKeys, reached, domain.ForceRouteDirectionForward, sig)
 	if cancel, ok := cancels[key]; ok {
 		cancel()
 	}
@@ -407,7 +405,7 @@ func (in *interpreter) handleParallelForceBack(ctx wf.Context, plan *dsl.Compile
 }
 
 func (in *interpreter) handleDegradedForceForward(ctx wf.Context, failed []failedBranch, sig adminSignal) ([]failedBranch, completedBranch, bool) {
-	idx := in.failedBranchFor(ctx, failed, sig)
+	idx := failedBranchFor(failed, sig)
 	if idx < 0 {
 		wf.GetLogger(ctx).Warn("instance-force-forward: target_node_key doesn't name a currently-failed branch; dropping",
 			"target_node_key", sig.TargetNodeKey)
@@ -419,7 +417,7 @@ func (in *interpreter) handleDegradedForceForward(ctx wf.Context, failed []faile
 }
 
 func (in *interpreter) handleDegradedForceBack(ctx wf.Context, plan *dsl.CompiledPlan, failed []failedBranch, settle, admin wf.Channel, sig adminSignal) ([]failedBranch, bool) {
-	idx := in.failedBranchFor(ctx, failed, sig)
+	idx := failedBranchFor(failed, sig)
 	if idx < 0 {
 		wf.GetLogger(ctx).Warn("instance-force-back: target_node_key doesn't name a currently-failed branch; dropping",
 			"target_node_key", sig.TargetNodeKey)
@@ -431,7 +429,7 @@ func (in *interpreter) handleDegradedForceBack(ctx wf.Context, plan *dsl.Compile
 	in.msgBuf.ResetSpan([]domain.NodeKey{fb.LastCompletedNode})
 	wf.Go(ctx, func(gctx wf.Context) {
 		node, err := in.respawnBranch(gctx, plan, fb, admin)
-		if err != nil && node == "" && getVersion(gctx, forceRouteByNodeKeyChangeID) != wf.DefaultVersion {
+		if err != nil && node == "" {
 			node = fb.LastCompletedNode
 		}
 		settle.Send(gctx, branchOutcome{DeptID: fb.DeptID, LastNode: node, Steps: fb.Steps, Err: err})
@@ -485,10 +483,7 @@ func stepsAfterDept(branchSteps []dsl.ExecutionStep, deptID string) []dsl.Execut
 	return nil
 }
 
-func (in *interpreter) failedBranchFor(ctx wf.Context, failed []failedBranch, sig adminSignal) int {
-	if getVersion(ctx, forceRouteByNodeKeyChangeID) == wf.DefaultVersion {
-		return indexOfFailedBranch(failed, sig.TargetDeptID)
-	}
+func failedBranchFor(failed []failedBranch, sig adminSignal) int {
 	if sig.TargetDeptID == "" && len(failed) == 1 {
 		return 0
 	}

@@ -17,6 +17,10 @@ type WorkflowStatusQuery struct {
 	CurrentNodeKeys      []domain.NodeKey
 	ActiveTasks          []domain.NodeKey
 	SavedSiblingBranches []string
+	// UnassignedTasks lists the open tasks that lost their last active
+	// assignee and have not been given a new one; the instance waits on them
+	// (execution LLD §3.1).
+	UnassignedTasks []string
 }
 
 func (in *interpreter) registerStatusQuery(ctx wf.Context) error {
@@ -34,6 +38,7 @@ func (in *interpreter) registerStatusQuery(ctx wf.Context) error {
 			CurrentNodeKeys:      keys,
 			ActiveTasks:          keys,
 			SavedSiblingBranches: saved,
+			UnassignedTasks:      in.unassignedTasks(),
 		}, nil
 	})
 	if err != nil {

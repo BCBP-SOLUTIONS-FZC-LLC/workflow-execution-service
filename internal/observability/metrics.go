@@ -47,6 +47,7 @@ var (
 	ConnectorDispatchDeadLetteredTotal  *prometheus.CounterVec
 	ConnectorTaskFailuresTotal          *prometheus.CounterVec
 	OldestReadyTaskAgeSeconds           prometheus.Gauge
+	OldestReadyConnectorTaskAgeSeconds  prometheus.Gauge
 	UpstreamDependencyErrorsTotal       *prometheus.CounterVec
 	UserPauseFailuresTotal              *prometheus.CounterVec
 	InternalAuthRejectedTotal           *prometheus.CounterVec
@@ -143,6 +144,9 @@ func registerServiceMetrics() {
 	OldestReadyTaskAgeSeconds = must(gincommon.NewGauge(nil,
 		"workflow_execution_service_oldest_ready_task_age_seconds",
 		"Age in seconds of the oldest unclaimed READY task."))
+	OldestReadyConnectorTaskAgeSeconds = must(gincommon.NewGauge(nil,
+		"workflow_execution_service_oldest_ready_connector_task_age_seconds",
+		"Age in seconds of the oldest connector task still READY (0 when none): a task the connector worker never ran or never reported."))
 	UpstreamDependencyErrorsTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_upstream_dependency_errors_total",
 		"Total upstream dependency call failures, by dependency.", "dependency"))

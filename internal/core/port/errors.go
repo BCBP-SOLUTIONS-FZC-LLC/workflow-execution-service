@@ -36,10 +36,6 @@ var (
 	// the request can be sent again.
 	ErrTemporalUnavailable = errors.New("the workflow engine could not take the request")
 
-	// ErrExecutionHeld: the execution id of a start is held by an open execution that another
-	// instance's start created.
-	ErrExecutionHeld = errors.New("the execution id is held by another open execution")
-
 	// ErrVersionNotFound: the Definition Service has no such workflow version for the tenant.
 	ErrVersionNotFound = errors.New("workflow version not found")
 

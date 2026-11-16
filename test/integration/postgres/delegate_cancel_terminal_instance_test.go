@@ -24,7 +24,10 @@ func TestCancelByDelegate_ActiveAssignmentOnATerminalInstance_IsVacatedAndCounte
 	instanceRepo := postgres.NewInstanceRepo(appPool)
 	taskRepo := postgres.NewTaskRepo(appPool)
 	assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
-	client := &service.WorkflowClient{Assignments: assignmentRepo, Transactor: postgres.NewTransactor(appPool)}
+	client := &service.WorkflowClient{
+		Instances: instanceRepo, Tasks: taskRepo, Assignments: assignmentRepo,
+		Transactor: postgres.NewTransactor(appPool), Signals: postgres.NewOutboxRepo(appPool),
+	}
 	ctx := context.Background()
 
 	for _, status := range []domain.InstanceStatus{
@@ -66,4 +69,33 @@ func TestCancelByDelegate_ActiveAssignmentOnATerminalInstance_IsVacatedAndCounte
 			assert.Zero(t, again, "a vacated assignment is not counted twice")
 		})
 	}
+	assert.Empty(t, recordedSignalNames(t, superPool), "no workflow is left to tell about a finished instance")
+}
+
+func TestCancelByDelegate_ATaskLeftWithoutAnAssigneeHasItsSignalRecordedWithTheVacate(t *testing.T) {
+	superPool, superDSN := fixtures.NewTestPoolAndDSN(t)
+	appPool := newAppRolePool(t, superPool, superDSN)
+	instanceRepo := postgres.NewInstanceRepo(appPool)
+	taskRepo := postgres.NewTaskRepo(appPool)
+	assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
+	client := &service.WorkflowClient{
+		Instances: instanceRepo, Tasks: taskRepo, Assignments: assignmentRepo,
+		Transactor: postgres.NewTransactor(appPool), Signals: postgres.NewOutboxRepo(appPool),
+	}
+	ctx := context.Background()
+	tenantID, delegate, coAssignee := uuid.New(), uuid.New(), uuid.New()
+	inst := newInstance(tenantID, time.Now().UTC())
+	require.NoError(t, instanceRepo.Create(ctx, inst))
+	alone, shared := newTask(tenantID, inst.ID), newTask(tenantID, inst.ID)
+	require.NoError(t, taskRepo.Create(ctx, alone))
+	require.NoError(t, taskRepo.Create(ctx, shared))
+	require.NoError(t, assignmentRepo.Create(ctx, newTaskAssignment(tenantID, alone.ID, delegate)))
+	require.NoError(t, assignmentRepo.Create(ctx, newTaskAssignment(tenantID, shared.ID, delegate)))
+	require.NoError(t, assignmentRepo.Create(ctx, newTaskAssignment(tenantID, shared.ID, coAssignee)))
+
+	count, err := client.CancelByDelegate(ctx, port.CancelByDelegateInput{TenantID: tenantID, DelegateUserID: delegate})
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+	assert.Equal(t, []string{port.SignalInstanceTaskVacated}, recordedSignalNames(t, superPool), "only the task that lost its last assignee is reported")
 }

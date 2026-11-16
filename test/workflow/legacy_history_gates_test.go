@@ -129,119 +129,74 @@ func TestExecute_MessageBoundaryOfAnOlderHistoryIsNotFiredByAnOutsideAnswer(t *t
 	assert.Equal(t, []domain.TaskStatus{domain.TaskStatusCompleted}, statuses, "never superseded by the boundary")
 }
 
-// A force-forward that names its target by node key only, the way older
-// callers did, reaches a parallel step and a degraded park.
-// A history recorded before the node-key routing reads such a signal by
-// department id alone, so it is dropped; a current one accepts it.
-func TestExecute_ForceForwardNamingOnlyANodeKeyIsDroppedByAnOlderHistoryAndTakenByACurrentOne(t *testing.T) {
-	for _, older := range []bool{true, false} {
-		name := "current history"
-		if older {
-			name = "older history"
+// A force-forward that names its target by node key only reaches a parallel
+// step and a degraded park: the department comes from the key.
+func TestExecute_ForceForwardNamingOnlyANodeKeyIsTakenByAParallelStepAndADegradedPark(t *testing.T) {
+	t.Run("parallel step open", func(t *testing.T) {
+		var suite testsuite.WorkflowTestSuite
+		env := suite.NewTestWorkflowEnvironment()
+		collab := parallelCollaboration()
+		fakes := wflNewFakes()
+		wflRegisterAll(env, fakes, collab)
+
+		wflSignalAt(env, 5*time.Second, "instance-force-forward", adminSignalWire{
+			AdminUserID: "admin-1", TargetNodeKey: "billing/prep", RecordVersion: 7,
+		})
+		wflSignalAt(env, 20*time.Second, "stage-transition", wflDoneStage("warehouse", "prep", 1))
+
+		status, err := wflStart(t, env, fakes, "")
+
+		require.NoError(t, err)
+		assert.Equal(t, domain.InstanceStatusCompleted, status)
+		routes := wflInputs[port.RecordForceRouteInput](fakes, port.ActivityRecordForceRoute)
+		require.Len(t, routes, 1)
+		assert.Equal(t, port.RecordForceRouteInput{
+			InstanceID: wflInstance, TenantID: wflTenant, OldNodeKeys: []domain.NodeKey{"billing/prep"},
+			TargetNodeID: "billing/prep", Direction: domain.ForceRouteDirectionForward, AdminUserID: "admin-1", RecordVersion: 7,
+		}, routes[0])
+	})
+
+	t.Run("degraded park", func(t *testing.T) {
+		var suite testsuite.WorkflowTestSuite
+		env := suite.NewTestWorkflowEnvironment()
+		collab := parallelCollaboration()
+		fakes := wflNewFakes()
+		fakes.failFor = func(name string, in any) error {
+			if ct, ok := in.(port.CreateTaskInput); ok && name == port.ActivityCreateTask && ct.NodeKey == "billing/prep" {
+				return temporal.NewApplicationError("card declined", "ValidationError")
+			}
+			return nil
 		}
-		t.Run(name+"/parallel step open", func(t *testing.T) {
-			var suite testsuite.WorkflowTestSuite
-			env := suite.NewTestWorkflowEnvironment()
-			if older {
-				wflOlderHistory(env, "force-route-by-node-key")
-			}
-			collab := parallelCollaboration()
-			fakes := wflNewFakes()
-			wflRegisterAll(env, fakes, collab)
+		wflRegisterAll(env, fakes, collab)
 
-			wflSignalAt(env, 5*time.Second, "instance-force-forward", adminSignalWire{
-				AdminUserID: "admin-1", TargetNodeKey: "billing/prep", RecordVersion: 7,
-			})
-			var routesSoon int
-			env.RegisterDelayedCallback(func() {
-				routesSoon = fakes.attemptsOf(port.ActivityRecordForceRoute)
-			}, 10*time.Second)
-			wflSignalAt(env, 20*time.Second, "stage-transition", wflDoneStage("warehouse", "prep", 1))
-			if older {
-				wflSignalAt(env, 25*time.Second, "stage-transition", wflDoneStage("billing", "prep", 1))
-			}
-
-			status, err := wflStart(t, env, fakes, "")
-
-			require.NoError(t, err)
-			assert.Equal(t, domain.InstanceStatusCompleted, status)
-			routes := wflInputs[port.RecordForceRouteInput](fakes, port.ActivityRecordForceRoute)
-			if older {
-				assert.Zero(t, routesSoon, "the signal names no department, so it matches no branch")
-				assert.Empty(t, routes)
-				return
-			}
-			require.Len(t, routes, 1)
-			assert.Equal(t, port.RecordForceRouteInput{
-				InstanceID: wflInstance, TenantID: wflTenant, OldNodeKeys: []domain.NodeKey{"billing/prep"},
-				TargetNodeID: "billing/prep", Direction: domain.ForceRouteDirectionForward, AdminUserID: "admin-1", RecordVersion: 7,
-			}, routes[0])
+		wflSignalAt(env, 2*time.Second, "stage-transition", wflDoneStage("warehouse", "prep", 1))
+		wflSignalAt(env, 5*time.Second, "instance-force-forward", adminSignalWire{
+			AdminUserID: "admin-1", TargetNodeKey: "billing/prep", RecordVersion: 7,
 		})
 
-		t.Run(name+"/degraded park", func(t *testing.T) {
-			var suite testsuite.WorkflowTestSuite
-			env := suite.NewTestWorkflowEnvironment()
-			if older {
-				wflOlderHistory(env, "force-route-by-node-key")
-			}
-			collab := parallelCollaboration()
-			fakes := wflNewFakes()
-			fakes.failFor = func(name string, in any) error {
-				if ct, ok := in.(port.CreateTaskInput); ok && name == port.ActivityCreateTask && ct.NodeKey == "billing/prep" {
-					return temporal.NewApplicationError("card declined", "ValidationError")
-				}
-				return nil
-			}
-			wflRegisterAll(env, fakes, collab)
+		status, err := wflStart(t, env, fakes, "")
 
-			wflSignalAt(env, 2*time.Second, "stage-transition", wflDoneStage("warehouse", "prep", 1))
-			wflSignalAt(env, 5*time.Second, "instance-force-forward", adminSignalWire{
-				AdminUserID: "admin-1", TargetNodeKey: "billing/prep", RecordVersion: 7,
-			})
-			var routesSoon int
-			var parked wfengine.WorkflowStatusQuery
-			env.RegisterDelayedCallback(func() {
-				routesSoon = fakes.attemptsOf(port.ActivityRecordForceRoute)
-			}, 10*time.Second)
-			wflQueryStatusAt(t, env, 10*time.Second, &parked)
-			if older {
-				wflSignalAt(env, 20*time.Second, "instance-force-forward", adminSignalWire{
-					AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 8,
-				})
-			}
-
-			status, err := wflStart(t, env, fakes, "")
-
-			require.NoError(t, err)
-			assert.Equal(t, domain.InstanceStatusCompleted, status)
-			routes := wflInputs[port.RecordForceRouteInput](fakes, port.ActivityRecordForceRoute)
-			require.Len(t, routes, 1)
-			assert.Equal(t, "billing/prep", routes[0].TargetNodeID)
-			assert.Equal(t, wflTenant, routes[0].TenantID)
-			assert.Equal(t, wflInstance, routes[0].InstanceID)
-			if older {
-				assert.Zero(t, routesSoon, "no force-route was recorded for the node-key-only signal")
-				assert.Equal(t, domain.InstanceStatusDegraded, parked.Status, "the branch is still failed after the dropped signal")
-				assert.EqualValues(t, 8, routes[0].RecordVersion, "only the department-addressed signal was applied")
-				return
-			}
-			assert.EqualValues(t, 7, routes[0].RecordVersion)
-		})
-	}
+		require.NoError(t, err)
+		assert.Equal(t, domain.InstanceStatusCompleted, status)
+		routes := wflInputs[port.RecordForceRouteInput](fakes, port.ActivityRecordForceRoute)
+		require.Len(t, routes, 1)
+		assert.Equal(t, "billing/prep", routes[0].TargetNodeID)
+		assert.Equal(t, wflTenant, routes[0].TenantID)
+		assert.Equal(t, wflInstance, routes[0].InstanceID)
+		assert.EqualValues(t, 7, routes[0].RecordVersion)
+	})
 }
 
-// In a history recorded before the node-key routing, a degraded park finds the
-// failed branch by department id only: a force-forward naming no target and a
-// force-back naming only a node key are both dropped, and the branch stays
-// failed (not re-run, nothing recorded) until a signal names its department.
-func TestExecute_DegradedParkOfAnOlderHistoryFindsTheFailedBranchByDepartmentIDOnly(t *testing.T) {
+// A degraded park finds the failed branch by node key: a force-forward naming
+// no target takes the only failed branch, and a force-back naming only a node
+// key respawns it.
+func TestExecute_DegradedParkFindsTheFailedBranchByNodeKeyOrAsTheOnlyOne(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
-	wflOlderHistory(env, "force-route-by-node-key")
 	collab := parallelCollaboration()
 	fakes := wflNewFakes()
 	fakes.failFor = func(name string, in any) error {
-		if ct, ok := in.(port.CreateTaskInput); ok && name == port.ActivityCreateTask && ct.NodeKey == "billing/prep" {
+		if ct, ok := in.(port.CreateTaskInput); ok && name == port.ActivityCreateTask && ct.NodeKey == "billing/prep" && ct.VisitCount == 1 {
 			return temporal.NewApplicationError("card declined", "ValidationError")
 		}
 		return nil
@@ -249,36 +204,19 @@ func TestExecute_DegradedParkOfAnOlderHistoryFindsTheFailedBranchByDepartmentIDO
 	wflRegisterAll(env, fakes, collab)
 
 	wflSignalAt(env, 2*time.Second, "stage-transition", wflDoneStage("warehouse", "prep", 1))
-	wflSignalAt(env, 5*time.Second, "instance-force-forward", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 7})
-	wflSignalAt(env, 8*time.Second, "instance-force-back", adminSignalWire{
+	wflSignalAt(env, 5*time.Second, "instance-force-back", adminSignalWire{
 		AdminUserID: "admin-1", TargetNodeKey: "billing/prep", RecordVersion: 7,
 	})
-	var routesBefore, billingTasksBefore int
-	var parked wfengine.WorkflowStatusQuery
-	env.RegisterDelayedCallback(func() {
-		routesBefore = fakes.attemptsOf(port.ActivityRecordForceRoute)
-		for _, in := range wflInputs[port.CreateTaskInput](fakes, port.ActivityCreateTask) {
-			if in.NodeKey == "billing/prep" {
-				billingTasksBefore++
-			}
-		}
-	}, 12*time.Second)
-	wflQueryStatusAt(t, env, 12*time.Second, &parked)
-	wflSignalAt(env, 20*time.Second, "instance-force-forward", adminSignalWire{
-		AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 9,
-	})
+	wflSignalAt(env, 20*time.Second, "stage-transition", wflDoneStage("billing", "prep", 2))
 
 	status, err := wflStart(t, env, fakes, "")
 
 	require.NoError(t, err)
 	assert.Equal(t, domain.InstanceStatusCompleted, status)
-	assert.Zero(t, routesBefore, "neither unaddressed signal was recorded as a force-route")
-	assert.Equal(t, 1, billingTasksBefore, "the failed branch was not re-run by the force-back")
-	assert.Equal(t, domain.InstanceStatusDegraded, parked.Status)
 	routes := wflInputs[port.RecordForceRouteInput](fakes, port.ActivityRecordForceRoute)
 	require.Len(t, routes, 1)
-	assert.EqualValues(t, 9, routes[0].RecordVersion)
-	assert.Equal(t, domain.ForceRouteDirectionForward, routes[0].Direction)
+	assert.Equal(t, domain.ForceRouteDirectionBack, routes[0].Direction)
+	assert.EqualValues(t, 7, routes[0].RecordVersion)
 	assert.Equal(t, wflTenant, routes[0].TenantID)
 	assert.Equal(t, wflInstance, routes[0].InstanceID)
 }

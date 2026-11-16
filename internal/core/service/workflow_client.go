@@ -24,7 +24,9 @@ type WorkflowClient struct {
 	Tasks       port.TaskRepository
 	Assignments port.TaskAssignmentRepository
 	Transactor  port.Transactor
-	Temporal    port.TemporalClient
+	Outbox      port.OutboxRepository
+	Signals     port.WorkflowSignalOutbox
+	Validator   port.EventValidator
 	Eligibility port.EligibilityChecker
 	Definitions port.DefinitionServiceClient
 	Log         port.Logger
@@ -62,8 +64,9 @@ type delegateRow struct {
 }
 
 // ReassignDelegate reads everything it needs first, so a failed read changes
-// nothing; it then moves the rows in one transaction and signals after the
-// commit (execution LLD §5.8).
+// nothing; it then moves the rows and records each one's event and signal in one
+// transaction, and the outbox relay delivers the signals after the commit
+// (execution LLD §5.8).
 func (s *WorkflowClient) ReassignDelegate(ctx context.Context, in port.ReassignDelegateInput) (int, error) {
 	active, err := s.Assignments.ListActiveByUser(ctx, in.TenantID, in.OldDelegateID)
 	if err != nil {
@@ -76,16 +79,11 @@ func (s *WorkflowClient) ReassignDelegate(ctx context.Context, in port.ReassignD
 	if len(rows) == 0 {
 		return 0, nil
 	}
-	rows, err = s.moveToNewDelegate(ctx, in, rows)
+	moved, err := s.moveToNewDelegate(ctx, in, rows)
 	if err != nil {
 		return 0, err
 	}
-	for _, r := range rows {
-		if err := s.signalReassign(ctx, r, in.NewDelegateID); err != nil {
-			s.logger().Warn("failed to signal instance-reassign, DB state already updated", map[string]any{"task_id": r.task.ID, "error": err.Error()})
-		}
-	}
-	return len(rows), nil
+	return moved, nil
 }
 
 func (s *WorkflowClient) eligibleDelegateRows(ctx context.Context, in port.ReassignDelegateInput, matched []*domain.TaskAssignment) ([]delegateRow, error) {
@@ -114,12 +112,13 @@ func (s *WorkflowClient) eligibleDelegateRows(ctx context.Context, in port.Reass
 	return rows, nil
 }
 
-// moveToNewDelegate returns the rows it moved: a row whose assignment ended
-// after it was read is left alone.
-func (s *WorkflowClient) moveToNewDelegate(ctx context.Context, in port.ReassignDelegateInput, rows []delegateRow) ([]delegateRow, error) {
-	moved := make([]delegateRow, 0, len(rows))
+// moveToNewDelegate returns the number of rows it moved, each with its event and
+// its signal: a row whose assignment ended after it was read is left alone, and
+// gets neither.
+func (s *WorkflowClient) moveToNewDelegate(ctx context.Context, in port.ReassignDelegateInput, rows []delegateRow) (int, error) {
+	moved := 0
 	err := s.Transactor.RunInTx(withTenantGUC(ctx, in.TenantID), func(ctx context.Context) error {
-		moved = moved[:0]
+		moved = 0
 		for _, r := range rows {
 			active, ok, err := vacateIfActive(ctx, s.Assignments, in.TenantID, r.assignment)
 			if err != nil {
@@ -131,18 +130,27 @@ func (s *WorkflowClient) moveToNewDelegate(ctx context.Context, in port.Reassign
 			if err := handOver(ctx, s.Assignments, in.TenantID, r.assignment, active, r.task, in.NewDelegateID, r.assignment.Reason); err != nil {
 				return fmt.Errorf("reassign delegate: hand task %s to the new delegate: %w", r.task.ID, err)
 			}
-			moved = append(moved, r)
+			if err := enqueueTaskReassigned(ctx, s.Outbox, s.Validator, r.instance, r.task, r.assignment.UserID, in.NewDelegateID, in.DelegationID); err != nil {
+				return fmt.Errorf("reassign delegate: record the reassigned event of task %s: %w", r.task.ID, err)
+			}
+			if err := s.recordReassign(ctx, r, in.NewDelegateID); err != nil {
+				return fmt.Errorf("reassign delegate: record the signal of task %s: %w", r.task.ID, err)
+			}
+			moved++
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	return moved, nil
 }
 
-// CancelByDelegate vacates every selected assignment in one transaction; a
-// failed write changes nothing and fails the call so the caller retries.
+// CancelByDelegate reads the task and instance of every selected assignment
+// first, then vacates them in one transaction; a task left with no active
+// assignee gets a signal recorded in the same transaction, so the workflow
+// learns of it (execution LLD §5.8). A failed read or write changes nothing
+// and fails the call so the caller retries.
 func (s *WorkflowClient) CancelByDelegate(ctx context.Context, in port.CancelByDelegateInput) (int, error) {
 	active, err := s.Assignments.ListActiveByUser(ctx, in.TenantID, in.DelegateUserID)
 	if err != nil {
@@ -152,16 +160,27 @@ func (s *WorkflowClient) CancelByDelegate(ctx context.Context, in port.CancelByD
 	if len(matched) == 0 {
 		return 0, nil
 	}
+	rows, err := s.readDelegateRows(ctx, in.TenantID, matched)
+	if err != nil {
+		return 0, err
+	}
 	vacated := 0
 	err = s.Transactor.RunInTx(withTenantGUC(ctx, in.TenantID), func(ctx context.Context) error {
 		vacated = 0
-		for _, a := range matched {
-			_, ok, err := vacateIfActive(ctx, s.Assignments, in.TenantID, a)
+		for _, r := range rows {
+			remaining, ok, err := vacateIfActive(ctx, s.Assignments, in.TenantID, r.assignment)
 			if err != nil {
-				return fmt.Errorf("cancel by delegate: vacate assignment %s: %w", a.ID, err)
+				return fmt.Errorf("cancel by delegate: vacate assignment %s: %w", r.assignment.ID, err)
 			}
-			if ok {
-				vacated++
+			if !ok {
+				continue
+			}
+			vacated++
+			if len(remaining) > 1 || isTerminalInstanceStatus(r.instance.Status) {
+				continue
+			}
+			if err := s.recordTaskVacated(ctx, r); err != nil {
+				return fmt.Errorf("cancel by delegate: record the signal of task %s: %w", r.task.ID, err)
 			}
 		}
 		return nil
@@ -170,6 +189,22 @@ func (s *WorkflowClient) CancelByDelegate(ctx context.Context, in port.CancelByD
 		return 0, err
 	}
 	return vacated, nil
+}
+
+func (s *WorkflowClient) readDelegateRows(ctx context.Context, tenantID uuid.UUID, assignments []*domain.TaskAssignment) ([]delegateRow, error) {
+	rows := make([]delegateRow, 0, len(assignments))
+	for _, a := range assignments {
+		task, err := s.Tasks.GetByID(ctx, tenantID, a.TaskID)
+		if err != nil {
+			return nil, fmt.Errorf("cancel by delegate: read task of assignment %s: %w", a.ID, err)
+		}
+		inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
+		if err != nil {
+			return nil, fmt.Errorf("cancel by delegate: read instance of task %s: %w", task.ID, err)
+		}
+		rows = append(rows, delegateRow{assignment: a, task: task, instance: inst})
+	}
+	return rows, nil
 }
 
 func (s *WorkflowClient) DelegateImpact(ctx context.Context, in port.DelegateImpactInput) (port.DelegateImpactResult, error) {
@@ -263,9 +298,15 @@ func (s *WorkflowClient) checkAssigneeEligible(ctx context.Context, plans *compi
 	return eligible, nil
 }
 
-func (s *WorkflowClient) signalReassign(ctx context.Context, r delegateRow, newUserID uuid.UUID) error {
-	return s.Temporal.SignalWorkflow(ctx, r.instance.TemporalWorkflowID, r.instance.ID, port.SignalInstanceReassign, reassignSignalWire{
+func (s *WorkflowClient) recordReassign(ctx context.Context, r delegateRow, newUserID uuid.UUID) error {
+	return recordWorkflowSignal(ctx, s.Signals, r.instance, port.SignalInstanceReassign, reassignSignalWire{
 		TaskID: r.task.ID.String(), OldUserID: r.assignment.UserID.String(), NewUserID: newUserID.String(),
-		RecordVersion: r.task.RecordVersion,
+		RecordVersion: r.task.RecordVersion, RecordedAt: time.Now().UTC(),
+	})
+}
+
+func (s *WorkflowClient) recordTaskVacated(ctx context.Context, r delegateRow) error {
+	return recordWorkflowSignal(ctx, s.Signals, r.instance, port.SignalInstanceTaskVacated, taskVacatedSignalWire{
+		TaskID: r.task.ID.String(), VacatedUserID: r.assignment.UserID.String(), RecordedAt: time.Now().UTC(),
 	})
 }

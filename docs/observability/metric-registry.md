@@ -60,6 +60,7 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 | `workflow_execution_service_internal_auth_rejected_total` | counter | `reason` | Internal-route requests refused for lacking the system caller identity, by reason (missing_user or missing_role). |
 | `workflow_execution_service_internal_events_ingest_total` | counter | `event_type`, `result` | Total internal event ingest calls, by event_type and result. |
 | `workflow_execution_service_internal_events_last_received_timestamp` | gauge | `event_type` | Unix timestamp of the last successfully dispatched POST /internal/events call, by event_type. |
+| `workflow_execution_service_oldest_ready_connector_task_age_seconds` | gauge | - | Age in seconds of the oldest connector task still READY (0 when none): a task the connector worker never ran or never reported. |
 | `workflow_execution_service_oldest_ready_task_age_seconds` | gauge | - | Age in seconds of the oldest unclaimed READY task. |
 | `workflow_execution_service_record_version_conflict_total` | counter | `table` | Total optimistic-lock record_version conflicts, by table. |
 | `workflow_execution_service_retention_rows_deleted_total` | counter | `table` | Rows the retention sweeps deleted, by table (outbox_events, processed_events, or a tenant's purged tables). |

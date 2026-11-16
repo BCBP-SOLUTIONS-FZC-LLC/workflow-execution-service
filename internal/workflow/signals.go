@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"time"
 
 	"go.temporal.io/sdk/temporal"
 	wf "go.temporal.io/sdk/workflow"
@@ -93,6 +94,7 @@ type reassignSignal struct {
 	NewUserID     string
 	AdminUserID   string
 	RecordVersion int64
+	RecordedAt    time.Time
 }
 
 type adminSignal struct {
@@ -143,6 +145,13 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 		in.handleInstanceReassign(ctx, sig)
 	})
 
+	vacatedCh := wf.GetSignalChannel(ctx, SignalInstanceTaskVacated+":"+in.instanceID)
+	sel.AddReceive(vacatedCh, func(c wf.ReceiveChannel, more bool) {
+		var sig taskVacatedSignal
+		c.Receive(ctx, &sig)
+		in.handleTaskVacated(ctx, sig)
+	})
+
 	for _, name := range []string{SignalInstancePause, SignalInstanceResume, SignalInstanceCancel, SignalInstanceForceFwd, SignalInstanceForceBack} {
 		ch := wf.GetSignalChannel(ctx, name+":"+in.instanceID)
 		sel.AddReceive(ch, func(c wf.ReceiveChannel, more bool) {
@@ -167,7 +176,7 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 				}
 				in.handleInstanceResume(ctx, sig)
 			default:
-				if sig.TargetDeptID == "" && sig.TargetNodeKey != "" && getVersion(ctx, forceRouteByNodeKeyChangeID) != wf.DefaultVersion {
+				if sig.TargetDeptID == "" && sig.TargetNodeKey != "" {
 					sig.TargetDeptID = deptFromNodeKey(sig.TargetNodeKey)
 				}
 				in.routeAdminSignal(ctx, name, sig)
@@ -300,6 +309,13 @@ func refuseDefer(reason string) error {
 }
 
 func (in *interpreter) handleInstanceReassign(ctx wf.Context, sig reassignSignal) {
+	if !in.noteTaskAssignee(ctx, sig.TaskID, false, sig.RecordedAt) {
+		return
+	}
+	if !sig.RecordedAt.IsZero() {
+		// Recorded through the outbox: the database move is already committed.
+		return
+	}
 	if err := validateSignal(in.status, SignalInstanceReassign); err != nil {
 		wf.GetLogger(ctx).Warn("dropping instance-reassign signal", "error", err)
 		return

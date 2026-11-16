@@ -226,6 +226,15 @@ spec:
             summary: "Connector task entry dead-lettered for {{ "{{" }} $labels.connector_type {{ "}}" }}"
             description: "A connector stream entry exceeded its delivery cap, so its task stays open and its instance waits; the worker's callback Warn lines name the status the Execution API answered."
 
+        - alert: ConnectorTaskStuckReady
+          expr: workflow_execution_service_oldest_ready_connector_task_age_seconds > {{ .Values.alerts.connectorTaskReadyAgeSeconds | int }}
+          labels:
+            severity: warning
+          annotations:
+            runbook: "workflow-execution-service/connector-task-stuck-ready"
+            summary: "A connector task has been READY for over {{ div (.Values.alerts.connectorTaskReadyAgeSeconds | int) 60 }} minutes"
+            description: "A connector task was created but its connector has not run or reported: the oldest has been READY for {{ "{{" }} $value | humanizeDuration {{ "}}" }}. Look for an event the ingest route refused (a stage whose department is not in the plan), a dead-lettered stream entry or a stopped connector worker."
+
         - alert: TenantPurgeFailing
           expr: increase(workflow_execution_service_tenant_purge_failures_total[{{ include "workflow-execution-service.purgeAlertWindow" . }}]) > 0
           for: 5m

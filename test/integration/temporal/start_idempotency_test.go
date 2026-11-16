@@ -16,8 +16,8 @@ import (
 // TestStartWorkflow_AnExecutionAlreadyRunningUnderTheIdentifierIsTheSameRun
 // pins the Temporal behaviour the idempotent start rests on (LLD decision 22):
 // a second start under a running workflow identifier is not an error and
-// returns the run that is already there, while a start after that execution
-// was closed begins a new run.
+// returns the run that is already there, and a start after that execution
+// was closed is not a new run either: it returns the closed run.
 func TestStartWorkflow_AnExecutionAlreadyRunningUnderTheIdentifierIsTheSameRun(t *testing.T) {
 	client := temporalclient.New(fixtures.NewTestTemporalServer(t))
 	ctx := context.Background()
@@ -51,16 +51,13 @@ func TestStartWorkflow_AnExecutionAlreadyRunningUnderTheIdentifierIsTheSameRun(t
 	}
 	reused, err := client.StartWorkflow(ctx, in)
 	if err != nil {
-		t.Fatalf("start after the execution closed: %v", err)
+		t.Fatalf("a repeated start after the execution closed must not fail: %v", err)
 	}
-	if reused.TemporalRunID == first.TemporalRunID {
-		t.Errorf("a start after a close returned the closed run %s, want a new execution", reused.TemporalRunID)
+	if reused.TemporalRunID != first.TemporalRunID {
+		t.Errorf("a start after a close returned run %s, want the closed run %s and no second run", reused.TemporalRunID, first.TemporalRunID)
 	}
 
 	if err := client.TerminateWorkflow(ctx, in.TemporalWorkflowID, first.TemporalRunID, "test"); err != nil {
 		t.Errorf("closing an already closed run must succeed: %v", err)
-	}
-	if err := client.TerminateWorkflow(ctx, in.TemporalWorkflowID, reused.TemporalRunID, "cleanup"); err != nil {
-		t.Errorf("cleanup terminate: %v", err)
 	}
 }

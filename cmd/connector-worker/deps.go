@@ -16,10 +16,12 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/openbao"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/pglogger"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkey"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkeystream"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/aliasconfig"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/docref"
@@ -62,6 +64,8 @@ type deps struct {
 	documents    *documentsql.Store
 	pruner       attemptPruner
 	retry        retryBounds
+	// gate says whether a connector may still run for a task; nil runs every entry.
+	gate port.ConnectorDispatchGate
 
 	streamKey    string
 	streamGroup  string
@@ -181,6 +185,7 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
 		pools:        buildPools(cfg, connectorSet),
 		completion:   newCompletionClient(cfg.ExecutionServiceInternalAddr, cfg.ConnectorCompletionTimeout),
 		pgPool:       pgPool,
+		gate:         &service.ConnectorDispatchGate{Instances: postgres.NewInstanceRepo(pgPool), Tasks: postgres.NewTaskRepo(pgPool)},
 		documents:    documents,
 		pruner:       documentsql.New(prunePool),
 		retry: retryBounds{

@@ -93,7 +93,7 @@ func TestInstanceService_Start(t *testing.T) {
 		assert.Equal(t, "TND-001", got.BusinessKey)
 		assert.Equal(t, workflowID, got.WorkflowID)
 		assert.Equal(t, port.InstanceStatusRunning, got.Status)
-		assert.Equal(t, tenantID.String()+":SUBJ-1:TND-001", got.TemporalWorkflowID)
+		assert.Equal(t, "tenant:"+tenantID.String()+":instance:"+got.ID.String(), got.TemporalWorkflowID)
 		assert.Len(t, instances.byID, 1, "the instance row must be committed")
 		assert.Len(t, outbox.enqueued, 1, "WorkflowInstanceStarted must be enqueued")
 		assert.Equal(t, domain.EventWorkflowInstanceStarted, outbox.enqueued[0].Type)
@@ -450,7 +450,7 @@ func TestInstanceService_Start(t *testing.T) {
 		assert.Len(t, instances.byID, 2)
 	})
 
-	t.Run("the Temporal id carries subject and key", func(t *testing.T) {
+	t.Run("the Temporal id carries tenant and instance", func(t *testing.T) {
 		svc, _, _, _, _, _, definitions, _ := newInstanceServiceHarness()
 		tenantID := uuid.New()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSON(t))
@@ -460,7 +460,7 @@ func TestInstanceService_Start(t *testing.T) {
 			SubjectID: "TND-001", BusinessKey: "stage-bid-no-bid", StartedByUserID: uuid.New(),
 		})
 		require.NoError(t, err)
-		assert.Equal(t, tenantID.String()+":TND-001:stage-bid-no-bid", got.TemporalWorkflowID)
+		assert.Equal(t, "tenant:"+tenantID.String()+":instance:"+got.ID.String(), got.TemporalWorkflowID)
 	})
 
 	t.Run("StartWorkflow failure after commit is returned, instance stays committed", func(t *testing.T) {

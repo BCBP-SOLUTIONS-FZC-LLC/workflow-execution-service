@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -35,12 +36,24 @@ func (s *TaskService) logger() port.Logger {
 	return noopLogger{}
 }
 
+// taskVacatedSignalWire is the payload of instance-task-vacated. RecordedAt lets
+// the workflow order it against a reassignment, because the relay does not.
+type taskVacatedSignalWire struct {
+	TaskID        string
+	VacatedUserID string
+	RecordedAt    time.Time
+}
+
+// reassignSignalWire is the payload of instance-reassign. RecordedAt is set by
+// the delegation paths, whose signals go through the outbox; a direct admin
+// reassignment leaves it out.
 type reassignSignalWire struct {
 	TaskID        string
 	OldUserID     string
 	NewUserID     string
 	AdminUserID   string
 	RecordVersion int64
+	RecordedAt    time.Time `json:",omitzero"`
 }
 
 func deptAndSuffix(nodeKey string) (deptID, suffix string) {

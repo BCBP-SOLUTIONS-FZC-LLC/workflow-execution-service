@@ -20,6 +20,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
 	outboundhttp "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/http"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/signalrelay"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporalclient"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkeystream"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
@@ -101,9 +102,31 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, err
 	}
 
+	var interceptors []interceptor.ClientInterceptor
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
+		tracingInterceptor, err := observability.NewTemporalTracingInterceptor(opentelemetry.TracerOptions{})
+		if err != nil {
+			unwind()
+			return nil, err
+		}
+		interceptors = append(interceptors, tracingInterceptor)
+	}
+	sdkClient, err := client.Dial(client.Options{
+		HostPort:     cfg.TemporalHostPort,
+		Namespace:    cfg.TemporalNamespace,
+		Interceptors: interceptors,
+	})
+	if err != nil {
+		unwind()
+		return nil, fmt.Errorf("dial temporal: %w", err)
+	}
+	cleanups = append(cleanups, sdkClient.Close)
+	temporal := temporalclient.New(sdkClient)
+
 	relay, err := outbox.NewRunner(outbox.Config{
-		Pool:         relayPool,
-		Publisher:    publisher,
+		Pool: relayPool,
+		// Signal records go to Temporal, every other record to the event bus.
+		Publisher:    signalrelay.New(publisher, temporal, log),
 		Logger:       log,
 		PollInterval: cfg.OutboxPollInterval,
 		BatchSize:    cfg.OutboxBatchSize,
@@ -124,6 +147,7 @@ func newApp(cfg *config.Config) (*app, error) {
 		Stats: postgres.NewOperationalStatsRepo(relayPool),
 		Record: func(s domain.OperationalStats) {
 			observability.RecordOperationalStats(s.DegradedInstances, s.OldestDegradedAgeSeconds, s.OldestReadyTaskAgeSeconds, s.InstancesByQueue)
+			observability.SetGauge(observability.OldestReadyConnectorTaskAgeSeconds, s.OldestReadyConnectorTaskAgeSeconds)
 		},
 		Interval: cfg.OperationalStatsInterval,
 		Logger:   log,
@@ -153,27 +177,6 @@ func newApp(cfg *config.Config) (*app, error) {
 			Logger:    log,
 		})
 	}
-
-	var interceptors []interceptor.ClientInterceptor
-	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
-		tracingInterceptor, err := observability.NewTemporalTracingInterceptor(opentelemetry.TracerOptions{})
-		if err != nil {
-			unwind()
-			return nil, err
-		}
-		interceptors = append(interceptors, tracingInterceptor)
-	}
-	sdkClient, err := client.Dial(client.Options{
-		HostPort:     cfg.TemporalHostPort,
-		Namespace:    cfg.TemporalNamespace,
-		Interceptors: interceptors,
-	})
-	if err != nil {
-		unwind()
-		return nil, fmt.Errorf("dial temporal: %w", err)
-	}
-	cleanups = append(cleanups, sdkClient.Close)
-	temporal := temporalclient.New(sdkClient)
 
 	validator, err := eventbus.NewSchemaValidator()
 	if err != nil {
@@ -215,8 +218,8 @@ func newApp(cfg *config.Config) (*app, error) {
 		Temporal: temporal, Cache: cache, Principals: principals, Log: log,
 	}
 	workflowClient := &service.WorkflowClient{
-		Instances: instances, Tasks: tasks, Assignments: assignments, Transactor: transactor, Temporal: temporal,
-		Eligibility: eligibility, Definitions: definitions, Log: log,
+		Instances: instances, Tasks: tasks, Assignments: assignments, Transactor: transactor, Outbox: outboxRepo, Signals: outboxRepo,
+		Validator: validator, Eligibility: eligibility, Definitions: definitions, Log: log,
 	}
 	guard := &service.ArchiveGuard{Instances: instances}
 	pauser := &service.UserTaskPauser{
@@ -224,7 +227,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 	availability := postgres.NewUserAvailabilityRepo(appPool)
 	delegationReconciler := &service.DelegationReconciler{
-		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo,
+		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo, Signals: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
 		Validator: validator, Availability: availability, Locks: recency, Log: log,
 	}

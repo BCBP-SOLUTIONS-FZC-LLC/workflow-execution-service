@@ -56,14 +56,14 @@ func (r *csaAssignments) ListActiveByUser(ctx context.Context, tenantID, userID 
 	return inTenant, nil
 }
 
-func (r *csaAssignments) Vacate(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error) {
+func (r *csaAssignments) VacateActive(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error) {
 	r.mu.Lock()
 	r.vacated = append(r.vacated, csaIDCall{tenantID, id})
 	r.mu.Unlock()
 	if a, ok := r.byID[id]; ok && a.TenantID != tenantID {
 		return nil, domain.ErrNotFound
 	}
-	return r.fakeAssignmentRepo.Vacate(ctx, tenantID, id)
+	return r.fakeAssignmentRepo.VacateActive(ctx, tenantID, id)
 }
 
 func (r *csaAssignments) Create(ctx context.Context, a *domain.TaskAssignment) error {
@@ -124,7 +124,7 @@ type csaClientHarness struct {
 	instances   *csaInstances
 	tasks       *csaTasks
 	assignments *csaAssignments
-	temporal    *fakeTemporalClient
+	outbox      *fakeOutbox
 }
 
 func csaNewClientHarness() *csaClientHarness {
@@ -132,9 +132,9 @@ func csaNewClientHarness() *csaClientHarness {
 		instances:   &csaInstances{fakeInstanceRepo: newFakeInstanceRepo()},
 		tasks:       &csaTasks{fakeTaskRepo: newFakeTaskRepo()},
 		assignments: csaWrapAssignments(newFakeAssignmentRepo()),
-		temporal:    &fakeTemporalClient{},
+		outbox:      &fakeOutbox{},
 	}
-	h.svc = &service.WorkflowClient{Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments, Transactor: fakeTransactor{}, Temporal: h.temporal}
+	h.svc = &service.WorkflowClient{Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments, Transactor: fakeTransactor{}, Outbox: h.outbox, Signals: h.outbox, Validator: realValidator()}
 	return h
 }
 
@@ -210,7 +210,7 @@ func TestWorkflowClient_ReassignDelegate_DelegationTagMatchesAsAPrefixOnly(t *te
 				assert.True(t, held.assignment.IsActive, "an assignment the filter does not match stays with the old delegate")
 				assert.Empty(t, h.assignments.created)
 				assert.Empty(t, h.assignments.vacated)
-				assert.Empty(t, h.temporal.signals)
+				assert.Empty(t, h.outbox.signals)
 				return
 			}
 			assert.Equal(t, 1, count)
@@ -219,11 +219,11 @@ func TestWorkflowClient_ReassignDelegate_DelegationTagMatchesAsAPrefixOnly(t *te
 			assert.Equal(t, []csaCreateCall{{tenantID, held.task.ID, newDelegate}}, h.assignments.created)
 			require.Len(t, h.assignments.creation, 1)
 			assert.Equal(t, tc.reason, h.assignments.creation[0].Reason, "the replacement keeps the original reason, suffix included")
-			require.Len(t, h.temporal.signals, 1)
-			assert.Equal(t, port.SignalInstanceReassign, h.temporal.signals[0].SignalName)
-			assert.Equal(t, held.instance.ID, h.temporal.signals[0].InstanceID)
+			require.Len(t, h.outbox.signals, 1)
+			assert.Equal(t, port.SignalInstanceReassign, h.outbox.signals[0].SignalName)
+			assert.Equal(t, held.instance.ID, h.outbox.signals[0].InstanceID)
 			assert.Equal(t, csaReassignWire{TaskID: held.task.ID.String(), OldUserID: oldDelegate.String(), NewUserID: newDelegate.String()},
-				csaDecodeReassign(t, h.temporal.signals[0].Payload))
+				csaDecodeReassign(t, h.outbox.signals[0].Payload))
 		})
 	}
 }
@@ -460,9 +460,9 @@ func TestWorkflowClient_DelegateWork_IgnoresTaskAndInstanceStatus(t *testing.T) 
 
 		require.NoError(t, err)
 		assert.Equal(t, 3, count)
-		require.Len(t, h.temporal.signals, 3)
+		require.Len(t, h.outbox.signals, 3)
 		signalled := map[uuid.UUID]csaReassignWire{}
-		for _, s := range h.temporal.signals {
+		for _, s := range h.outbox.signals {
 			assert.Equal(t, port.SignalInstanceReassign, s.SignalName)
 			signalled[s.InstanceID] = csaDecodeReassign(t, s.Payload)
 		}

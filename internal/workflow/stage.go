@@ -73,6 +73,7 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 		}
 		return nodeKey, "", err
 	}
+	defer delete(in.taskAssignees, out.TaskID)
 	if err := updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{nodeKey},
 	}); err != nil {
