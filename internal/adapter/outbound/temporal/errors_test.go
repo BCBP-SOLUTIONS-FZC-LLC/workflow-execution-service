@@ -24,23 +24,23 @@ type erroringValidator struct{}
 
 func (erroringValidator) Validate(context.Context, string, json.RawMessage) error { return errBoom }
 
-func TestCreateTask_ParsesValidAndIgnoresInvalidDueDate(t *testing.T) {
+func TestCreateTask_ParsesValidDueDateAndRefusesAnUnreadableFollowUpDate(t *testing.T) {
 	deps, tasks, _, _ := newTestDeps()
-	log := &fakeLogger{}
-	deps.Log = log
 
-	stage := dsl.StageDef{Type: "review", DueDate: "2026-01-01T00:00:00Z", FollowUpDate: "not-a-date"}
-	compiled, err := json.Marshal(stage)
+	valid, err := json.Marshal(dsl.StageDef{Type: "review", DueDate: "2026-01-01T00:00:00Z"})
 	require.NoError(t, err)
-
 	out, err := deps.CreateTask(context.Background(), port.CreateTaskInput{
-		InstanceID: uuid.New().String(), TenantID: uuid.New().String(), NodeKey: "sales/review", CompiledNode: compiled,
+		InstanceID: uuid.New().String(), TenantID: uuid.New().String(), NodeKey: "sales/review", CompiledNode: valid,
 	})
 	require.NoError(t, err)
-	task := tasks.byID[uuid.MustParse(out.TaskID)]
-	require.NotNil(t, task.DueAt)
-	assert.Nil(t, task.FollowUpAt, "an unparseable FollowUpDate is treated as absent, not an error")
-	assert.NotEmpty(t, log.warnCalls, "an unparseable date must be logged, not silently dropped")
+	require.NotNil(t, tasks.byID[uuid.MustParse(out.TaskID)].DueAt)
+
+	unreadable, err := json.Marshal(dsl.StageDef{Type: "review", FollowUpDate: "not-a-date"})
+	require.NoError(t, err)
+	_, err = deps.CreateTask(context.Background(), port.CreateTaskInput{
+		InstanceID: uuid.New().String(), TenantID: uuid.New().String(), NodeKey: "sales/other", CompiledNode: unreadable,
+	})
+	requireValidationError(t, err)
 }
 
 func TestCreateTask_InvalidInstanceID_IsNonRetryable(t *testing.T) {
@@ -89,7 +89,7 @@ func TestUpdateInstanceNodes_InvalidIDs(t *testing.T) {
 }
 
 func TestUpdateInstanceNodes_InstanceNotFound(t *testing.T) {
-	deps := &outboundtemporal.Deps{Instances: newFakeInstanceRepo()}
+	deps := &outboundtemporal.Deps{Instances: newFakeInstanceRepo(), Transactor: fakeTransactor{}}
 	err := deps.UpdateInstanceNodes(context.Background(), port.UpdateInstanceNodesInput{InstanceID: uuid.New().String(), TenantID: uuid.New().String()})
 	require.Error(t, err)
 }

@@ -340,7 +340,7 @@ func TestUpdateInstanceNodes_UpdatesCurrentNodeKeys(t *testing.T) {
 	tenantID, instanceID := uuid.New(), uuid.New()
 	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1}
 	instances := newFakeInstanceRepo(inst)
-	deps := &outboundtemporal.Deps{Instances: instances}
+	deps := &outboundtemporal.Deps{Instances: instances, Transactor: fakeTransactor{}}
 
 	err := deps.UpdateInstanceNodes(context.Background(), port.UpdateInstanceNodesInput{
 		InstanceID: instanceID.String(), TenantID: tenantID.String(), NodeKeys: []domain.NodeKey{"sales/approve"},
@@ -357,7 +357,7 @@ func TestUpdateInstanceNodes_UpdateCurrentNodeKeysError(t *testing.T) {
 	inst := &domain.Instance{ID: instanceID, TenantID: tenantID, RecordVersion: 1}
 	instances := newFakeInstanceRepo(inst)
 	instances.updateCurrentNodeKeysErr = errBoom
-	deps := &outboundtemporal.Deps{Instances: instances}
+	deps := &outboundtemporal.Deps{Instances: instances, Transactor: fakeTransactor{}}
 
 	err := deps.UpdateInstanceNodes(context.Background(), port.UpdateInstanceNodesInput{
 		InstanceID: instanceID.String(), TenantID: tenantID.String(), NodeKeys: []domain.NodeKey{"sales/approve"},

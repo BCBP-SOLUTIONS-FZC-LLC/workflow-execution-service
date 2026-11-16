@@ -56,7 +56,8 @@ func vacateIfActive(ctx context.Context, repo port.TaskAssignmentRepository, ten
 // handOver gives the vacated assignment's task to newUserID inside the caller's
 // transaction. A user who already holds the task keeps that one row, and
 // inherits the lead flag; inserting a second row would be a unique violation,
-// which aborts the whole transaction.
+// which aborts the whole transaction. Callers never hand a task to the user who
+// just lost it: that move changes nothing, and the vacate would take the task away.
 func handOver(ctx context.Context, repo port.TaskAssignmentRepository, tenantID uuid.UUID, vacated *domain.TaskAssignment, active []*domain.TaskAssignment, task *domain.Task, newUserID uuid.UUID, reason string) error {
 	if existing := activeAssignmentOfUser(active, newUserID); existing != nil {
 		if !vacated.IsLead {

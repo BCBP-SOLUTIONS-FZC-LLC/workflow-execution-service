@@ -481,6 +481,9 @@ components:
               description: >
                 Runtime context passed from the instance start request at task creation.
                 Read-only; matches the context_json provided when the instance was started.
+                For a connector task, resolved_inputs and output_mapping are included only for
+                callers holding tenant_admin or tenant_owner; every other reader of the task
+                gets the rest of the payload without them.
               additionalProperties: true
             assignments:
               type: array

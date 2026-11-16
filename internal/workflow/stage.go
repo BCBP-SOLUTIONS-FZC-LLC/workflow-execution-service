@@ -122,27 +122,31 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	for !resolved && fired == nil && !abandoned {
 		sel.Select(ctx)
 	}
+	cancelBoundaries()
+	if fired != nil && !fired.Interrupting && !abandoned {
+		in.spawnFiredPath(ctx, plan, fired)
+		for !resolved && !abandoned {
+			sel.Select(ctx)
+		}
+	}
 	cancelSLA()
 
 	if abandoned {
-		cancelBoundaries()
 		in.supersedeAbandoned(ctx, out.TaskID)
 		return nodeKey, "", errStageAbandoned
 	}
 
-	if fired != nil {
-		cancelBoundaries()
-		if fired.Interrupting {
-			delete(in.pending, visitKey)
-			_ = updateTaskStatus(ctx, port.UpdateTaskStatusInput{
-				TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusSuperseded,
-			})
-			return in.runFiredPath(ctx, plan, fired)
+	if fired != nil && fired.Interrupting {
+		delete(in.pending, visitKey)
+		if err := updateTaskStatus(ctx, port.UpdateTaskStatusInput{
+			TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusSuperseded,
+		}); err != nil {
+			if abandonedMidActivity(ctx) {
+				return nodeKey, "", errStageAbandoned
+			}
+			return nodeKey, "", err
 		}
-		in.spawnFiredPath(ctx, plan, fired)
-		resolveCh.Receive(ctx, &sig)
-	} else {
-		cancelBoundaries()
+		return in.runFiredPath(ctx, plan, fired)
 	}
 
 	return in.resolveTaskStage(ctx, nodeKey, out, sig)

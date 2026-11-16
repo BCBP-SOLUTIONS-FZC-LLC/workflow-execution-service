@@ -243,6 +243,27 @@ func TestInstanceService_StartRetry(t *testing.T) {
 		assert.Equal(t, "tenant:"+tenantID.String()+":instance:"+sent.InstanceID.String(), sent.TemporalWorkflowID)
 	})
 
+	t.Run("a context of JSON null is stored and sent as an empty object", func(t *testing.T) {
+		for _, raw := range []string{`null`, ` null `} {
+			svc, instances, _, _, _, temporal, definitions, _ := newInstanceServiceHarness()
+			definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
+			var sent port.StartWorkflowInput
+			temporal.startFunc = func(_ context.Context, in port.StartWorkflowInput) (port.StartWorkflowOutput, error) {
+				sent = in
+				return port.StartWorkflowOutput{TemporalWorkflowID: in.TemporalWorkflowID, TemporalRunID: "run-1"}, nil
+			}
+			in := input(caller, versionID)
+			in.ContextJSON = json.RawMessage(raw)
+
+			got, err := svc.Start(context.Background(), in)
+
+			require.NoError(t, err)
+			assert.JSONEq(t, `{}`, string(instances.byID[got.ID].ContextJSON), "stored context for %q", raw)
+			assert.JSONEq(t, `{}`, sent.ContextJSON, "sent context for %q", raw)
+			assert.Equal(t, tenantID, instances.byID[got.ID].TenantID)
+		}
+	})
+
 	t.Run("a row whose run id was never recorded is closed by the current execution", func(t *testing.T) {
 		svc, instances, _, _, _, temporal, definitions, _ := newInstanceServiceHarness()
 		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))

@@ -10,6 +10,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- Tasks: a second defer of a task whose first defer is being or was applied answers 409 and routes nothing (the instance could go back two steps); claiming a task answers 409 `INVALID_INSTANCE_STATE` when the instance is not running or degraded, as completing already did.
+- Node override and reassign to a user who already holds the task as a co-assignee make that user the lead and remove the replaced lead; the override used to be recorded and answered 200 while the lead never changed.
+- Safety-net pause: a user-revocation pause takes over an instance already paused by out-of-office, so a later "available" resume no longer restarts an instance whose user lost access; only an administrator's resume lifts it.
+- Instance start: `context_json: null` is stored as an empty object and runs normally (the workflow task used to panic and retry for ever, leaving the instance running with no task).
+- Delegation: a reassign whose new delegate is the old delegate, and a self-delegation reroute or reversal, answer success and change nothing (a non-lead holder used to lose the task, with a reassigned event and signal written).
+- Task detail: `GET /tasks/:id` shows a connector task's `resolved_inputs` and `output_mapping` in `payload_json` only to tenant administrators and owners; other readers of the task used to see them.
+- Workflow activities:
+  - an activity given a missing or other-tenant instance, task or assignment fails at once as not found (it used to retry without limit and stall the instance);
+  - a retried status update, force-route record or task creation after a committed one changes nothing more and sends no second event (a retried creation used to fail on commit forever);
+  - a task listing one assignee twice gets one assignment, and an unreadable SLA date or department id is refused instead of retried, dropped or replaced by the all-zero id;
+  - a late or repeated node update no longer touches an ended instance or bumps its version again;
+  - when one assignee completes a multi-assignee task, the others' open assignments are closed and the task completes (the instance used to move on with the task still open);
+  - the task-created event subject names the instance and the task.
+- Workflow interpreter:
+  - a refused pause, resume, force-route or boundary-supersede write leaves the instance as it was or fails the run, instead of changing state and carrying on;
+  - a force-back inside a parallel step records the force-routed event, supersedes the open tasks and moves the current node, and a force-back on a failed branch names the node the branch resumes at;
+  - a branch that failed partway through a department is parked at that department's last finished stage, finished stages are not run again after a force-back, and a branch reached through an exclusive gateway reruns its failed department;
+  - a cancel that lands in a nested park, a fork inside a boundary path, a fork inside a call or a park inside a non-interrupting side path ends the whole instance as TERMINATED (it used to finish COMPLETED);
+  - a retried force-route write recognises its own earlier commit even when another event landed in between, and a genuine repeat at a later record version is announced again;
+  - a force-forward inside a parallel step or a park fails the run when the current-node write is refused after the route record committed (the branch used to wait on a superseded task); a force-back inside a parallel step that is the plan's first step changes nothing;
+  - a force-back with no completed step to return to changes nothing (it used to cancel the running stage and create a second task);
+  - repeated identical step-result signals no longer stall pause, cancel and every later signal;
+  - an overdue task that started a non-interrupting side path still records its SLA warning and breach;
+  - skipping or cancelling a call that has an armed timer path no longer fails with a nil dereference, a call's message boundaries stop listening once the call is left, and an inner failure after a non-interrupting fire takes its error path instead of waiting for ever;
+  - a revert that names only a department no longer erases the whole step history;
+  - a resume signal with no initiator no longer lifts a pause held by a tenant state change or an out-of-office user.
 - Error answers: a start refused for a suspended tenant carries its own problem type `tenant-not-active` and title "Tenant Not Active" (it had the internal-error type and an empty title), and `NOT_ASSIGNEE`'s problem type is `not-assignee` (it was `assignee-not-assigned`).
 - Idempotency: the key now includes the calling user, so another user of the same tenant sending the same key no longer receives the first user's stored answer. An attempt that panics, or whose 2xx answer could not be stored, releases its claim, so a retry runs again (it used to get 409 `IDEMPOTENCY_KEY_REPLAY` for 24 hours).
 - Internal routes: a body or event envelope with a second JSON value after the first is refused with 400, and a key in the wrong case (`Tenant_ID`) is refused instead of being bound to `tenant_id`; unknown fields are still ignored.

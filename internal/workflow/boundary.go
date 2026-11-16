@@ -12,6 +12,10 @@ import (
 
 var errPathEnded = errors.New("workflow: path ended at an end event")
 
+const kindInstanceTerminated = "instance-terminated"
+
+var errInstanceTerminated = errors.New("workflow: instance cancelled")
+
 func endsPath(ctx wf.Context, f *boundaryFire) bool {
 	return getVersion(ctx, boundaryEndsPathChangeID) != wf.DefaultVersion && f.TargetDept == ""
 }
@@ -37,6 +41,9 @@ func (in *interpreter) runFiredPath(ctx wf.Context, plan *dsl.CompiledPlan, f *b
 		if err != nil {
 			return out.LastNode, out.LastResult, err
 		}
+		if out.Terminated {
+			return out.LastNode, out.LastResult, errInstanceTerminated
+		}
 		return out.LastNode, out.LastResult, errPathEnded
 	}
 	if endsPath(ctx, f) {
@@ -45,10 +52,17 @@ func (in *interpreter) runFiredPath(ctx wf.Context, plan *dsl.CompiledPlan, f *b
 	return in.runDepartment(ctx, plan, f.TargetDept)
 }
 
+func (in *interpreter) reportTerminated(ctx wf.Context, terminated bool, err error) {
+	if terminated || errors.Is(err, errInstanceTerminated) {
+		in.baseAdmin.Send(ctx, adminSignalEnvelope{Kind: kindInstanceTerminated})
+	}
+}
+
 func (in *interpreter) spawnFiredPath(ctx wf.Context, plan *dsl.CompiledPlan, f *boundaryFire) {
 	if len(f.Steps) > 0 {
 		wf.Go(ctx, func(gctx wf.Context) {
-			_, _ = in.runSteps(gctx, plan, f.Steps, in.admin)
+			out, err := in.runSteps(gctx, plan, f.Steps, in.admin)
+			in.reportTerminated(gctx, out.Terminated, err)
 		})
 		return
 	}

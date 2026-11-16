@@ -20,6 +20,9 @@ func (in *interpreter) runSubWorkflow(ctx wf.Context, plan *dsl.CompiledPlan, sw
 	wf.Go(childCtx, func(gctx wf.Context) {
 		out, err := in.runSteps(gctx, plan, sw.Plan.Steps, admin)
 		lastNode, runErr = out.LastNode, err
+		if out.Terminated && err == nil {
+			runErr = errInstanceTerminated
+		}
 		if code, raised := in.raisedErrorCode(gctx, sw, err); raised {
 			errCh.Send(gctx, code)
 			return
@@ -36,30 +39,45 @@ func (in *interpreter) runSubWorkflow(ctx wf.Context, plan *dsl.CompiledPlan, sw
 	})
 
 	var fired *boundaryFire
-	cancelBoundaries := registerSubWorkflowBoundaries(ctx, sel, in, errCh, sw, func(f boundaryFire) {
+	cancelBoundaries := onceOnly(registerSubWorkflowBoundaries(ctx, sel, in, errCh, sw, func(f boundaryFire) {
 		fired = &f
-	})
+	}))
+	defer cancelBoundaries()
 
-	sel.Select(ctx)
-
-	if completed {
-		cancelBoundaries()
-		return lastNode, runErr
-	}
-
-	if fired.Interrupting {
-		cancelChild()
-		if fired.Kind != "error" {
-			in.awaitWindDown(ctx, doneCh)
+	for {
+		for !completed && fired == nil {
+			sel.Select(ctx)
+			if !completed && fired == nil && ctx.Err() != nil {
+				return lastNode, errStageAbandoned
+			}
 		}
-		node, _, err := in.runFiredPath(ctx, plan, fired)
-		return node, err
-	}
+		if completed {
+			return lastNode, runErr
+		}
 
-	in.spawnFiredPath(ctx, plan, fired)
-	var v struct{}
-	doneCh.Receive(ctx, &v)
-	return lastNode, runErr
+		f := fired
+		fired = nil
+		if f.Interrupting {
+			cancelBoundaries()
+			cancelChild()
+			if f.Kind != "error" {
+				in.awaitWindDown(ctx, doneCh)
+			}
+			node, _, err := in.runFiredPath(ctx, plan, f)
+			return node, err
+		}
+		in.spawnFiredPath(ctx, plan, f)
+	}
+}
+
+func onceOnly(f func()) func() {
+	done := false
+	return func() {
+		if !done {
+			done = true
+			f()
+		}
+	}
 }
 
 const windDownWait = 30 * time.Second

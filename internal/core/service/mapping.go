@@ -211,6 +211,10 @@ func redactedPayload(eventType port.WorkflowEventType, data json.RawMessage) jso
 	if eventType != port.EventTaskCreated {
 		return data
 	}
+	return withoutConnectorFields(data)
+}
+
+func withoutConnectorFields(data json.RawMessage) json.RawMessage {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return data

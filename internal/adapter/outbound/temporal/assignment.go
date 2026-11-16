@@ -22,7 +22,7 @@ func (d *Deps) ClaimAssignment(ctx context.Context, in port.ClaimAssignmentInput
 	}
 
 	ctx = withTenantGUC(ctx, tenantID)
-	return d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
+	return retryableOrNotFound(d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
 		existing, err := d.Assignments.GetByID(ctx, tenantID, assignmentID)
 		if err != nil {
 			return fmt.Errorf("get assignment: %w", err)
@@ -52,7 +52,7 @@ func (d *Deps) ClaimAssignment(ctx context.Context, in port.ClaimAssignmentInput
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assignees}
 		payload := domain.NewWorkflowTaskClaimedPayload(core, taskCore, existing.UserID)
 		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskClaimed, payload)
-	})
+	}))
 }
 
 func (d *Deps) CompleteAssignment(ctx context.Context, in port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
@@ -86,7 +86,7 @@ func (d *Deps) CompleteAssignment(ctx context.Context, in port.CompleteAssignmen
 		return err
 	})
 	if err != nil {
-		return port.CompleteAssignmentOutput{}, err
+		return port.CompleteAssignmentOutput{}, retryableOrNotFound(err)
 	}
 	return out, nil
 }
@@ -104,11 +104,10 @@ func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, t
 	if err != nil {
 		return port.CompleteAssignmentOutput{}, fmt.Errorf("complete assignment: %w", err)
 	}
-	remaining, err := d.Assignments.ListActiveByTask(ctx, tenantID, completed.TaskID)
-	if err != nil {
-		return port.CompleteAssignmentOutput{}, fmt.Errorf("list active assignments: %w", err)
+	if err := vacateOthers(ctx, d.Assignments, tenantID, active, target.ID); err != nil {
+		return port.CompleteAssignmentOutput{}, err
 	}
-	out := port.CompleteAssignmentOutput{AllDone: len(remaining) == 0}
+	out := port.CompleteAssignmentOutput{AllDone: true}
 
 	core, err := d.instanceCore(ctx, tenantID, task.WorkflowInstanceID)
 	if err != nil {
@@ -120,6 +119,20 @@ func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, t
 		return port.CompleteAssignmentOutput{}, err
 	}
 	return out, nil
+}
+
+// vacateOthers closes the co-assignees' open assignments: the instance moves on
+// at the first accepted result, so the task is finished for everyone on it.
+func vacateOthers(ctx context.Context, repo port.TaskAssignmentRepository, tenantID uuid.UUID, active []*domain.TaskAssignment, completedID uuid.UUID) error {
+	for _, a := range active {
+		if a.ID == completedID {
+			continue
+		}
+		if _, err := repo.Vacate(ctx, tenantID, a.ID); err != nil {
+			return fmt.Errorf("vacate co-assignee assignment %s: %w", a.ID, err)
+		}
+	}
+	return nil
 }
 
 func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) error {
@@ -141,7 +154,7 @@ func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) error {
 	}
 
 	ctx = withTenantGUC(ctx, tenantID)
-	return d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
+	return retryableOrNotFound(d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
 		task, err := d.Tasks.GetByID(ctx, tenantID, taskID)
 		if err != nil {
 			return fmt.Errorf("get task: %w", err)
@@ -169,7 +182,7 @@ func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) error {
 		reason := &in.Reason
 		payload := domain.NewWorkflowTaskDeferredPayload(core, taskCore, in.DeferredToNodeKey, reason, nil)
 		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskDeferred, payload)
-	})
+	}))
 }
 
 func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmentInput) error {
@@ -195,7 +208,7 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 	}
 
 	ctx = withTenantGUC(ctx, tenantID)
-	return d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
+	return retryableOrNotFound(d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
 		task, err := d.Tasks.GetByID(ctx, tenantID, taskID)
 		if err != nil {
 			return fmt.Errorf("get task: %w", err)
@@ -204,8 +217,11 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 		if err != nil {
 			return fmt.Errorf("list active assignments: %w", err)
 		}
-		if assignmentActiveFor(active, newUserID) {
-			return nil
+		if holder := assignmentFor(active, newUserID); holder != nil {
+			if holder.IsLead || !leadHeldBy(active, oldUserID) {
+				return nil
+			}
+			return d.makeHolderLead(ctx, tenantID, task, active, holder, oldUserID, in.RecordVersion)
 		}
 		if _, err := d.Tasks.BumpRecordVersion(ctx, tenantID, taskID, in.RecordVersion); err != nil {
 			if errors.Is(err, domain.ErrRecordVersionConflict) {
@@ -231,7 +247,30 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{newUserID}}
 		payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, oldUserID, newUserID, domain.ReassignInitiatorAdmin, nil)
 		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskReassigned, payload)
-	})
+	}))
+}
+
+// makeHolderLead moves the lead to a user who already holds the task without it,
+// and vacates the replaced lead's assignment. SetLead also bumps the task's
+// record version. It runs only while the replaced user still holds the lead, so a
+// retry after the move committed finds nothing to do.
+func (d *Deps) makeHolderLead(ctx context.Context, tenantID uuid.UUID, task *domain.Task, active []*domain.TaskAssignment, holder *domain.TaskAssignment, oldUserID uuid.UUID, recordVersion int64) error {
+	if err := vacateAssignmentsFor(ctx, d.Assignments, tenantID, active, oldUserID); err != nil {
+		return err
+	}
+	if _, err := d.Assignments.SetLead(ctx, tenantID, task.ID, holder.ID, recordVersion); err != nil {
+		if errors.Is(err, domain.ErrRecordVersionConflict) {
+			return nonRetryable("VersionConflict", fmt.Errorf("reassign: lost the record_version race: %w", err))
+		}
+		return fmt.Errorf("set lead: %w", err)
+	}
+	core, err := d.instanceCore(ctx, tenantID, task.WorkflowInstanceID)
+	if err != nil {
+		return err
+	}
+	taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{holder.UserID}}
+	payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, oldUserID, holder.UserID, domain.ReassignInitiatorAdmin, nil)
+	return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskReassigned, payload)
 }
 
 // parseOptionalUserID reads a user id that a reassignment may leave out when nobody held the task.
@@ -249,10 +288,6 @@ func parseOptionalUserID(raw string) (uuid.UUID, error) {
 func leadHeldBy(active []*domain.TaskAssignment, userID uuid.UUID) bool {
 	a := assignmentFor(active, userID)
 	return a != nil && a.IsLead
-}
-
-func assignmentActiveFor(active []*domain.TaskAssignment, userID uuid.UUID) bool {
-	return assignmentFor(active, userID) != nil
 }
 
 func assignmentFor(active []*domain.TaskAssignment, userID uuid.UUID) *domain.TaskAssignment {
@@ -294,7 +329,7 @@ func (d *Deps) UpdateTaskStatus(ctx context.Context, in port.UpdateTaskStatusInp
 	}
 
 	ctx = withTenantGUC(ctx, tenantID)
-	return d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
+	return retryableOrNotFound(d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
 		existing, err := d.Tasks.GetByID(ctx, tenantID, taskID)
 		if err != nil {
 			return fmt.Errorf("get task: %w", err)
@@ -330,5 +365,5 @@ func (d *Deps) UpdateTaskStatus(ctx context.Context, in port.UpdateTaskStatusInp
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
 		payload := domain.NewWorkflowTaskFailedPayload(core, taskCore, "stage_fail", in.ErrorClass)
 		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskFailed, payload)
-	})
+	}))
 }

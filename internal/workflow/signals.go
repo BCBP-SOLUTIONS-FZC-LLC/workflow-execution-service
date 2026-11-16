@@ -51,7 +51,7 @@ func validateSignal(status domain.InstanceStatus, signal string) error {
 }
 
 func canResume(pausedBy, resumeInitiator string) bool {
-	if resumeInitiator == domain.InitiatorAdmin || resumeInitiator == "" {
+	if resumeInitiator == domain.InitiatorAdmin {
 		return true
 	}
 	return resumeInitiator == pausedBy
@@ -161,6 +161,9 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 				in.recordHeldPause(ctx, name, sig)
 				return
 			}
+			if name == SignalInstancePause && in.takeOverPause(sig) {
+				return
+			}
 			if err := validateSignal(in.status, name); err != nil {
 				logger.Warn("dropping admin signal", "signal", name, "error", err)
 				return
@@ -216,7 +219,9 @@ func (in *interpreter) deliverResult(ctx wf.Context, signal string, visitKey nod
 		return
 	}
 	if ch, ok := in.pending[visitKey]; ok {
-		ch.Send(ctx, sig)
+		if !ch.SendAsync(sig) {
+			wf.GetLogger(ctx).Warn("dropping repeated step result: one is already waiting", "node_key", string(visitKey.Node), "visit", visitKey.Visit)
+		}
 	} else {
 		in.pendingSignals[visitKey] = sig
 	}
@@ -276,6 +281,9 @@ func (in *interpreter) validateStageDefer(sig stageDeferSignal) error {
 	if in.deferTarget() == "" {
 		return refuseDefer("there is no completed step to go back to")
 	}
+	if in.deferredTasks[sig.TaskID] {
+		return refuseDefer("this task is already deferred or being deferred")
+	}
 	return nil
 }
 
@@ -288,7 +296,9 @@ func (in *interpreter) applyStageDefer(ctx wf.Context, sig stageDeferSignal) err
 		AssignmentID: sig.AssignmentID, Reason: sig.Reason, RecordVersion: sig.RecordVersion,
 		DeferredToNodeKey: string(in.deferTarget()),
 	}
+	in.deferredTasks[sig.TaskID] = true
 	if err := deferTask(ctx, input); err != nil {
+		delete(in.deferredTasks, sig.TaskID)
 		return fmt.Errorf("defer task: %w", err)
 	}
 	in.routeAdminSignal(ctx, SignalInstanceForceBack, adminSignal{
@@ -337,6 +347,9 @@ func (in *interpreter) recordHeldPause(ctx wf.Context, signal string, sig adminS
 	logger := wf.GetLogger(ctx)
 	if signal == SignalInstancePause {
 		if in.pauseHeld {
+			if in.takeOverPause(sig) {
+				return
+			}
 			logger.Warn("dropping instance-pause signal: a pause is already held", "paused_by", in.pauseInitiator)
 			return
 		}
@@ -359,30 +372,41 @@ func (in *interpreter) recordHeldPause(ctx wf.Context, signal string, sig adminS
 	in.pauseSignal = adminSignal{}
 }
 
-func (in *interpreter) handleInstancePause(ctx wf.Context, sig adminSignal) {
-	in.status = domain.InstanceStatusPaused
+func (in *interpreter) takeOverPause(sig adminSignal) bool {
+	if !in.pauseHeld || sig.Initiator != domain.InitiatorSafetyNet || in.pauseInitiator == domain.InitiatorSafetyNet {
+		return false
+	}
 	in.pauseInitiator = sig.Initiator
-	in.pauseHeld = true
 	in.pauseSignal = sig
+	return true
+}
+
+func (in *interpreter) handleInstancePause(ctx wf.Context, sig adminSignal) {
 	if err := pauseInstance(ctx, port.PauseInstanceInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID,
 		AdminUserID: sig.AdminUserID, Initiator: sig.Initiator, RecordVersion: sig.RecordVersion,
 	}); err != nil {
-		wf.GetLogger(ctx).Warn("pauseInstance failed", "error", err)
+		wf.GetLogger(ctx).Warn("pauseInstance failed; the instance keeps running", "error", err)
+		return
 	}
+	in.status = domain.InstanceStatusPaused
+	in.pauseInitiator = sig.Initiator
+	in.pauseHeld = true
+	in.pauseSignal = sig
 }
 
 func (in *interpreter) handleInstanceResume(ctx wf.Context, sig adminSignal) {
-	in.status = domain.InstanceStatusRunning
-	in.pauseInitiator = ""
-	in.pauseHeld = false
-	in.pauseSignal = adminSignal{}
 	if err := resumeInstance(ctx, port.ResumeInstanceInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID,
 		AdminUserID: sig.AdminUserID, Initiator: sig.Initiator, RecordVersion: sig.RecordVersion,
 	}); err != nil {
-		wf.GetLogger(ctx).Warn("resumeInstance failed", "error", err)
+		wf.GetLogger(ctx).Warn("resumeInstance failed; the instance stays paused", "error", err)
+		return
 	}
+	in.status = domain.InstanceStatusRunning
+	in.pauseInitiator = ""
+	in.pauseHeld = false
+	in.pauseSignal = adminSignal{}
 	in.releaseHeldResults(ctx)
 }
 

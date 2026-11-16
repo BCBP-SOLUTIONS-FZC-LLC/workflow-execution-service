@@ -68,6 +68,9 @@ func (in *interpreter) mergeVariables(vars map[string]any) error {
 			return fmt.Errorf("workflow: parsing context_json: %w", err)
 		}
 	}
+	if current == nil {
+		current = map[string]any{}
+	}
 	for k, v := range vars {
 		current[k] = v
 	}

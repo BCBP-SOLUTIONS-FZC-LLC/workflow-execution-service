@@ -39,6 +39,23 @@ func (h *nodeHistory) PopTo(target domain.NodeKey) []domain.NodeKey {
 	return popped
 }
 
+func (h *nodeHistory) PopToDept(deptID string) []domain.NodeKey {
+	idx := -1
+	for i := len(h.stack) - 1; i >= 0; i-- {
+		if deptFromNodeKey(h.stack[i]) == deptID {
+			idx = i
+		} else if idx != -1 {
+			break
+		}
+	}
+	if idx == -1 {
+		return nil
+	}
+	popped := append([]domain.NodeKey(nil), h.stack[idx:]...)
+	h.stack = h.stack[:idx]
+	return popped
+}
+
 func (h *nodeHistory) PreForkEntry() domain.NodeKey {
 	return h.Peek()
 }

@@ -47,7 +47,7 @@ func TestInstanceService_RepeatedForceBackWithTheOldRecordVersionConflictsAfterT
 	instances := postgres.NewInstanceRepo(appPool)
 	recorder := &wflSignalRecorder{}
 	svc := &service.InstanceService{Instances: instances, Tasks: postgres.NewTaskRepo(appPool), Temporal: recorder}
-	workflowSide := &temporaladapter.Deps{Instances: instances}
+	workflowSide := &temporaladapter.Deps{Instances: instances, Transactor: postgres.NewTransactor(appPool)}
 	ctx := context.Background()
 
 	tenantID, actorID, id := uuid.New(), uuid.New(), uuid.New()
@@ -65,7 +65,7 @@ func TestInstanceService_RepeatedForceBackWithTheOldRecordVersionConflictsAfterT
 	require.Equal(t, []wflSignal{{workflowID: "wf-" + id.String(), instanceID: id, name: port.SignalInstanceForceBack}}, recorder.signals)
 
 	require.NoError(t, workflowSide.UpdateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
-		InstanceID: id.String(), TenantID: tenantID.String(), NodeKeys: []domain.NodeKey{"billing/prep"},
+		InstanceID: id.String(), TenantID: tenantID.String(), NodeKeys: []domain.NodeKey{"billing/entry"},
 	}))
 
 	err := svc.ForceBack(ctx, tenantID, id, actorID, "billing/prep", firstVersion)

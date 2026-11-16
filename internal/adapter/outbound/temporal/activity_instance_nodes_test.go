@@ -12,7 +12,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-func TestUpdateInstanceNodes_RetryWithSameKeys_SucceedsAndLeavesTheSameKeys(t *testing.T) {
+func TestUpdateInstanceNodes_RetryWithSameKeys_SucceedsAndWritesOnce(t *testing.T) {
 	world := wkactNewWorld()
 	deps, _ := wkactNewDeps(t, world)
 	tenant := uuid.New()
@@ -26,12 +26,10 @@ func TestUpdateInstanceNodes_RetryWithSameKeys_SucceedsAndLeavesTheSameKeys(t *t
 	require.NoError(t, deps.UpdateInstanceNodes(context.Background(), in), "a retry after a committed write is not a version conflict")
 
 	want := []string{"sales/review", "sales/approve"}
-	require.Len(t, world.nodeWrites, 2)
-	for _, w := range world.nodeWrites {
-		assert.Equal(t, tenant, w.Tenant)
-		assert.Equal(t, inst.ID, w.ID)
-		assert.Equal(t, want, w.Keys)
-	}
+	require.Len(t, world.nodeWrites, 1, "the retry writes nothing")
+	assert.Equal(t, tenant, world.nodeWrites[0].Tenant)
+	assert.Equal(t, inst.ID, world.nodeWrites[0].ID)
+	assert.Equal(t, want, world.nodeWrites[0].Keys)
 	assert.Equal(t, want, world.instances[inst.ID].CurrentNodeKeys)
 	world.requireAllCallsForTenant(t, tenant)
 }

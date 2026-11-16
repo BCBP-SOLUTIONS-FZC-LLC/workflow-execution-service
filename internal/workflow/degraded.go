@@ -61,14 +61,15 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 			if errors.Is(err, errStageAbandoned) {
 				return
 			}
-			settle.Send(gctx, branchOutcome{Key: key, DeptID: deptID, LastNode: out.LastNode, Steps: steps, Err: err})
+			settle.Send(gctx, branchOutcome{Key: key, DeptID: deptID, LastNode: out.LastNode, Steps: steps, Err: err, Terminated: out.Terminated})
 		})
 	}
 
 	var completed []completedBranch
 	var failed []failedBranch
 	remaining := len(branches)
-	for remaining > 0 {
+	terminated := false
+	for remaining > 0 && !terminated {
 		sel := wf.NewSelector(ctx)
 		var envelope adminSignalEnvelope
 		gotAdmin := false
@@ -82,6 +83,10 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 			var out branchOutcome
 			c.Receive(ctx, &out)
 			if resolved[out.Key] {
+				return
+			}
+			if out.Terminated {
+				terminated = true
 				return
 			}
 			resolved[out.Key] = true
@@ -102,18 +107,25 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 			return stepOutcome{Terminated: true}, in.cancelInstanceOnSignal(ctx, envelope.Signal)
 
 		case SignalInstanceForceFwd:
-			if cb, ok := in.handleParallelForceForward(ctx, plan, keys, branchSteps, cancels, resolved, envelope.Signal); ok {
+			cb, ok, err := in.handleParallelForceForward(ctx, plan, keys, branchSteps, cancels, resolved, envelope.Signal)
+			if err != nil {
+				return stepOutcome{}, err
+			}
+			if ok {
 				remaining--
 				completed = append(completed, cb)
 			}
 
 		case SignalInstanceForceBack:
-			if err := in.handleParallelForceBack(ctx, plan, deptIDs, preFork); err != nil {
+			if err := in.handleParallelForceBack(ctx, plan, deptIDs, preFork, envelope.Signal); err != nil {
 				return stepOutcome{}, err
 			}
 		}
 	}
 
+	if terminated {
+		return stepOutcome{Terminated: true}, nil
+	}
 	if len(failed) == 0 {
 		return stepOutcome{LastNode: preFork}, nil
 	}
@@ -212,7 +224,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 	for len(failed) > 0 || respawning > 0 {
 		sel := wf.NewSelector(ctx)
 		var terminated bool
-		var cancelErr error
+		var cancelErr, fatal error
 
 		sel.AddReceive(p.ch, func(c wf.ReceiveChannel, more bool) {
 			var envelope adminSignalEnvelope
@@ -230,7 +242,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 			case SignalInstanceForceFwd:
 				var cb completedBranch
 				var ok bool
-				failed, cb, ok = in.handleDegradedForceForward(ctx, failed, sig)
+				failed, cb, ok, fatal = in.handleDegradedForceForward(ctx, failed, sig)
 				if ok {
 					completed = append(completed, cb)
 				}
@@ -248,6 +260,10 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 			var out branchOutcome
 			c.Receive(ctx, &out)
 			respawning--
+			if out.Terminated {
+				terminated = true
+				return
+			}
 			if out.Err != nil {
 				fb := failedBranch{DeptID: out.DeptID, Steps: out.Steps, LastCompletedNode: out.LastNode, Err: out.Err}
 				failed = append(failed, fb)
@@ -258,6 +274,10 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 		})
 
 		sel.Select(ctx)
+		if fatal != nil {
+			in.closePark(p)
+			return stepOutcome{}, fatal
+		}
 		if terminated {
 			in.closePark(p)
 			return stepOutcome{Terminated: true}, cancelErr
@@ -306,25 +326,42 @@ func (in *interpreter) leaveParkPaused(ctx wf.Context) {
 	}
 }
 
-func (in *interpreter) handleParallelForceForward(ctx wf.Context, plan *dsl.CompiledPlan, keys []string, branchSteps map[string][]dsl.ExecutionStep, cancels map[string]wf.CancelFunc, resolved map[string]bool, sig adminSignal) (completedBranch, bool) {
+func (in *interpreter) handleParallelForceForward(ctx wf.Context, plan *dsl.CompiledPlan, keys []string, branchSteps map[string][]dsl.ExecutionStep, cancels map[string]wf.CancelFunc, resolved map[string]bool, sig adminSignal) (completedBranch, bool, error) {
 	deptID := sig.TargetDeptID
 	key := branchRunning(keys, branchSteps, resolved, deptID)
 	if key == "" {
 		wf.GetLogger(ctx).Warn("instance-force-forward: target_node_key doesn't name a still-active branch of this gateway; dropping",
 			"target_dept_id", deptID)
-		return completedBranch{}, false
+		return completedBranch{}, false, nil
 	}
 	oldKeys := in.pendingNodesIn(branchSteps[key])
 	reached := departmentEntryNode(plan, deptID, sig.TargetNodeKey)
 	if len(oldKeys) > 0 {
 		reached = oldKeys[0]
 	}
-	in.recordAndRedirect(ctx, oldKeys, reached, domain.ForceRouteDirectionForward, sig)
+	if err := in.recordAndRedirect(ctx, oldKeys, reached, domain.ForceRouteDirectionForward, sig); err != nil {
+		if droppedRoute(ctx, err, "target_dept_id", deptID) {
+			return completedBranch{}, false, nil
+		}
+		return completedBranch{}, false, err
+	}
 	if cancel, ok := cancels[key]; ok {
 		cancel()
 	}
 	resolved[key] = true
-	return completedBranch{DeptID: deptID, LastNode: sig.TargetNodeKey}, true
+	return completedBranch{DeptID: deptID, LastNode: sig.TargetNodeKey}, true, nil
+}
+
+// droppedRoute reports whether a failed force-route is a clean drop: only a
+// refused audit write is, because it changed nothing. A refused current-node
+// write comes after the audit committed and the abandoned tasks were superseded.
+func droppedRoute(ctx wf.Context, err error, field, value string) bool {
+	var audit *routeAuditError
+	if !errors.As(err, &audit) {
+		return false
+	}
+	wf.GetLogger(ctx).Warn("instance-force-forward: route record refused; dropping", field, value, "error", err)
+	return true
 }
 
 func (in *interpreter) innermostGatewayRunning(deptID string) *gateway {
@@ -385,16 +422,21 @@ func stepsRun(steps []dsl.ExecutionStep, deptID string) bool {
 	return false
 }
 
-func (in *interpreter) handleParallelForceBack(ctx wf.Context, plan *dsl.CompiledPlan, deptIDs []string, preFork domain.NodeKey) error {
+func (in *interpreter) handleParallelForceBack(ctx wf.Context, plan *dsl.CompiledPlan, deptIDs []string, preFork domain.NodeKey, sig adminSignal) error {
+	if preFork == "" {
+		wf.GetLogger(ctx).Warn("instance-force-back: no completed node to return to; dropping")
+		return nil
+	}
+	entry := departmentEntryNode(plan, deptFromNodeKey(preFork), preFork)
+	if err := in.recordAndRedirect(ctx, in.currentPendingNodes(), entry, domain.ForceRouteDirectionBack, sig); err != nil {
+		return err
+	}
 	for _, d := range deptIDs {
 		in.pauseDept(ctx, d)
 	}
 	popped := in.history.PopTo(preFork)
 	in.msgBuf.ResetSpan(popped)
-	var err error
-	if preFork != "" {
-		_, _, err = in.runDepartment(ctx, plan, deptFromNodeKey(preFork))
-	}
+	_, _, err := in.runDepartment(ctx, plan, deptFromNodeKey(preFork))
 	if errors.Is(err, errPathEnded) {
 		err = nil
 	}
@@ -404,16 +446,21 @@ func (in *interpreter) handleParallelForceBack(ctx wf.Context, plan *dsl.Compile
 	return err
 }
 
-func (in *interpreter) handleDegradedForceForward(ctx wf.Context, failed []failedBranch, sig adminSignal) ([]failedBranch, completedBranch, bool) {
+func (in *interpreter) handleDegradedForceForward(ctx wf.Context, failed []failedBranch, sig adminSignal) ([]failedBranch, completedBranch, bool, error) {
 	idx := failedBranchFor(failed, sig)
 	if idx < 0 {
 		wf.GetLogger(ctx).Warn("instance-force-forward: target_node_key doesn't name a currently-failed branch; dropping",
 			"target_node_key", sig.TargetNodeKey)
-		return failed, completedBranch{}, false
+		return failed, completedBranch{}, false, nil
 	}
 	fb := failed[idx]
-	in.recordAndRedirect(ctx, []domain.NodeKey{fb.LastCompletedNode}, sig.TargetNodeKey, domain.ForceRouteDirectionForward, sig)
-	return removeFailedBranch(failed, idx), completedBranch{DeptID: fb.DeptID, LastNode: sig.TargetNodeKey}, true
+	if err := in.recordAndRedirect(ctx, []domain.NodeKey{fb.LastCompletedNode}, sig.TargetNodeKey, domain.ForceRouteDirectionForward, sig); err != nil {
+		if droppedRoute(ctx, err, "target_node_key", string(sig.TargetNodeKey)) {
+			return failed, completedBranch{}, false, nil
+		}
+		return failed, completedBranch{}, false, err
+	}
+	return removeFailedBranch(failed, idx), completedBranch{DeptID: fb.DeptID, LastNode: sig.TargetNodeKey}, true, nil
 }
 
 func (in *interpreter) handleDegradedForceBack(ctx wf.Context, plan *dsl.CompiledPlan, failed []failedBranch, settle, admin wf.Channel, sig adminSignal) ([]failedBranch, bool) {
@@ -424,63 +471,96 @@ func (in *interpreter) handleDegradedForceBack(ctx wf.Context, plan *dsl.Compile
 		return failed, false
 	}
 	fb := failed[idx]
+	if err := in.recordForceRouteAudit(ctx, nil, resumeNode(plan, fb), domain.ForceRouteDirectionBack, sig); err != nil {
+		wf.GetLogger(ctx).Warn("instance-force-back: audit write failed; dropping", "target_node_key", sig.TargetNodeKey, "error", err)
+		return failed, false
+	}
 	failed = removeFailedBranch(failed, idx)
-	in.recordForceRouteAudit(ctx, nil, fb.LastCompletedNode, domain.ForceRouteDirectionBack, sig)
 	in.msgBuf.ResetSpan([]domain.NodeKey{fb.LastCompletedNode})
 	wf.Go(ctx, func(gctx wf.Context) {
-		node, err := in.respawnBranch(gctx, plan, fb, admin)
-		if err != nil && node == "" {
-			node = fb.LastCompletedNode
+		out, err := in.respawnBranch(gctx, plan, fb, admin)
+		if err != nil && out.LastNode == "" {
+			out.LastNode = fb.LastCompletedNode
 		}
-		settle.Send(gctx, branchOutcome{DeptID: fb.DeptID, LastNode: node, Steps: fb.Steps, Err: err})
+		settle.Send(gctx, branchOutcome{DeptID: fb.DeptID, LastNode: out.LastNode, Steps: fb.Steps, Err: err, Terminated: out.Terminated})
 	})
 	return failed, true
 }
 
-func (in *interpreter) respawnBranch(ctx wf.Context, plan *dsl.CompiledPlan, fb failedBranch, admin wf.Channel) (domain.NodeKey, error) {
+func (in *interpreter) respawnBranch(ctx wf.Context, plan *dsl.CompiledPlan, fb failedBranch, admin wf.Channel) (stepOutcome, error) {
 	if fb.LastCompletedNode == "" {
-		out, err := in.runSteps(ctx, plan, fb.Steps, admin)
-		return out.LastNode, err
+		return in.runSteps(ctx, plan, fb.Steps, admin)
 	}
 
 	resumeDept := deptFromNodeKey(fb.LastCompletedNode)
 	dept := findDepartment(plan, resumeDept)
 	if dept == nil {
-		out, err := in.runSteps(ctx, plan, fb.Steps, admin)
-		return out.LastNode, err
+		return in.runSteps(ctx, plan, fb.Steps, admin)
 	}
 
 	node, _, err := in.runDepartmentFrom(ctx, plan, resumeDept, stageIndexAfter(dept, fb.LastCompletedNode))
+	if errors.Is(err, errInstanceTerminated) {
+		return stepOutcome{LastNode: node, Terminated: true}, nil
+	}
 	if errors.Is(err, errPathEnded) {
-		return node, nil
+		return stepOutcome{LastNode: node}, nil
 	}
 	if err != nil {
-		return node, err
+		return stepOutcome{LastNode: node}, err
 	}
 	rest := stepsAfterDept(fb.Steps, resumeDept)
 	if len(rest) == 0 {
-		return node, nil
+		return stepOutcome{LastNode: node}, nil
 	}
 	out, err := in.runSteps(ctx, plan, rest, admin)
-	if out.LastNode != "" {
-		node = out.LastNode
+	if out.LastNode == "" {
+		out.LastNode = node
 	}
-	return node, err
+	return out, err
 }
 
 func stepsAfterDept(branchSteps []dsl.ExecutionStep, deptID string) []dsl.ExecutionStep {
-	for i, step := range branchSteps {
-		for j, d := range step.Sequential {
-			if d == deptID {
-				var out []dsl.ExecutionStep
-				if rest := step.Sequential[j+1:]; len(rest) > 0 {
-					out = append(out, dsl.ExecutionStep{Sequential: append([]string{}, rest...)})
-				}
-				return append(out, branchSteps[i+1:]...)
+	cont, ok := findRedirectTarget(branchSteps, deptID)
+	if !ok || len(cont) == 0 {
+		return nil
+	}
+	head := cont[0]
+	if len(head.Sequential) == 0 || head.Sequential[0] != deptID {
+		return cont
+	}
+	var out []dsl.ExecutionStep
+	if rest := head.Sequential[1:]; len(rest) > 0 {
+		out = append(out, dsl.ExecutionStep{Sequential: append([]string{}, rest...)})
+	}
+	return append(out, cont[1:]...)
+}
+
+// resumeNode is the node a respawned branch re-enters at: the stage after its
+// last completed one, the first stage of the next department when that
+// department is done, or the branch's first stage when nothing completed.
+func resumeNode(plan *dsl.CompiledPlan, fb failedBranch) domain.NodeKey {
+	steps := fb.Steps
+	if fb.LastCompletedNode != "" {
+		if dept := findDepartment(plan, deptFromNodeKey(fb.LastCompletedNode)); dept != nil {
+			if idx := stageIndexAfter(dept, fb.LastCompletedNode); idx < len(dept.Stages) {
+				return domain.NodeKey(dsl.NodeKey(dept.ID, &dept.Stages[idx]))
 			}
+			steps = stepsAfterDept(fb.Steps, dept.ID)
 		}
 	}
-	return nil
+	if node := firstNodeOf(plan, steps); node != "" {
+		return node
+	}
+	return fb.LastCompletedNode
+}
+
+func firstNodeOf(plan *dsl.CompiledPlan, steps []dsl.ExecutionStep) domain.NodeKey {
+	for _, step := range steps {
+		if len(step.Sequential) > 0 {
+			return departmentEntryNode(plan, step.Sequential[0], "")
+		}
+	}
+	return ""
 }
 
 func failedBranchFor(failed []failedBranch, sig adminSignal) int {

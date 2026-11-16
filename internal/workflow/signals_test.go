@@ -83,7 +83,8 @@ func TestCanResume(t *testing.T) {
 			want:            true,
 		},
 		{name: "an admin resume overrides an ooo pause", pausedBy: domain.InitiatorOOO, resumeInitiator: domain.InitiatorAdmin, want: true},
-		{name: "an unattributed resume is treated as an admin override", pausedBy: domain.InitiatorOOO, resumeInitiator: "", want: true},
+		{name: "an unattributed resume does not lift an owned pause", pausedBy: domain.InitiatorOOO, resumeInitiator: "", want: false},
+		{name: "an unattributed resume lifts an unowned pause", pausedBy: "", resumeInitiator: "", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

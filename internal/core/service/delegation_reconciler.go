@@ -168,6 +168,9 @@ func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID
 }
 
 func (s *DelegationReconciler) Reroute(ctx context.Context, in port.DelegationRerouteInput) error {
+	if in.DelegateID == in.DelegatorID {
+		return nil
+	}
 	active, err := s.Assignments.ListActiveByUser(ctx, in.TenantID, in.DelegatorID)
 	if err != nil {
 		return err
@@ -258,6 +261,9 @@ func (s *DelegationReconciler) resumeForAbsentDelegator(ctx context.Context, ten
 }
 
 func (s *DelegationReconciler) Reverse(ctx context.Context, in port.DelegationReversalInput) error {
+	if in.DelegatorID == in.DelegateID {
+		return nil
+	}
 	active, err := s.Assignments.ListActiveByUser(ctx, in.TenantID, in.DelegateID)
 	if err != nil {
 		return err

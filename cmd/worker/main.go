@@ -163,7 +163,6 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*outboundtemporal.Deps, po
 		Transactor:  postgres.NewTransactor(pool),
 		Validator:   validator,
 		Definitions: definitions,
-		Log:         wlog,
 	}
 	queueRepo := postgres.NewActiveTaskQueueRepo(pool)
 

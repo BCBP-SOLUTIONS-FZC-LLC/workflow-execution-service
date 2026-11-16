@@ -64,6 +64,7 @@ func (s *InstanceService) readCompiledWorkflow(ctx context.Context, tenantID, ve
 }
 
 func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput) (*port.Instance, error) {
+	in.ContextJSON = nullContextAsEmptyObject(in.ContextJSON)
 	if existing, err := s.matchingStart(ctx, in); err != nil {
 		return nil, err
 	} else if existing != nil {
@@ -218,6 +219,13 @@ func (s *InstanceService) allowStart(ctx context.Context, tenantID uuid.UUID) er
 		return nil
 	}
 	return s.Gate.Allow(ctx, tenantID)
+}
+
+func nullContextAsEmptyObject(raw []byte) []byte {
+	if string(bytes.TrimSpace(raw)) == "null" {
+		return []byte("{}")
+	}
+	return raw
 }
 
 func sameContext(stored, requested []byte) bool {
