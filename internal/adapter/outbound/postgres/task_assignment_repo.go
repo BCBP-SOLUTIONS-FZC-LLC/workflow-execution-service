@@ -103,6 +103,25 @@ func (r *TaskAssignmentRepo) ListActiveByUser(
 	return assignments, err
 }
 
+func (r *TaskAssignmentRepo) CountActiveByTasks(ctx context.Context, tenantID uuid.UUID, taskIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	counts := make(map[uuid.UUID]int, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return counts, nil
+	}
+	ctx = withTenantGUC(ctx, tenantID)
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		rows, err := db.New(dbtx).CountActiveAssignmentsByTasks(ctx, db.CountActiveAssignmentsByTasksParams{TenantID: tenantID, TaskIds: taskIDs})
+		if err != nil {
+			return mapErr(err)
+		}
+		for _, row := range rows {
+			counts[row.TaskID] = int(row.AssigneeCount)
+		}
+		return nil
+	})
+	return counts, err
+}
+
 func (r *TaskAssignmentRepo) ListActiveByUserPaginated(
 	ctx context.Context,
 	tenantID, userID uuid.UUID,

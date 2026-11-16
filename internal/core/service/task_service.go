@@ -13,6 +13,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
 var _ port.TaskService = (*TaskService)(nil)
@@ -22,6 +23,8 @@ type TaskService struct {
 	Tasks       port.TaskRepository
 	Assignments port.TaskAssignmentRepository
 	Overrides   port.AssigneeOverrideRepository
+	Transactor  port.Transactor
+	Signals     port.WorkflowSignalOutbox
 	Temporal    port.TemporalClient
 	Eligibility port.EligibilityChecker
 	Definitions port.DefinitionServiceClient
@@ -49,7 +52,7 @@ type taskVacatedSignalWire struct {
 // reassignment leaves it out.
 type reassignSignalWire struct {
 	TaskID        string
-	OldUserID     string
+	OldUserID     string `json:",omitempty"`
 	NewUserID     string
 	AdminUserID   string
 	RecordVersion int64
@@ -80,9 +83,9 @@ func (s *TaskService) List(ctx context.Context, tenantID uuid.UUID, scope port.R
 	if err != nil {
 		return port.PageResult[*port.Task]{}, wrapTaskErr(err)
 	}
-	items := make([]*port.Task, len(rows))
-	for i, t := range rows {
-		items[i] = toPortTask(t)
+	items, err := toPortTasksWithCounts(ctx, s.Assignments, tenantID, rows)
+	if err != nil {
+		return port.PageResult[*port.Task]{}, err
 	}
 	return port.PageResult[*port.Task]{Items: items, NextCursor: encodeNextCursor(next)}, nil
 }
@@ -105,7 +108,9 @@ func (s *TaskService) Get(ctx context.Context, tenantID, taskID uuid.UUID, scope
 	for i, a := range assignments {
 		portAssignments[i] = toPortTaskAssignment(a)
 	}
-	return toPortTask(task), portAssignments, nil
+	out := toPortTask(task)
+	out.AssigneeCount = len(assignments)
+	return out, portAssignments, nil
 }
 
 func (s *TaskService) taskInScope(scope port.ReadScope, task *domain.Task, assignments []*domain.TaskAssignment) bool {
@@ -128,21 +133,32 @@ func (s *TaskService) GetByNode(ctx context.Context, tenantID, instanceID uuid.U
 		return nil, wrapTaskErr(err)
 	}
 	out := toPortTask(task)
-	if s.Definitions == nil {
-		return out, nil
+	if s.Definitions != nil {
+		if err := s.fillRequiredLevel(ctx, tenantID, task, out); err != nil {
+			return nil, err
+		}
 	}
+	counted, err := toPortTasksWithCounts(ctx, s.Assignments, tenantID, []*domain.Task{task})
+	if err != nil {
+		return nil, err
+	}
+	out.AssigneeCount = counted[0].AssigneeCount
+	return out, nil
+}
+
+func (s *TaskService) fillRequiredLevel(ctx context.Context, tenantID uuid.UUID, task *domain.Task, out *port.Task) error {
 	inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
 	if err != nil {
-		return nil, wrapInstanceErr(err)
+		return wrapInstanceErr(err)
 	}
 	plan, err := newCompiledPlanCache(s.Definitions, s.logger()).backedBy(s.Cache).mainPlan(ctx, tenantID, inst.WorkflowVersionID)
 	if err != nil {
-		return nil, fmt.Errorf("get compiled plan for the task's required level: %w", err)
+		return fmt.Errorf("get compiled plan for the task's required level: %w", err)
 	}
 	if level, ok := requiredLevelForTask(plan, task); ok {
 		out.RequiredLevel = level
 	}
-	return out, nil
+	return nil
 }
 
 func (s *TaskService) ActiveByUser(ctx context.Context, tenantID, userID uuid.UUID, page port.Page) (port.PageResult[*port.ActiveUserTask], error) {
@@ -211,7 +227,7 @@ func (s *TaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.U
 		return nil, port.ErrClaimNotApplicable
 	}
 	if task.RecordVersion != recordVersion {
-		return nil, port.ErrRecordVersionConflict
+		return nil, staleTaskVersion()
 	}
 	if err := checkTaskActive(task); err != nil {
 		return nil, err
@@ -223,6 +239,9 @@ func (s *TaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.U
 	}
 	var target *domain.TaskAssignment
 	for _, a := range assignments {
+		if a.IsLead && a.UserID == userID {
+			return s.presentedTask(ctx, tenantID, task), nil
+		}
 		if a.IsLead {
 			return nil, port.ErrTaskAlreadyClaimed
 		}
@@ -240,11 +259,37 @@ func (s *TaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.U
 	if _, err := s.Assignments.SetLead(ctx, tenantID, taskID, target.ID, recordVersion); err != nil {
 		return nil, wrapTaskErr(err)
 	}
-	updated, err := s.Tasks.GetByID(ctx, tenantID, taskID)
-	if err != nil {
-		return nil, wrapTaskErr(err)
+	committed := *task
+	committed.RecordVersion++
+	return s.readCommitted(ctx, tenantID, &committed)
+}
+
+// readCommitted answers with the task as stored now. A read-back that fails twice does not undo a change
+// that already committed, so the caller's own picture of the committed state is returned instead; a task
+// that is gone is still reported as not found.
+func (s *TaskService) readCommitted(ctx context.Context, tenantID uuid.UUID, committed *domain.Task) (*port.Task, error) {
+	for range 2 {
+		task, err := s.Tasks.GetByID(ctx, tenantID, committed.ID)
+		if err == nil {
+			return s.presentedTask(ctx, tenantID, task), nil
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, wrapTaskErr(err)
+		}
+		s.logger().Warn("task read-back after a committed change failed", map[string]any{"task_id": committed.ID, "error": err.Error()})
 	}
-	return toPortTask(updated), nil
+	return s.presentedTask(ctx, tenantID, committed), nil
+}
+
+// presentedTask maps a task an action just acted on and adds its active assignee count. The action has
+// already taken effect, so a failed count leaves the count at zero instead of failing the answer.
+func (s *TaskService) presentedTask(ctx context.Context, tenantID uuid.UUID, task *domain.Task) *port.Task {
+	counted, err := toPortTasksWithCounts(ctx, s.Assignments, tenantID, []*domain.Task{task})
+	if err != nil {
+		s.logger().Warn("assignee count after a task action failed", map[string]any{"task_id": task.ID, "error": err.Error()})
+		return toPortTask(task)
+	}
+	return counted[0]
 }
 
 type stageTransitionWire struct {
@@ -273,7 +318,7 @@ func (s *TaskService) Complete(ctx context.Context, tenantID, taskID, userID uui
 		return nil, port.ErrInvalidInstanceState
 	}
 	if !s.reserveCompletion(ctx, task.ID) {
-		return nil, port.ErrRecordVersionConflict
+		return nil, staleTaskVersion()
 	}
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-transition", stageTransitionWire{
@@ -283,7 +328,7 @@ func (s *TaskService) Complete(ctx context.Context, tenantID, taskID, userID uui
 		s.releaseCompletion(ctx, task.ID)
 		return nil, fmt.Errorf("signal stage-transition: %w", err)
 	}
-	return toPortTask(task), nil
+	return s.presentedTask(ctx, tenantID, task), nil
 }
 
 type stageDeferWire struct {
@@ -329,11 +374,10 @@ func (s *TaskService) Defer(ctx context.Context, tenantID, taskID, userID uuid.U
 	if err != nil {
 		return nil, fmt.Errorf("update stage-defer: %w", err)
 	}
-	deferred, err := s.Tasks.GetByID(ctx, tenantID, taskID)
-	if err != nil {
-		return nil, wrapTaskErr(err)
-	}
-	return toPortTask(deferred), nil
+	committed := *task
+	committed.Status = domain.TaskStatusDeferred
+	committed.RecordVersion += 2 // the status change and the completion of the deferring assignment each bump it
+	return s.readCommitted(ctx, tenantID, &committed)
 }
 
 func (s *TaskService) Reassign(ctx context.Context, tenantID, taskID, actorUserID, newUserID uuid.UUID, recordVersion int64) (*port.Task, error) {
@@ -345,7 +389,7 @@ func (s *TaskService) Reassign(ctx context.Context, tenantID, taskID, actorUserI
 		return nil, err
 	}
 	if task.RecordVersion != recordVersion {
-		return nil, port.ErrRecordVersionConflict
+		return nil, staleTaskVersion()
 	}
 	if err := checkTaskActive(task); err != nil {
 		return nil, err
@@ -355,13 +399,7 @@ func (s *TaskService) Reassign(ctx context.Context, tenantID, taskID, actorUserI
 	if err != nil {
 		return nil, err
 	}
-	var oldUserID uuid.UUID
-	for _, a := range assignments {
-		if task.AssigneeMode != "all" || a.IsLead {
-			oldUserID = a.UserID
-			break
-		}
-	}
+	oldUserID := replacedUser(task, assignments)
 	if oldUserID == newUserID {
 		return nil, port.ErrOverrideNoOp
 	}
@@ -370,10 +408,43 @@ func (s *TaskService) Reassign(ctx context.Context, tenantID, taskID, actorUserI
 	if err != nil {
 		return nil, wrapInstanceErr(err)
 	}
+	if err := checkInstanceReassignable(inst); err != nil {
+		return nil, err
+	}
 	if err := s.sendReassignSignal(ctx, inst, task, oldUserID, newUserID, actorUserID, recordVersion); err != nil {
 		return nil, err
 	}
-	return toPortTask(task), nil
+	return s.presentedTask(ctx, tenantID, task), nil
+}
+
+func checkInstanceReassignable(inst *domain.Instance) error {
+	if inst.Status != domain.InstanceStatusRunning && inst.Status != domain.InstanceStatusDegraded {
+		return port.ErrInvalidInstanceState
+	}
+	return nil
+}
+
+// replacedUser is the assignee a reassignment takes the task from: the only assignee, or the lead of an
+// all-assignee task. It is the zero id when nobody holds the task.
+func replacedUser(task *domain.Task, assignments []*domain.TaskAssignment) uuid.UUID {
+	for _, a := range assignments {
+		if task.AssigneeMode != "all" || a.IsLead {
+			return a.UserID
+		}
+	}
+	return uuid.Nil
+}
+
+func previousUserWire(id uuid.UUID) string {
+	if id == uuid.Nil {
+		return ""
+	}
+	return id.String()
+}
+
+func staleTaskVersion() error {
+	observability.IncCounterVec(observability.RecordVersionConflictTotal, "workflow_task")
+	return port.ErrRecordVersionConflict
 }
 
 func (s *TaskService) sendReassignSignal(ctx context.Context, inst *domain.Instance, task *domain.Task, oldUserID, newUserID, actorUserID uuid.UUID, recordVersion int64) error {
@@ -381,7 +452,7 @@ func (s *TaskService) sendReassignSignal(ctx context.Context, inst *domain.Insta
 		return err
 	}
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, port.SignalInstanceReassign, reassignSignalWire{
-		TaskID: task.ID.String(), OldUserID: oldUserID.String(), NewUserID: newUserID.String(),
+		TaskID: task.ID.String(), OldUserID: previousUserWire(oldUserID), NewUserID: newUserID.String(),
 		AdminUserID: actorUserID.String(), RecordVersion: recordVersion,
 	}); err != nil {
 		return fmt.Errorf("signal instance-reassign: %w", err)
@@ -420,7 +491,7 @@ func (s *TaskService) precheckTaskAction(ctx context.Context, tenantID, taskID, 
 		return nil, err
 	}
 	if task.RecordVersion != recordVersion {
-		return nil, port.ErrRecordVersionConflict
+		return nil, staleTaskVersion()
 	}
 	if err := checkTaskActive(task); err != nil {
 		return nil, err
@@ -453,29 +524,61 @@ func (s *TaskService) OverrideAssignee(ctx context.Context, in port.AssigneeOver
 		return nil, port.ErrNodeAlreadyResolved
 	}
 	if task.RecordVersion != in.RecordVersion {
-		return nil, port.ErrRecordVersionConflict
+		return nil, staleTaskVersion()
 	}
 
 	assignments, err := s.Assignments.ListActiveByTask(ctx, in.TenantID, task.ID)
 	if err != nil {
 		return nil, err
 	}
-	if len(assignments) == 0 {
-		return nil, port.ErrNotAssignee
-	}
-	previousUserID := assignments[0].UserID
+	previousUserID := replacedUser(task, assignments)
 	if previousUserID == in.NewUserID {
 		return nil, port.ErrOverrideNoOp
 	}
+	inst, err := s.Instances.GetByID(ctx, in.TenantID, task.WorkflowInstanceID)
+	if err != nil {
+		return nil, wrapInstanceErr(err)
+	}
+	if err := checkInstanceReassignable(inst); err != nil {
+		return nil, err
+	}
+	if err := s.checkEligible(ctx, inst, task, in.NewUserID); err != nil {
+		return nil, err
+	}
 
+	override, version, err := s.storeOverride(ctx, in, inst, task, previousUserID)
+	if err != nil {
+		return nil, err
+	}
+	return toPortAssigneeOverride(override, version), nil
+}
+
+// storeOverride bumps the task's record_version, stores the row and queues the reassign signal in one
+// transaction. Of two admins overriding the same task only the first persists, and once the row is
+// committed the relay delivers the move even if Temporal is down. It returns the version the task now has.
+func (s *TaskService) storeOverride(ctx context.Context, in port.AssigneeOverrideInput, inst *domain.Instance, task *domain.Task, previousUserID uuid.UUID) (*domain.AssigneeOverride, int64, error) {
 	override := &domain.AssigneeOverride{
 		ID: deterministicOverrideID(in, task.RecordVersion), TenantID: in.TenantID, WorkflowInstanceID: in.InstanceID, NodeKey: in.NodeKey,
 		PreviousUserID: previousUserID, NewUserID: in.NewUserID, Reason: in.Reason, ActorUserID: in.ActorUserID,
 	}
-	if err := s.Overrides.Create(ctx, override); err != nil {
-		return nil, err
+	var bumped *domain.Task
+	err := s.Transactor.RunInTx(withTenantGUC(ctx, in.TenantID), func(ctx context.Context) error {
+		var err error
+		if bumped, err = s.Tasks.BumpRecordVersion(ctx, in.TenantID, task.ID, task.RecordVersion); err != nil {
+			return wrapTaskErr(err)
+		}
+		if err := s.Overrides.Create(ctx, override); err != nil {
+			return err
+		}
+		return recordWorkflowSignal(ctx, s.Signals, inst, port.SignalInstanceReassign, reassignSignalWire{
+			TaskID: task.ID.String(), OldUserID: previousUserWire(previousUserID), NewUserID: in.NewUserID.String(),
+			AdminUserID: in.ActorUserID.String(), RecordVersion: bumped.RecordVersion,
+		})
+	})
+	if err != nil {
+		return nil, 0, err
 	}
-	return toPortAssigneeOverride(override, task.RecordVersion), nil
+	return override, bumped.RecordVersion, nil
 }
 
 // deterministicOverrideID names the override by the action it records, so a retry after a failed
@@ -487,16 +590,4 @@ func deterministicOverrideID(in port.AssigneeOverrideInput, recordVersion int64)
 		in.NewUserID.String(), strconv.FormatInt(recordVersion, 10),
 	}, "/")
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(name))
-}
-
-func (s *TaskService) SignalReassign(ctx context.Context, tenantID, taskID, actorUserID, previousUserID, newUserID uuid.UUID, recordVersion int64) error {
-	task, err := s.Tasks.GetByID(ctx, tenantID, taskID)
-	if err != nil {
-		return wrapTaskErr(err)
-	}
-	inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
-	if err != nil {
-		return wrapInstanceErr(err)
-	}
-	return s.sendReassignSignal(ctx, inst, task, previousUserID, newUserID, actorUserID, recordVersion)
 }

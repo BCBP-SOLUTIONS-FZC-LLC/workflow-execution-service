@@ -130,7 +130,6 @@ type TaskService interface {
 	Reassign(ctx context.Context, tenantID, taskID, actorUserID, newUserID uuid.UUID, recordVersion int64) (*Task, error)
 
 	OverrideAssignee(ctx context.Context, in AssigneeOverrideInput) (*AssigneeOverride, error)
-	SignalReassign(ctx context.Context, tenantID, taskID, actorUserID, previousUserID, newUserID uuid.UUID, recordVersion int64) error
 
 	ActiveByUser(ctx context.Context, tenantID, userID uuid.UUID, page Page) (PageResult[*ActiveUserTask], error)
 }

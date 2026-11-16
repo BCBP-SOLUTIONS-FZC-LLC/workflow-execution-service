@@ -21,46 +21,26 @@ func overridePath(instanceID uuid.UUID, node string) string {
 
 func TestOverrideNodeAssignee_Success(t *testing.T) {
 	newUser := uuid.New()
-	deptID := uuid.New()
 	previousUser := uuid.New()
 
-	var eligibilityCalledWith struct {
-		newUserID, deptID, tenantID uuid.UUID
-		level                       string
-	}
 	fake := &fakeTaskService{
-		getByNode: func(_ context.Context, tenantID, instanceID uuid.UUID, nodeKey string) (*port.Task, error) {
-			assert.Equal(t, testTenantID, tenantID)
-			assert.Equal(t, testInstID, instanceID)
-			assert.Equal(t, "review_finance", nodeKey)
-			return &port.Task{
-				ID: testTaskID, WorkflowInstanceID: testInstID, NodeKey: "review_finance",
-				DepartmentID: deptID, RequiredLevel: "reviewer", Status: port.TaskStatusReady, RecordVersion: 4,
-			}, nil
-		},
 		overrideAssignee: func(_ context.Context, in port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
+			assert.Equal(t, testTenantID, in.TenantID)
+			assert.Equal(t, testInstID, in.InstanceID)
+			assert.Equal(t, "review_finance", in.NodeKey)
 			assert.Equal(t, newUser, in.NewUserID)
+			assert.Equal(t, testUserID, in.ActorUserID)
 			assert.Equal(t, int64(4), in.RecordVersion)
 			return &port.AssigneeOverride{
 				WorkflowInstanceID: testInstID, NodeKey: "review_finance",
 				PreviousUserID: previousUser, NewUserID: newUser, ActorUserID: testUserID, RecordVersion: 5,
 			}, nil
 		},
-		signalReassign: func(_ context.Context, tenantID, taskID, actorUserID, prevUserID, newUserID uuid.UUID, recordVersion int64) error {
-			assert.Equal(t, testTaskID, taskID)
-			assert.Equal(t, previousUser, prevUserID)
-			assert.Equal(t, newUser, newUserID)
-			assert.Equal(t, int64(4), recordVersion, "signal carries the record_version validated at step 1, not the post-persist one")
-			return nil
-		},
 	}
 	elig := &fakeEligibilityChecker{
-		check: func(_ context.Context, tenantID, newUserID, departmentID uuid.UUID, level string) (bool, error) {
-			eligibilityCalledWith.newUserID = newUserID
-			eligibilityCalledWith.deptID = departmentID
-			eligibilityCalledWith.level = level
-			eligibilityCalledWith.tenantID = tenantID
-			return true, nil
+		check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
+			t.Fatal("the service asks eligibility once, before it stores anything; the handler does not")
+			return false, nil
 		},
 	}
 	router := newRouter(newHandler(fake, elig))
@@ -70,10 +50,6 @@ func TestOverrideNodeAssignee_Success(t *testing.T) {
 	})))
 
 	require.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, newUser, eligibilityCalledWith.newUserID)
-	assert.Equal(t, deptID, eligibilityCalledWith.deptID)
-	assert.Equal(t, "reviewer", eligibilityCalledWith.level)
-	assert.Equal(t, testTenantID, eligibilityCalledWith.tenantID)
 
 	var body struct {
 		PreviousUserID uuid.UUID `json:"previous_user_id"`
@@ -87,12 +63,8 @@ func TestOverrideNodeAssignee_Success(t *testing.T) {
 
 func TestOverrideNodeAssignee_AlreadyResolved(t *testing.T) {
 	fake := &fakeTaskService{
-		getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
-			return &port.Task{Status: port.TaskStatusCompleted, RecordVersion: 4}, nil
-		},
 		overrideAssignee: func(context.Context, port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
-			t.Fatal("must not persist when the node has already resolved")
-			return nil, nil
+			return nil, port.ErrNodeAlreadyResolved
 		},
 	}
 	elig := &fakeEligibilityChecker{
@@ -117,8 +89,8 @@ func TestOverrideNodeAssignee_AlreadyResolved(t *testing.T) {
 
 func TestOverrideNodeAssignee_StaleRecordVersion(t *testing.T) {
 	fake := &fakeTaskService{
-		getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
-			return &port.Task{Status: port.TaskStatusReady, RecordVersion: 9}, nil
+		overrideAssignee: func(context.Context, port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
+			return nil, port.ErrRecordVersionConflict
 		},
 	}
 	elig := &fakeEligibilityChecker{
@@ -142,29 +114,18 @@ func TestOverrideNodeAssignee_StaleRecordVersion(t *testing.T) {
 }
 
 func TestOverrideNodeAssignee_Ineligible(t *testing.T) {
-	var persisted bool
 	fake := &fakeTaskService{
-		getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
-			return &port.Task{Status: port.TaskStatusReady, RecordVersion: 4}, nil
-		},
 		overrideAssignee: func(context.Context, port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
-			persisted = true
-			return nil, nil
+			return nil, port.ErrAssigneeIneligible
 		},
 	}
-	elig := &fakeEligibilityChecker{
-		check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
-			return false, nil
-		},
-	}
-	router := newRouter(newHandler(fake, elig))
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
 	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
 		"new_user_id": uuid.New(), "record_version": 4,
 	})))
 
 	require.Equal(t, http.StatusUnprocessableEntity, w.Code)
-	assert.False(t, persisted, "an ineligible request must leave zero rows persisted")
 	var body struct {
 		Code string `json:"code"`
 	}
@@ -174,16 +135,11 @@ func TestOverrideNodeAssignee_Ineligible(t *testing.T) {
 
 func TestOverrideNodeAssignee_UpstreamUnavailable(t *testing.T) {
 	fake := &fakeTaskService{
-		getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
-			return &port.Task{Status: port.TaskStatusReady, RecordVersion: 4}, nil
+		overrideAssignee: func(context.Context, port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
+			return nil, fmt.Errorf("wrapped: %w", adapterhttp.ErrUpstreamUnavailable)
 		},
 	}
-	elig := &fakeEligibilityChecker{
-		check: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (bool, error) {
-			return false, fmt.Errorf("wrapped: %w", adapterhttp.ErrUpstreamUnavailable)
-		},
-	}
-	router := newRouter(newHandler(fake, elig))
+	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
 	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
 		"new_user_id": uuid.New(), "record_version": 4,
@@ -198,9 +154,6 @@ func TestOverrideNodeAssignee_UpstreamUnavailable(t *testing.T) {
 // record_version.
 func TestOverrideNodeAssignee_PersistConflict(t *testing.T) {
 	fake := &fakeTaskService{
-		getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
-			return &port.Task{Status: port.TaskStatusReady, RecordVersion: 4}, nil
-		},
 		overrideAssignee: func(context.Context, port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
 			return nil, port.ErrRecordVersionConflict
 		},
@@ -215,12 +168,7 @@ func TestOverrideNodeAssignee_PersistConflict(t *testing.T) {
 }
 
 func TestOverrideNodeAssignee_NotAdmin_Forbidden(t *testing.T) {
-	fake := &fakeTaskService{
-		getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
-			t.Fatal("must not call the service when the caller is not admin")
-			return nil, nil
-		},
-	}
+	fake := &fakeTaskService{}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
 	w := do(router, req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{
@@ -236,12 +184,7 @@ func TestOverrideNodeAssignee_NotAdmin_Forbidden(t *testing.T) {
 }
 
 func TestOverrideNodeAssignee_ReasonTooLong_400(t *testing.T) {
-	fake := &fakeTaskService{
-		getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
-			t.Fatal("must not call the service when reason exceeds the 500-char cap")
-			return nil, nil
-		},
-	}
+	fake := &fakeTaskService{}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
 
 	w := do(router, asAdmin(req(http.MethodPost, overridePath(testInstID, "review_finance"), map[string]any{

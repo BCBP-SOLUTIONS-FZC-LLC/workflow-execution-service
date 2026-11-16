@@ -52,7 +52,6 @@ type fakeTaskService struct {
 	deferTask        func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, int64) (*port.Task, error)
 	reassign         func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, int64) (*port.Task, error)
 	overrideAssignee func(context.Context, port.AssigneeOverrideInput) (*port.AssigneeOverride, error)
-	signalReassign   func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, int64) error
 	activeByUser     func(context.Context, uuid.UUID, uuid.UUID, port.Page) (port.PageResult[*port.ActiveUserTask], error)
 }
 
@@ -110,13 +109,6 @@ func (f *fakeTaskService) OverrideAssignee(ctx context.Context, in port.Assignee
 		return f.overrideAssignee(ctx, in)
 	}
 	return nil, nil
-}
-
-func (f *fakeTaskService) SignalReassign(ctx context.Context, tenantID, taskID, actorUserID, previousUserID, newUserID uuid.UUID, recordVersion int64) error {
-	if f.signalReassign != nil {
-		return f.signalReassign(ctx, tenantID, taskID, actorUserID, previousUserID, newUserID, recordVersion)
-	}
-	return nil
 }
 
 func (f *fakeTaskService) ActiveByUser(ctx context.Context, tenantID, userID uuid.UUID, page port.Page) (port.PageResult[*port.ActiveUserTask], error) {

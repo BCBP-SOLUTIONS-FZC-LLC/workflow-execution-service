@@ -89,6 +89,7 @@ var codeTitles = map[ErrCode]string{
 	CodeWaitNotFound:            "Wait Not Found",
 	CodeNotWaiting:              "Not Waiting",
 	CodeDuplicateBusinessKey:    "Duplicate Business Key",
+	CodeTenantNotActive:         "Tenant Not Active",
 	CodeVersionNotPublished:     "Version Not Published",
 	CodeVersionInvalid:          "Version Invalid",
 	CodeVersionNotFound:         "Version Not Found",
@@ -107,7 +108,7 @@ var problemTypes = map[ErrCode]string{
 	CodeBadRequest:               errBase + "bad-request",
 	CodeUnauthorized:             errBase + "unauthorized",
 	CodeForbidden:                errBase + "forbidden",
-	CodeNotAssignee:              errBase + "assignee-not-assigned",
+	CodeNotAssignee:              errBase + "not-assignee",
 	CodeNotAuthorizedForResource: errBase + "not-authorized-for-resource",
 	CodeTaskNotFound:             errBase + "task-not-found",
 	CodeNotFound:                 errBase + "not-found",
@@ -131,6 +132,7 @@ var problemTypes = map[ErrCode]string{
 	CodeWaitNotFound:            errBase + "wait-not-found",
 	CodeNotWaiting:              errBase + "not-waiting",
 	CodeDuplicateBusinessKey:    errBase + "duplicate-business-key",
+	CodeTenantNotActive:         errBase + "tenant-not-active",
 	CodeVersionNotPublished:     errBase + "version-not-published",
 	CodeVersionInvalid:          errBase + "version-invalid",
 	CodeVersionNotFound:         errBase + "version-not-found",
@@ -232,21 +234,46 @@ var errTrailingData = errors.New("request body has data after its JSON value")
 const maxEchoedFieldName = 64
 
 func bindStrictJSON(c *gin.Context, obj any) error {
-	if c.Request == nil || c.Request.Body == nil {
-		return errors.New("invalid request")
-	}
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := readBindBody(c)
 	if err != nil {
-		return fmt.Errorf("read request body: %w", err)
-	}
-	if len(bytes.TrimSpace(body)) == 0 {
-		return fmt.Errorf("decode request body: %w", io.EOF)
+		return err
 	}
 	if err := checkKnownFields(body, obj); err != nil {
 		return err
 	}
+	return decodeOneValue(body, obj, true)
+}
+
+func bindInternalStrictJSON(c *gin.Context, obj any) error {
+	body, err := readBindBody(c)
+	if err != nil {
+		return err
+	}
+	if err := checkFieldCase(body, obj); err != nil {
+		return err
+	}
+	return decodeOneValue(body, obj, false)
+}
+
+func readBindBody(c *gin.Context) ([]byte, error) {
+	if c.Request == nil || c.Request.Body == nil {
+		return nil, errors.New("invalid request")
+	}
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read request body: %w", err)
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil, fmt.Errorf("decode request body: %w", io.EOF)
+	}
+	return body, nil
+}
+
+func decodeOneValue(body []byte, obj any, disallowUnknown bool) error {
 	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
+	if disallowUnknown {
+		dec.DisallowUnknownFields()
+	}
 	if err := dec.Decode(obj); err != nil {
 		return fmt.Errorf("decode request body: %w", err)
 	}

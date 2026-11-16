@@ -51,13 +51,6 @@ func deref[T any](p *T) T {
 	return *p
 }
 
-var resolvedStatuses = map[port.TaskStatus]bool{
-	port.TaskStatusCompleted:  true,
-	port.TaskStatusDeferred:   true,
-	port.TaskStatusFailed:     true,
-	port.TaskStatusSuperseded: true,
-}
-
 func (h *Handler) OverrideNodeAssignee(c *gin.Context) {
 	tenantID, actorUserID, ok := callerIdentity(c)
 	if !ok {
@@ -83,30 +76,6 @@ func (h *Handler) OverrideNodeAssignee(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	task, err := h.tasks.GetByNode(ctx, tenantID, instanceID, nodeKey)
-	if err != nil {
-		errResponse(c, err)
-		return
-	}
-	if resolvedStatuses[task.Status] {
-		errResponse(c, port.ErrNodeAlreadyResolved)
-		return
-	}
-	if task.RecordVersion != req.RecordVersion {
-		errResponse(c, port.ErrRecordVersionConflict)
-		return
-	}
-
-	eligible, err := h.eligibility.CheckEligibility(ctx, tenantID, req.NewUserID, task.DepartmentID, task.RequiredLevel)
-	if err != nil {
-		errResponse(c, err)
-		return
-	}
-	if !eligible {
-		writeProblem(c, http.StatusUnprocessableEntity, CodeAssigneeIneligible, "the new assignee is not eligible for this node", nil)
-		return
-	}
-
 	override, err := h.tasks.OverrideAssignee(ctx, port.AssigneeOverrideInput{
 		TenantID:      tenantID,
 		InstanceID:    instanceID,
@@ -117,11 +86,6 @@ func (h *Handler) OverrideNodeAssignee(c *gin.Context) {
 		RecordVersion: req.RecordVersion,
 	})
 	if err != nil {
-		errResponse(c, err)
-		return
-	}
-
-	if err := h.tasks.SignalReassign(ctx, tenantID, task.ID, actorUserID, override.PreviousUserID, req.NewUserID, req.RecordVersion); err != nil {
 		errResponse(c, err)
 		return
 	}

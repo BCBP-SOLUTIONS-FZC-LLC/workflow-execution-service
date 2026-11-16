@@ -33,10 +33,6 @@ type valfixCalls struct {
 func valfixRecordingServices(calls *valfixCalls) (*fakeTaskService, *fakeInstanceService) {
 	task := newTestTask()
 	tasks := &fakeTaskService{
-		getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
-			calls.n++
-			return &port.Task{ID: testTaskID, Status: port.TaskStatusReady, RecordVersion: 4}, nil
-		},
 		claim: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int64) (*port.Task, error) {
 			calls.n++
 			return task, nil
@@ -359,9 +355,6 @@ func TestValfix_OverrideReason_EmptyOrBlankRefusedOmittedAndNullAccepted(t *test
 		t.Run("accepted "+name, func(t *testing.T) {
 			var gotReason []string
 			tasks := &fakeTaskService{
-				getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
-					return &port.Task{ID: testTaskID, Status: port.TaskStatusReady, RecordVersion: 4}, nil
-				},
 				overrideAssignee: func(_ context.Context, in port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
 					gotReason = append(gotReason, in.Reason)
 					return &port.AssigneeOverride{}, nil

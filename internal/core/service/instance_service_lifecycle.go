@@ -8,6 +8,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
 type adminSignalWire struct {
@@ -32,7 +33,7 @@ func (s *InstanceService) signalLifecycle(ctx context.Context, tenantID, instanc
 		return port.ErrInstanceAlreadyTerminal
 	}
 	if inst.RecordVersion != recordVersion {
-		return port.ErrRecordVersionConflict
+		return staleInstanceVersion()
 	}
 	if err := validateInstanceStateFor(signalName, inst.Status); err != nil {
 		return err
@@ -40,6 +41,11 @@ func (s *InstanceService) signalLifecycle(ctx context.Context, tenantID, instanc
 	return s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, signalName, adminSignalWire{
 		AdminUserID: actorUserID.String(), Reason: ann.reason, Initiator: ann.initiator, RecordVersion: recordVersion,
 	})
+}
+
+func staleInstanceVersion() error {
+	observability.IncCounterVec(observability.RecordVersionConflictTotal, "workflow_instance")
+	return port.ErrRecordVersionConflict
 }
 
 func validateInstanceStateFor(signalName string, status domain.InstanceStatus) error {
@@ -83,7 +89,7 @@ func (s *InstanceService) ForceForward(ctx context.Context, tenantID, instanceID
 		return wrapInstanceErr(err)
 	}
 	if inst.RecordVersion != recordVersion {
-		return port.ErrRecordVersionConflict
+		return staleInstanceVersion()
 	}
 	if err := validateInstanceStateFor(port.SignalInstanceForceFwd, inst.Status); err != nil {
 		return err
@@ -102,7 +108,7 @@ func (s *InstanceService) ForceBack(ctx context.Context, tenantID, instanceID, a
 		return wrapInstanceErr(err)
 	}
 	if inst.RecordVersion != recordVersion {
-		return port.ErrRecordVersionConflict
+		return staleInstanceVersion()
 	}
 	if err := validateInstanceStateFor(port.SignalInstanceForceBack, inst.Status); err != nil {
 		return err

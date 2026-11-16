@@ -181,7 +181,7 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 	if err != nil {
 		return nonRetryable("ValidationError", fmt.Errorf("parse task_id: %w", err))
 	}
-	oldUserID, err := uuid.Parse(in.OldUserID)
+	oldUserID, err := parseOptionalUserID(in.OldUserID)
 	if err != nil {
 		return nonRetryable("ValidationError", fmt.Errorf("parse old_user_id: %w", err))
 	}
@@ -232,6 +232,18 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 		payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, oldUserID, newUserID, domain.ReassignInitiatorAdmin, nil)
 		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskReassigned, payload)
 	})
+}
+
+// parseOptionalUserID reads a user id that a reassignment may leave out when nobody held the task.
+func parseOptionalUserID(raw string) (uuid.UUID, error) {
+	if raw == "" {
+		return uuid.Nil, nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("parse previous user id: %w", err)
+	}
+	return id, nil
 }
 
 func leadHeldBy(active []*domain.TaskAssignment, userID uuid.UUID) bool {

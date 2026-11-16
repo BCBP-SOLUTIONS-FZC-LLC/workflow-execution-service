@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -74,6 +75,16 @@ func (r *csdAssignmentRepo) ListActiveByTask(_ context.Context, tenantID, taskID
 		}
 	}
 	return out, nil
+}
+
+func (r *csdAssignmentRepo) CountActiveByTasks(_ context.Context, tenantID uuid.UUID, taskIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	counts := map[uuid.UUID]int{}
+	for _, a := range r.byID {
+		if a.TenantID == tenantID && a.IsActive && slices.Contains(taskIDs, a.TaskID) {
+			counts[a.TaskID]++
+		}
+	}
+	return counts, nil
 }
 
 func (r *csdAssignmentRepo) SetLead(_ context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {

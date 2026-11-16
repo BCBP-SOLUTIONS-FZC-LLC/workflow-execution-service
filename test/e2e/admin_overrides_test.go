@@ -83,6 +83,7 @@ func newAdminOverrideFixture(t *testing.T) *adminOverrideFixture {
 		Outbox: postgres.NewOutboxRepo(pool), Transactor: postgres.NewTransactor(pool), Validator: validator, Definitions: definitions,
 	}
 	startWorker(t, sdk, deps, "wf-e2e-test-queue")
+	startSignalRelay(t, pool, sdk)
 
 	router := buildRouter(t, pool, sdk, definitions)
 	srv := httptest.NewServer(router.Handler())
@@ -412,7 +413,7 @@ func TestE2E_NodeOverride(t *testing.T) {
 	}
 
 	pollInstance(t, f.admin, f.instanceID, func(d instanceDetail) bool {
-		return len(d.Tasks) > 0 && d.Tasks[0].RecordVersion > f.firstTask.RecordVersion
+		return len(d.Tasks) > 0 && d.Tasks[0].RecordVersion >= f.firstTask.RecordVersion+2
 	})
 
 	var taskDetail taskSummary

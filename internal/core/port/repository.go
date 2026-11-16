@@ -111,6 +111,9 @@ type TaskAssignmentRepository interface {
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error)
 	ListActiveByTask(ctx context.Context, tenantID, taskID uuid.UUID) ([]*domain.TaskAssignment, error)
 	ListActiveByUser(ctx context.Context, tenantID, userID uuid.UUID) ([]*domain.TaskAssignment, error)
+	// CountActiveByTasks returns the number of active assignments of each task in one query; a task
+	// with none is absent from the map.
+	CountActiveByTasks(ctx context.Context, tenantID uuid.UUID, taskIDs []uuid.UUID) (map[uuid.UUID]int, error)
 	ListActiveByUserPaginated(
 		ctx context.Context,
 		tenantID, userID uuid.UUID,

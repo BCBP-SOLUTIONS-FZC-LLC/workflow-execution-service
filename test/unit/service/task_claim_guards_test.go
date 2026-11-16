@@ -51,16 +51,18 @@ func TestTaskClaim_TaskInAStatusThatIsNotActive_ReturnsInvalidTaskState(t *testi
 	}
 }
 
-func TestTaskClaim_CurrentLeadRepeatsTheClaimWithTheNewVersion_ReturnsAlreadyClaimed(t *testing.T) {
+func TestTaskClaim_CurrentLeadRepeatsTheClaimWithTheNewVersion_ReturnsTheClaimedTask(t *testing.T) {
 	h := csdNewTaskHarness(t, "all", csdReviewStage())
 	first, err := h.svc.Claim(context.Background(), h.tenantID, h.task.ID, h.callerID, csdTaskVersion)
 	require.NoError(t, err)
 	require.EqualValues(t, csdTaskVersion+1, first.RecordVersion, "a claim moves the task to a new record version")
 	require.Equal(t, h.callerID, h.assignments.leadOf(h.task.ID))
 
-	_, err = h.svc.Claim(context.Background(), h.tenantID, h.task.ID, h.callerID, first.RecordVersion)
+	repeated, err := h.svc.Claim(context.Background(), h.tenantID, h.task.ID, h.callerID, first.RecordVersion)
 
-	require.ErrorIs(t, err, port.ErrTaskAlreadyClaimed)
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, repeated.ID)
+	assert.EqualValues(t, csdTaskVersion+1, repeated.RecordVersion)
 	require.Len(t, h.assignments.setLeads, 1, "the repeat must not write a second lead")
 	assert.Equal(t, csdSetLeadCall{h.tenantID, h.task.ID, h.caller.ID, csdTaskVersion}, h.assignments.setLeads[0])
 	assert.Equal(t, h.callerID, h.assignments.leadOf(h.task.ID))

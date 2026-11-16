@@ -48,9 +48,9 @@ func (s *InstanceService) Get(ctx context.Context, tenantID, instanceID uuid.UUI
 		return nil, nil, err
 	}
 
-	portTasks := make([]*port.Task, len(tasks))
-	for i, t := range tasks {
-		portTasks[i] = toPortTask(t)
+	portTasks, err := toPortTasksWithCounts(ctx, s.Assignments, tenantID, tasks)
+	if err != nil {
+		return nil, nil, err
 	}
 	return toPortInstance(inst), portTasks, nil
 }
@@ -86,6 +86,9 @@ func (s *InstanceService) requireVisible(ctx context.Context, tenantID, instance
 }
 
 func (s *InstanceService) ListEvents(ctx context.Context, tenantID, instanceID uuid.UUID, scope port.ReadScope, page port.Page) (port.PageResult[*port.WorkflowEvent], error) {
+	if _, err := s.Instances.GetByID(ctx, tenantID, instanceID); err != nil {
+		return port.PageResult[*port.WorkflowEvent]{}, wrapInstanceErr(err)
+	}
 	if err := s.requireVisible(ctx, tenantID, instanceID, scope); err != nil {
 		return port.PageResult[*port.WorkflowEvent]{}, err
 	}

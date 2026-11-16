@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -77,6 +78,16 @@ type cseAssignmentRepo struct {
 	rows  []*domain.TaskAssignment
 	calls []cseLookup
 	err   error
+}
+
+func (r *cseAssignmentRepo) CountActiveByTasks(_ context.Context, tenantID uuid.UUID, taskIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	counts := map[uuid.UUID]int{}
+	for _, a := range r.rows {
+		if a.TenantID == tenantID && a.IsActive && slices.Contains(taskIDs, a.TaskID) {
+			counts[a.TaskID]++
+		}
+	}
+	return counts, nil
 }
 
 func (r *cseAssignmentRepo) ListActiveByTask(_ context.Context, tenantID, taskID uuid.UUID) ([]*domain.TaskAssignment, error) {

@@ -291,9 +291,6 @@ func (errUnexpected) Error() string { return "unexpected failure" }
 
 func TestOverrideNodeAssignee_OverrideNoOp(t *testing.T) {
 	fake := &fakeTaskService{
-		getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
-			return &port.Task{Status: port.TaskStatusReady, RecordVersion: 4}, nil
-		},
 		overrideAssignee: func(context.Context, port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
 			return nil, port.ErrOverrideNoOp
 		},
@@ -312,9 +309,9 @@ func TestOverrideNodeAssignee_OverrideNoOp(t *testing.T) {
 	assert.Equal(t, "OVERRIDE_NO_OP", body.Code)
 }
 
-func TestOverrideNodeAssignee_GetByNodeError(t *testing.T) {
+func TestOverrideNodeAssignee_TaskNotFound(t *testing.T) {
 	fake := &fakeTaskService{
-		getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
+		overrideAssignee: func(context.Context, port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
 			return nil, port.ErrTaskNotFound
 		},
 	}
@@ -329,14 +326,8 @@ func TestOverrideNodeAssignee_GetByNodeError(t *testing.T) {
 
 func TestOverrideNodeAssignee_SignalFailure(t *testing.T) {
 	fake := &fakeTaskService{
-		getByNode: func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error) {
-			return &port.Task{Status: port.TaskStatusReady, RecordVersion: 4}, nil
-		},
 		overrideAssignee: func(context.Context, port.AssigneeOverrideInput) (*port.AssigneeOverride, error) {
-			return &port.AssigneeOverride{RecordVersion: 5}, nil
-		},
-		signalReassign: func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, int64) error {
-			return assertUnknownErr
+			return nil, assertUnknownErr
 		},
 	}
 	router := newRouter(newHandler(fake, &fakeEligibilityChecker{}))
@@ -345,9 +336,8 @@ func TestOverrideNodeAssignee_SignalFailure(t *testing.T) {
 		"new_user_id": uuid.New(), "record_version": 4,
 	})))
 
-	// Persist already committed; the signal failing afterward is the accepted
-	// residual gap (LLD Appendix B) — the response reports the failure, but
-	// no compensating rollback is attempted.
+	// The service stores the row and then signals the workflow; a failed signal
+	// is reported, and no compensating rollback is attempted.
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
