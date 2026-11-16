@@ -17,6 +17,9 @@ func applyIOMapping(contextJSON string, m *dsl.IOMapping, byInputRule bool) (str
 			return "", fmt.Errorf("workflow: parsing context_json for io_mapping: %w", err)
 		}
 	}
+	if vars == nil {
+		vars = map[string]any{}
+	}
 	for _, in := range m.Inputs {
 		if byInputRule {
 			vars[in.Target] = in.InputValue(vars)

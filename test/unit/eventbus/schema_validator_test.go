@@ -145,7 +145,7 @@ var allEvents = []eventCase{
 		name:      "WorkflowTaskReassigned",
 		eventType: domain.EventWorkflowTaskReassigned,
 		payload: func() any {
-			return domain.NewWorkflowTaskReassignedPayload(testCore(), testTaskCore(), uuid.New(), uuid.New(), domain.ReassignInitiatorAdmin, nil)
+			return domain.NewWorkflowTaskReassignedPayload(testCore(), testTaskCore(), domain.OptionalUserID(uuid.New()), uuid.New(), domain.ReassignInitiatorAdmin, nil)
 		},
 		dropField: "new_user_id",
 	},

@@ -121,7 +121,7 @@ func assigneeOverrideFromDB(row db.AssigneeOverride) *domain.AssigneeOverride {
 		TenantID:           row.TenantID,
 		WorkflowInstanceID: row.WorkflowInstanceID,
 		NodeKey:            row.NodeKey,
-		PreviousUserID:     row.PreviousUserID,
+		PreviousUserID:     fromPgtypeUUID(row.PreviousUserID),
 		NewUserID:          row.NewUserID,
 		Reason:             fromPgtypeText(row.Reason),
 		ActorUserID:        row.ActorUserID,

@@ -33,7 +33,7 @@ func TestOverrideNodeAssignee_Success(t *testing.T) {
 			assert.Equal(t, int64(4), in.RecordVersion)
 			return &port.AssigneeOverride{
 				WorkflowInstanceID: testInstID, NodeKey: "review_finance",
-				PreviousUserID: previousUser, NewUserID: newUser, ActorUserID: testUserID, RecordVersion: 5,
+				PreviousUserID: &previousUser, NewUserID: newUser, ActorUserID: testUserID, RecordVersion: 5,
 			}, nil
 		},
 	}
@@ -52,12 +52,13 @@ func TestOverrideNodeAssignee_Success(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var body struct {
-		PreviousUserID uuid.UUID `json:"previous_user_id"`
-		NewUserID      uuid.UUID `json:"new_user_id"`
-		RecordVersion  int64     `json:"record_version"`
+		PreviousUserID *uuid.UUID `json:"previous_user_id"`
+		NewUserID      uuid.UUID  `json:"new_user_id"`
+		RecordVersion  int64      `json:"record_version"`
 	}
 	decodeJSON(t, w.Body, &body)
-	assert.Equal(t, previousUser, body.PreviousUserID)
+	require.NotNil(t, body.PreviousUserID)
+	assert.Equal(t, previousUser, *body.PreviousUserID)
 	assert.Equal(t, newUser, body.NewUserID)
 }
 

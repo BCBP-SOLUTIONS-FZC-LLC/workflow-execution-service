@@ -31,7 +31,7 @@ func (r *AssigneeOverrideRepo) Create(ctx context.Context, override *domain.Assi
 			TenantID:           override.TenantID,
 			WorkflowInstanceID: override.WorkflowInstanceID,
 			NodeKey:            override.NodeKey,
-			PreviousUserID:     override.PreviousUserID,
+			PreviousUserID:     toPgtypeUUID(override.PreviousUserID),
 			NewUserID:          override.NewUserID,
 			Reason:             toNullableText(override.Reason),
 			ActorUserID:        override.ActorUserID,

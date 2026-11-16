@@ -110,6 +110,9 @@ func (s *TaskService) Get(ctx context.Context, tenantID, taskID uuid.UUID, scope
 	}
 	out := toPortTask(task)
 	out.AssigneeCount = len(assignments)
+	if !scope.IsAdmin && len(out.ExtrasJSON) > 0 {
+		out.ExtrasJSON = withoutConnectorFields(out.ExtrasJSON)
+	}
 	return out, portAssignments, nil
 }
 
@@ -230,6 +233,13 @@ func (s *TaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.U
 		return nil, staleTaskVersion()
 	}
 	if err := checkTaskActive(task); err != nil {
+		return nil, err
+	}
+	inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
+	if err != nil {
+		return nil, wrapInstanceErr(err)
+	}
+	if err := checkInstanceActionable(inst); err != nil {
 		return nil, err
 	}
 
@@ -408,7 +418,7 @@ func (s *TaskService) Reassign(ctx context.Context, tenantID, taskID, actorUserI
 	if err != nil {
 		return nil, wrapInstanceErr(err)
 	}
-	if err := checkInstanceReassignable(inst); err != nil {
+	if err := checkInstanceActionable(inst); err != nil {
 		return nil, err
 	}
 	if err := s.sendReassignSignal(ctx, inst, task, oldUserID, newUserID, actorUserID, recordVersion); err != nil {
@@ -417,7 +427,7 @@ func (s *TaskService) Reassign(ctx context.Context, tenantID, taskID, actorUserI
 	return s.presentedTask(ctx, tenantID, task), nil
 }
 
-func checkInstanceReassignable(inst *domain.Instance) error {
+func checkInstanceActionable(inst *domain.Instance) error {
 	if inst.Status != domain.InstanceStatusRunning && inst.Status != domain.InstanceStatusDegraded {
 		return port.ErrInvalidInstanceState
 	}
@@ -539,7 +549,7 @@ func (s *TaskService) OverrideAssignee(ctx context.Context, in port.AssigneeOver
 	if err != nil {
 		return nil, wrapInstanceErr(err)
 	}
-	if err := checkInstanceReassignable(inst); err != nil {
+	if err := checkInstanceActionable(inst); err != nil {
 		return nil, err
 	}
 	if err := s.checkEligible(ctx, inst, task, in.NewUserID); err != nil {
@@ -559,7 +569,7 @@ func (s *TaskService) OverrideAssignee(ctx context.Context, in port.AssigneeOver
 func (s *TaskService) storeOverride(ctx context.Context, in port.AssigneeOverrideInput, inst *domain.Instance, task *domain.Task, previousUserID uuid.UUID) (*domain.AssigneeOverride, int64, error) {
 	override := &domain.AssigneeOverride{
 		ID: deterministicOverrideID(in, task.RecordVersion), TenantID: in.TenantID, WorkflowInstanceID: in.InstanceID, NodeKey: in.NodeKey,
-		PreviousUserID: previousUserID, NewUserID: in.NewUserID, Reason: in.Reason, ActorUserID: in.ActorUserID,
+		PreviousUserID: domain.OptionalUserID(previousUserID), NewUserID: in.NewUserID, Reason: in.Reason, ActorUserID: in.ActorUserID,
 	}
 	var bumped *domain.Task
 	err := s.Transactor.RunInTx(withTenantGUC(ctx, in.TenantID), func(ctx context.Context) error {

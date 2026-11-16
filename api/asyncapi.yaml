@@ -356,8 +356,9 @@ components:
       description: >
         Fires when ReassignAssignmentActivity vacates the old assignment and creates a new
         one — an admin instance-reassign, a node-override, or a delegation reroute. Consumed
-        by Audit and the Dashboard Stream Gateway, which routes to both old_user_id (removed
-        from their list) and new_user_id (added to theirs).
+        by Audit and the Dashboard Stream Gateway, which routes to old_user_id (removed from
+        their list) when the event carries it and to new_user_id (added to theirs). old_user_id
+        is absent when no one was replaced, a task nobody held.
       x-lifecycle: { status: active }
       x-owner: { team: platform-engineers, slack: "#workflow-engine" }
       traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
@@ -714,7 +715,7 @@ components:
     WorkflowTaskReassignedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, old_user_id, new_user_id, initiator]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, new_user_id, initiator]
       properties:
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
@@ -724,7 +725,7 @@ components:
         node_key:             { type: string }
         department_id:        { type: string, format: uuid }
         assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
-        old_user_id:          { type: string, format: uuid }
+        old_user_id:          { type: string, format: uuid, description: the user the task was taken from; absent when no one was replaced }
         new_user_id:          { type: string, format: uuid }
         initiator:            { type: string, enum: [admin, override, delegation] }
         delegation_id:        { type: ["string", "null"], format: uuid }

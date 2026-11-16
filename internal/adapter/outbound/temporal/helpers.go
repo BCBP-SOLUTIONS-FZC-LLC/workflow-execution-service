@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -18,12 +19,30 @@ func withTenantGUC(ctx context.Context, tenantID uuid.UUID) context.Context {
 }
 
 func nonRetryable(errType string, err error) error {
-	return temporal.NewApplicationErrorWithCause(err.Error(), errType, err) //nolint:wrapcheck // must stay *temporal.ApplicationError for NonRetryableErrorTypes matching
+	return temporal.NewNonRetryableApplicationError(err.Error(), errType, err) //nolint:wrapcheck // must stay *temporal.ApplicationError for NonRetryableErrorTypes matching
 }
 
-func deptUUID(iamDeptID string) uuid.UUID {
-	id, _ := uuid.Parse(iamDeptID)
-	return id
+// retryableOrNotFound lets an unknown row end the activity instead of retrying it
+// without limit; every other error is returned as it came.
+func retryableOrNotFound(err error) error {
+	var appErr *temporal.ApplicationError
+	if err == nil || errors.As(err, &appErr) || !errors.Is(err, domain.ErrNotFound) {
+		return err
+	}
+	return nonRetryable("NotFoundError", err)
+}
+
+// deptUUID reads the department id the plan carries; an absent id stays the
+// zero id, a malformed one is refused.
+func deptUUID(iamDeptID string) (uuid.UUID, error) {
+	if iamDeptID == "" {
+		return uuid.Nil, nil
+	}
+	id, err := uuid.Parse(iamDeptID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("parse department id %q: %w", iamDeptID, err)
+	}
+	return id, nil
 }
 
 func deterministicTaskID(instanceID uuid.UUID, nodeKey string, visitCount int64) uuid.UUID {

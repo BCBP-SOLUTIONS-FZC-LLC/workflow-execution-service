@@ -22,6 +22,15 @@ func (in *interpreter) runSteps(ctx wf.Context, plan *dsl.CompiledPlan, steps []
 }
 
 func (in *interpreter) runStepList(ctx wf.Context, plan *dsl.CompiledPlan, steps []dsl.ExecutionStep, admin wf.Channel) (stepOutcome, error) {
+	out, err := in.runStepItems(ctx, plan, steps, admin)
+	if errors.Is(err, errInstanceTerminated) {
+		out.Terminated = true
+		return out, nil
+	}
+	return out, err
+}
+
+func (in *interpreter) runStepItems(ctx wf.Context, plan *dsl.CompiledPlan, steps []dsl.ExecutionStep, admin wf.Channel) (stepOutcome, error) {
 	var last domain.NodeKey
 	var lastResult string
 	for i := range steps {
@@ -39,10 +48,12 @@ func (in *interpreter) runStepList(ctx wf.Context, plan *dsl.CompiledPlan, steps
 		case len(step.Sequential) > 0:
 			for _, deptID := range step.Sequential {
 				node, result, err := in.runDepartment(ctx, plan, deptID)
+				if node != "" {
+					last = node
+				}
 				if err != nil {
 					return stepOutcome{LastNode: last, LastResult: lastResult}, err
 				}
-				last = node
 				if result != "" {
 					lastResult = result
 				}
@@ -85,7 +96,8 @@ func (in *interpreter) runDepartment(ctx wf.Context, plan *dsl.CompiledPlan, dep
 
 func (in *interpreter) spawnNonInterruptingTarget(ctx wf.Context, plan *dsl.CompiledPlan, targetDept string) {
 	wf.Go(ctx, func(gctx wf.Context) {
-		_, _, _ = in.runDepartment(gctx, plan, targetDept)
+		_, _, err := in.runDepartment(gctx, plan, targetDept)
+		in.reportTerminated(gctx, false, err)
 	})
 }
 
@@ -258,12 +270,11 @@ func (in *interpreter) runExclusiveRevert(ctx wf.Context, plan *dsl.CompiledPlan
 	if identifier == "" {
 		identifier = winner.RevertToStage
 	}
-	target := domain.NodeKey(deptID + "/" + identifier)
-	popped := in.history.PopTo(target)
-	in.msgBuf.ResetSpan(popped)
-
 	if identifier == "" {
+		in.msgBuf.ResetSpan(in.history.PopToDept(deptID))
 		return in.runDepartment(ctx, plan, deptID)
 	}
+	target := domain.NodeKey(deptID + "/" + identifier)
+	in.msgBuf.ResetSpan(in.history.PopTo(target))
 	return in.runDepartmentAtKey(ctx, plan, deptID, target)
 }

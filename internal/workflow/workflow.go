@@ -110,7 +110,14 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 		sel.AddReceive(baseAdmin, func(c wf.ReceiveChannel, more bool) {
 			c.Receive(ctx, &envelope)
 		})
-		sel.Select(ctx)
+		for {
+			sel.Select(ctx)
+			if done || !in.forceBackHasNowhereToGo(envelope) {
+				break
+			}
+			wf.GetLogger(ctx).Warn("instance-force-back: no completed node to return to; dropping")
+			envelope = adminSignalEnvelope{}
+		}
 		abandonedNodes := in.currentPendingNodes()
 		in.routing = envelope.Kind != "" && !envelope.Signal.FromDefer
 		cancelRun()
@@ -121,40 +128,54 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 
 		sig := envelope.Signal
 		switch envelope.Kind {
+		case kindInstanceTerminated:
+			return stepOutcome{Terminated: true}, nil
+
 		case SignalInstanceCancel:
 			return stepOutcome{Terminated: true}, in.cancelInstanceOnSignal(ctx, sig)
 
 		case SignalInstanceForceFwd:
 			entry := departmentEntryNode(plan, deptFromNodeKey(sig.TargetNodeKey), sig.TargetNodeKey)
-			in.recordAndRedirect(ctx, abandonedNodes, entry, domain.ForceRouteDirectionForward, sig)
+			if err := in.recordAndRedirect(ctx, abandonedNodes, entry, domain.ForceRouteDirectionForward, sig); err != nil {
+				return stepOutcome{}, err
+			}
 			steps = redirectSteps(plan, deptFromNodeKey(sig.TargetNodeKey))
 
 		case SignalInstanceForceBack:
-			target, popped, ok := in.history.PopOne()
-			if !ok {
-				wf.GetLogger(ctx).Warn("instance-force-back: no completed node to return to; dropping")
-				in.routing = false
-				continue
-			}
+			target, popped, _ := in.history.PopOne()
 			in.msgBuf.ResetSpan(popped)
-			in.recordAndRedirect(ctx, abandonedNodes, departmentEntryNode(plan, deptFromNodeKey(target), target), domain.ForceRouteDirectionBack, sig)
+			if err := in.recordAndRedirect(ctx, abandonedNodes, departmentEntryNode(plan, deptFromNodeKey(target), target), domain.ForceRouteDirectionBack, sig); err != nil {
+				return stepOutcome{}, err
+			}
 			steps = redirectSteps(plan, deptFromNodeKey(target))
 		}
 		in.routing = false
 	}
 }
 
-func (in *interpreter) recordAndRedirect(ctx wf.Context, oldNodeKeys []domain.NodeKey, target domain.NodeKey, direction string, sig adminSignal) {
+func (in *interpreter) forceBackHasNowhereToGo(envelope adminSignalEnvelope) bool {
+	return envelope.Kind == SignalInstanceForceBack && in.history.Peek() == ""
+}
+
+type routeAuditError struct{ err error }
+
+func (e *routeAuditError) Error() string { return e.err.Error() }
+
+func (e *routeAuditError) Unwrap() error { return e.err }
+
+func (in *interpreter) recordAndRedirect(ctx wf.Context, oldNodeKeys []domain.NodeKey, target domain.NodeKey, direction string, sig adminSignal) error {
 	if !sig.FromDefer {
-		in.recordForceRouteAudit(ctx, oldNodeKeys, target, direction, sig)
+		if err := in.recordForceRouteAudit(ctx, oldNodeKeys, target, direction, sig); err != nil {
+			return &routeAuditError{err: err}
+		}
 	}
-	_ = updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
+	return updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{target},
 	})
 }
 
-func (in *interpreter) recordForceRouteAudit(ctx wf.Context, oldNodeKeys []domain.NodeKey, target domain.NodeKey, direction string, sig adminSignal) {
-	_ = recordForceRoute(ctx, port.RecordForceRouteInput{
+func (in *interpreter) recordForceRouteAudit(ctx wf.Context, oldNodeKeys []domain.NodeKey, target domain.NodeKey, direction string, sig adminSignal) error {
+	return recordForceRoute(ctx, port.RecordForceRouteInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID,
 		OldNodeKeys: oldNodeKeys, TargetNodeID: string(target), Direction: direction,
 		AdminUserID: sig.AdminUserID, RecordVersion: sig.RecordVersion,

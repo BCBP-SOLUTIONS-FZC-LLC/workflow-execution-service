@@ -86,7 +86,7 @@ func TestCompleteAssignment_AllDoneWhenNoActiveAssignmentsRemain(t *testing.T) {
 	assert.Equal(t, domain.EventWorkflowTaskCompleted, outbox.enqueued[0].Type)
 }
 
-func TestCompleteAssignment_NotAllDoneWhenAnotherAssignmentStillActive(t *testing.T) {
+func TestCompleteAssignment_ClosesAnotherAssignmentStillActive(t *testing.T) {
 	taskID := uuid.New()
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
 	completing := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
@@ -97,7 +97,7 @@ func TestCompleteAssignment_NotAllDoneWhenAnotherAssignmentStillActive(t *testin
 		TaskID: taskID.String(), UserID: completing.UserID.String(), TenantID: uuid.New().String(), ResultJSON: `{}`,
 	})
 	require.NoError(t, err)
-	assert.False(t, out.AllDone)
+	assert.True(t, out.AllDone, "the co-assignee's open assignment is closed with the completion")
 }
 
 // TestCompleteAssignment_CompleteError forces Assignments.Complete to fail.

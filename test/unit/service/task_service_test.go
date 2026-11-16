@@ -224,7 +224,7 @@ func TestTaskService_ClaimByIneligibleUser(t *testing.T) {
 	svc.Eligibility = &fakeEligibilityChecker{check: func(_ context.Context, _, _, _ uuid.UUID, level string) (bool, error) {
 		return level != "approver", nil
 	}}
-	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID}
+	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, Status: domain.InstanceStatusRunning}
 	task := newReadyTask(tenantID, instanceID)
 	task.AssigneeMode = "all"
 	tasks.byID[task.ID] = task
@@ -239,9 +239,10 @@ func TestTaskService_ClaimByIneligibleUser(t *testing.T) {
 
 func TestTaskService_Claim(t *testing.T) {
 	t.Run("success sets lead on a multi-assignee task", func(t *testing.T) {
-		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		svc, instances, tasks, assignments, _, _ := newTaskServiceHarness()
 		tenantID := uuid.New()
 		task := newReadyTask(tenantID, uuid.New())
+		instances.byID[task.WorkflowInstanceID] = &domain.Instance{ID: task.WorkflowInstanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning}
 		task.AssigneeMode = "all"
 		tasks.byID[task.ID] = task
 		userID := uuid.New()
@@ -265,9 +266,10 @@ func TestTaskService_Claim(t *testing.T) {
 	})
 
 	t.Run("already claimed by another lead", func(t *testing.T) {
-		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
+		svc, instances, tasks, assignments, _, _ := newTaskServiceHarness()
 		tenantID := uuid.New()
 		task := newReadyTask(tenantID, uuid.New())
+		instances.byID[task.WorkflowInstanceID] = &domain.Instance{ID: task.WorkflowInstanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning}
 		task.AssigneeMode = "all"
 		tasks.byID[task.ID] = task
 		lead := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: uuid.New(), IsActive: true, IsLead: true}
@@ -278,9 +280,10 @@ func TestTaskService_Claim(t *testing.T) {
 	})
 
 	t.Run("caller is not an assignee", func(t *testing.T) {
-		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		svc, instances, tasks, _, _, _ := newTaskServiceHarness()
 		tenantID := uuid.New()
 		task := newReadyTask(tenantID, uuid.New())
+		instances.byID[task.WorkflowInstanceID] = &domain.Instance{ID: task.WorkflowInstanceID, TenantID: tenantID, Status: domain.InstanceStatusRunning}
 		task.AssigneeMode = "all"
 		tasks.byID[task.ID] = task
 
@@ -955,7 +958,8 @@ func TestTaskService_OverrideAssignee(t *testing.T) {
 			NewUserID: newUserID, Reason: "on leave", ActorUserID: uuid.New(), RecordVersion: 4,
 		})
 		require.NoError(t, err)
-		assert.Equal(t, previousUserID, got.PreviousUserID)
+		require.NotNil(t, got.PreviousUserID)
+		assert.Equal(t, previousUserID, *got.PreviousUserID)
 		assert.Equal(t, newUserID, got.NewUserID)
 		assert.Equal(t, int64(5), got.RecordVersion)
 		assert.Equal(t, int64(5), task.RecordVersion)

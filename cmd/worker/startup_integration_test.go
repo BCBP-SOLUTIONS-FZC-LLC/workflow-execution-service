@@ -313,9 +313,6 @@ func TestBuildDeps_WiresTheRepositoriesTheQueueRepoAndTheDefinitionClientOnTheCo
 	if deps.Instances == nil || deps.Tasks == nil || deps.Assignments == nil || deps.Outbox == nil || deps.Transactor == nil || deps.Validator == nil || deps.Definitions == nil {
 		t.Errorf("deps has an unset field: %+v", deps)
 	}
-	if deps.Log != port.Logger(log) {
-		t.Error("deps.Log is not the logger passed to buildDeps")
-	}
 
 	tenant := uuid.New()
 	queueName := domain.TenantTaskQueueName(tenant)

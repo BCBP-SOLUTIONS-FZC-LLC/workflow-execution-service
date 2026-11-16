@@ -111,7 +111,7 @@ type AssigneeOverride struct {
 	ID                 uuid.UUID
 	WorkflowInstanceID uuid.UUID
 	NodeKey            string
-	PreviousUserID     uuid.UUID
+	PreviousUserID     *uuid.UUID
 	NewUserID          uuid.UUID
 	Reason             string
 	ActorUserID        uuid.UUID

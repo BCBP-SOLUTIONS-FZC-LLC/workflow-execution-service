@@ -42,7 +42,7 @@ func hreOverrideFake(t *testing.T, lookupErr error) (*fakeTaskService, *fakeElig
 			}
 			rec.overrides = append(rec.overrides, in)
 			return &port.AssigneeOverride{
-				WorkflowInstanceID: in.InstanceID, NodeKey: in.NodeKey, PreviousUserID: hrePreviousUserID,
+				WorkflowInstanceID: in.InstanceID, NodeKey: in.NodeKey, PreviousUserID: &hrePreviousUserID,
 				NewUserID: in.NewUserID, Reason: in.Reason, ActorUserID: in.ActorUserID, RecordVersion: in.RecordVersion + 1,
 			}, nil
 		},

@@ -481,6 +481,9 @@ components:
               description: >
                 Runtime context passed from the instance start request at task creation.
                 Read-only; matches the context_json provided when the instance was started.
+                For a connector task, resolved_inputs and output_mapping are included only for
+                callers holding tenant_admin or tenant_owner; every other reader of the task
+                gets the rest of the payload without them.
               additionalProperties: true
             assignments:
               type: array
@@ -566,10 +569,11 @@ components:
         previous_user_id:
           type: string
           format: uuid
+          nullable: true
           description: >
-            The user the node was taken from (the lead on a multi-assignee task). The all-zero
-            UUID when no one is replaced: a task with no active assignee, or a multi-assignee
-            task with no lead yet, where the new user is added beside the current assignees.
+            The user the node was taken from (the lead on a multi-assignee task). Null when no
+            one is replaced: a task with no active assignee, or a multi-assignee task with no
+            lead yet, where the new user is added beside the current assignees.
         new_user_id:
           type: string
           format: uuid

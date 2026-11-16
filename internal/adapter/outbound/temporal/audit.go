@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,27 +28,73 @@ func (d *Deps) RecordForceRoute(ctx context.Context, in port.RecordForceRouteInp
 		return nonRetryable("ValidationError", fmt.Errorf("parse admin_user_id: %w", err))
 	}
 
+	fromKeys := make([]string, len(in.OldNodeKeys))
+	for i, k := range in.OldNodeKeys {
+		fromKeys[i] = string(k)
+	}
+	direction := in.Direction
+	if direction == "" {
+		direction = domain.ForceRouteDirectionForward
+	}
+
 	ctx = withTenantGUC(ctx, tenantID)
-	return d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
-		if err := d.supersedeBypassedTasks(ctx, tenantID, instanceID, in.OldNodeKeys, adminUserID); err != nil {
-			return err
-		}
+	return retryableOrNotFound(d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
 		inst, err := d.Instances.GetByID(ctx, tenantID, instanceID)
 		if err != nil {
 			return fmt.Errorf("get instance: %w", err)
 		}
 		core := domain.CommonCore{WorkflowInstanceID: instanceID, SubjectID: inst.SubjectID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}
-		fromKeys := make([]string, len(in.OldNodeKeys))
-		for i, k := range in.OldNodeKeys {
-			fromKeys[i] = string(k)
-		}
-		direction := in.Direction
-		if direction == "" {
-			direction = domain.ForceRouteDirectionForward
-		}
 		payload := domain.NewWorkflowInstanceForceRoutedPayload(core, adminUserID, fromKeys, in.TargetNodeID, direction)
-		return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowInstanceForceRouted, payload)
-	})
+		eventID := forceRouteEventID(instanceID, in)
+		announced, err := d.eventRecorded(ctx, tenantID, instanceID, eventID)
+		if err != nil || announced {
+			return err
+		}
+		if err := d.supersedeBypassedTasks(ctx, tenantID, instanceID, in.OldNodeKeys, adminUserID); err != nil {
+			return err
+		}
+		return d.enqueueInstanceEventWithID(ctx, tenantID, instanceID, eventID, domain.EventWorkflowInstanceForceRouted, payload)
+	}))
+}
+
+var forceRouteEventNamespace = uuid.MustParse("5a1f7d0e-3c2b-4e8a-9b6d-0f4c7a2e9d13")
+
+// forceRouteEventID is the id of the force-routed event for one request. It is
+// derived from the request, so an attempt that committed and its retry name the
+// same event, while the same route made again at a later record version is a
+// different event.
+func forceRouteEventID(instanceID uuid.UUID, in port.RecordForceRouteInput) string {
+	key := fmt.Sprintf("%s|%s|%s|%s|%d|%s", instanceID, in.Direction, in.TargetNodeID, in.AdminUserID, in.RecordVersion, joinNodeKeys(in.OldNodeKeys))
+	return uuid.NewSHA1(forceRouteEventNamespace, []byte(key)).String()
+}
+
+func joinNodeKeys(keys []domain.NodeKey) string {
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = string(k)
+	}
+	return strings.Join(parts, ",")
+}
+
+// eventRecorded reports whether the instance already has the event with this
+// id, which means an earlier attempt of the same activity committed.
+func (d *Deps) eventRecorded(ctx context.Context, tenantID, instanceID uuid.UUID, eventID string) (bool, error) {
+	var cursor *port.Cursor
+	for {
+		records, next, err := d.Outbox.ListByInstance(ctx, tenantID, instanceID, port.PageRequest{After: cursor, Limit: 100})
+		if err != nil {
+			return false, fmt.Errorf("read instance events: %w", err)
+		}
+		for _, r := range records {
+			if r.ID.String() == eventID {
+				return true, nil
+			}
+		}
+		if next == nil {
+			return false, nil
+		}
+		cursor = next
+	}
 }
 
 func (d *Deps) supersedeBypassedTasks(ctx context.Context, tenantID, instanceID uuid.UUID, oldNodeKeys []domain.NodeKey, actorUserID uuid.UUID) error {
@@ -178,5 +225,5 @@ func (d *Deps) recordSLAEvent(
 	if err == nil && recorded && eventType == domain.EventWorkflowTaskSLABreached {
 		observability.IncCounter(observability.SLABreachesTotal)
 	}
-	return err
+	return retryableOrNotFound(err)
 }

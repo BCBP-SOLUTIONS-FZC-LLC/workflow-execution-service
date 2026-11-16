@@ -56,7 +56,8 @@ func vacateIfActive(ctx context.Context, repo port.TaskAssignmentRepository, ten
 // handOver gives the vacated assignment's task to newUserID inside the caller's
 // transaction. A user who already holds the task keeps that one row, and
 // inherits the lead flag; inserting a second row would be a unique violation,
-// which aborts the whole transaction.
+// which aborts the whole transaction. Callers never hand a task to the user who
+// just lost it: that move changes nothing, and the vacate would take the task away.
 func handOver(ctx context.Context, repo port.TaskAssignmentRepository, tenantID uuid.UUID, vacated *domain.TaskAssignment, active []*domain.TaskAssignment, task *domain.Task, newUserID uuid.UUID, reason string) error {
 	if existing := activeAssignmentOfUser(active, newUserID); existing != nil {
 		if !vacated.IsLead {
@@ -76,7 +77,7 @@ func handOver(ctx context.Context, repo port.TaskAssignmentRepository, tenantID 
 func enqueueTaskReassigned(ctx context.Context, outbox port.OutboxRepository, validator port.EventValidator, inst *domain.Instance, task *domain.Task, oldUserID, newUserID uuid.UUID, delegationID *uuid.UUID) error {
 	core := domain.CommonCore{WorkflowInstanceID: inst.ID, SubjectID: inst.SubjectID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}
 	taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{newUserID}}
-	payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, oldUserID, newUserID, domain.ReassignInitiatorDelegation, delegationID)
+	payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, &oldUserID, newUserID, domain.ReassignInitiatorDelegation, delegationID)
 	subject := "instances/" + inst.ID.String() + "/tasks/" + task.ID.String()
 	envelope, err := BuildEnvelope(ctx, validator, domain.EventWorkflowTaskReassigned, inst.TenantID.String(), subject, "", payload)
 	if err != nil {

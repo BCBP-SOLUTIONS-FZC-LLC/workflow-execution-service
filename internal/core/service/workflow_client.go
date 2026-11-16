@@ -68,6 +68,9 @@ type delegateRow struct {
 // transaction, and the outbox relay delivers the signals after the commit
 // (execution LLD §5.8).
 func (s *WorkflowClient) ReassignDelegate(ctx context.Context, in port.ReassignDelegateInput) (int, error) {
+	if in.NewDelegateID == in.OldDelegateID {
+		return 0, nil
+	}
 	active, err := s.Assignments.ListActiveByUser(ctx, in.TenantID, in.OldDelegateID)
 	if err != nil {
 		return 0, err

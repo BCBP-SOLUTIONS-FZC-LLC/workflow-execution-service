@@ -400,12 +400,38 @@ type wkactOutbox struct {
 }
 
 func (o wkactOutbox) Enqueue(_ context.Context, env events.Envelope[json.RawMessage]) error {
-	o.w.record("Outbox.Enqueue", uuid.MustParse(env.TenantID), uuid.MustParse(strings.TrimPrefix(strings.TrimPrefix(env.Subject, "instances/"), "tasks/")))
+	o.w.record("Outbox.Enqueue", uuid.MustParse(env.TenantID), uuid.MustParse(env.Subject[strings.LastIndex(env.Subject, "/")+1:]))
 	if err := o.w.fail("Outbox.Enqueue"); err != nil {
 		return err
 	}
 	o.w.outbox = append(o.w.outbox, env)
 	return nil
+}
+
+// ListByInstance serves the instance's events newest first, each as the
+// stored record the real repository returns: the whole envelope, with the
+// business fields under its data key.
+func (o wkactOutbox) ListByInstance(_ context.Context, tenant, instanceID uuid.UUID, _ port.PageRequest) ([]*domain.OutboxEventRecord, *port.Cursor, error) {
+	o.w.record("Outbox.ListByInstance", tenant, instanceID)
+	var out []*domain.OutboxEventRecord
+	for i := len(o.w.outbox) - 1; i >= 0; i-- {
+		env := o.w.outbox[i]
+		if env.TenantID != tenant.String() {
+			continue
+		}
+		var data struct {
+			InstanceID string `json:"workflow_instance_id"`
+		}
+		if err := json.Unmarshal(env.Payload, &data); err != nil || data.InstanceID != instanceID.String() {
+			continue
+		}
+		stored, err := json.Marshal(env)
+		if err != nil {
+			return nil, nil, err
+		}
+		out = append(out, &domain.OutboxEventRecord{ID: uuid.MustParse(env.ID), EventType: env.Type, Payload: stored})
+	}
+	return out, nil, nil
 }
 
 func (o wkactOutbox) ExistsForTask(_ context.Context, eventType string, taskID uuid.UUID) (bool, error) {

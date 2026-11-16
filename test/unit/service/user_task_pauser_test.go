@@ -43,7 +43,7 @@ func TestUserTaskPauser_PauseUserTasks(t *testing.T) {
 		assert.Contains(t, string(b), `"Initiator":"`+domain.InitiatorSafetyNet+`"`, "the signal must carry safety_net as its initiator, not fall back to admin")
 	})
 
-	t.Run("skips a non-RUNNING instance without failing the batch", func(t *testing.T) {
+	t.Run("skips a finished instance without failing the batch", func(t *testing.T) {
 		instances := newFakeInstanceRepo()
 		tasks := newFakeTaskRepo()
 		assignments := newFakeAssignmentRepo()
@@ -51,7 +51,7 @@ func TestUserTaskPauser_PauseUserTasks(t *testing.T) {
 		tenantID, userID := uuid.New(), uuid.New()
 
 		instanceID := uuid.New()
-		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusPaused}
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusCompleted}
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID}
 		tasks.byID[task.ID] = task
 		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
@@ -180,26 +180,31 @@ func TestUserTaskPauser_PauseUserTasks(t *testing.T) {
 		assert.Equal(t, before+1, failures(), "only the real failure is counted")
 
 		delete(instances.byID, broken)
-		instances.byID[broken] = &domain.Instance{ID: broken, TenantID: tenantID, Status: domain.InstanceStatusPaused}
+		instances.byID[broken] = &domain.Instance{ID: broken, TenantID: tenantID, Status: domain.InstanceStatusCompleted}
 		require.NoError(t, pauser.PauseUserTasks(context.Background(), tenantID, userID, nil), "with only the gone instance left the pause succeeds")
 		assert.Equal(t, before+1, failures())
 	})
 
-	t.Run("an instance already paused is skipped without an error", func(t *testing.T) {
+	t.Run("an instance already paused is signalled so the safety net takes the pause over", func(t *testing.T) {
 		instances := newFakeInstanceRepo()
 		tasks := newFakeTaskRepo()
 		assignments := newFakeAssignmentRepo()
 		temporal := &fakeTemporalClient{}
 		tenantID, userID := uuid.New(), uuid.New()
 		instanceID := uuid.New()
-		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusPaused}
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusPaused, TemporalWorkflowID: "tenant:biz", RecordVersion: 4}
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID}
 		tasks.byID[task.ID] = task
 		assignments.add(&domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true})
 		pauser := &service.UserTaskPauser{Instances: instances, Assignments: assignments, Tasks: tasks, Temporal: temporal}
 
 		require.NoError(t, pauser.PauseUserTasks(context.Background(), tenantID, userID, nil))
-		assert.Empty(t, temporal.signals)
+		require.Len(t, temporal.signals, 1)
+		assert.Equal(t, port.SignalInstancePause, temporal.signals[0].SignalName)
+		assert.Equal(t, instanceID, temporal.signals[0].InstanceID)
+		b, err := json.Marshal(temporal.signals[0].Payload)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"Initiator":"`+domain.InitiatorSafetyNet+`"`)
 	})
 
 	t.Run("two tasks on the same instance only signal once", func(t *testing.T) {

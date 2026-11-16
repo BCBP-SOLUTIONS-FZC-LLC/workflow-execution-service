@@ -31,6 +31,8 @@ type branchOutcome struct {
 	LastNode domain.NodeKey
 	Steps    []dsl.ExecutionStep
 	Err      error
+
+	Terminated bool
 }
 
 type nodeVisitKey struct {
@@ -67,6 +69,8 @@ type interpreter struct {
 
 	taskAssignees map[string]assigneeNote
 
+	deferredTasks map[string]bool
+
 	pauseGates map[string]wf.Channel
 
 	status         domain.InstanceStatus
@@ -96,6 +100,7 @@ func newInterpreter(tenantID, instanceID, initialContextJSON string, collab *dsl
 		pendingSignals:  make(map[nodeVisitKey]stageTransitionSignal),
 		taskVisits:      make(map[domain.NodeKey]int64),
 		taskAssignees:   make(map[string]assigneeNote),
+		deferredTasks:   make(map[string]bool),
 		pauseGates:      make(map[string]wf.Channel),
 		status:          domain.InstanceStatusRunning,
 	}

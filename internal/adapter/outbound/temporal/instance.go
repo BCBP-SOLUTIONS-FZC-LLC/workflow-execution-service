@@ -29,7 +29,7 @@ func (d *Deps) UpdateInstanceStatus(ctx context.Context, in port.UpdateInstanceS
 		if err != nil {
 			return fmt.Errorf("get instance: %w", err)
 		}
-		if (in.Status == domain.InstanceStatusDegraded || in.Status == domain.InstanceStatusRunning) && inst.Status == in.Status {
+		if inst.Status == in.Status {
 			return nil
 		}
 		updated, err := d.Instances.UpdateStatus(ctx, tenantID, instanceID, in.Status, inst.RecordVersion)
@@ -75,7 +75,7 @@ func (d *Deps) UpdateInstanceStatus(ctx context.Context, in port.UpdateInstanceS
 	if err == nil && enteredDegraded {
 		observability.IncCounter(observability.InstanceDegradedTotal)
 	}
-	return err
+	return retryableOrNotFound(err)
 }
 
 func (d *Deps) PauseInstance(ctx context.Context, in port.PauseInstanceInput) error {
@@ -107,7 +107,7 @@ func (d *Deps) CancelInstance(ctx context.Context, in port.CancelInstanceInput) 
 	}
 
 	ctx = withTenantGUC(ctx, tenantID)
-	return d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
+	return retryableOrNotFound(d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
 		inst, err := d.Instances.GetByID(ctx, tenantID, instanceID)
 		if err != nil {
 			return fmt.Errorf("get instance: %w", err)
@@ -125,7 +125,7 @@ func (d *Deps) CancelInstance(ctx context.Context, in port.CancelInstanceInput) 
 		core := domain.CommonCore{WorkflowInstanceID: instanceID, SubjectID: updated.SubjectID, BusinessKey: updated.BusinessKey, WorkflowVersionID: updated.WorkflowVersionID}
 		payload := domain.NewWorkflowInstanceCancelledPayload(core, updated.StartedByUserID, adminUserID, in.Reason)
 		return d.enqueueInstanceEvent(ctx, tenantID, instanceID, domain.EventWorkflowInstanceCancelled, payload)
-	})
+	}))
 }
 
 func (d *Deps) instanceLifecycleEvent(
@@ -142,7 +142,7 @@ func (d *Deps) instanceLifecycleEvent(
 	}
 
 	ctx = withTenantGUC(ctx, tenantID)
-	return d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
+	return retryableOrNotFound(d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
 		inst, err := d.Instances.GetByID(ctx, tenantID, instanceID)
 		if err != nil {
 			return fmt.Errorf("get instance: %w", err)
@@ -156,7 +156,7 @@ func (d *Deps) instanceLifecycleEvent(
 		}
 		core := domain.CommonCore{WorkflowInstanceID: instanceID, SubjectID: updated.SubjectID, BusinessKey: updated.BusinessKey, WorkflowVersionID: updated.WorkflowVersionID}
 		return d.enqueueInstanceEvent(ctx, tenantID, instanceID, eventType, buildPayload(core, updated.StartedByUserID))
-	})
+	}))
 }
 
 func (d *Deps) failActiveTasks(ctx context.Context, tenantID, instanceID uuid.UUID, cascadeSource string) error {
@@ -207,9 +207,16 @@ func (d *Deps) failTask(ctx context.Context, tenantID, instanceID uuid.UUID, tas
 }
 
 func (d *Deps) enqueueInstanceEvent(ctx context.Context, tenantID, instanceID uuid.UUID, eventType string, payload any) error {
+	return d.enqueueInstanceEventWithID(ctx, tenantID, instanceID, "", eventType, payload)
+}
+
+func (d *Deps) enqueueInstanceEventWithID(ctx context.Context, tenantID, instanceID uuid.UUID, eventID, eventType string, payload any) error {
 	env, err := service.BuildEnvelope(ctx, d.Validator, eventType, tenantID.String(), "instances/"+instanceID.String(), "", payload)
 	if err != nil {
 		return fmt.Errorf("build %s envelope: %w", eventType, err)
+	}
+	if eventID != "" {
+		env.ID = eventID
 	}
 	if err := d.Outbox.Enqueue(ctx, env); err != nil {
 		return fmt.Errorf("enqueue %s: %w", eventType, err)

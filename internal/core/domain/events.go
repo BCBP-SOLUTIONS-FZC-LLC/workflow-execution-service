@@ -239,14 +239,22 @@ func NewWorkflowTaskDeferredPayload(core CommonCore, task TaskScopedCore, deferr
 type WorkflowTaskReassignedPayload struct {
 	CommonCore
 	TaskScopedCore
-	OldUserID    uuid.UUID  `json:"old_user_id"`
+	OldUserID    *uuid.UUID `json:"old_user_id,omitempty"`
 	NewUserID    uuid.UUID  `json:"new_user_id"`
 	Initiator    string     `json:"initiator"`
 	DelegationID *uuid.UUID `json:"delegation_id,omitempty"`
 }
 
-func NewWorkflowTaskReassignedPayload(core CommonCore, task TaskScopedCore, oldUserID, newUserID uuid.UUID, initiator string, delegationID *uuid.UUID) WorkflowTaskReassignedPayload {
+func NewWorkflowTaskReassignedPayload(core CommonCore, task TaskScopedCore, oldUserID *uuid.UUID, newUserID uuid.UUID, initiator string, delegationID *uuid.UUID) WorkflowTaskReassignedPayload {
 	return WorkflowTaskReassignedPayload{CommonCore: core, TaskScopedCore: task, OldUserID: oldUserID, NewUserID: newUserID, Initiator: initiator, DelegationID: delegationID}
+}
+
+// OptionalUserID is the pointer form of a user id the caller holds as the all-zero id when nobody is meant.
+func OptionalUserID(id uuid.UUID) *uuid.UUID {
+	if id == uuid.Nil {
+		return nil
+	}
+	return &id
 }
 
 type WorkflowTaskSupersededPayload struct {

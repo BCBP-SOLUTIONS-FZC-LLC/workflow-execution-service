@@ -83,9 +83,11 @@ func TestTaskOverride_AllModeWithALead_RecordsTheLeadAsPreviousUser(t *testing.T
 	got, err := h.svc.OverrideAssignee(context.Background(), h.overrideInput(uuid.New()))
 
 	require.NoError(t, err)
-	assert.Equal(t, h.otherID, got.PreviousUserID, "the caller row is listed first, but the lead is the holder")
+	require.NotNil(t, got.PreviousUserID)
+	assert.Equal(t, h.otherID, *got.PreviousUserID, "the caller row is listed first, but the lead is the holder")
 	require.Len(t, h.overrides.creates, 1)
-	assert.Equal(t, h.otherID, h.overrides.creates[0].Override.PreviousUserID)
+	require.NotNil(t, h.overrides.creates[0].Override.PreviousUserID)
+	assert.Equal(t, h.otherID, *h.overrides.creates[0].Override.PreviousUserID)
 	require.Len(t, h.outbox.signals, 1)
 	assert.Equal(t, h.otherID.String(), taDecodePayload(t, h.outbox.signals[0].Payload).OldUserID)
 }
@@ -161,7 +163,8 @@ func TestTaskOverride_Success_BumpsTheVersionStoresTheRowAndQueuesTheSignalInOne
 	assert.Equal(t, []string{h.tenantID.String()}, h.tx.guTenants, "the transaction carries the caller's tenant")
 	assert.EqualValues(t, csdTaskVersion+1, h.task.RecordVersion)
 	assert.EqualValues(t, csdTaskVersion+1, got.RecordVersion, "the answer carries the version the task now has")
-	assert.Equal(t, h.callerID, got.PreviousUserID)
+	require.NotNil(t, got.PreviousUserID)
+	assert.Equal(t, h.callerID, *got.PreviousUserID)
 	assert.Empty(t, h.temporalLog.signals, "the workflow is not signalled directly; the relay delivers the queued signal")
 
 	require.Len(t, h.outbox.signals, 1)

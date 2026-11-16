@@ -67,7 +67,7 @@ func seedPurgeTenant(t *testing.T, superPool *pgcommon.Pool, tenantID uuid.UUID,
 		}
 		require.NoError(t, overrideRepo.Create(ctx, &domain.AssigneeOverride{
 			ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, NodeKey: "finance/review",
-			PreviousUserID: uuid.New(), NewUserID: uuid.New(), Reason: "leave", ActorUserID: uuid.New(),
+			PreviousUserID: domain.OptionalUserID(uuid.New()), NewUserID: uuid.New(), Reason: "leave", ActorUserID: uuid.New(),
 		}))
 	}
 	_, err := postgres.NewActiveTaskQueueRepo(superPool).Register(ctx, tenantID, domain.TenantTaskQueueName(tenantID))

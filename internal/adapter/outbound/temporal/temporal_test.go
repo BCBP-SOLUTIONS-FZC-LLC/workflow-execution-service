@@ -453,14 +453,3 @@ func realValidator() port.EventValidator {
 }
 
 var errBoom = errors.New("boom")
-
-type fakeLogger struct {
-	warnCalls []string
-}
-
-func (l *fakeLogger) Debug(string, map[string]any) {}
-func (l *fakeLogger) Info(string, map[string]any)  {}
-func (l *fakeLogger) Warn(msg string, _ map[string]any) {
-	l.warnCalls = append(l.warnCalls, msg)
-}
-func (l *fakeLogger) Error(string, map[string]any) {}
