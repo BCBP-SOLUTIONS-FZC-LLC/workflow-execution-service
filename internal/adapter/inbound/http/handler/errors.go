@@ -50,6 +50,7 @@ const (
 	CodeTenantNotActive         ErrCode = "TENANT_NOT_ACTIVE"
 	CodeVersionNotPublished     ErrCode = "VERSION_NOT_PUBLISHED"
 	CodeVersionInvalid          ErrCode = "VERSION_INVALID"
+	CodeVersionNotFound         ErrCode = "VERSION_NOT_FOUND"
 	CodeInstanceAlreadyTerminal ErrCode = "INSTANCE_ALREADY_TERMINAL"
 	CodeInvalidInstanceState    ErrCode = "INVALID_INSTANCE_STATE"
 	CodeForceBackNoSavedBranch  ErrCode = "FORCE_BACK_NO_SAVED_BRANCH"
@@ -90,6 +91,7 @@ var codeTitles = map[ErrCode]string{
 	CodeDuplicateBusinessKey:    "Duplicate Business Key",
 	CodeVersionNotPublished:     "Version Not Published",
 	CodeVersionInvalid:          "Version Invalid",
+	CodeVersionNotFound:         "Version Not Found",
 	CodeInstanceAlreadyTerminal: "Instance Already Terminal",
 	CodeInvalidInstanceState:    "Invalid Instance State",
 	CodeForceBackNoSavedBranch:  "Force Back No Saved Branch",
@@ -116,7 +118,7 @@ var problemTypes = map[ErrCode]string{
 	CodeInvalidTaskState:         errBase + "invalid-task-state",
 	CodeNodeAlreadyResolved:      errBase + "node-already-resolved",
 	CodeAssigneeIneligible:       errBase + "assignee-ineligible",
-	CodeUpstreamUnavailable:      errBase + "temporal-unavailable",
+	CodeUpstreamUnavailable:      errBase + "upstream-unavailable",
 	CodePayloadTooLarge:          errBase + "payload-too-large",
 	CodeUnsupportedMediaType:     errBase + "unsupported-media-type",
 	CodeInternal:                 errBase + "internal-error",
@@ -131,6 +133,7 @@ var problemTypes = map[ErrCode]string{
 	CodeDuplicateBusinessKey:    errBase + "duplicate-business-key",
 	CodeVersionNotPublished:     errBase + "version-not-published",
 	CodeVersionInvalid:          errBase + "version-invalid",
+	CodeVersionNotFound:         errBase + "version-not-found",
 	CodeInstanceAlreadyTerminal: errBase + "instance-already-terminal",
 	CodeInvalidInstanceState:    errBase + "invalid-instance-state",
 	CodeForceBackNoSavedBranch:  errBase + "force-back-no-saved-branch",
@@ -328,6 +331,8 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusConflict, CodeVersionNotPublished, err.Error()
 	case errors.Is(err, port.ErrVersionInvalid):
 		return http.StatusConflict, CodeVersionInvalid, err.Error()
+	case errors.Is(err, port.ErrVersionNotFound):
+		return http.StatusNotFound, CodeVersionNotFound, err.Error()
 	case errors.Is(err, port.ErrInstanceAlreadyTerminal):
 		return http.StatusConflict, CodeInstanceAlreadyTerminal, err.Error()
 	case errors.Is(err, port.ErrInvalidInstanceState), errors.Is(err, port.ErrWorkflowNotFound):
@@ -352,6 +357,8 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "the Definition Service could not serve the workflow version"
 	case errors.Is(err, context.DeadlineExceeded):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "request timed out"
+	case errors.Is(err, port.ErrTemporalUnavailable):
+		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "the workflow engine could not take the request; retry it"
 	default:
 		return http.StatusInternalServerError, CodeInternal, "an unexpected error occurred"
 	}

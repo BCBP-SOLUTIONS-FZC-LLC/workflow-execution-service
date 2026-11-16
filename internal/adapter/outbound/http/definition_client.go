@@ -80,6 +80,8 @@ func (c *DefinitionClient) tryGet(ctx context.Context, tenantID uuid.UUID, rawUR
 	switch {
 	case resp.StatusCode >= 500:
 		return nil, true, fmt.Errorf("%w: compiled plan returned %d", port.ErrDefinitionUnavailable, resp.StatusCode)
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, false, fmt.Errorf("%w: %w: compiled plan returned %d", port.ErrDefinitionRejected, port.ErrDefinitionNotFound, resp.StatusCode)
 	case resp.StatusCode != http.StatusOK:
 		return nil, false, fmt.Errorf("%w: compiled plan returned %d", port.ErrDefinitionRejected, resp.StatusCode)
 	}

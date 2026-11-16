@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -11,8 +13,8 @@ import (
 
 type overrideReq struct {
 	NewUserID     uuid.UUID `json:"new_user_id" binding:"required"`
-	Reason        string    `json:"reason" binding:"max=500"`
-	RecordVersion int64     `json:"record_version" binding:"required"`
+	Reason        *string   `json:"reason" binding:"omitempty,notblank,max=500"`
+	RecordVersion int64     `json:"record_version" binding:"required,gte=1"`
 }
 
 type overrideResp struct {
@@ -37,6 +39,18 @@ func toOverrideResp(o *port.AssigneeOverride) overrideResp {
 	}
 }
 
+func validNodeKey(key string) bool {
+	return utf8.ValidString(key) && !strings.ContainsRune(key, 0)
+}
+
+func deref[T any](p *T) T {
+	var zero T
+	if p == nil {
+		return zero
+	}
+	return *p
+}
+
 var resolvedStatuses = map[port.TaskStatus]bool{
 	port.TaskStatusCompleted:  true,
 	port.TaskStatusDeferred:   true,
@@ -57,6 +71,10 @@ func (h *Handler) OverrideNodeAssignee(c *gin.Context) {
 		return
 	}
 	nodeKey := c.Param("node")
+	if !validNodeKey(nodeKey) {
+		writeInvalidParam(c, "node_key", "invalid node_key path parameter")
+		return
+	}
 
 	var req overrideReq
 	if !bindJSON(c, &req) {
@@ -94,7 +112,7 @@ func (h *Handler) OverrideNodeAssignee(c *gin.Context) {
 		InstanceID:    instanceID,
 		NodeKey:       nodeKey,
 		NewUserID:     req.NewUserID,
-		Reason:        req.Reason,
+		Reason:        deref(req.Reason),
 		ActorUserID:   actorUserID,
 		RecordVersion: req.RecordVersion,
 	})

@@ -310,7 +310,7 @@ func (h *Handler) ListInstanceEvents(c *gin.Context) {
 
 type pauseInstanceReq struct {
 	Reason        string `json:"reason" binding:"max=500"`
-	RecordVersion int64  `json:"record_version" binding:"required"`
+	RecordVersion int64  `json:"record_version" binding:"required,gte=1"`
 }
 
 func (h *Handler) PauseInstance(c *gin.Context) {
@@ -338,7 +338,7 @@ func (h *Handler) PauseInstance(c *gin.Context) {
 }
 
 type resumeInstanceReq struct {
-	RecordVersion int64 `json:"record_version" binding:"required"`
+	RecordVersion int64 `json:"record_version" binding:"required,gte=1"`
 }
 
 func (h *Handler) ResumeInstance(c *gin.Context) {
@@ -366,8 +366,8 @@ func (h *Handler) ResumeInstance(c *gin.Context) {
 }
 
 type cancelInstanceReq struct {
-	Reason        string `json:"reason" binding:"required,max=500"`
-	RecordVersion int64  `json:"record_version" binding:"required"`
+	Reason        string `json:"reason" binding:"required,notblank,max=500"`
+	RecordVersion int64  `json:"record_version" binding:"required,gte=1"`
 }
 
 func (h *Handler) CancelInstance(c *gin.Context) {
@@ -395,7 +395,7 @@ func (h *Handler) CancelInstance(c *gin.Context) {
 }
 
 type terminateInstanceReq struct {
-	Reason string `json:"reason" binding:"required,max=500"`
+	Reason string `json:"reason" binding:"required,notblank,max=500"`
 }
 
 func (h *Handler) TerminateInstance(c *gin.Context) {
@@ -424,7 +424,7 @@ func (h *Handler) TerminateInstance(c *gin.Context) {
 
 type forceForwardInstanceReq struct {
 	TargetNodeKey string `json:"target_node_key" binding:"required,max=255"`
-	RecordVersion int64  `json:"record_version" binding:"required"`
+	RecordVersion int64  `json:"record_version" binding:"required,gte=1"`
 }
 
 func (h *Handler) ForceForwardInstance(c *gin.Context) {
@@ -453,7 +453,7 @@ func (h *Handler) ForceForwardInstance(c *gin.Context) {
 
 type forceBackInstanceReq struct {
 	TargetNodeKey string `json:"target_node_key" binding:"max=255"`
-	RecordVersion int64  `json:"record_version" binding:"required"`
+	RecordVersion int64  `json:"record_version" binding:"required,gte=1"`
 }
 
 func (h *Handler) ForceBackInstance(c *gin.Context) {

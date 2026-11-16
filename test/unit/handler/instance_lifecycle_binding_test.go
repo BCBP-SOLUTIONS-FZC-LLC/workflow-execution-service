@@ -123,7 +123,7 @@ func TestInstanceLifecycle_NonUUIDInstanceID_Returns400(t *testing.T) {
 			prob := hhcDecodeProblem(t, w)
 			assert.Equal(t, "BAD_REQUEST", prob.Code)
 			assert.Equal(t, "invalid id path parameter", prob.Detail)
-			assert.Empty(t, prob.InvalidParams)
+			assert.Equal(t, []hhcParam{{Name: "id", Reason: "is not valid"}}, prob.InvalidParams)
 			assert.Empty(t, rec.calls, "a refused request must not reach the service")
 			hhcAssertNoInternalText(t, w)
 		})

@@ -41,6 +41,9 @@ type InstanceRepository interface {
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.Instance, error)
 	GetLiveByBusinessKey(ctx context.Context, tenantID uuid.UUID, subjectID, businessKey string) (*domain.Instance, error)
 	RecordRunID(ctx context.Context, tenantID, id uuid.UUID, runID string) error
+	// FailUnstarted sets the instance FAILED only while it is RUNNING and has no run id. It reports
+	// whether a row changed; a row that moved on (terminated, or its workflow started) is left alone.
+	FailUnstarted(ctx context.Context, tenantID, id uuid.UUID) (bool, error)
 	UpdateStatus(
 		ctx context.Context,
 		tenantID, id uuid.UUID,

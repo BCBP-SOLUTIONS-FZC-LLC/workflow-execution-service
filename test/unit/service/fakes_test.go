@@ -111,6 +111,18 @@ func (r *fakeInstanceRepo) RecordRunID(_ context.Context, _, id uuid.UUID, runID
 	return nil
 }
 
+func (r *fakeInstanceRepo) FailUnstarted(_ context.Context, tenantID, id uuid.UUID) (bool, error) {
+	inst, ok := r.byID[id]
+	if !ok || inst.TenantID != tenantID || inst.Status != domain.InstanceStatusRunning || inst.TemporalRunID != "" {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	inst.Status = domain.InstanceStatusFailed
+	inst.CompletedAt = &now
+	inst.RecordVersion++
+	return true, nil
+}
+
 func isTerminalForTest(s domain.InstanceStatus) bool {
 	return s == domain.InstanceStatusCompleted || s == domain.InstanceStatusTerminated || s == domain.InstanceStatusFailed
 }

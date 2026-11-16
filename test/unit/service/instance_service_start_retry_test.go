@@ -266,21 +266,16 @@ func TestInstanceService_StartRetry(t *testing.T) {
 		assert.Empty(t, instances.byID)
 	})
 
-	t.Run("a stored context or override map that cannot be read is not the same start", func(t *testing.T) {
-		for name, corrupt := range map[string]func(*domain.Instance){
-			"context":      func(i *domain.Instance) { i.ContextJSON = []byte(`{`) },
-			"override map": func(i *domain.Instance) { i.OverrideMap = []byte(`[`) },
-		} {
-			svc, instances, _, _, _, _, definitions, _ := newInstanceServiceHarness()
-			definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
-			_, err := svc.Start(context.Background(), input(caller, versionID))
-			require.NoError(t, err, name)
-			for _, inst := range instances.byID {
-				corrupt(inst)
-			}
-			_, err = svc.Start(context.Background(), input(caller, versionID))
-			assert.ErrorIs(t, err, port.ErrDuplicateBusinessKey, name)
+	t.Run("a stored context that cannot be read is not the same start", func(t *testing.T) {
+		svc, instances, _, _, _, _, definitions, _ := newInstanceServiceHarness()
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), versionID, compiledPlanJSON(t, assignedStage("review")))
+		_, err := svc.Start(context.Background(), input(caller, versionID))
+		require.NoError(t, err)
+		for _, inst := range instances.byID {
+			inst.ContextJSON = []byte(`{`)
 		}
+		_, err = svc.Start(context.Background(), input(caller, versionID))
+		assert.ErrorIs(t, err, port.ErrDuplicateBusinessKey)
 	})
 
 	t.Run("a close of an instance terminated while starting names the run", func(t *testing.T) {

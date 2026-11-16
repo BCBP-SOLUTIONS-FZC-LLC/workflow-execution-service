@@ -31,7 +31,7 @@ func TestForceForwardInstance_NonUUIDInstanceID_Returns400(t *testing.T) {
 	p := hrdDecodeProblem(t, w, http.StatusBadRequest)
 	assert.Equal(t, "BAD_REQUEST", p.Code)
 	assert.Equal(t, "invalid id path parameter", p.Detail)
-	assert.Empty(t, p.InvalidParams)
+	assert.Equal(t, []hrdParam{{Name: "id", Reason: "is not valid"}}, p.InvalidParams)
 	hrdAssertNoInternalText(t, w)
 	assert.False(t, called, "a refused request must not reach the service")
 }
