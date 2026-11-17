@@ -70,6 +70,7 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 		finalStatus = domain.InstanceStatusTerminated
 	}
 	in.status = finalStatus
+	in.finishing = true
 	if finalStatus != domain.InstanceStatusTerminated {
 		now := wf.Now(ctx)
 		if err := updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{

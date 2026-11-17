@@ -15,6 +15,10 @@ import (
 
 var errStageAbandoned = errors.New("workflow: stage abandoned")
 
+// errStageDeferred ends a stage whose task was deferred inside a running fork;
+// its department runs the stage again once the fork's saved branches resume.
+var errStageDeferred = errors.New("workflow: stage deferred")
+
 func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, stage *dsl.StageDef) (domain.NodeKey, string, error) {
 	nodeKey := domain.NodeKey(dsl.NodeKey(deptID, stage))
 
@@ -72,6 +76,10 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 		return nodeKey, "", err
 	}
 	defer delete(in.taskAssignees, out.TaskID)
+	defer func() {
+		delete(in.deferEarly, out.TaskID)
+		in.stageExited[out.TaskID] = true
+	}()
 	if err := updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{nodeKey},
 	}); err != nil {
@@ -90,9 +98,15 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	}
 	in.pending[visitKey] = resolveCh
 	defer delete(in.pending, visitKey)
+	deferCh := wf.NewBufferedChannel(ctx, 1)
+	in.deferCh[out.TaskID] = deferCh
+	defer delete(in.deferCh, out.TaskID)
+	if in.deferEarly[out.TaskID] {
+		deferCh.SendAsync(struct{}{})
+	}
 
 	sel := wf.NewSelector(ctx)
-	var resolved, abandoned bool
+	var resolved, abandoned, deferred bool
 	var sig stageTransitionSignal
 	sel.AddReceive(resolveCh, func(c wf.ReceiveChannel, more bool) {
 		c.Receive(ctx, &sig)
@@ -100,6 +114,10 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	})
 	sel.AddReceive(ctx.Done(), func(c wf.ReceiveChannel, more bool) {
 		abandoned = true
+	})
+	sel.AddReceive(deferCh, func(c wf.ReceiveChannel, more bool) {
+		c.Receive(ctx, nil)
+		deferred = true
 	})
 
 	var fired *boundaryFire
@@ -111,13 +129,16 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 		DueDate: stage.DueDate, FollowUpDate: stage.FollowUpDate,
 	})
 
-	for !resolved && fired == nil && !abandoned {
+	for !resolved && fired == nil && !abandoned && !deferred {
 		sel.Select(ctx)
 	}
 	cancelBoundaries()
-	if fired != nil && !fired.Interrupting && !abandoned {
-		in.spawnFiredPath(ctx, plan, fired)
-		for !resolved && !abandoned {
+	cancelPaths := func() {}
+	if fired != nil && !fired.Interrupting && !abandoned && !deferred {
+		var pathCtx wf.Context
+		pathCtx, cancelPaths = wf.WithCancel(ctx)
+		in.spawnFiredPath(pathCtx, plan, fired)
+		for !resolved && !abandoned && !deferred {
 			sel.Select(ctx)
 		}
 	}
@@ -126,6 +147,11 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	if abandoned {
 		in.supersedeAbandoned(ctx, out.TaskID)
 		return nodeKey, "", errStageAbandoned
+	}
+
+	if deferred {
+		cancelPaths()
+		return nodeKey, "", errStageDeferred
 	}
 
 	if fired != nil && fired.Interrupting {

@@ -20,7 +20,7 @@ func newWorkflowClientHarness() (*service.WorkflowClient, *fakeInstanceRepo, *fa
 	tasks := newFakeTaskRepo()
 	assignments := newFakeAssignmentRepo()
 	outbox := &fakeOutbox{}
-	return &service.WorkflowClient{Instances: instances, Tasks: tasks, Assignments: assignments, Transactor: fakeTransactor{}, Outbox: outbox, Signals: outbox, Validator: realValidator(), Ended: newFakeEndedDelegations()}, instances, tasks, assignments, outbox
+	return &service.WorkflowClient{Instances: instances, Tasks: tasks, Assignments: assignments, Transactor: fakeTransactor{}, Outbox: outbox, Signals: outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(), Locks: &fakeLocker{}}, instances, tasks, assignments, outbox
 }
 
 func TestWorkflowClient_ReassignDelegate(t *testing.T) {

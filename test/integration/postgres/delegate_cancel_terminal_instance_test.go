@@ -26,7 +26,7 @@ func TestCancelByDelegate_ActiveAssignmentOnATerminalInstance_IsVacatedAndCounte
 	assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
 	client := &service.WorkflowClient{
 		Instances: instanceRepo, Tasks: taskRepo, Assignments: assignmentRepo,
-		Transactor: postgres.NewTransactor(appPool), Signals: postgres.NewOutboxRepo(appPool),
+		Transactor: postgres.NewTransactor(appPool), Signals: postgres.NewOutboxRepo(appPool), Ended: postgres.NewEndedDelegationRepo(appPool), Locks: postgres.NewRecencyGuardRepo(appPool, appPool),
 	}
 	ctx := context.Background()
 
@@ -81,7 +81,7 @@ func TestCancelByDelegate_ATaskLeftWithoutAnAssigneeHasItsSignalRecordedWithTheV
 	assignmentRepo := postgres.NewTaskAssignmentRepo(appPool)
 	client := &service.WorkflowClient{
 		Instances: instanceRepo, Tasks: taskRepo, Assignments: assignmentRepo,
-		Transactor: postgres.NewTransactor(appPool), Signals: postgres.NewOutboxRepo(appPool),
+		Transactor: postgres.NewTransactor(appPool), Signals: postgres.NewOutboxRepo(appPool), Ended: postgres.NewEndedDelegationRepo(appPool), Locks: postgres.NewRecencyGuardRepo(appPool, appPool),
 	}
 	ctx := context.Background()
 	tenantID, delegate, coAssignee := uuid.New(), uuid.New(), uuid.New()

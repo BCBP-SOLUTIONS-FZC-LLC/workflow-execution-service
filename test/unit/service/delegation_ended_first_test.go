@@ -126,5 +126,7 @@ func TestDelegationStartAndEnd_TakeTheDelegatorsLockAroundTheEndRecord(t *testin
 	assert.True(t, checkHeld, "a start looks for an end while the delegator's lock is held, so an end cannot slip in before its move commits")
 	assert.True(t, markHeld, "an end is recorded while the delegator's lock is held")
 	scope := port.UserAvailabilityScope(w.tenantID, w.delegator)
-	assert.Equal(t, []string{scope, scope, scope}, locker.keys)
+	assert.Equal(t, []string{
+		scope, port.DelegationScope(w.tenantID, delegationID), port.DelegateScope(w.tenantID, w.delegate), scope, scope,
+	}, locker.keys, "the start also holds the delegation's and the delegate's locks")
 }

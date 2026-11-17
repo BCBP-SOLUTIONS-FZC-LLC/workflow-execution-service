@@ -849,7 +849,7 @@ func TestEnterDegradedUnknownTargetDeptIsANoOp(t *testing.T) {
 		in.parallelDepth++
 
 		plan := &dsl.CompiledPlan{Name: "main"}
-		_, err := in.enterDegraded(ctx, plan, "", nil, []failedBranch{{DeptID: "billing", LastCompletedNode: "billing/prep"}}, admin)
+		_, err := in.enterDegraded(ctx, plan, nil, "", nil, []failedBranch{{DeptID: "billing", LastCompletedNode: "billing/prep"}}, admin)
 		return err
 	})
 	if err := env.GetWorkflowError(); err != nil {

@@ -9,3 +9,14 @@ ON CONFLICT (tenant_id, delegation_id) DO NOTHING;
 SELECT EXISTS (
     SELECT 1 FROM ended_delegation WHERE tenant_id = $1 AND delegation_id = $2
 )::boolean AS ended;
+
+-- name: MarkDelegateEnded :exec
+-- Backs EndedDelegationRepo.MarkDelegateEnded -- a later cancel moves the time
+-- forward, an older one never moves it back.
+INSERT INTO ended_delegate (tenant_id, delegate_id, ended_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (tenant_id, delegate_id) DO UPDATE
+    SET ended_at = GREATEST(ended_delegate.ended_at, EXCLUDED.ended_at);
+
+-- name: GetDelegateEndedAt :one
+SELECT ended_at FROM ended_delegate WHERE tenant_id = $1 AND delegate_id = $2;

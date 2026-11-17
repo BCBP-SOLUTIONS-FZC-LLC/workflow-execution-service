@@ -91,7 +91,7 @@ func TestDelegationMoves_ReReadTheTaskInsideTheTransactionBeforeHandingTheLeadOv
 	t.Run("reassign to a delegate who already holds the task", func(t *testing.T) {
 		instances, tasks, assignments, outbox := newFakeInstanceRepo(), newFakeTaskRepo(), newFakeAssignmentRepo(), &fakeOutbox{}
 		w := newFVWorld(instances, tasks, assignments, uuid.New(), "delegation:"+uuid.NewString())
-		svc := &service.WorkflowClient{Instances: instances, Tasks: w.tasks, Assignments: w.assignments, Transactor: fakeTransactor{}, Outbox: outbox, Signals: outbox, Validator: realValidator(), Ended: newFakeEndedDelegations()}
+		svc := &service.WorkflowClient{Instances: instances, Tasks: w.tasks, Assignments: w.assignments, Transactor: fakeTransactor{}, Outbox: outbox, Signals: outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(), Locks: &fakeLocker{}}
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: w.tenantID, OldDelegateID: w.from, NewDelegateID: w.to})
 
@@ -103,7 +103,7 @@ func TestDelegationMoves_ReReadTheTaskInsideTheTransactionBeforeHandingTheLeadOv
 		instances, tasks, assignments, outbox := newFakeInstanceRepo(), newFakeTaskRepo(), newFakeAssignmentRepo(), &fakeOutbox{}
 		w := newFVWorld(instances, tasks, assignments, uuid.New(), "")
 		w.lead.Reason = dcrHop(uuid.New(), w.to)
-		svc := &service.WorkflowClient{Instances: instances, Tasks: w.tasks, Assignments: w.assignments, Transactor: fakeTransactor{}, Outbox: outbox, Signals: outbox, Validator: realValidator(), Ended: newFakeEndedDelegations()}
+		svc := &service.WorkflowClient{Instances: instances, Tasks: w.tasks, Assignments: w.assignments, Transactor: fakeTransactor{}, Outbox: outbox, Signals: outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(), Locks: &fakeLocker{}}
 
 		count, err := svc.CancelByDelegate(context.Background(), port.CancelByDelegateInput{TenantID: w.tenantID, DelegateUserID: w.from})
 

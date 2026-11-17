@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"sort"
 
 	wf "go.temporal.io/sdk/workflow"
 
@@ -29,10 +30,12 @@ func (in *interpreter) registerStatusQuery(ctx wf.Context) error {
 		for k := range in.pending {
 			keys = append(keys, k.Node)
 		}
+		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 		saved := make([]string, 0, len(in.pauseGates))
 		for dept := range in.pauseGates {
 			saved = append(saved, dept)
 		}
+		sort.Strings(saved)
 		return WorkflowStatusQuery{
 			Status:               in.status,
 			CurrentNodeKeys:      keys,

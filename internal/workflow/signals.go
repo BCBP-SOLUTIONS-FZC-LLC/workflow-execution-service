@@ -105,6 +105,9 @@ type adminSignal struct {
 	TargetNodeKey domain.NodeKey
 	RecordVersion int64
 	FromDefer     bool
+	// DeferredTaskID names the task a defer closed, so a running fork can end
+	// the stage that waits on it.
+	DeferredTaskID string
 }
 
 func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Channel) {
@@ -198,6 +201,7 @@ type heldResult struct {
 }
 
 func (in *interpreter) handleStageTransition(ctx wf.Context, sig stageTransitionSignal) {
+	in.retryStatusRestore(ctx)
 	key := domain.NodeKey(sig.DeptID + "/" + sig.NodeID)
 	if sig.NodeID == "" {
 		key = domain.NodeKey(sig.DeptID + "/" + sig.ToStage)
@@ -242,6 +246,9 @@ func (in *interpreter) handleStageFail(ctx wf.Context, sig stageFailSignal) {
 
 func (in *interpreter) routeAdminSignal(ctx wf.Context, kind string, sig adminSignal) {
 	envelope := adminSignalEnvelope{Kind: kind, Signal: sig}
+	if in.routeDeferToFork(ctx, envelope) {
+		return
+	}
 	if in.routeToParks(ctx, envelope) {
 		return
 	}
@@ -256,6 +263,24 @@ func (in *interpreter) routeAdminSignal(ctx wf.Context, kind string, sig adminSi
 	}
 }
 
+// routeDeferToFork sends a defer to the innermost fork that holds the deferred
+// task: its park when it is parked, otherwise the fork's own loop.
+func (in *interpreter) routeDeferToFork(ctx wf.Context, envelope adminSignalEnvelope) bool {
+	if envelope.Kind != SignalInstanceForceBack || !envelope.Signal.FromDefer {
+		return false
+	}
+	gw := in.innermostGatewayHolding(envelope.Signal.TargetDeptID)
+	if gw == nil || (gw.park != nil && gw.park.ended) {
+		return false
+	}
+	if gw.park != nil {
+		gw.park.ch.Send(ctx, envelope)
+	} else {
+		gw.own.Send(ctx, envelope)
+	}
+	return true
+}
+
 func (in *interpreter) forceForwardOwner(kind string, sig adminSignal) *gateway {
 	if kind != SignalInstanceForceFwd {
 		return nil
@@ -267,7 +292,7 @@ func (in *interpreter) validateStageDefer(sig stageDeferSignal) error {
 	if err := validateSignal(in.status, SignalStageDefer); err != nil {
 		return refuseDefer(err.Error())
 	}
-	if in.deferTarget() == "" {
+	if in.deferTarget(sig.DeptID) == "" {
 		return refuseDefer("there is no completed step to go back to")
 	}
 	if in.deferredTasks[sig.TaskID] {
@@ -283,7 +308,7 @@ func (in *interpreter) applyStageDefer(ctx wf.Context, sig stageDeferSignal) err
 	input := port.DeferTaskInput{
 		TaskID: sig.TaskID, TenantID: in.tenantID, UserID: sig.UserID,
 		AssignmentID: sig.AssignmentID, Reason: sig.Reason, RecordVersion: sig.RecordVersion,
-		DeferredToNodeKey: string(in.deferTarget()),
+		DeferredToNodeKey: string(in.deferTarget(sig.DeptID)),
 	}
 	in.deferredTasks[sig.TaskID] = true
 	if err := deferTask(ctx, input); err != nil {
@@ -291,12 +316,15 @@ func (in *interpreter) applyStageDefer(ctx wf.Context, sig stageDeferSignal) err
 		return fmt.Errorf("defer task: %w", err)
 	}
 	in.routeAdminSignal(ctx, SignalInstanceForceBack, adminSignal{
-		AdminUserID: sig.UserID, Reason: sig.Reason, RecordVersion: sig.RecordVersion, FromDefer: true,
+		AdminUserID: sig.UserID, Reason: sig.Reason, RecordVersion: sig.RecordVersion, FromDefer: true, TargetDeptID: sig.DeptID, DeferredTaskID: sig.TaskID,
 	})
 	return nil
 }
 
-func (in *interpreter) deferTarget() domain.NodeKey {
+func (in *interpreter) deferTarget(deptID string) domain.NodeKey {
+	if gw := in.innermostGatewayHolding(deptID); gw != nil {
+		return gw.preFork
+	}
 	if in.parallelDepth > 0 {
 		return in.forkEntries[len(in.forkEntries)-1]
 	}
@@ -379,6 +407,7 @@ func (in *interpreter) handleInstancePause(ctx wf.Context, sig adminSignal) {
 		return
 	}
 	in.status = domain.InstanceStatusPaused
+	in.statusRestorePending = false
 	in.pauseInitiator = sig.Initiator
 	in.pauseHeld = true
 	in.pauseSignal = sig
@@ -393,6 +422,7 @@ func (in *interpreter) handleInstanceResume(ctx wf.Context, sig adminSignal) {
 		return
 	}
 	in.status = domain.InstanceStatusRunning
+	in.statusRestorePending = false
 	in.pauseInitiator = ""
 	in.pauseHeld = false
 	in.pauseSignal = adminSignal{}

@@ -14,3 +14,20 @@ ALTER TABLE ended_delegation FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation_policy ON ended_delegation
     USING      (rls_check_tenant(tenant_id, 'ended_delegation'))
     WITH CHECK (rls_check_tenant(tenant_id, 'ended_delegation'));
+
+-- The time of the last cancel of every delegation to a delegate (the cancel
+-- that names no delegation), so a start of a delegation that began before it
+-- moves nothing. One row per delegate; a later cancel moves the time forward.
+CREATE TABLE ended_delegate (
+    tenant_id   UUID        NOT NULL,
+    delegate_id UUID        NOT NULL,
+    ended_at    TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (tenant_id, delegate_id)
+);
+
+REVOKE ALL ON ended_delegate FROM PUBLIC;
+ALTER TABLE ended_delegate ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ended_delegate FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_policy ON ended_delegate
+    USING      (rls_check_tenant(tenant_id, 'ended_delegate'))
+    WITH CHECK (rls_check_tenant(tenant_id, 'ended_delegate'));

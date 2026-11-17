@@ -129,6 +129,9 @@ var tenantPurgeSteps = []purgeStep{
 	{"ended_delegation", func(ctx context.Context, q *db.Queries, t uuid.UUID, n int32) (int64, error) {
 		return q.PurgeTenantEndedDelegations(ctx, db.PurgeTenantEndedDelegationsParams{TenantID: t, Limit: n})
 	}},
+	{"ended_delegate", func(ctx context.Context, q *db.Queries, t uuid.UUID, n int32) (int64, error) {
+		return q.PurgeTenantEndedDelegates(ctx, db.PurgeTenantEndedDelegatesParams{TenantID: t, Limit: n})
+	}},
 	{"active_task_queues", func(ctx context.Context, q *db.Queries, t uuid.UUID, _ int32) (int64, error) {
 		return q.PurgeTenantQueues(ctx, t)
 	}},
