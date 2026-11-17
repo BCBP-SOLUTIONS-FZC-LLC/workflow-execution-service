@@ -10,6 +10,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- Terminate and offboarding: terminating an instance, or offboarding a tenant, queues a task-failed event for every open task (cascade source `instance_terminate`), and the terminated event carries the reason; before, only the instance event was sent and the reason went only to Temporal.
+- Internal events:
+  - a user-availability or tenant-state event with an unrecognised status is acknowledged and ignored, with nothing paused, terminated or stored and the recency value unchanged, and is counted as `result="ignored"` in `internal_events_ingest_total` (a tenant event with such a status used to pause every instance);
+  - an offboarded or tenant-memberships-purged event strictly older than the tenant's last applied change is skipped, one with the same timestamp is applied, and the purge takes the same per-tenant lock as the state change (a late one used to terminate every instance of a tenant that had come back);
+  - a tenant-memberships-purged event whose payload cannot be decoded is refused with 400;
+  - a tenant event whose payload tenant differs from the envelope tenant, or whose `changed_at` is zero, is refused with 400;
+  - a Token Service or Temporal outage while processing an event answers 503 `UPSTREAM_UNAVAILABLE` and counts in `upstream_dependency_errors_total` (it was a fixed 500, not counted).
+- Delegation:
+  - cancel-by-delegate and reassign-delegate without `delegation_id` act only on assignments a delegation created (they used to also cancel or move the delegate's own tasks), and reassign-delegate with the same old and new delegate answers 400 naming `new_delegate_id`;
+  - cancel-by-delegate returns each vacated task to the user the delegation took it from, when that user is still eligible (it used to leave the task with no assignee);
+  - ending a delegation returns its work to the delegator wherever it now sits, including work delegated onward (it used to find nothing, or return it to the middle person);
+  - a delegation-started event arriving after its delegation-ended event, or after a cancel that names the delegation, moves nothing (the work used to move with nothing ever reversing it);
+  - a cancel, reassign or reroute no longer fails with a version conflict when a claim or completion lands just before it;
+  - an assignment created for a new delegate carries its assignment time, and `claimed_at` is recorded only when the assignee claims the task, keeping the first claim time (it used to stay empty).
+- Database: a task, assignment or override can no longer reference another tenant's parent row, and the outbox tables enforce row-level security on the table owner too.
+- Tenant purge: a tenant another replica is already purging is skipped without counting a failure (two replicas used to raise a false failure and back the tenant off), and a purge also deletes the tenant's recorded ended delegations.
+- Safety-net pause: removing a member's access also pauses DEGRADED instances that hold the member's tasks (they used to be skipped).
 - Tasks: a second defer of a task whose first defer is being or was applied answers 409 and routes nothing (the instance could go back two steps); claiming a task answers 409 `INVALID_INSTANCE_STATE` when the instance is not running or degraded, as completing already did.
 - When a task had no holder, the `workflow.task.reassigned` event leaves out `old_user_id`, and a node override's stored record and 200 answer carry `previous_user_id: null`; both used to carry the all-zero UUID (`previous_user_id` is now nullable in the schema, the event schema and both specs).
 - Node override and reassign to a user who already holds the task as a co-assignee make that user the lead and remove the replaced lead; the override used to be recorded and answered 200 while the lead never changed.

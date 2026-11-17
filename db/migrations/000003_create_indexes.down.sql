@@ -4,10 +4,12 @@ DROP INDEX IF EXISTS idx_outbox_events_instance_created;
 
 DROP INDEX IF EXISTS idx_assignee_overrides_instance_node;
 
+DROP INDEX IF EXISTS idx_workflow_task_assignment_tenant_task;
 DROP INDEX IF EXISTS idx_workflow_task_assignment_user_active;
 DROP INDEX IF EXISTS idx_workflow_task_assignment_task_active;
 DROP INDEX IF EXISTS uq_workflow_task_assignment_active;
 
+DROP INDEX IF EXISTS idx_workflow_task_tenant_deferred_from;
 DROP INDEX IF EXISTS idx_workflow_task_tenant_keyset;
 DROP INDEX IF EXISTS idx_workflow_task_instance_status;
 DROP INDEX IF EXISTS idx_workflow_task_tenant_dept_status;

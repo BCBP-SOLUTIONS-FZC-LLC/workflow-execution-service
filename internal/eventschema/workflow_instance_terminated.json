@@ -11,6 +11,7 @@
     "workflow_version_id": { "type": "string", "format": "uuid" },
     "started_by_user_id": { "type": "string", "format": "uuid" },
     "initiator": { "type": "string", "enum": ["admin", "tenant_state"] },
-    "actor_user_id": { "type": ["string", "null"], "format": "uuid" }
+    "actor_user_id": { "type": ["string", "null"], "format": "uuid" },
+    "reason": { "type": ["string", "null"] }
   }
 }

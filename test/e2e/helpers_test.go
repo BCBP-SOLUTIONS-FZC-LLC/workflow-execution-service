@@ -178,7 +178,7 @@ func buildRouter(t *testing.T, pool *pgcommon.Pool, sdk client.Client, definitio
 	delegationReconciler := &service.DelegationReconciler{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo, Signals: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
-		Validator: validator, Availability: postgres.NewUserAvailabilityRepo(pool), Locks: recency,
+		Validator: validator, Availability: postgres.NewUserAvailabilityRepo(pool), Locks: recency, Ended: postgres.NewEndedDelegationRepo(pool),
 	}
 
 	h := handler.New(handler.Services{

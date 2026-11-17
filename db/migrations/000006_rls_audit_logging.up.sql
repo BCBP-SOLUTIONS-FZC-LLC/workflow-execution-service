@@ -84,7 +84,7 @@ CREATE POLICY tenant_isolation_policy ON assignee_overrides
 
 -- tenant_id is text here (platform-events-owned), so the row value casts up
 -- to uuid — opposite direction from 000005's app_tenant_id()::text. USING
--- only, no WITH CHECK/FORCE, matching 000005's existing shape.
+-- only, no WITH CHECK, matching 000005's existing shape.
 DROP POLICY tenant_isolation_policy ON outbox_events;
 CREATE POLICY tenant_isolation_policy ON outbox_events
     USING (rls_check_tenant(tenant_id::uuid, 'outbox_events'));

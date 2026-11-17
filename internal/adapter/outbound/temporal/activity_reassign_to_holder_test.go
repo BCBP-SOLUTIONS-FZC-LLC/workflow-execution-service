@@ -44,6 +44,7 @@ func TestReassignAssignment_ToACoAssigneeWhoIsNotLead_MakesThemLeadAndVacatesThe
 	assert.True(t, world.assignments[helper.ID].IsActive)
 	assert.False(t, world.assignments[lead.ID].IsActive, "the replaced lead is vacated")
 	assert.Len(t, world.callsTo("Assignments.Create"), 0, "no second row for a user who already holds the task")
+	assert.Empty(t, world.callsTo("Assignments.ClaimLead"), "an admin's lead move is not a claim")
 	setLead := world.callsTo("Assignments.SetLead")
 	require.Len(t, setLead, 1)
 	assert.Equal(t, int64(4), setLead[0].Version, "the lead change is made at the version the request was read at")

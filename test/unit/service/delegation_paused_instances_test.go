@@ -95,7 +95,7 @@ func TestDelegationReconciler_Reroute_PausedInstanceGetsTheReassignSignal(t *tes
 	assert.Equal(t, []csaUserCall{{tenantID, delegatorID}}, recording.listed)
 	assert.Equal(t, []csaIDCall{{tenantID, held.ID}}, recording.vacated)
 	assert.Equal(t, []csaCreateCall{{tenantID, task.ID, delegateID}}, recording.created)
-	assert.Equal(t, "delegation:"+delegationID.String(), recording.creation[0].Reason)
+	assert.Equal(t, "delegation:"+delegationID.String()+":"+delegatorID.String(), recording.creation[0].Reason)
 	require.Len(t, outbox.enqueued, 1)
 	assert.Equal(t, domain.EventWorkflowTaskReassigned, outbox.enqueued[0].Type)
 }

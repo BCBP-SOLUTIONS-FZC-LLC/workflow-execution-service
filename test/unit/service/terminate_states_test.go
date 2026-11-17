@@ -43,8 +43,9 @@ func TestInstanceService_Terminate_FromPausedOrDegraded_TerminatesCascadesAndAnn
 			assert.Equal(t, []cscVacateCall{{TenantID: tenantID, AssignmentID: assignment.ID}}, h.assignments.vacated)
 			assert.False(t, assignment.IsActive)
 
-			require.Len(t, h.outbox.attempts, 1)
-			sent := h.outbox.attempts[0]
+			require.Len(t, h.outbox.attempts, 2)
+			assert.Equal(t, domain.EventWorkflowTaskFailed, h.outbox.attempts[0].Envelope.Type)
+			sent := h.outbox.attempts[1]
 			assert.True(t, sent.InTx, "the event is written in the same transaction as the status change")
 			assert.Equal(t, domain.EventWorkflowInstanceTerminated, sent.Envelope.Type)
 			assert.Equal(t, tenantID.String(), sent.Envelope.TenantID)
@@ -114,7 +115,7 @@ func TestInstanceService_Terminate_OutboxFailure_ReturnsTheErrorFromInsideTheTra
 
 	require.ErrorIs(t, err, errCscOutbox)
 	require.Len(t, h.outbox.attempts, 1)
-	assert.Equal(t, domain.EventWorkflowInstanceTerminated, h.outbox.attempts[0].Envelope.Type)
+	assert.Equal(t, domain.EventWorkflowTaskFailed, h.outbox.attempts[0].Envelope.Type, "the first enqueue is the failed task, and its error stops the cascade")
 
 	// The status change, the task change and the outbox write all ran inside the
 	// one transaction, and the callback ended in the outbox error, so the database

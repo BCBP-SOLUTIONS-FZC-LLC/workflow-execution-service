@@ -588,6 +588,7 @@ components:
         started_by_user_id:   { type: string, format: uuid, description: 'Dashboard Stream Gateway routing key' }
         initiator:            { type: string, enum: [admin, tenant_state] }
         actor_user_id:        { type: ["string", "null"], format: uuid }
+        reason:               { type: ["string", "null"], description: the reason given for the termination }
     WorkflowInstanceDegradedPayload:
       type: object
       additionalProperties: true
@@ -756,7 +757,7 @@ components:
         node_key:             { type: string }
         department_id:        { type: string, format: uuid }
         assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
-        cascade_source:       { type: string, description: what failed the task (cancel, terminate, instance-fail, or stage_fail for a task failed by its own stage) }
+        cascade_source:       { type: string, description: what failed the task (instance_cancel, instance_terminate, instance_failed, or stage_fail for a task failed by its own stage) }
         error_class:          { type: string, description: the error class the connector failed the task with; present only when cascade_source is stage_fail }
     WorkflowTaskSlaWarningPayload:
       type: object

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,6 +28,7 @@ type WorkflowClient struct {
 	Validator   port.EventValidator
 	Eligibility port.EligibilityChecker
 	Definitions port.DefinitionServiceClient
+	Ended       port.EndedDelegationRepository
 	Log         port.Logger
 }
 
@@ -40,17 +40,22 @@ func (s *WorkflowClient) logger() port.Logger {
 }
 
 func delegationReasonTag(delegationID uuid.UUID) string {
-	return "delegation:" + delegationID.String()
+	return delegationTagPrefix + delegationID.String()
 }
 
 func matchingAssignments(assignments []*domain.TaskAssignment, delegationID *uuid.UUID) []*domain.TaskAssignment {
 	if delegationID == nil {
 		return assignments
 	}
-	tag := delegationReasonTag(*delegationID)
+	return delegatedAssignments(assignments, delegationID)
+}
+
+// delegatedAssignments selects the assignments a delegation created: those that
+// carry the delegation's tag, or any delegation's tag when none is named.
+func delegatedAssignments(assignments []*domain.TaskAssignment, delegationID *uuid.UUID) []*domain.TaskAssignment {
 	var out []*domain.TaskAssignment
 	for _, a := range assignments {
-		if strings.HasPrefix(a.Reason, tag) {
+		if delegationID == nil && isDelegated(a.Reason) || delegationID != nil && reasonHasDelegation(a.Reason, delegationReasonTag(*delegationID)) {
 			out = append(out, a)
 		}
 	}
@@ -61,6 +66,15 @@ type delegateRow struct {
 	assignment *domain.TaskAssignment
 	task       *domain.Task
 	instance   *domain.Instance
+	restore    *delegationRestore
+}
+
+// delegationRestore is the user a cancelled row goes back to, with the reason the
+// row carries there.
+type delegationRestore struct {
+	userID       uuid.UUID
+	delegationID uuid.UUID
+	reason       string
 }
 
 // ReassignDelegate reads everything it needs first, so a failed read changes
@@ -75,7 +89,7 @@ func (s *WorkflowClient) ReassignDelegate(ctx context.Context, in port.ReassignD
 	if err != nil {
 		return 0, err
 	}
-	rows, err := s.eligibleDelegateRows(ctx, in, matchingAssignments(active, in.DelegationID))
+	rows, err := s.eligibleDelegateRows(ctx, in, delegatedAssignments(active, in.DelegationID))
 	if err != nil {
 		return 0, err
 	}
@@ -130,7 +144,7 @@ func (s *WorkflowClient) moveToNewDelegate(ctx context.Context, in port.Reassign
 			if !ok {
 				continue
 			}
-			if err := handOver(ctx, s.Assignments, in.TenantID, r.assignment, active, r.task, in.NewDelegateID, r.assignment.Reason); err != nil {
+			if err := handOver(ctx, s.Assignments, s.Tasks, in.TenantID, r.assignment, active, r.task, in.NewDelegateID, r.assignment.Reason); err != nil {
 				return fmt.Errorf("reassign delegate: hand task %s to the new delegate: %w", r.task.ID, err)
 			}
 			if err := enqueueTaskReassigned(ctx, s.Outbox, s.Validator, r.instance, r.task, r.assignment.UserID, in.NewDelegateID, in.DelegationID); err != nil {
@@ -150,7 +164,8 @@ func (s *WorkflowClient) moveToNewDelegate(ctx context.Context, in port.Reassign
 }
 
 // CancelByDelegate reads the task and instance of every selected assignment
-// first, then vacates them in one transaction; a task left with no active
+// first, then vacates them, and records the named delegation as ended, in one
+// transaction; a task left with no active
 // assignee gets a signal recorded in the same transaction, so the workflow
 // learns of it (execution LLD §5.8). A failed read or write changes nothing
 // and fails the call so the caller retries.
@@ -159,17 +174,23 @@ func (s *WorkflowClient) CancelByDelegate(ctx context.Context, in port.CancelByD
 	if err != nil {
 		return 0, err
 	}
-	matched := matchingAssignments(active, in.DelegationID)
+	matched := delegatedAssignments(active, in.DelegationID)
 	if len(matched) == 0 {
-		return 0, nil
+		return 0, s.markDelegationEnded(ctx, in)
 	}
 	rows, err := s.readDelegateRows(ctx, in.TenantID, matched)
 	if err != nil {
 		return 0, err
 	}
+	if err := s.planRestores(ctx, in, rows); err != nil {
+		return 0, err
+	}
 	vacated := 0
 	err = s.Transactor.RunInTx(withTenantGUC(ctx, in.TenantID), func(ctx context.Context) error {
 		vacated = 0
+		if err := s.markDelegationEnded(ctx, in); err != nil {
+			return err
+		}
 		for _, r := range rows {
 			remaining, ok, err := vacateIfActive(ctx, s.Assignments, in.TenantID, r.assignment)
 			if err != nil {
@@ -179,6 +200,12 @@ func (s *WorkflowClient) CancelByDelegate(ctx context.Context, in port.CancelByD
 				continue
 			}
 			vacated++
+			if r.restore != nil {
+				if err := s.returnToDelegator(ctx, in.TenantID, r, remaining); err != nil {
+					return err
+				}
+				continue
+			}
 			if len(remaining) > 1 || isTerminalInstanceStatus(r.instance.Status) {
 				continue
 			}
@@ -192,6 +219,61 @@ func (s *WorkflowClient) CancelByDelegate(ctx context.Context, in port.CancelByD
 		return 0, err
 	}
 	return vacated, nil
+}
+
+// markDelegationEnded records the named delegation as ended, so a start of it
+// delivered later moves nothing; a cancel that names no delegation ends none.
+func (s *WorkflowClient) markDelegationEnded(ctx context.Context, in port.CancelByDelegateInput) error {
+	if in.DelegationID == nil {
+		return nil
+	}
+	if err := s.Ended.MarkEnded(ctx, in.TenantID, *in.DelegationID); err != nil {
+		return fmt.Errorf("cancel by delegate: record delegation %s as ended: %w", *in.DelegationID, err)
+	}
+	return nil
+}
+
+// planRestores marks each row whose delegation recorded who the work was taken
+// from, when that user is eligible for the task again. The others are only vacated.
+func (s *WorkflowClient) planRestores(ctx context.Context, in port.CancelByDelegateInput, rows []delegateRow) error {
+	plans := newCompiledPlanCache(s.Definitions, s.logger())
+	answered := map[uuid.UUID]map[eligibilityPair]bool{}
+	for i := range rows {
+		r := &rows[i]
+		hop, ok := hopToUnwind(r.assignment.Reason, in.DelegationID)
+		if !ok {
+			continue
+		}
+		delegationID, delegatorID, ok := parseDelegationHop(hop)
+		if !ok || delegatorID == r.assignment.UserID {
+			continue
+		}
+		if answered[delegatorID] == nil {
+			answered[delegatorID] = map[eligibilityPair]bool{}
+		}
+		eligible, err := s.checkAssigneeEligible(ctx, plans, answered[delegatorID], in.TenantID, r.task, r.instance, delegatorID)
+		if err != nil {
+			return err
+		}
+		if eligible {
+			r.restore = &delegationRestore{userID: delegatorID, delegationID: delegationID, reason: reasonBeforeDelegation(r.assignment.Reason, hop)}
+		}
+	}
+	return nil
+}
+
+func (s *WorkflowClient) returnToDelegator(ctx context.Context, tenantID uuid.UUID, r delegateRow, active []*domain.TaskAssignment) error {
+	restore := r.restore
+	if err := handOver(ctx, s.Assignments, s.Tasks, tenantID, r.assignment, active, r.task, restore.userID, restore.reason); err != nil {
+		return fmt.Errorf("cancel by delegate: return task %s to its delegator: %w", r.task.ID, err)
+	}
+	if err := enqueueTaskReassigned(ctx, s.Outbox, s.Validator, r.instance, r.task, r.assignment.UserID, restore.userID, &restore.delegationID); err != nil {
+		return fmt.Errorf("cancel by delegate: record the reassigned event of task %s: %w", r.task.ID, err)
+	}
+	if err := s.recordReassign(ctx, r, restore.userID); err != nil {
+		return fmt.Errorf("cancel by delegate: record the signal of task %s: %w", r.task.ID, err)
+	}
+	return nil
 }
 
 func (s *WorkflowClient) readDelegateRows(ctx context.Context, tenantID uuid.UUID, assignments []*domain.TaskAssignment) ([]delegateRow, error) {

@@ -29,9 +29,9 @@ func (s *UserTaskPauser) logger() port.Logger {
 	return noopLogger{}
 }
 
-// PauseUserTasks pauses every running instance the user holds an active task on,
-// and takes over the pause of an instance another initiator already paused, so
-// that only an administrator lifts a revocation pause.
+// PauseUserTasks pauses every running or degraded instance the user holds an
+// active task on, and takes over the pause of an instance another initiator
+// already paused, so that only an administrator lifts a revocation pause.
 // It attempts every instance and returns the joined failures, so the caller
 // (Definition, which retries a 5xx) does not acknowledge a revocation that left
 // an instance running. An instance whose workflow is already gone counts as paused.
@@ -69,7 +69,7 @@ func (s *UserTaskPauser) PauseUserTasks(ctx context.Context, tenantID, userID uu
 			fail("read_instance", "cannot read instance during safety-net pause", map[string]any{"instance_id": task.WorkflowInstanceID}, err)
 			continue
 		}
-		if inst.Status != domain.InstanceStatusRunning && inst.Status != domain.InstanceStatusPaused {
+		if !canTakeSafetyNetPause(inst.Status) {
 			s.logger().Warn("skipping non-pausable instance during safety-net pause", map[string]any{"instance_id": inst.ID, "status": inst.Status})
 			continue
 		}
@@ -86,4 +86,14 @@ func (s *UserTaskPauser) PauseUserTasks(ctx context.Context, tenantID, userID uu
 		return fmt.Errorf("%w: %w", port.ErrUserPauseIncomplete, errors.Join(failures...))
 	}
 	return nil
+}
+
+func canTakeSafetyNetPause(status domain.InstanceStatus) bool {
+	switch status {
+	case domain.InstanceStatusRunning, domain.InstanceStatusPaused, domain.InstanceStatusDegraded:
+		return true
+	case domain.InstanceStatusCompleted, domain.InstanceStatusTerminated, domain.InstanceStatusFailed:
+		return false
+	}
+	return false
 }

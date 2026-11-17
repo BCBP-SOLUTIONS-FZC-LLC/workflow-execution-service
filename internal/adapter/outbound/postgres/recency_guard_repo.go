@@ -42,6 +42,22 @@ func (r *RecencyGuardRepo) ShouldApply(ctx context.Context, scopeKey string, eve
 	return shouldApply, err
 }
 
+func (r *RecencyGuardRepo) ShouldApplyUnlessOlder(ctx context.Context, scopeKey string, eventTime time.Time) (bool, error) {
+	var shouldApply bool
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		v, err := db.New(dbtx).RecencyGuardShouldApplyUnlessOlder(ctx, db.RecencyGuardShouldApplyUnlessOlderParams{
+			ScopeKey:  scopeKey,
+			EventTime: eventTime,
+		})
+		if err != nil {
+			return err
+		}
+		shouldApply = v
+		return nil
+	})
+	return shouldApply, err
+}
+
 func (r *RecencyGuardRepo) CheckAndCommit(ctx context.Context, scopeKey string, eventTime time.Time) (bool, error) {
 	var applied bool
 	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {

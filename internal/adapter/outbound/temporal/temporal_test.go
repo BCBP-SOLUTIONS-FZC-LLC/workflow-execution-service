@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -305,6 +306,16 @@ func (r *fakeAssignmentRepo) CountActiveByTasks(_ context.Context, _ uuid.UUID, 
 	return counts, nil
 }
 
+func (r *fakeAssignmentRepo) ListActiveByReasonTag(_ context.Context, tenantID uuid.UUID, tag string) ([]*domain.TaskAssignment, error) {
+	var out []*domain.TaskAssignment
+	for _, a := range r.byID {
+		if a.TenantID == tenantID && a.IsActive && strings.Contains(a.Reason, tag) {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
 func (r *fakeAssignmentRepo) ListActiveByUserPaginated(_ context.Context, _, userID uuid.UUID, _ port.PageRequest) ([]port.ActiveUserTaskRow, *port.Cursor, error) {
 	var out []port.ActiveUserTaskRow
 	for _, a := range r.byID {
@@ -364,6 +375,10 @@ func (r *fakeAssignmentRepo) Complete(_ context.Context, _, id uuid.UUID, result
 	a.ResultJSON = resultJSON
 	a.CompletedAt = &now
 	return a, nil
+}
+
+func (r *fakeAssignmentRepo) ClaimLead(ctx context.Context, tenant, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {
+	return r.SetLead(ctx, tenant, taskID, id, taskRecordVersion)
 }
 
 func (r *fakeAssignmentRepo) SetLead(_ context.Context, _, _, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {

@@ -659,35 +659,6 @@ func TestHandleInternalEvent_TenantStateChanged_Success(t *testing.T) {
 	assert.Equal(t, "suspended", gotIn.Status)
 }
 
-func TestHandleInternalEvent_TenantStateChanged_Offboarded_NeverSkippedEvenIfStale(t *testing.T) {
-	fakes := newEventsFakes()
-	calls := 0
-	fakes.tenantLifecycle.apply = func(context.Context, port.TenantLifecycleInput) error {
-		calls++
-		return nil
-	}
-	router := newInternalRouter(newEventsHandler(fakes))
-
-	newer := time.Now()
-	older := newer.Add(-24 * time.Hour)
-
-	// Prime the recency guard with a newer value first.
-	w1 := postEvent(router, envelope("TenantStateChanged", uuid.New(), testTenantID, newer, map[string]any{
-		"tenant_id": testTenantID.String(), "status": "suspended", "previous_status": "active",
-		"plan": "pro", "previous_plan": "pro", "changed_at": newer.Format(time.RFC3339), "cause": "x",
-	}))
-	require.Equal(t, http.StatusOK, w1.Code)
-	require.Equal(t, 1, calls)
-
-	// An older offboarded event must still be applied, not skipped.
-	w2 := postEvent(router, envelope("TenantStateChanged", uuid.New(), testTenantID, older, map[string]any{
-		"tenant_id": testTenantID.String(), "status": "offboarded", "previous_status": "suspended",
-		"plan": "pro", "previous_plan": "pro", "changed_at": older.Format(time.RFC3339), "cause": "churn",
-	}))
-	require.Equal(t, http.StatusOK, w2.Code)
-	assert.Equal(t, 2, calls, "offboarded is terminal and must never be skipped by the recency guard")
-}
-
 func TestHandleInternalEvent_TenantStateChanged_RecencyGuard_SkipsStaleNonOffboarded(t *testing.T) {
 	fakes := newEventsFakes()
 	calls := 0

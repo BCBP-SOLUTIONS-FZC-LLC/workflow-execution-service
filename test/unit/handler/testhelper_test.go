@@ -387,6 +387,11 @@ func (f *fakeRecencyGuard) ShouldApply(_ context.Context, scopeKey string, event
 	return !ok || eventTime.After(last), nil
 }
 
+func (f *fakeRecencyGuard) ShouldApplyUnlessOlder(_ context.Context, scopeKey string, eventTime time.Time) (bool, error) {
+	last, ok := f.last[scopeKey]
+	return !ok || !eventTime.Before(last), nil
+}
+
 func (f *fakeRecencyGuard) CheckAndCommit(_ context.Context, scopeKey string, eventTime time.Time) (bool, error) {
 	last, ok := f.last[scopeKey]
 	if ok && !eventTime.After(last) {
@@ -529,6 +534,10 @@ type erroringRecencyGuard struct {
 }
 
 func (e *erroringRecencyGuard) ShouldApply(context.Context, string, time.Time) (bool, error) {
+	return false, e.err
+}
+
+func (e *erroringRecencyGuard) ShouldApplyUnlessOlder(context.Context, string, time.Time) (bool, error) {
 	return false, e.err
 }
 

@@ -55,6 +55,7 @@ type csdAssignmentRepo struct {
 	listErr  error
 	lists    []csdIDCall
 	setLeads []csdSetLeadCall
+	claims   []csdSetLeadCall
 }
 
 func (r *csdAssignmentRepo) add(a *domain.TaskAssignment) {
@@ -103,6 +104,11 @@ func (r *csdAssignmentRepo) SetLead(_ context.Context, tenantID, taskID, id uuid
 		}
 	}
 	return r.byID[id], nil
+}
+
+func (r *csdAssignmentRepo) ClaimLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {
+	r.claims = append(r.claims, csdSetLeadCall{tenantID, taskID, id, taskRecordVersion})
+	return r.SetLead(ctx, tenantID, taskID, id, taskRecordVersion)
 }
 
 func (r *csdAssignmentRepo) leadOf(taskID uuid.UUID) uuid.UUID {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +27,7 @@ type DelegationReconciler struct {
 	Validator    port.EventValidator
 	Availability port.UserAvailabilityRepository
 	Locks        port.ScopeLocker
+	Ended        port.EndedDelegationRepository
 	Log          port.Logger
 }
 
@@ -141,7 +141,7 @@ func (s *DelegationReconciler) eligibleCandidates(ctx context.Context, plans *co
 // move, its event and its signal; the outbox relay delivers the signal after
 // the commit. A row whose assignment ended after it was read gets no new
 // assignment, no event and no signal.
-func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID uuid.UUID, rows []delegationCandidate, newUserID uuid.UUID, reason string, delegationID *uuid.UUID) error {
+func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID uuid.UUID, rows []delegationCandidate, newUserID uuid.UUID, reasonFor func(*domain.TaskAssignment) string, delegationID *uuid.UUID) error {
 	return s.Transactor.RunInTx(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
 		for _, c := range rows {
 			active, ok, err := vacateIfActive(ctx, s.Assignments, tenantID, c.assignment)
@@ -151,7 +151,7 @@ func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID
 			if !ok {
 				continue
 			}
-			if err := handOver(ctx, s.Assignments, tenantID, c.assignment, active, c.task, newUserID, reason); err != nil {
+			if err := handOver(ctx, s.Assignments, s.Tasks, tenantID, c.assignment, active, c.task, newUserID, reasonFor(c.assignment)); err != nil {
 				return err
 			}
 			if err := enqueueTaskReassigned(ctx, s.Outbox, s.Validator, c.instance, c.task, c.assignment.UserID, newUserID, delegationID); err != nil {
@@ -204,19 +204,28 @@ func (s *DelegationReconciler) Reroute(ctx context.Context, in port.DelegationRe
 		return nil
 	}
 
-	commit := func(ctx context.Context) error {
-		return s.commitReassignments(ctx, in.TenantID, eligible, in.DelegateID, delegationReasonTag(in.DelegationID), &in.DelegationID)
-	}
-	settled := instancesFullyMoved(candidates, eligible)
-	if len(settled) == 0 {
-		return commit(ctx)
-	}
 	return s.Locks.WithLock(ctx, port.UserAvailabilityScope(in.TenantID, in.DelegatorID), func(ctx context.Context) error {
+		ended, err := s.Ended.IsEnded(ctx, in.TenantID, in.DelegationID)
+		if err != nil || ended {
+			return err
+		}
+		return s.moveToDelegate(ctx, in, candidates, eligible)
+	})
+}
+
+// moveToDelegate runs under the delegator's lock, which the end of the same
+// delegation takes before it is recorded, so a start that read "not ended" has
+// committed its move before the end looks for work to return.
+func (s *DelegationReconciler) moveToDelegate(ctx context.Context, in port.DelegationRerouteInput, candidates, eligible []delegationCandidate) error {
+	if settled := instancesFullyMoved(candidates, eligible); len(settled) > 0 {
 		if err := s.resumeForAbsentDelegator(ctx, in.TenantID, in.DelegatorID, settled); err != nil {
 			return err
 		}
-		return commit(ctx)
-	})
+	}
+	hop := delegationHop(in.DelegationID, in.DelegatorID)
+	return s.commitReassignments(ctx, in.TenantID, eligible, in.DelegateID, func(a *domain.TaskAssignment) string {
+		return appendDelegationHop(a.Reason, hop)
+	}, &in.DelegationID)
 }
 
 // instancesFullyMoved returns one row per instance whose every task the
@@ -264,21 +273,23 @@ func (s *DelegationReconciler) Reverse(ctx context.Context, in port.DelegationRe
 	if in.DelegatorID == in.DelegateID {
 		return nil
 	}
-	active, err := s.Assignments.ListActiveByUser(ctx, in.TenantID, in.DelegateID)
-	if err != nil {
+	if err := s.recordEnded(ctx, in); err != nil {
 		return err
 	}
-	candidates, err := s.resolveCandidates(ctx, in.TenantID, active)
-	if err != nil {
-		return err
-	}
-
 	tag := delegationReasonTag(in.DelegationID)
-	tagged := make([]delegationCandidate, 0, len(candidates))
-	for _, c := range candidates {
-		if strings.HasPrefix(c.assignment.Reason, tag) {
-			tagged = append(tagged, c)
+	carried, err := s.Assignments.ListActiveByReasonTag(ctx, in.TenantID, tag)
+	if err != nil {
+		return err
+	}
+	owed := make([]*domain.TaskAssignment, 0, len(carried))
+	for _, a := range carried {
+		if reasonHasDelegation(a.Reason, tag) && a.UserID != in.DelegatorID {
+			owed = append(owed, a)
 		}
+	}
+	tagged, err := s.resolveCandidates(ctx, in.TenantID, owed)
+	if err != nil {
+		return err
 	}
 	if len(tagged) == 0 {
 		return nil
@@ -296,7 +307,15 @@ func (s *DelegationReconciler) Reverse(ctx context.Context, in port.DelegationRe
 		if err := s.settleOutOfOfficePauses(ctx, in, eligible); err != nil {
 			return err
 		}
-		return s.commitReassignments(ctx, in.TenantID, eligible, in.DelegatorID, "", &in.DelegationID)
+		return s.commitReassignments(ctx, in.TenantID, eligible, in.DelegatorID, func(a *domain.TaskAssignment) string {
+			return reasonBeforeDelegation(a.Reason, tag)
+		}, &in.DelegationID)
+	})
+}
+
+func (s *DelegationReconciler) recordEnded(ctx context.Context, in port.DelegationReversalInput) error {
+	return s.Locks.WithLock(ctx, port.UserAvailabilityScope(in.TenantID, in.DelegatorID), func(ctx context.Context) error {
+		return s.Ended.MarkEnded(ctx, in.TenantID, in.DelegationID)
 	})
 }
 

@@ -201,7 +201,7 @@ func dlgfixNewClient(t *testing.T) *dlgfixClient {
 	h.tx.outbox = h.outbox
 	h.svc = &service.WorkflowClient{
 		Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments,
-		Transactor: h.tx, Outbox: h.outbox, Signals: h.outbox, Validator: realValidator(), Log: &fakeLogger{},
+		Transactor: h.tx, Outbox: h.outbox, Signals: h.outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(), Log: &fakeLogger{},
 	}
 	return h
 }
@@ -215,8 +215,8 @@ func (h *dlgfixClient) withEligibility(answer func(level string) (bool, error)) 
 	}}
 }
 
-// seed gives the old delegate one active assignment on a task of a new
-// instance whose plan has the given stage role.
+// seed gives the old delegate one active assignment, created by a delegation,
+// on a task of a new instance whose plan has the given stage role.
 func (h *dlgfixClient) seed(t *testing.T, role string) dlgfixHeld {
 	t.Helper()
 	versionID := uuid.New()
@@ -228,7 +228,7 @@ func (h *dlgfixClient) seed(t *testing.T, role string) dlgfixHeld {
 	h.instances.byID[inst.ID] = inst
 	task := &domain.Task{ID: uuid.New(), TenantID: h.tenantID, WorkflowInstanceID: inst.ID, NodeKey: "finance/review", RecordVersion: 1}
 	h.tasks.byID[task.ID] = task
-	a := &domain.TaskAssignment{ID: uuid.New(), TenantID: h.tenantID, TaskID: task.ID, UserID: h.oldDelegate, IsActive: true}
+	a := &domain.TaskAssignment{ID: uuid.New(), TenantID: h.tenantID, TaskID: task.ID, UserID: h.oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 	h.assignments.add(a)
 	return dlgfixHeld{instance: inst, task: task, assignment: a, versionID: versionID}
 }
@@ -345,7 +345,7 @@ func TestDelegationReassign_AReadThatFailsChangesNothingAndFailsTheCall(t *testi
 	t.Run("a task that cannot be read", func(t *testing.T) {
 		h := dlgfixNewClient(t)
 		first := h.seed(t, "reviewer")
-		orphan := &domain.TaskAssignment{ID: uuid.New(), TenantID: h.tenantID, TaskID: uuid.New(), UserID: h.oldDelegate, IsActive: true}
+		orphan := &domain.TaskAssignment{ID: uuid.New(), TenantID: h.tenantID, TaskID: uuid.New(), UserID: h.oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		h.assignments.add(orphan)
 
 		count, err := h.reassign()

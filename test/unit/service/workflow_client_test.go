@@ -20,18 +20,18 @@ func newWorkflowClientHarness() (*service.WorkflowClient, *fakeInstanceRepo, *fa
 	tasks := newFakeTaskRepo()
 	assignments := newFakeAssignmentRepo()
 	outbox := &fakeOutbox{}
-	return &service.WorkflowClient{Instances: instances, Tasks: tasks, Assignments: assignments, Transactor: fakeTransactor{}, Outbox: outbox, Signals: outbox, Validator: realValidator()}, instances, tasks, assignments, outbox
+	return &service.WorkflowClient{Instances: instances, Tasks: tasks, Assignments: assignments, Transactor: fakeTransactor{}, Outbox: outbox, Signals: outbox, Validator: realValidator(), Ended: newFakeEndedDelegations()}, instances, tasks, assignments, outbox
 }
 
 func TestWorkflowClient_ReassignDelegate(t *testing.T) {
-	t.Run("reassigns every active assignment, no delegation filter", func(t *testing.T) {
+	t.Run("reassigns every delegation-created assignment, no delegation filter", func(t *testing.T) {
 		svc, instances, tasks, assignments, outbox := newWorkflowClientHarness()
 		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
 		instanceID := uuid.New()
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, RecordVersion: 1}
 		tasks.byID[task.ID] = task
-		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
@@ -93,7 +93,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 	t.Run("an unreadable task fails the call and changes nothing", func(t *testing.T) {
 		svc, _, _, assignments, outbox := newWorkflowClientHarness()
 		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
-		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: uuid.New(), UserID: oldDelegate, IsActive: true}
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: uuid.New(), UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
@@ -111,7 +111,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, RecordVersion: 1}
 		tasks.byID[task.ID] = task
-		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
@@ -127,7 +127,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, RecordVersion: 1}
 		tasks.byID[task.ID] = task
-		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
 		assignments.createErr = assert.AnError
 
@@ -144,7 +144,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, RecordVersion: 1}
 		tasks.byID[task.ID] = task
-		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
@@ -167,7 +167,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review", RecordVersion: 1}
 		tasks.byID[task.ID] = task
-		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
@@ -192,7 +192,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		for i := 0; i < 4; i++ {
 			task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review", RecordVersion: 1}
 			tasks.byID[task.ID] = task
-			a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+			a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 			assignments.byID[a.ID] = a
 		}
 
@@ -216,7 +216,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review", RecordVersion: 1}
 		tasks.byID[task.ID] = task
-		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
@@ -240,7 +240,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review", RecordVersion: 1}
 		tasks.byID[task.ID] = task
-		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
@@ -259,7 +259,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		// task.WorkflowInstanceID has no matching entry in instances.byID.
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: uuid.New(), NodeKey: "finance/review", RecordVersion: 1}
 		tasks.byID[task.ID] = task
-		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
@@ -285,7 +285,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, WorkflowVersionID: versionID, TemporalWorkflowID: "tenant:biz"}
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: "finance/review", RecordVersion: 1}
 		tasks.byID[task.ID] = task
-		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true}
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
@@ -303,7 +303,7 @@ func TestWorkflowClient_CancelByDelegate(t *testing.T) {
 	instances.byID[instance.ID] = instance
 	task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instance.ID}
 	tasks.byID[task.ID] = task
-	a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegate, IsActive: true}
+	a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 	assignments.byID[a.ID] = a
 
 	count, err := svc.CancelByDelegate(context.Background(), port.CancelByDelegateInput{TenantID: tenantID, DelegateUserID: delegate})
@@ -328,7 +328,7 @@ func TestWorkflowClient_CancelByDelegate_Errors(t *testing.T) {
 		instances.byID[instance.ID] = instance
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instance.ID}
 		tasks.byID[task.ID] = task
-		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegate, IsActive: true}
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
 
 		count, err := svc.CancelByDelegate(context.Background(), port.CancelByDelegateInput{TenantID: tenantID, DelegateUserID: delegate})
@@ -348,7 +348,7 @@ func TestWorkflowClient_DelegateImpact_Errors(t *testing.T) {
 	t.Run("an unreadable task fails the call, so the count is never short", func(t *testing.T) {
 		svc, _, _, assignments, _ := newWorkflowClientHarness()
 		tenantID, delegate := uuid.New(), uuid.New()
-		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: uuid.New(), UserID: delegate, IsActive: true}
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: uuid.New(), UserID: delegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
 
 		_, err := svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: delegate})

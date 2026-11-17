@@ -70,7 +70,7 @@ func dlgfixNewRecon() *dlgfixRecon {
 	h.svc = &service.DelegationReconciler{
 		Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments, Outbox: h.outbox,
 		Transactor: fakeTransactor{}, Temporal: h.temporal, Signals: h.outbox, Definitions: h.definitions, Eligibility: h.eligibility,
-		Validator: realValidator(), Availability: h.store, Locks: h.locker, Log: h.log,
+		Validator: realValidator(), Availability: h.store, Locks: h.locker, Ended: newFakeEndedDelegations(), Log: h.log,
 	}
 	return h
 }

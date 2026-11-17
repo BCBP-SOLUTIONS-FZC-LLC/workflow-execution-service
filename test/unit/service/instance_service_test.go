@@ -1017,8 +1017,9 @@ func TestInstanceService_Terminate(t *testing.T) {
 		assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[inst.ID].Status)
 		assert.Equal(t, domain.TaskStatusFailed, tasks.byID[task.ID].Status)
 		assert.False(t, assignments.byID[assignment.ID].IsActive)
-		require.Len(t, outbox.enqueued, 1)
-		assert.Equal(t, domain.EventWorkflowInstanceTerminated, outbox.enqueued[0].Type)
+		require.Len(t, outbox.enqueued, 2)
+		assert.Equal(t, domain.EventWorkflowTaskFailed, outbox.enqueued[0].Type)
+		assert.Equal(t, domain.EventWorkflowInstanceTerminated, outbox.enqueued[1].Type)
 		require.NotEmpty(t, temporal.terminateCalls())
 	})
 

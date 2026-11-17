@@ -457,6 +457,24 @@ func (r *fakeAssignmentRepo) ListActiveByUser(_ context.Context, _, userID uuid.
 	return out, nil
 }
 
+func (r *fakeAssignmentRepo) ListActiveByReasonTag(_ context.Context, tenantID uuid.UUID, tag string) ([]*domain.TaskAssignment, error) {
+	if r.listActiveByUserErr != nil {
+		return nil, r.listActiveByUserErr
+	}
+	var out []*domain.TaskAssignment
+	for _, id := range r.order {
+		if a, ok := r.byID[id]; ok && a.TenantID == tenantID && a.IsActive && strings.Contains(a.Reason, tag) {
+			out = append(out, a)
+		}
+	}
+	for id, a := range r.byID {
+		if !slices.Contains(r.order, id) && a.TenantID == tenantID && a.IsActive && strings.Contains(a.Reason, tag) {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
 func (r *fakeAssignmentRepo) CountActiveByTasks(_ context.Context, _ uuid.UUID, taskIDs []uuid.UUID) (map[uuid.UUID]int, error) {
 	r.countMu.Lock()
 	r.countCalls = append(r.countCalls, taskIDs)
@@ -541,6 +559,10 @@ func (r *fakeAssignmentRepo) SetLead(_ context.Context, _, _, id uuid.UUID, _ in
 	}
 	a.IsLead = true
 	return a, nil
+}
+
+func (r *fakeAssignmentRepo) ClaimLead(ctx context.Context, tenantID, taskID, id uuid.UUID, version int64) (*domain.TaskAssignment, error) {
+	return r.SetLead(ctx, tenantID, taskID, id, version)
 }
 
 // --- AssigneeOverrideRepository ---

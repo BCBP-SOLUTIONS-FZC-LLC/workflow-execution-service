@@ -66,6 +66,7 @@ func TestReassignDelegate_ADelegateWhoAlreadyHoldsTheTaskKeepsOneActiveRow(t *te
 	task := newTask(tenantID, inst.ID)
 	require.NoError(t, taskRepo.Create(ctx, task))
 	old := newTaskAssignment(tenantID, task.ID, oldDelegate)
+	old.Reason = "delegation:" + uuid.NewString()
 	require.NoError(t, assignmentRepo.Create(ctx, old))
 	require.NoError(t, assignmentRepo.Create(ctx, newTaskAssignment(tenantID, task.ID, newDelegate)))
 
