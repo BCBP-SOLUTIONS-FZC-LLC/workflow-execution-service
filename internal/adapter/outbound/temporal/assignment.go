@@ -218,7 +218,7 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 			return fmt.Errorf("list active assignments: %w", err)
 		}
 		if holder := assignmentFor(active, newUserID); holder != nil {
-			if holder.IsLead || !leadHeldBy(active, oldUserID) {
+			if !movesLeadTo(active, holder, oldUserID) {
 				return nil
 			}
 			return d.makeHolderLead(ctx, tenantID, task, active, holder, oldUserID, in.RecordVersion)
@@ -251,8 +251,8 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 }
 
 // makeHolderLead moves the lead to a user who already holds the task without it,
-// and vacates the replaced lead's assignment. SetLead also bumps the task's
-// record version. It runs only while the replaced user still holds the lead, so a
+// and vacates the replaced lead's assignment, if one was named. SetLead also bumps
+// the task's record version. It runs only while the move is still pending, so a
 // retry after the move committed finds nothing to do.
 func (d *Deps) makeHolderLead(ctx context.Context, tenantID uuid.UUID, task *domain.Task, active []*domain.TaskAssignment, holder *domain.TaskAssignment, oldUserID uuid.UUID, recordVersion int64) error {
 	if err := vacateAssignmentsFor(ctx, d.Assignments, tenantID, active, oldUserID); err != nil {
@@ -271,6 +271,28 @@ func (d *Deps) makeHolderLead(ctx context.Context, tenantID uuid.UUID, task *dom
 	taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: []uuid.UUID{holder.UserID}}
 	payload := domain.NewWorkflowTaskReassignedPayload(core, taskCore, domain.OptionalUserID(oldUserID), holder.UserID, domain.ReassignInitiatorAdmin, nil)
 	return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskReassigned, payload)
+}
+
+// movesLeadTo reports whether a reassignment to a user who already holds the task
+// changes who leads it: the named lead hands over, or nobody was named and the
+// task has no lead yet.
+func movesLeadTo(active []*domain.TaskAssignment, holder *domain.TaskAssignment, oldUserID uuid.UUID) bool {
+	if holder.IsLead {
+		return false
+	}
+	if oldUserID == uuid.Nil {
+		return !anyLead(active)
+	}
+	return leadHeldBy(active, oldUserID)
+}
+
+func anyLead(active []*domain.TaskAssignment) bool {
+	for _, a := range active {
+		if a.IsLead {
+			return true
+		}
+	}
+	return false
 }
 
 // parseOptionalUserID reads a user id that a reassignment may leave out when nobody held the task.

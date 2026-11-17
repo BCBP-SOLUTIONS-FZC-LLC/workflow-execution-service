@@ -75,6 +75,20 @@ func (r *OutboxRepo) ExistsForTask(ctx context.Context, eventType string, taskID
 	return exists, err
 }
 
+func (r *OutboxRepo) ExistsByID(ctx context.Context, tenantID, id uuid.UUID) (bool, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var exists bool
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		var err error
+		exists, err = db.New(dbtx).OutboxEventExistsByID(ctx, db.OutboxEventExistsByIDParams{
+			TenantID: tenantID.String(),
+			ID:       id,
+		})
+		return mapErr(err)
+	})
+	return exists, err
+}
+
 func (r *OutboxRepo) ListByInstance(
 	ctx context.Context,
 	tenantID, instanceID uuid.UUID,

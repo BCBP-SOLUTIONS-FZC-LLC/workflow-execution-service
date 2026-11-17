@@ -365,7 +365,7 @@ func (s *TaskService) Defer(ctx context.Context, tenantID, taskID, userID uuid.U
 	if err != nil {
 		return nil, wrapInstanceErr(err)
 	}
-	if inst.Status != domain.InstanceStatusRunning {
+	if inst.Status != domain.InstanceStatusRunning && inst.Status != domain.InstanceStatusDegraded {
 		return nil, port.ErrInvalidInstanceState
 	}
 	if done, err := hasCompletedStep(ctx, s.Tasks, tenantID, inst.ID); err != nil {

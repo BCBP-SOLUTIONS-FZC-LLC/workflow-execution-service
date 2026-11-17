@@ -10,6 +10,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- An override or reassign on an all-assignee task nobody has claimed, to a user who already holds an assignment on it, makes that user the lead (it used to answer 200 and change nothing).
+- A retried force-route finds its earlier record with one lookup by id instead of reading the instance's event list.
+- Deferring a task on a degraded instance sends the work back to the step before the fork (it used to be refused with 409 `INVALID_INSTANCE_STATE`); a defer whose fork is the plan's first step is still refused with 409.
 - Readiness and shutdown:
   - `/readyz` stays 200 and reports `cache: degraded` when Valkey is down (it used to answer 503 and pull every API pod out of rotation), and the API starts when Valkey does not answer;
   - on SIGTERM the API answers `/readyz` 503 with `shutting_down: true` and waits `SHUTDOWN_DRAIN_DELAY` (default 5s) before closing its listener;

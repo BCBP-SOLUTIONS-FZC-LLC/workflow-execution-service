@@ -21,3 +21,12 @@ WHERE tenant_id = @tenant_id::text
   )
 ORDER BY created_at DESC, id DESC
 LIMIT @page_limit::int;
+
+-- name: OutboxEventExistsByID :one
+-- A retried activity recognises its own earlier commit by the deterministic
+-- id it gave the event.
+SELECT EXISTS(
+    SELECT 1 FROM outbox_events
+    WHERE tenant_id = @tenant_id::text
+      AND id = @id::uuid
+) AS exists;

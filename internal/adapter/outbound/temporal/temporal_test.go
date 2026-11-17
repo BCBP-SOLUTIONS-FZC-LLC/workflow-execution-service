@@ -414,6 +414,15 @@ func (o *fakeOutbox) ListByInstance(_ context.Context, _, _ uuid.UUID, _ port.Pa
 	return nil, nil, nil
 }
 
+func (o *fakeOutbox) ExistsByID(_ context.Context, tenantID, id uuid.UUID) (bool, error) {
+	for _, env := range o.enqueued {
+		if env.ID == id.String() && env.TenantID == tenantID.String() {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (o *fakeOutbox) ExistsForTask(_ context.Context, eventType string, taskID uuid.UUID) (bool, error) {
 	if o.existsErr != nil {
 		return false, o.existsErr

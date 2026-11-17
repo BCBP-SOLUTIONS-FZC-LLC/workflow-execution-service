@@ -691,6 +691,15 @@ func (o *fakeOutbox) signalsNamed(name string) []signalCall {
 	return out
 }
 
+func (o *fakeOutbox) ExistsByID(_ context.Context, tenantID, id uuid.UUID) (bool, error) {
+	for _, env := range o.enqueued {
+		if env.ID == id.String() && env.TenantID == tenantID.String() {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (o *fakeOutbox) Enqueue(_ context.Context, env events.Envelope[json.RawMessage]) error {
 	if o.enqueueErr != nil {
 		return o.enqueueErr
