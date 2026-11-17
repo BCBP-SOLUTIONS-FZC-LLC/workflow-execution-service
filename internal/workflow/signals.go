@@ -275,9 +275,6 @@ func (in *interpreter) validateStageDefer(sig stageDeferSignal) error {
 	if err := validateSignal(in.status, SignalStageDefer); err != nil {
 		return refuseDefer(err.Error())
 	}
-	if in.status != domain.InstanceStatusRunning {
-		return refuseDefer(fmt.Sprintf("only a running instance goes back a step; it is %s", in.status))
-	}
 	if in.deferTarget() == "" {
 		return refuseDefer("there is no completed step to go back to")
 	}

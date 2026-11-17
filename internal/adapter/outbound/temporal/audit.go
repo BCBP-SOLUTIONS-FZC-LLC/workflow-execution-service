@@ -46,7 +46,7 @@ func (d *Deps) RecordForceRoute(ctx context.Context, in port.RecordForceRouteInp
 		core := domain.CommonCore{WorkflowInstanceID: instanceID, SubjectID: inst.SubjectID, BusinessKey: inst.BusinessKey, WorkflowVersionID: inst.WorkflowVersionID}
 		payload := domain.NewWorkflowInstanceForceRoutedPayload(core, adminUserID, fromKeys, in.TargetNodeID, direction)
 		eventID := forceRouteEventID(instanceID, in)
-		announced, err := d.eventRecorded(ctx, tenantID, instanceID, eventID)
+		announced, err := d.eventRecorded(ctx, tenantID, eventID)
 		if err != nil || announced {
 			return err
 		}
@@ -76,25 +76,18 @@ func joinNodeKeys(keys []domain.NodeKey) string {
 	return strings.Join(parts, ",")
 }
 
-// eventRecorded reports whether the instance already has the event with this
-// id, which means an earlier attempt of the same activity committed.
-func (d *Deps) eventRecorded(ctx context.Context, tenantID, instanceID uuid.UUID, eventID string) (bool, error) {
-	var cursor *port.Cursor
-	for {
-		records, next, err := d.Outbox.ListByInstance(ctx, tenantID, instanceID, port.PageRequest{After: cursor, Limit: 100})
-		if err != nil {
-			return false, fmt.Errorf("read instance events: %w", err)
-		}
-		for _, r := range records {
-			if r.ID.String() == eventID {
-				return true, nil
-			}
-		}
-		if next == nil {
-			return false, nil
-		}
-		cursor = next
+// eventRecorded reports whether the event with this id already exists, which
+// means an earlier attempt of the same activity committed.
+func (d *Deps) eventRecorded(ctx context.Context, tenantID uuid.UUID, eventID string) (bool, error) {
+	id, err := uuid.Parse(eventID)
+	if err != nil {
+		return false, nonRetryable("ValidationError", fmt.Errorf("parse event id: %w", err))
 	}
+	recorded, err := d.Outbox.ExistsByID(ctx, tenantID, id)
+	if err != nil {
+		return false, fmt.Errorf("look up event %s: %w", id, err)
+	}
+	return recorded, nil
 }
 
 func (d *Deps) supersedeBypassedTasks(ctx context.Context, tenantID, instanceID uuid.UUID, oldNodeKeys []domain.NodeKey, actorUserID uuid.UUID) error {

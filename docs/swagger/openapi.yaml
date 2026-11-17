@@ -2584,9 +2584,11 @@ paths:
         transitions to DEFERRED and the instance goes back one step, as an admin
         force-back does: the previous step's department runs again and creates a new
         task for it. The request waits for the workflow to apply the defer and answers
-        200 with the deferred task, now DEFERRED. When the workflow cannot apply it (no
-        completed step to go back to, or the instance is not running) it answers
-        409 INVALID_TASK_STATE naming the reason, and nothing changes.
+        200 with the deferred task, now DEFERRED. The instance may be RUNNING or DEGRADED;
+        on a DEGRADED instance the work goes back to the step before the fork and the
+        failed branch is not rerun. Any other instance state answers 409
+        INVALID_INSTANCE_STATE. When the workflow cannot apply it (no completed step to go
+        back to) it answers 409 INVALID_TASK_STATE naming the reason, and nothing changes.
         The calling user's eligibility for the task's department and its stage's required level
         is read from Org & Membership before the signal: 422 ASSIGNEE_INELIGIBLE when the read
         answers ineligible (a suspended, removed or demoted member) or the node has no stage in
@@ -2647,6 +2649,7 @@ paths:
           description: >
             RECORD_VERSION_CONFLICT — version mismatch;
             INVALID_TASK_STATE — task is not IN_PROGRESS or has no previous step to defer to;
+            INVALID_INSTANCE_STATE — the instance is not RUNNING or DEGRADED;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:
             application/problem+json:

@@ -136,7 +136,13 @@ type park struct {
 	ch       wf.Channel
 	depts    map[string]bool
 	branches []domain.FailedBranch
+
+	respawnCancels []wf.CancelFunc
+	rerunCancel    wf.CancelFunc
+	rerunning      bool
 }
+
+type rerunOutcome struct{ Err error }
 
 const parkTerminate = "park-terminate"
 
@@ -219,9 +225,10 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 	}
 
 	settle := wf.NewChannel(ctx)
+	rerunDone := wf.NewChannel(ctx)
 	respawning := 0
 
-	for len(failed) > 0 || respawning > 0 {
+	for len(failed) > 0 || respawning > 0 || p.rerunning {
 		sel := wf.NewSelector(ctx)
 		var terminated bool
 		var cancelErr, fatal error
@@ -248,8 +255,12 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 				}
 
 			case SignalInstanceForceBack:
+				if sig.FromDefer {
+					fatal = in.startParkRerun(ctx, plan, p, preFork, rerunDone, sig)
+					break
+				}
 				var started bool
-				failed, started = in.handleDegradedForceBack(ctx, plan, failed, settle, admin, sig)
+				failed, started = in.handleDegradedForceBack(ctx, plan, p, failed, settle, admin, sig)
 				if started {
 					respawning++
 				}
@@ -270,6 +281,18 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 				p.depts[fb.DeptID] = true
 			} else {
 				completed = append(completed, completedBranch{DeptID: out.DeptID, LastNode: out.LastNode})
+			}
+		})
+
+		sel.AddReceive(rerunDone, func(c wf.ReceiveChannel, more bool) {
+			var out rerunOutcome
+			c.Receive(ctx, &out)
+			p.rerunning, p.rerunCancel = false, nil
+			switch {
+			case errors.Is(out.Err, errInstanceTerminated):
+				terminated = true
+			case out.Err != nil && !errors.Is(out.Err, errPathEnded):
+				fatal = out.Err
 			}
 		})
 
@@ -463,7 +486,41 @@ func (in *interpreter) handleDegradedForceForward(ctx wf.Context, failed []faile
 	return removeFailedBranch(failed, idx), completedBranch{DeptID: fb.DeptID, LastNode: sig.TargetNodeKey}, true, nil
 }
 
-func (in *interpreter) handleDegradedForceBack(ctx wf.Context, plan *dsl.CompiledPlan, failed []failedBranch, settle, admin wf.Channel, sig adminSignal) ([]failedBranch, bool) {
+// startParkRerun answers a defer inside a park: every respawned branch is
+// abandoned (it returns to the failed list), and the step before the fork runs
+// again beside the park loop so the park keeps reading admin signals.
+func (in *interpreter) startParkRerun(ctx wf.Context, plan *dsl.CompiledPlan, p *park, preFork domain.NodeKey, done wf.Channel, sig adminSignal) error {
+	if preFork == "" {
+		wf.GetLogger(ctx).Warn("stage-defer: no completed node to return to; dropping")
+		return nil
+	}
+	for _, cancel := range p.respawnCancels {
+		cancel()
+	}
+	p.respawnCancels = nil
+	if p.rerunCancel != nil {
+		p.rerunCancel()
+	}
+	deptID := deptFromNodeKey(preFork)
+	if err := in.recordAndRedirect(ctx, in.currentPendingNodes(), departmentEntryNode(plan, deptID, preFork), domain.ForceRouteDirectionBack, sig); err != nil {
+		return err
+	}
+	if !p.rerunning {
+		in.msgBuf.ResetSpan(in.history.PopTo(preFork))
+	}
+	rctx, cancel := wf.WithCancel(ctx)
+	p.rerunCancel, p.rerunning = cancel, true
+	wf.Go(rctx, func(gctx wf.Context) {
+		_, _, err := in.runDepartment(gctx, plan, deptID)
+		if errors.Is(err, errStageAbandoned) {
+			return
+		}
+		done.Send(gctx, rerunOutcome{Err: err})
+	})
+	return nil
+}
+
+func (in *interpreter) handleDegradedForceBack(ctx wf.Context, plan *dsl.CompiledPlan, p *park, failed []failedBranch, settle, admin wf.Channel, sig adminSignal) ([]failedBranch, bool) {
 	idx := failedBranchFor(failed, sig)
 	if idx < 0 {
 		wf.GetLogger(ctx).Warn("instance-force-back: target_node_key doesn't name a currently-failed branch; dropping",
@@ -477,7 +534,9 @@ func (in *interpreter) handleDegradedForceBack(ctx wf.Context, plan *dsl.Compile
 	}
 	failed = removeFailedBranch(failed, idx)
 	in.msgBuf.ResetSpan([]domain.NodeKey{fb.LastCompletedNode})
-	wf.Go(ctx, func(gctx wf.Context) {
+	bctx, cancel := wf.WithCancel(ctx)
+	p.respawnCancels = append(p.respawnCancels, cancel)
+	wf.Go(bctx, func(gctx wf.Context) {
 		out, err := in.respawnBranch(gctx, plan, fb, admin)
 		if err != nil && out.LastNode == "" {
 			out.LastNode = fb.LastCompletedNode

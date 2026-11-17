@@ -21,4 +21,6 @@ type OutboxRepository interface {
 	) ([]*domain.OutboxEventRecord, *Cursor, error)
 
 	ExistsForTask(ctx context.Context, eventType string, taskID uuid.UUID) (bool, error)
+
+	ExistsByID(ctx context.Context, tenantID, id uuid.UUID) (bool, error)
 }
