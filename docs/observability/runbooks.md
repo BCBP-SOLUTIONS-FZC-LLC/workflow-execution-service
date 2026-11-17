@@ -104,7 +104,7 @@ Common starting points:
 
 **Meaning.** Temporal replay of a workflow hit non-determinism, which is fatal to that workflow execution.
 
-**Triage.** The workflow type is in the alert. The cause is almost always a deploy that changed workflow code without a `GetVersion` change ID. Roll back to the previous image so the open executions replay again, then ship the change behind a change ID with a replay fixture (`test/workflow/replay`).
+**Triage.** The workflow type is in the alert. The cause is almost always a deploy that changed workflow code so that it no longer replays the open executions' recorded history. Roll back to the previous image so the open executions replay again.
 
 ## Outbox and events
 

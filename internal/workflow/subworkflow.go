@@ -23,7 +23,7 @@ func (in *interpreter) runSubWorkflow(ctx wf.Context, plan *dsl.CompiledPlan, sw
 		if out.Terminated && err == nil {
 			runErr = errInstanceTerminated
 		}
-		if code, raised := in.raisedErrorCode(gctx, sw, err); raised {
+		if code, raised := in.raisedErrorCode(sw, err); raised {
 			errCh.Send(gctx, code)
 			return
 		}
@@ -83,9 +83,6 @@ func onceOnly(f func()) func() {
 const windDownWait = 30 * time.Second
 
 func (in *interpreter) awaitWindDown(ctx wf.Context, doneCh wf.ReceiveChannel) {
-	if getVersion(ctx, abandonedTaskSupersededChangeID) == wf.DefaultVersion {
-		return
-	}
 	timerCtx, cancelTimer := wf.WithCancel(ctx)
 	defer cancelTimer()
 	sel := wf.NewSelector(ctx)
@@ -97,12 +94,9 @@ func (in *interpreter) awaitWindDown(ctx wf.Context, doneCh wf.ReceiveChannel) {
 	sel.Select(ctx)
 }
 
-func (in *interpreter) raisedErrorCode(ctx wf.Context, sw *dsl.SubWorkflowStep, err error) (string, bool) {
+func (in *interpreter) raisedErrorCode(sw *dsl.SubWorkflowStep, err error) (string, bool) {
 	var failed *stageFailedError
 	if !errors.As(err, &failed) || matchErrorPath(sw.ErrorPaths, failed.Reason) == nil {
-		return "", false
-	}
-	if getVersion(ctx, subWorkflowErrorRaisedChangeID) == wf.DefaultVersion {
 		return "", false
 	}
 	return failed.Reason, true

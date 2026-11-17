@@ -26,12 +26,10 @@ func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID s
 		return nodeKey, "", nil
 
 	case string(enums.StageTypeReceiveTask):
-		if getVersion(ctx, receiveRecordsNodeChangeID) != wf.DefaultVersion {
-			if err := updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
-				InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{nodeKey},
-			}); err != nil {
-				return nodeKey, "", err
-			}
+		if err := updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
+			InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{nodeKey},
+		}); err != nil {
+			return nodeKey, "", err
 		}
 		in.receive(ctx, nodeKey, stage.Extras["message"])
 		in.history.Push(nodeKey)
@@ -84,11 +82,7 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 		return nodeKey, "", err
 	}
 
-	visit := int64(0)
-	if getVersion(ctx, nodeVisitKeyChangeID) != wf.DefaultVersion {
-		visit = in.taskVisits[nodeKey]
-	}
-	visitKey := nodeVisitKey{Node: nodeKey, Visit: visit}
+	visitKey := nodeVisitKey{Node: nodeKey, Visit: in.taskVisits[nodeKey]}
 	resolveCh := wf.NewBufferedChannel(ctx, 1)
 	if buffered, ok := in.pendingSignals[visitKey]; ok {
 		delete(in.pendingSignals, visitKey)
@@ -104,11 +98,9 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 		c.Receive(ctx, &sig)
 		resolved = true
 	})
-	if getVersion(ctx, taskStageCancelChangeID) != wf.DefaultVersion {
-		sel.AddReceive(ctx.Done(), func(c wf.ReceiveChannel, more bool) {
-			abandoned = true
-		})
-	}
+	sel.AddReceive(ctx.Done(), func(c wf.ReceiveChannel, more bool) {
+		abandoned = true
+	})
 
 	var fired *boundaryFire
 	cancelBoundaries := registerTaskBoundaries(ctx, sel, in, string(nodeKey), stage.BoundaryTimer, stage.BoundaryMessage, func(f boundaryFire) {
@@ -153,11 +145,11 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 }
 
 func abandonedMidActivity(ctx wf.Context) bool {
-	return ctx.Err() != nil && getVersion(ctx, abandonedMidActivityChangeID) != wf.DefaultVersion
+	return ctx.Err() != nil
 }
 
 func (in *interpreter) supersedeAbandoned(ctx wf.Context, taskID string) {
-	if in.routing || getVersion(ctx, abandonedTaskSupersededChangeID) == wf.DefaultVersion {
+	if in.routing {
 		return
 	}
 	dctx, _ := wf.NewDisconnectedContext(ctx)
@@ -178,7 +170,7 @@ func (e *stageFailedError) Error() string {
 func (in *interpreter) resolveTaskStage(
 	ctx wf.Context, nodeKey domain.NodeKey, out port.CreateTaskOutput, sig stageTransitionSignal,
 ) (domain.NodeKey, string, error) {
-	if getVersion(ctx, stageFailChangeID) != wf.DefaultVersion && sig.Failed {
+	if sig.Failed {
 		if err := updateTaskStatus(ctx, port.UpdateTaskStatusInput{
 			TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusFailed, RecordVersion: sig.RecordVersion,
 			ErrorClass: sig.Reason,
@@ -194,17 +186,15 @@ func (in *interpreter) resolveTaskStage(
 	if err != nil {
 		return nodeKey, "", err
 	}
-	if getVersion(ctx, taskCompletedStatusChangeID) != wf.DefaultVersion && completion.AllDone {
+	if completion.AllDone {
 		if err := updateTaskStatus(ctx, port.UpdateTaskStatusInput{
 			TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusCompleted,
 		}); err != nil {
 			return nodeKey, "", err
 		}
 	}
-	if getVersion(ctx, taskResultVariablesChangeID) != wf.DefaultVersion {
-		if err := in.mergeResult(sig.ResultJSON); err != nil {
-			return nodeKey, "", err
-		}
+	if err := in.mergeResult(sig.ResultJSON); err != nil {
+		return nodeKey, "", err
 	}
 	in.history.Push(nodeKey)
 	return nodeKey, sig.ResultJSON, nil

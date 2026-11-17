@@ -25,12 +25,10 @@ type cseLookup struct {
 // absent as an unknown id, the way row-level security makes it.
 type cseTaskRepo struct {
 	port.TaskRepository
-	tasks      []*domain.Task
-	getCalls   []cseLookup
-	getErrs    []error // consumed one per GetByID call; nil means "look it up"
-	listCalls  []cseLookup
-	nodeCalls  []cseLookup
-	nodeKeyArg []string
+	tasks     []*domain.Task
+	getCalls  []cseLookup
+	getErrs   []error // consumed one per GetByID call; nil means "look it up"
+	listCalls []cseLookup
 }
 
 func (r *cseTaskRepo) GetByID(_ context.Context, tenantID, id uuid.UUID) (*domain.Task, error) {
@@ -62,8 +60,6 @@ func (r *cseTaskRepo) ListByInstance(_ context.Context, tenantID, instanceID uui
 }
 
 func (r *cseTaskRepo) GetByInstanceAndNode(_ context.Context, tenantID, instanceID uuid.UUID, nodeKey string) (*domain.Task, error) {
-	r.nodeCalls = append(r.nodeCalls, cseLookup{tenantID, instanceID})
-	r.nodeKeyArg = append(r.nodeKeyArg, nodeKey)
 	for _, t := range r.tasks {
 		if t.WorkflowInstanceID == instanceID && t.TenantID == tenantID && t.NodeKey == nodeKey {
 			return t, nil

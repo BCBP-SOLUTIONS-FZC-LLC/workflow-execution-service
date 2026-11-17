@@ -2,11 +2,9 @@ package postgres
 
 import (
 	"context"
-	"errors"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres/db"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
@@ -36,10 +34,6 @@ func (r *AssigneeOverrideRepo) Create(ctx context.Context, override *domain.Assi
 			Reason:             toNullableText(override.Reason),
 			ActorUserID:        override.ActorUserID,
 		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			// The id is derived from the action, so a conflict is a retry: keep the stored row.
-			row, err = db.New(dbtx).GetAssigneeOverride(ctx, override.ID)
-		}
 		if err != nil {
 			return mapErr(err)
 		}

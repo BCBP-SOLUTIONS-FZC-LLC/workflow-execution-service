@@ -8,7 +8,6 @@ import (
 
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
-	wf "go.temporal.io/sdk/workflow"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -41,7 +40,6 @@ func (l *eventLog) snapshot() []string {
 
 type degradedPauseScenario struct {
 	pauseBeforeFailure   bool
-	oldVersion           bool
 	pauseDuringExitWrite bool
 	signals              []timedSignal
 }
@@ -76,9 +74,6 @@ func runDegradedPause(t *testing.T, sc degradedPauseScenario) []string {
 	t.Helper()
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
-	if sc.oldVersion {
-		env.OnGetVersion("pause-survives-degraded", wf.DefaultVersion, 1).Return(wf.DefaultVersion)
-	}
 
 	log := &eventLog{}
 	released := make(chan struct{})
@@ -211,18 +206,6 @@ func TestDegraded_ACancelDuringThePauseHeldParkTerminates(t *testing.T) {
 		cancelSignal(12 * tick),
 	}})
 	assertEvents(t, got, []string{"status:DEGRADED", "cancel"})
-}
-
-func TestDegraded_AnEpisodeBeganBeforeTheChangeKeepsTheOldBehaviour(t *testing.T) {
-	got := runDegradedPause(t, degradedPauseScenario{
-		oldVersion: true,
-		signals: []timedSignal{
-			pauseSignal(6*tick, domain.InitiatorTenantState, ""),
-			forceForwardSignal(12 * tick),
-			cancelSignal(30 * tick),
-		},
-	})
-	assertEvents(t, got, []string{"status:DEGRADED", "status:RUNNING", "cancel"})
 }
 
 func TestDegraded_AResumeAfterTheParkEndedLiftsTheHeldPause(t *testing.T) {

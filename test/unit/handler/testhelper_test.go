@@ -46,7 +46,6 @@ var (
 type fakeTaskService struct {
 	list             func(context.Context, uuid.UUID, port.ReadScope, port.TaskFilter, port.Page) (port.PageResult[*port.Task], error)
 	get              func(context.Context, uuid.UUID, uuid.UUID, port.ReadScope) (*port.Task, []*port.TaskAssignment, error)
-	getByNode        func(context.Context, uuid.UUID, uuid.UUID, string) (*port.Task, error)
 	claim            func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int64) (*port.Task, error)
 	complete         func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, json.RawMessage, int64) (*port.Task, error)
 	deferTask        func(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string, int64) (*port.Task, error)
@@ -67,13 +66,6 @@ func (f *fakeTaskService) Get(ctx context.Context, tenantID, taskID uuid.UUID, s
 		return f.get(ctx, tenantID, taskID, scope)
 	}
 	return nil, nil, nil
-}
-
-func (f *fakeTaskService) GetByNode(ctx context.Context, tenantID, instanceID uuid.UUID, nodeKey string) (*port.Task, error) {
-	if f.getByNode != nil {
-		return f.getByNode(ctx, tenantID, instanceID, nodeKey)
-	}
-	return nil, nil
 }
 
 func (f *fakeTaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.UUID, recordVersion int64) (*port.Task, error) {

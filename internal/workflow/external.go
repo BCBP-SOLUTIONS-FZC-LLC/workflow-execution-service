@@ -109,7 +109,7 @@ func (in *interpreter) registerWaitingExternalQuery(ctx wf.Context) error {
 }
 
 func (in *interpreter) receive(ctx wf.Context, nodeKey domain.NodeKey, messageName string) {
-	if in.external[string(nodeKey)] && getVersion(ctx, externalWaitChangeID) != wf.DefaultVersion {
+	if in.external[string(nodeKey)] {
 		ch, cancel := in.waitExternal(ctx, string(nodeKey))
 		defer cancel()
 		var answered domain.NodeKey
@@ -121,7 +121,7 @@ func (in *interpreter) receive(ctx wf.Context, nodeKey domain.NodeKey, messageNa
 
 func (in *interpreter) addMessageBoundary(ctx wf.Context, sel wf.Selector, host string, m dsl.MessagePath, onFire func(boundaryFire)) (cancel func()) {
 	key := dsl.BoundaryWaitKey(host, m.BoundaryID)
-	if m.BoundaryID != "" && in.external[key] && getVersion(ctx, externalWaitChangeID) != wf.DefaultVersion {
+	if m.BoundaryID != "" && in.external[key] {
 		ch, cancelWait := in.waitExternal(ctx, key)
 		sel.AddReceive(ch, func(c wf.ReceiveChannel, more bool) {
 			var answered domain.NodeKey

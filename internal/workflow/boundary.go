@@ -16,8 +16,8 @@ const kindInstanceTerminated = "instance-terminated"
 
 var errInstanceTerminated = errors.New("workflow: instance cancelled")
 
-func endsPath(ctx wf.Context, f *boundaryFire) bool {
-	return getVersion(ctx, boundaryEndsPathChangeID) != wf.DefaultVersion && f.TargetDept == ""
+func endsPath(f *boundaryFire) bool {
+	return f.TargetDept == ""
 }
 
 type boundaryFire struct {
@@ -46,7 +46,7 @@ func (in *interpreter) runFiredPath(ctx wf.Context, plan *dsl.CompiledPlan, f *b
 		}
 		return out.LastNode, out.LastResult, errPathEnded
 	}
-	if endsPath(ctx, f) {
+	if endsPath(f) {
 		return "", "", errPathEnded
 	}
 	return in.runDepartment(ctx, plan, f.TargetDept)
@@ -66,18 +66,17 @@ func (in *interpreter) spawnFiredPath(ctx wf.Context, plan *dsl.CompiledPlan, f 
 		})
 		return
 	}
-	if !endsPath(ctx, f) {
+	if !endsPath(f) {
 		in.spawnNonInterruptingTarget(ctx, plan, f.TargetDept)
 	}
 }
 
 func addTimerCase(ctx wf.Context, sel wf.Selector, duration string, interrupting bool, targetDept string, onFire func(boundaryFire)) (cancel func()) {
-	iso := getVersion(ctx, isoTimerDurationChangeID) != wf.DefaultVersion
 	if duration == "" {
 		return func() {}
 	}
 	dur, err := time.ParseDuration(duration)
-	if err != nil && iso {
+	if err != nil {
 		dur, err = parseISODuration(duration)
 	}
 	if err != nil {

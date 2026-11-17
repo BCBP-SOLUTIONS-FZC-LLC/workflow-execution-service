@@ -4,31 +4,15 @@ import (
 	"slices"
 	"testing"
 
-	"go.temporal.io/sdk/testsuite"
-	wf "go.temporal.io/sdk/workflow"
-
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
-// TestBranchKeys pins that branches are keyed by place, and, in a history
-// recorded before parallelJoinByBranchChangeID, by DeptID as they were.
+// TestBranchKeys pins that branches are keyed by place, so two branches of
+// the same department join separately.
 func TestBranchKeys(t *testing.T) {
-	branches := []dsl.ParallelBranch{{DeptID: "Ops"}, {DeptID: "Ops"}}
-	for _, tc := range []struct {
-		version wf.Version
-		want    []string
-	}{{1, []string{"0", "1"}}, {wf.DefaultVersion, []string{"Ops", "Ops"}}} {
-		var suite testsuite.WorkflowTestSuite
-		env := suite.NewTestWorkflowEnvironment()
-		env.OnGetVersion(parallelJoinByBranchChangeID, wf.DefaultVersion, 1).Return(tc.version)
-		var got []string
-		env.ExecuteWorkflow(func(ctx wf.Context) error {
-			got = branchKeys(ctx, branches)
-			return nil
-		})
-		if !slices.Equal(got, tc.want) {
-			t.Errorf("version %d: keys = %v, want %v", tc.version, got, tc.want)
-		}
+	got := branchKeys([]dsl.ParallelBranch{{DeptID: "Ops"}, {DeptID: "Ops"}})
+	if want := []string{"0", "1"}; !slices.Equal(got, want) {
+		t.Errorf("keys = %v, want %v", got, want)
 	}
 }
 

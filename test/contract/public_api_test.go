@@ -100,7 +100,7 @@ func TestPublicContract_Instances_And_Tasks(t *testing.T) {
 	}
 	task := &port.Task{
 		ID: uuid.New(), TenantID: tenant, WorkflowInstanceID: instance.ID, NodeKey: "eng/Review", TaskType: "review", DepartmentID: uuid.New(),
-		RequiredLevel: "reviewer", Status: port.TaskStatusReady, RecordVersion: 3, AssigneeMode: "single", AssigneeCount: 1,
+		Status: port.TaskStatusReady, RecordVersion: 3, AssigneeMode: "single", AssigneeCount: 1,
 		ExtrasJSON: json.RawMessage(`{}`), CreatedAt: at, UpdatedAt: at,
 	}
 	assignment := &port.TaskAssignment{ID: uuid.New(), TenantID: tenant, TaskID: task.ID, UserID: user, IsLead: true, IsActive: true, AssignedAt: &at, UpdatedAt: at}

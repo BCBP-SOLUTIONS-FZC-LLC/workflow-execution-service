@@ -201,27 +201,6 @@ func TestRunExclusiveTerminates_EndsThePath(t *testing.T) {
 	}
 }
 
-// TestRunExclusiveTerminates_BeforeTheChangeTerminates pins the behaviour a
-// history recorded before exclusiveEndCompletesPathChangeID replays.
-func TestRunExclusiveTerminates_BeforeTheChangeTerminates(t *testing.T) {
-	var suite testsuite.WorkflowTestSuite
-	env := suite.NewTestWorkflowEnvironment()
-	env.OnGetVersion(exclusiveEndCompletesPathChangeID, wf.DefaultVersion, 1).Return(wf.DefaultVersion)
-
-	var out stepOutcome
-	var err error
-	env.ExecuteWorkflow(func(ctx wf.Context) error {
-		in := newInterpreter("tenant", "instance", "", nil, nil)
-		out, err = in.runExclusive(ctx, &dsl.CompiledPlan{Name: "main"}, []dsl.ExclusiveBranch{
-			{ConditionExpression: `decision == "reject"`, Terminates: true},
-		}, `{"decision":"reject"}`, nil)
-		return nil
-	})
-	if err != nil || !out.Terminated {
-		t.Errorf("runExclusive = %+v, %v; want Terminated", out, err)
-	}
-}
-
 // TestRunExclusiveRevertPopsHistory exercises runExclusive's RevertTo* path
 // — structurally the same transfer mechanism as force-back, but
 // condition-triggered (LLD §2.6 point 4).
