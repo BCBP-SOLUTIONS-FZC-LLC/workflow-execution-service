@@ -49,6 +49,8 @@ const (
 	InitiatorDegradedRecovery = "degraded_recovery"
 )
 
+const CascadeSourceInstanceTerminate = "instance_terminate"
+
 const (
 	TerminatedInitiatorAdmin       = "admin"
 	TerminatedInitiatorTenantState = "tenant_state"
@@ -135,10 +137,11 @@ type WorkflowInstanceTerminatedPayload struct {
 	StartedByUserID uuid.UUID  `json:"started_by_user_id"`
 	Initiator       string     `json:"initiator"`
 	ActorUserID     *uuid.UUID `json:"actor_user_id,omitempty"`
+	Reason          *string    `json:"reason,omitempty"`
 }
 
-func NewWorkflowInstanceTerminatedPayload(core CommonCore, startedByUserID uuid.UUID, initiator string, actorUserID *uuid.UUID) WorkflowInstanceTerminatedPayload {
-	return WorkflowInstanceTerminatedPayload{CommonCore: core, StartedByUserID: startedByUserID, Initiator: initiator, ActorUserID: actorUserID}
+func NewWorkflowInstanceTerminatedPayload(core CommonCore, startedByUserID uuid.UUID, initiator string, actorUserID *uuid.UUID, reason *string) WorkflowInstanceTerminatedPayload {
+	return WorkflowInstanceTerminatedPayload{CommonCore: core, StartedByUserID: startedByUserID, Initiator: initiator, ActorUserID: actorUserID, Reason: reason}
 }
 
 type WorkflowInstanceDegradedPayload struct {
@@ -296,4 +299,24 @@ type WorkflowTaskSLABreachedPayload struct {
 
 func NewWorkflowTaskSLABreachedPayload(core CommonCore, task TaskScopedCore, dueAt time.Time) WorkflowTaskSLABreachedPayload {
 	return WorkflowTaskSLABreachedPayload{CommonCore: core, TaskScopedCore: task, DueAt: dueAt}
+}
+
+const (
+	TenantStatusTrial        = "trial"
+	TenantStatusActive       = "active"
+	TenantStatusPastDue      = "past_due"
+	TenantStatusCancelled    = "cancelled"
+	TenantStatusSuspended    = "suspended"
+	TenantStatusTrialExpired = "trial_expired"
+	TenantStatusOffboarded   = "offboarded"
+)
+
+func IsKnownTenantStatus(status string) bool {
+	switch status {
+	case TenantStatusTrial, TenantStatusActive, TenantStatusPastDue, TenantStatusCancelled,
+		TenantStatusSuspended, TenantStatusTrialExpired, TenantStatusOffboarded:
+		return true
+	default:
+		return false
+	}
 }

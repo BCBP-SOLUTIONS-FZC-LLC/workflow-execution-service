@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	pgdomain "github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
@@ -101,6 +103,8 @@ func (h *Handler) decodeEnvelope(c *gin.Context) (events.Envelope[json.RawMessag
 // the type is request-controlled text, so it must not become a label value.
 const unknownEventType = "unknown"
 
+const resultIgnored = "ignored"
+
 func (h *Handler) unhandledType(c *gin.Context, eventType string) {
 	h.logWarn("internal events: ignoring unhandled type", map[string]any{"event_type": eventType})
 	incIngestTotal(unknownEventType, "unhandled_type")
@@ -185,6 +189,10 @@ func (h *Handler) badPayload(c *gin.Context, eventType, detail string) {
 func (h *Handler) reconcilerError(c *gin.Context, eventType string, err error) {
 	incIngestTotal(eventType, "error")
 	h.logError("internal events: reconciler call failed", map[string]any{"event_type": eventType, "error": err.Error()})
+	if status, _, _ := mapErr(err); status == http.StatusServiceUnavailable {
+		errResponse(c, err)
+		return
+	}
 	writeProblem(c, http.StatusInternalServerError, CodeInternal, "failed to process event", nil)
 }
 
@@ -220,6 +228,17 @@ func (h *Handler) respondOK(c *gin.Context, eventID uuid.UUID, consumer, eventTy
 		})
 	}
 	h.markOK(eventType)
+	c.Status(http.StatusOK)
+}
+
+func (h *Handler) respondIgnored(c *gin.Context, eventID uuid.UUID, consumer, eventType string) {
+	if err := h.processedEvents.MarkProcessed(c.Request.Context(), eventID, consumer); err != nil {
+		h.logWarn("internal events: MarkProcessed failed for an ignored event", map[string]any{
+			"event_type": eventType, "event_id": eventID, "error": err.Error(),
+		})
+	}
+	incIngestTotal(eventType, resultIgnored)
+	markLastReceived(eventType)
 	c.Status(http.StatusOK)
 }
 
@@ -502,6 +521,12 @@ func (h *Handler) handleUserAvailabilityChanged(c *gin.Context, env events.Envel
 		return
 	}
 
+	if !isKnownAvailability(p.Status) {
+		h.logWarn("internal events: ignoring unrecognised availability status", map[string]any{"event_type": eventType, "event_id": eventID})
+		h.respondIgnored(c, eventID, port.ConsumerUser, eventType)
+		return
+	}
+
 	scopeKey := port.UserAvailabilityScope(tenantID, userID)
 	input := port.UserAvailabilityInput{
 		TenantID: tenantID, UserID: userID, Status: p.Status,
@@ -513,6 +538,15 @@ func (h *Handler) handleUserAvailabilityChanged(c *gin.Context, env events.Envel
 	}
 
 	h.respondOK(c, eventID, port.ConsumerUser, eventType)
+}
+
+func isKnownAvailability(status string) bool {
+	switch status {
+	case port.AvailabilityAvailable, port.AvailabilityBusy, port.AvailabilityOOO:
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *Handler) applyUserAvailabilityLocked(
@@ -605,6 +639,10 @@ func (h *Handler) handleMembershipRevoked(c *gin.Context, env events.Envelope[js
 	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
 }
 
+type tenantMembershipsPurgedPayload struct {
+	TenantID string `json:"tenant_id"`
+}
+
 func (h *Handler) handleTenantMembershipsPurged(c *gin.Context, env events.Envelope[json.RawMessage]) {
 	const eventType = eventTypeTenantMembershipsPurged
 	eventID, ok := h.parseEventID(c, eventType, env.ID)
@@ -615,15 +653,24 @@ func (h *Handler) handleTenantMembershipsPurged(c *gin.Context, env events.Envel
 	if !ok {
 		return
 	}
+	var p tenantMembershipsPurgedPayload
+	if hasPayload(env.Payload) {
+		if err := json.Unmarshal(env.Payload, &p); err != nil {
+			h.badPayload(c, eventType, "invalid TenantMembershipsPurged payload")
+			return
+		}
+	}
+	if p.TenantID != "" && !h.payloadTenantMatches(c, eventType, p.TenantID, tenantID) {
+		return
+	}
 
 	if h.alreadyProcessed(c, eventID, port.ConsumerMembership, eventType) {
 		return
 	}
 
-	ctx := guCtx(c.Request.Context(), tenantID)
-	if err := h.tenantLifecycle.Apply(ctx, port.TenantLifecycleInput{
+	if err := h.applyTenantLifecycleLocked(c, eventType, port.TenantLifecycleInput{
 		TenantID:       tenantID,
-		Status:         "offboarded",
+		Status:         domain.TenantStatusOffboarded,
 		PreviousStatus: "active",
 		ChangedAt:      env.Timestamp,
 	}); err != nil {
@@ -632,6 +679,24 @@ func (h *Handler) handleTenantMembershipsPurged(c *gin.Context, env events.Envel
 	}
 
 	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
+}
+
+func hasPayload(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
+}
+
+func (h *Handler) payloadTenantMatches(c *gin.Context, eventType, raw string, envelopeTenant uuid.UUID) bool {
+	payloadTenant, err := uuid.Parse(raw)
+	if err != nil {
+		h.badPayload(c, eventType, "invalid tenant_id in payload")
+		return false
+	}
+	if payloadTenant != envelopeTenant {
+		h.badPayload(c, eventType, "tenant_id in payload does not match the envelope tenant_id")
+		return false
+	}
+	return true
 }
 
 func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[json.RawMessage]) {
@@ -649,12 +714,11 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 	if !ok {
 		return
 	}
-	if _, err := uuid.Parse(p.TenantID); err != nil {
-		h.badPayload(c, eventType, "invalid tenant_id in payload")
+	if !h.payloadTenantMatches(c, eventType, p.TenantID, tenantID) {
 		return
 	}
 	changedAt, err := time.Parse(time.RFC3339, p.ChangedAt)
-	if err != nil {
+	if err != nil || changedAt.IsZero() {
 		h.badPayload(c, eventType, "invalid changed_at in payload")
 		return
 	}
@@ -663,8 +727,21 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 		return
 	}
 
-	scopeKey := "tenant:" + tenantID.String()
-	if err := h.applyTenantStateChangeLocked(c, p, tenantID, scopeKey, changedAt); err != nil {
+	if !domain.IsKnownTenantStatus(p.Status) {
+		h.logWarn("internal events: ignoring unrecognised tenant status", map[string]any{"event_type": eventType, "event_id": eventID})
+		h.respondIgnored(c, eventID, port.ConsumerMembership, eventType)
+		return
+	}
+
+	if err := h.applyTenantLifecycleLocked(c, eventType, port.TenantLifecycleInput{
+		TenantID:       tenantID,
+		Status:         p.Status,
+		PreviousStatus: p.PreviousStatus,
+		Plan:           p.Plan,
+		PreviousPlan:   p.PreviousPlan,
+		ChangedAt:      changedAt,
+		Cause:          p.Cause,
+	}); err != nil {
 		h.reconcilerError(c, eventType, err)
 		return
 	}
@@ -672,37 +749,31 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
 }
 
-func (h *Handler) applyTenantStateChangeLocked(
-	c *gin.Context, p tenantStateChangedPayload,
-	tenantID uuid.UUID, scopeKey string, changedAt time.Time,
-) error {
+func (h *Handler) shouldApplyTenantChange(ctx context.Context, scopeKey string, in port.TenantLifecycleInput) (bool, error) {
+	if in.Status == domain.TenantStatusOffboarded {
+		return h.recency.ShouldApplyUnlessOlder(ctx, scopeKey, in.ChangedAt)
+	}
+	return h.recency.ShouldApply(ctx, scopeKey, in.ChangedAt)
+}
+
+func (h *Handler) applyTenantLifecycleLocked(c *gin.Context, eventType string, in port.TenantLifecycleInput) error {
+	scopeKey := "tenant:" + in.TenantID.String()
 	return h.recency.WithLock(c.Request.Context(), scopeKey, func(ctx context.Context) error {
-		if p.Status != "offboarded" {
-			shouldApply, err := h.recency.ShouldApply(ctx, scopeKey, changedAt)
-			if err != nil {
-				return err
-			}
-			if !shouldApply {
-				return nil
-			}
+		shouldApply, err := h.shouldApplyTenantChange(ctx, scopeKey, in)
+		if err != nil {
+			return err
+		}
+		if !shouldApply {
+			return nil
 		}
 
-		applyCtx := guCtx(ctx, tenantID)
-		if err := h.tenantLifecycle.Apply(applyCtx, port.TenantLifecycleInput{
-			TenantID:       tenantID,
-			Status:         p.Status,
-			PreviousStatus: p.PreviousStatus,
-			Plan:           p.Plan,
-			PreviousPlan:   p.PreviousPlan,
-			ChangedAt:      changedAt,
-			Cause:          p.Cause,
-		}); err != nil {
+		if err := h.tenantLifecycle.Apply(guCtx(ctx, in.TenantID), in); err != nil {
 			return err
 		}
 
-		if err := h.recency.Commit(ctx, scopeKey, changedAt); err != nil {
+		if err := h.recency.Commit(ctx, scopeKey, in.ChangedAt); err != nil {
 			h.logWarn("internal events: recency Commit failed after Apply succeeded", map[string]any{
-				"event_type": eventTypeTenantStateChanged, "scope_key": scopeKey, "error": err.Error(),
+				"event_type": eventType, "scope_key": scopeKey, "error": err.Error(),
 			})
 		}
 		return nil

@@ -26,7 +26,7 @@ WHERE (tenant_retention.offboarded_at IS NULL OR tenant_retention.offboarded_at 
 -- name: LockCurrentTenantRetention :one
 SELECT record_version FROM tenant_retention
 WHERE tenant_id = $1 AND record_version = $2 AND returned_at IS NULL
-FOR SHARE;
+FOR UPDATE SKIP LOCKED;
 
 -- name: ListTenantsDueForPurge :many
 SELECT tenant_id, attempts, record_version FROM tenant_retention
@@ -83,6 +83,10 @@ WHERE id IN (SELECT s.id FROM connector_send_intents s WHERE s.tenant_id = $1 LI
 DELETE FROM user_availability
 WHERE (tenant_id, user_id) IN (SELECT u.tenant_id, u.user_id FROM user_availability u WHERE u.tenant_id = $1 LIMIT $2);
 
+-- name: PurgeTenantEndedDelegations :execrows
+DELETE FROM ended_delegation
+WHERE (tenant_id, delegation_id) IN (SELECT e.tenant_id, e.delegation_id FROM ended_delegation e WHERE e.tenant_id = $1 LIMIT $2);
+
 -- name: PurgeTenantQueues :execrows
 DELETE FROM active_task_queues WHERE tenant_id = $1;
 
@@ -104,6 +108,7 @@ SELECT (
     OR EXISTS (SELECT 1 FROM connector_document_attempts da WHERE da.tenant_id = @tenant_text::text)
     OR EXISTS (SELECT 1 FROM connector_send_intents s WHERE s.tenant_id = @tenant_text::text)
     OR EXISTS (SELECT 1 FROM user_availability u WHERE u.tenant_id = @tenant_id::uuid)
+    OR EXISTS (SELECT 1 FROM ended_delegation ed WHERE ed.tenant_id = @tenant_id::uuid)
     OR EXISTS (SELECT 1 FROM active_task_queues q WHERE q.tenant_id = @tenant_id::uuid)
     OR EXISTS (SELECT 1 FROM event_recency_guard g WHERE g.scope_key = @tenant_scope::text OR g.scope_key LIKE @user_scope::text)
 )::boolean AS has_rows;

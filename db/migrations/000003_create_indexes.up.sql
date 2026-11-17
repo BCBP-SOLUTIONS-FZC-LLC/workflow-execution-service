@@ -28,6 +28,10 @@ CREATE INDEX idx_workflow_task_tenant_dept_status
 CREATE INDEX idx_workflow_task_instance_status
     ON workflow_task (workflow_instance_id, status);
 
+-- Serves the delete check of the (tenant_id, deferred_from_task_id) foreign key.
+CREATE INDEX IF NOT EXISTS idx_workflow_task_tenant_deferred_from
+    ON workflow_task (tenant_id, deferred_from_task_id);
+
 -- Keyset-pagination-friendly (created_at DESC, id DESC tiebreaker) — no
 -- OFFSET-oriented index anywhere in this schema.
 CREATE INDEX idx_workflow_task_tenant_keyset
@@ -43,6 +47,10 @@ CREATE UNIQUE INDEX uq_workflow_task_assignment_active
 
 CREATE INDEX idx_workflow_task_assignment_task_active
     ON workflow_task_assignment (task_id) WHERE is_active;
+
+-- Serves the delete check of the (tenant_id, task_id) foreign key.
+CREATE INDEX IF NOT EXISTS idx_workflow_task_assignment_tenant_task
+    ON workflow_task_assignment (tenant_id, task_id);
 
 -- "Show me my active tasks" — the single most common dashboard query.
 CREATE INDEX idx_workflow_task_assignment_user_active

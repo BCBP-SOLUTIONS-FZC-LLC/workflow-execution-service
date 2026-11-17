@@ -56,7 +56,7 @@ func TestTenantLifecycleReconciler_Apply_StatusTransitions(t *testing.T) {
 		assert.Equal(t, domain.InstanceStatusCompleted, instances.byID[completed.ID].Status, "an already-terminal instance must be left untouched")
 		assert.Equal(t, domain.TaskStatusFailed, tasks.byID[activeTask.ID].Status)
 		assert.False(t, assignments.byID[a.ID].IsActive)
-		assert.Len(t, outbox.enqueued, 2)
+		assert.Len(t, outbox.enqueued, 3, "one task-failed event and two instance terminated events")
 		require.NotEmpty(t, temporal.terminate)
 	})
 

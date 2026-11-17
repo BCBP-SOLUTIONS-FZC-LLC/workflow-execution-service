@@ -25,6 +25,10 @@ func (h *Handler) ReassignDelegate(c *gin.Context) {
 	if !bindInternalJSON(c, &req) {
 		return
 	}
+	if req.NewDelegateID == req.OldDelegateID {
+		writeInvalidParam(c, "new_delegate_id", "new_delegate_id must differ from old_delegate_id")
+		return
+	}
 
 	reassigned, err := h.workflowClient.ReassignDelegate(c.Request.Context(), port.ReassignDelegateInput{
 		TenantID:      req.TenantID,

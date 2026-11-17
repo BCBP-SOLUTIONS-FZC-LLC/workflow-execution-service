@@ -399,12 +399,14 @@ paths:
     post:
       operationId: pauseUserTasks
       tags: [Internal (Definition)]
-      summary: Pause every running instance holding a task of a removed member
+      summary: Pause every running or degraded instance holding a task of a removed member
       description: >
         Called by the Definition Service when a membership revocation
         invalidates a published version the user is a default assignee of.
-        Each RUNNING instance with an active assignment for the user is sent a
-        pause signal with initiator safety_net. The call attempts every
+        Each RUNNING or DEGRADED instance with an active assignment for the user
+        is sent a pause signal with initiator safety_net; an instance already
+        paused by another initiator is signalled too, and the safety-net pause
+        takes it over. The call attempts every
         instance. A signal that finds the workflow already gone counts as
         paused. A failed read of a task or an instance, or a failed signal of
         any other kind, does not stop the others and makes the call answer 503
@@ -713,9 +715,10 @@ paths:
       description: >
         Internal, service-to-service endpoint called by the Org & Membership Service (not routed through
         the gateway; no x-tenant-id / x-user-id headers) when a delegation is superseded or
-        transferred. Vacates old_delegate_id's active READY/IN_PROGRESS assignments and
-        creates equivalent assignments for new_delegate_id, scoped to tenant_id (and
-        optionally to a single delegation_id).
+        transferred. Vacates old_delegate_id's active assignments that a delegation created
+        and creates equivalent assignments for new_delegate_id, scoped to tenant_id. Without
+        delegation_id only the assignments tagged by some delegation move; the delegate's own
+        tasks stay. new_delegate_id must differ from old_delegate_id (400 otherwise).
       security:
         - InternalServiceAuth: []
       parameters:
@@ -744,7 +747,10 @@ paths:
                   type: string
                   format: uuid
                   nullable: true
-                  description: Optional delegation UUID to scope the reassignment to a single delegation.
+                  description: >
+                    Optional delegation UUID to scope the reassignment to a single delegation. When
+                    omitted or null, every assignment that carries any delegation's tag moves, and
+                    assignments no delegation created are left alone.
       responses:
         "200":
           description: Reassignment completed.
@@ -795,8 +801,11 @@ paths:
         Internal, service-to-service endpoint called by the Org & Membership Service (not routed through
         the gateway; no x-tenant-id / x-user-id headers) when a delegation ends without a
         replacement delegate. Vacates delegate_user_id's active READY/IN_PROGRESS assignments
-        for the given tenant (and optionally a single delegation_id) without creating
-        replacement assignments; the assignments revert to the compiled plan's default assignee.
+        for the given tenant that a delegation created (optionally a single delegation_id).
+        Each vacated assignment returns to the assignee the delegation took it from, the
+        original assignee of the work, when that assignee is eligible for the task; otherwise
+        the task is left without an active assignee. The delegate's own tasks, which no
+        delegation created, are never cancelled.
       security:
         - InternalServiceAuth: []
       parameters:
@@ -821,7 +830,10 @@ paths:
                   type: string
                   format: uuid
                   nullable: true
-                  description: Optional delegation UUID to scope the cancellation to a single delegation.
+                  description: >
+                    Optional delegation UUID to scope the cancellation to a single delegation. When
+                    omitted or null, every assignment that carries any delegation's tag is cancelled,
+                    and assignments no delegation created are left alone.
       responses:
         "200":
           description: Cancellation completed.

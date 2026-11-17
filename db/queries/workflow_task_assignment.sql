@@ -9,6 +9,13 @@ WHERE task_id = $1 AND is_active;
 SELECT * FROM workflow_task_assignment
 WHERE tenant_id = $1 AND user_id = $2 AND is_active;
 
+-- name: ListActiveAssignmentsByReasonTag :many
+-- Backs TaskAssignmentRepo.ListActiveByReasonTag -- a delegation's work is found
+-- by its tag wherever it sits, because the tag stays in the reason of a row a
+-- later delegation moved on.
+SELECT * FROM workflow_task_assignment
+WHERE tenant_id = $1 AND is_active AND strpos(reason, sqlc.arg('tag')::text) > 0;
+
 -- name: ListActiveTasksByUser :many
 -- Backs TaskService.ActiveByUser -- workflow_task_assignment has no created_at
 -- column of its own (assigned_at is nullable) so the keyset orders on the
@@ -68,6 +75,14 @@ RETURNING *;
 UPDATE workflow_task_assignment
 SET is_lead = false, updated_at = now()
 WHERE task_id = $1 AND id != $2 AND is_lead;
+
+-- name: ClaimTaskAssignmentLead :one
+-- Backs TaskAssignmentRepo.ClaimLead -- the assignee's own claim; a repeated
+-- claim keeps the first claim time.
+UPDATE workflow_task_assignment
+SET is_lead = true, claimed_at = COALESCE(claimed_at, now()), updated_at = now()
+WHERE id = $1
+RETURNING *;
 
 -- name: SetTaskAssignmentLead :one
 UPDATE workflow_task_assignment

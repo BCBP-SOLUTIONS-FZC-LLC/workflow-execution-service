@@ -11,6 +11,8 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
+const tenantOffboardedReason = "tenant offboarded"
+
 var _ port.TenantLifecycleReconciler = (*TenantLifecycleReconciler)(nil)
 
 type TenantLifecycleReconciler struct {
@@ -38,6 +40,10 @@ func (s *TenantLifecycleReconciler) logger() port.Logger {
 }
 
 func (s *TenantLifecycleReconciler) Apply(ctx context.Context, in port.TenantLifecycleInput) error {
+	if !domain.IsKnownTenantStatus(in.Status) {
+		s.logger().Warn("tenant lifecycle: ignoring unrecognised status", map[string]any{"tenant_id": in.TenantID})
+		return nil
+	}
 	if err := s.recordStatus(ctx, in); err != nil {
 		return err
 	}
@@ -74,7 +80,7 @@ func (s *TenantLifecycleReconciler) now() time.Time {
 
 func (s *TenantLifecycleReconciler) applyStatusTransition(ctx context.Context, in port.TenantLifecycleInput) error {
 	switch {
-	case in.Status == "offboarded":
+	case in.Status == domain.TenantStatusOffboarded:
 		if err := s.terminateAllNonTerminal(ctx, in.TenantID); err != nil {
 			return err
 		}
@@ -108,7 +114,7 @@ func (s *TenantLifecycleReconciler) eventTime(in port.TenantLifecycleInput) time
 
 func runsInstances(status string) bool {
 	switch status {
-	case "trial", "active", "past_due":
+	case domain.TenantStatusTrial, domain.TenantStatusActive, domain.TenantStatusPastDue:
 		return true
 	default:
 		return false
@@ -181,7 +187,7 @@ func (s *TenantLifecycleReconciler) recordOffboarded(ctx context.Context, tenant
 }
 
 func (s *TenantLifecycleReconciler) terminateOne(ctx context.Context, tenantID uuid.UUID, inst *domain.Instance) error {
-	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, inst.TemporalRunID, "tenant offboarded"); err != nil {
+	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, inst.TemporalRunID, tenantOffboardedReason); err != nil {
 		return err
 	}
 	var updated *domain.Instance
@@ -197,16 +203,18 @@ func (s *TenantLifecycleReconciler) terminateOne(ctx context.Context, tenantID u
 		if err != nil {
 			return wrapInstanceErr(err)
 		}
-		if err := cascadeFailTasksForInstance(ctx, s.Tasks, s.Assignments, tenantID, inst.ID); err != nil {
+		sink := instanceEventSink{Outbox: s.Outbox, Validator: s.Validator}
+		cascade := taskCascade{Tasks: s.Tasks, Assignments: s.Assignments, Sink: sink}
+		if err := cascade.failTasks(ctx, tenantID, updated); err != nil {
 			return err
 		}
-		payload := domain.NewWorkflowInstanceTerminatedPayload(instanceCore(updated), updated.StartedByUserID, domain.TerminatedInitiatorTenantState, nil)
-		sink := instanceEventSink{Outbox: s.Outbox, Validator: s.Validator}
+		reason := tenantOffboardedReason
+		payload := domain.NewWorkflowInstanceTerminatedPayload(instanceCore(updated), updated.StartedByUserID, domain.TerminatedInitiatorTenantState, nil, &reason)
 		return sink.enqueueInstanceEvent(ctx, tenantID.String(), domain.EventWorkflowInstanceTerminated, inst.ID.String(), "", payload)
 	}); err != nil {
 		return err
 	}
-	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, inst.TemporalRunID, "tenant offboarded"); err != nil {
+	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, inst.TemporalRunID, tenantOffboardedReason); err != nil {
 		s.logger().Warn("tenant lifecycle: failed to close the workflow execution after the instance was marked terminated", map[string]any{"instance_id": inst.ID, "error": err.Error()})
 	}
 	return nil

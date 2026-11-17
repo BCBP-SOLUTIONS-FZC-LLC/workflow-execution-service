@@ -40,6 +40,7 @@ func TestCancelByDelegate_ActiveAssignmentOnATerminalInstance_IsVacatedAndCounte
 			task := newTask(tenantID, inst.ID)
 			require.NoError(t, taskRepo.Create(ctx, task))
 			assignment := newTaskAssignment(tenantID, task.ID, delegate)
+			assignment.Reason = "delegation:" + uuid.NewString()
 			require.NoError(t, assignmentRepo.Create(ctx, assignment))
 			ended, err := instanceRepo.UpdateStatus(ctx, tenantID, inst.ID, status, inst.RecordVersion)
 			require.NoError(t, err)
@@ -89,8 +90,11 @@ func TestCancelByDelegate_ATaskLeftWithoutAnAssigneeHasItsSignalRecordedWithTheV
 	alone, shared := newTask(tenantID, inst.ID), newTask(tenantID, inst.ID)
 	require.NoError(t, taskRepo.Create(ctx, alone))
 	require.NoError(t, taskRepo.Create(ctx, shared))
-	require.NoError(t, assignmentRepo.Create(ctx, newTaskAssignment(tenantID, alone.ID, delegate)))
-	require.NoError(t, assignmentRepo.Create(ctx, newTaskAssignment(tenantID, shared.ID, delegate)))
+	for _, taskID := range []uuid.UUID{alone.ID, shared.ID} {
+		held := newTaskAssignment(tenantID, taskID, delegate)
+		held.Reason = "delegation:" + uuid.NewString()
+		require.NoError(t, assignmentRepo.Create(ctx, held))
+	}
 	require.NoError(t, assignmentRepo.Create(ctx, newTaskAssignment(tenantID, shared.ID, coAssignee)))
 
 	count, err := client.CancelByDelegate(ctx, port.CancelByDelegateInput{TenantID: tenantID, DelegateUserID: delegate})

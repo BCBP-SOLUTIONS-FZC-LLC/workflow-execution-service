@@ -158,13 +158,14 @@ func (s *InstanceService) Terminate(ctx context.Context, tenantID, instanceID, a
 		if err != nil {
 			return wrapInstanceErr(err)
 		}
-		if err := cascadeFailTasksForInstance(ctx, s.Tasks, s.Assignments, tenantID, instanceID); err != nil {
-			return err
-		}
 		inst = updated
 		sink := instanceEventSink{Outbox: s.Outbox, Validator: s.Validator}
+		cascade := taskCascade{Tasks: s.Tasks, Assignments: s.Assignments, Sink: sink}
+		if err := cascade.failTasks(ctx, tenantID, inst); err != nil {
+			return err
+		}
 		return sink.enqueueInstanceEvent(ctx, tenantID.String(), domain.EventWorkflowInstanceTerminated, instanceID.String(),
-			actorUserID.String(), domain.NewWorkflowInstanceTerminatedPayload(instanceCore(inst), inst.StartedByUserID, domain.TerminatedInitiatorAdmin, &actorUserID))
+			actorUserID.String(), domain.NewWorkflowInstanceTerminatedPayload(instanceCore(inst), inst.StartedByUserID, domain.TerminatedInitiatorAdmin, &actorUserID, &reason))
 	})
 	if txErr != nil {
 		return txErr
@@ -178,15 +179,21 @@ func (s *InstanceService) Terminate(ctx context.Context, tenantID, instanceID, a
 	return nil
 }
 
-func cascadeFailTasksForInstance(ctx context.Context, tasks port.TaskRepository, assignments port.TaskAssignmentRepository, tenantID, instanceID uuid.UUID) error {
+type taskCascade struct {
+	Tasks       port.TaskRepository
+	Assignments port.TaskAssignmentRepository
+	Sink        instanceEventSink
+}
+
+func (c taskCascade) failTasks(ctx context.Context, tenantID uuid.UUID, inst *domain.Instance) error {
 	var after *port.Cursor
 	for {
-		rows, next, err := tasks.ListByInstance(ctx, tenantID, instanceID, port.PageRequest{After: after, Limit: 100})
+		rows, next, err := c.Tasks.ListByInstance(ctx, tenantID, inst.ID, port.PageRequest{After: after, Limit: 100})
 		if err != nil {
 			return wrapTaskErr(err)
 		}
 		for _, t := range rows {
-			if err := failOpenTask(ctx, tasks, assignments, tenantID, t); err != nil {
+			if err := c.failOpenTask(ctx, tenantID, inst, t); err != nil {
 				return err
 			}
 		}
@@ -197,23 +204,27 @@ func cascadeFailTasksForInstance(ctx context.Context, tasks port.TaskRepository,
 	}
 }
 
-func failOpenTask(ctx context.Context, tasks port.TaskRepository, assignments port.TaskAssignmentRepository, tenantID uuid.UUID, t *domain.Task) error {
+func (c taskCascade) failOpenTask(ctx context.Context, tenantID uuid.UUID, inst *domain.Instance, t *domain.Task) error {
 	if t.Status != domain.TaskStatusReady && t.Status != domain.TaskStatusInProgress {
 		return nil
 	}
-	if _, err := tasks.UpdateStatus(ctx, tenantID, t.ID, domain.TaskStatusFailed, t.RecordVersion); err != nil {
+	if _, err := c.Tasks.UpdateStatus(ctx, tenantID, t.ID, domain.TaskStatusFailed, t.RecordVersion); err != nil {
 		return wrapTaskErr(err)
 	}
-	active, err := assignments.ListActiveByTask(ctx, tenantID, t.ID)
+	active, err := c.Assignments.ListActiveByTask(ctx, tenantID, t.ID)
 	if err != nil {
 		return err
 	}
+	assigneeUserIDs := make([]uuid.UUID, 0, len(active))
 	for _, a := range active {
-		if _, err := assignments.Vacate(ctx, tenantID, a.ID); err != nil {
+		if _, err := c.Assignments.Vacate(ctx, tenantID, a.ID); err != nil {
 			return err
 		}
+		assigneeUserIDs = append(assigneeUserIDs, a.UserID)
 	}
-	return nil
+	taskCore := domain.TaskScopedCore{TaskID: t.ID, NodeKey: t.NodeKey, DepartmentID: t.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
+	payload := domain.NewWorkflowTaskFailedPayload(instanceCore(inst), taskCore, domain.CascadeSourceInstanceTerminate, "")
+	return c.Sink.enqueueInstanceEvent(ctx, tenantID.String(), domain.EventWorkflowTaskFailed, inst.ID.String(), "", payload)
 }
 
 func isTerminalInstanceStatus(status domain.InstanceStatus) bool {

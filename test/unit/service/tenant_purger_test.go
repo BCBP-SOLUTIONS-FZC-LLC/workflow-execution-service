@@ -46,13 +46,6 @@ func (f *fakeRetention) RecordReturned(_ context.Context, tenantID uuid.UUID, at
 	return f.recordErr
 }
 
-func (f *fakeRetention) Current(context.Context, uuid.UUID, int64) error {
-	if f.changed {
-		return port.ErrTenantRetentionChanged
-	}
-	return nil
-}
-
 func (f *fakeRetention) RecordFailure(_ context.Context, tenantID uuid.UUID, version int64, attempts int, next time.Time) error {
 	f.failures = append(f.failures, recordedFailure{tenantID, version, attempts, next})
 	return nil

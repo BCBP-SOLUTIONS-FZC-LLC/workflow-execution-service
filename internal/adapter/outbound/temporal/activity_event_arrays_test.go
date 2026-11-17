@@ -108,6 +108,7 @@ func TestEmitters_NoActiveAssignees_SendEmptyArraysNeverNull(t *testing.T) {
 		evs := world.eventsOfType(domain.EventWorkflowTaskClaimed)
 		require.Len(t, evs, 1)
 		assert.JSONEq(t, "[]", string(wkactPayloadFields(t, evs[0])["assignee_user_ids"]))
+		assert.Len(t, world.callsTo("Assignments.ClaimLead"), 1, "the assignee's claim is recorded as a claim")
 		leads := world.callsTo("Assignments.SetLead")
 		require.Len(t, leads, 1)
 		assert.Equal(t, int64(3), leads[0].Version, "the lead is set at the task version read in the transaction")

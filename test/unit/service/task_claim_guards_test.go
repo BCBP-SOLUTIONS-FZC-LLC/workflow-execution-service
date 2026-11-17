@@ -63,6 +63,7 @@ func TestTaskClaim_CurrentLeadRepeatsTheClaimWithTheNewVersion_ReturnsTheClaimed
 	require.NoError(t, err)
 	assert.Equal(t, first.ID, repeated.ID)
 	assert.EqualValues(t, csdTaskVersion+1, repeated.RecordVersion)
+	require.Len(t, h.assignments.claims, 1, "the claim is made as a claim, so the claim time is recorded")
 	require.Len(t, h.assignments.setLeads, 1, "the repeat must not write a second lead")
 	assert.Equal(t, csdSetLeadCall{h.tenantID, h.task.ID, h.caller.ID, csdTaskVersion}, h.assignments.setLeads[0])
 	assert.Equal(t, h.callerID, h.assignments.leadOf(h.task.ID))

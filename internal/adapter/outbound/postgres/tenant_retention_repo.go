@@ -77,12 +77,6 @@ func (r *TenantRetentionRepo) RecordFailure(ctx context.Context, tenantID uuid.U
 	})
 }
 
-func (r *TenantRetentionRepo) Current(ctx context.Context, tenantID uuid.UUID, version int64) error {
-	return exec(ctx, r.pool, func(dbtx db.DBTX) error {
-		return lockCurrentRetention(ctx, db.New(dbtx), tenantID, version)
-	})
-}
-
 func lockCurrentRetention(ctx context.Context, q *db.Queries, tenantID uuid.UUID, version int64) error {
 	_, err := q.LockCurrentTenantRetention(ctx, db.LockCurrentTenantRetentionParams{TenantID: tenantID, RecordVersion: version})
 	return retentionChanged(err)
@@ -131,6 +125,9 @@ var tenantPurgeSteps = []purgeStep{
 	}},
 	{"user_availability", func(ctx context.Context, q *db.Queries, t uuid.UUID, n int32) (int64, error) {
 		return q.PurgeTenantUserAvailability(ctx, db.PurgeTenantUserAvailabilityParams{TenantID: t, Limit: n})
+	}},
+	{"ended_delegation", func(ctx context.Context, q *db.Queries, t uuid.UUID, n int32) (int64, error) {
+		return q.PurgeTenantEndedDelegations(ctx, db.PurgeTenantEndedDelegationsParams{TenantID: t, Limit: n})
 	}},
 	{"active_task_queues", func(ctx context.Context, q *db.Queries, t uuid.UUID, _ int32) (int64, error) {
 		return q.PurgeTenantQueues(ctx, t)

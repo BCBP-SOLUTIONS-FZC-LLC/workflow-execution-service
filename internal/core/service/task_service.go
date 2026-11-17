@@ -266,7 +266,7 @@ func (s *TaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.U
 		return nil, err
 	}
 
-	if _, err := s.Assignments.SetLead(ctx, tenantID, taskID, target.ID, recordVersion); err != nil {
+	if _, err := s.Assignments.ClaimLead(ctx, tenantID, taskID, target.ID, recordVersion); err != nil {
 		return nil, wrapTaskErr(err)
 	}
 	committed := *task

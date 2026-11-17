@@ -120,7 +120,7 @@ func TestDelegationCancel_AFailedSignalRecordingChangesNothingAndFailsTheCall(t 
 func TestDelegationCancel_ATaskThatCannotBeReadFailsTheCallBeforeAnythingChanges(t *testing.T) {
 	h := dlgfixNewClient(t)
 	first := h.seed(t, "reviewer")
-	h.assignments.add(&domain.TaskAssignment{ID: uuid.New(), TenantID: h.tenantID, TaskID: uuid.New(), UserID: h.oldDelegate, IsActive: true})
+	h.assignments.add(&domain.TaskAssignment{ID: uuid.New(), TenantID: h.tenantID, TaskID: uuid.New(), UserID: h.oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()})
 
 	count, err := h.cancel()
 

@@ -377,6 +377,11 @@ func (r wkactAssignments) Complete(_ context.Context, tenant, id uuid.UUID, resu
 	return a, nil
 }
 
+func (r wkactAssignments) ClaimLead(ctx context.Context, tenant, taskID, id uuid.UUID, version int64) (*domain.TaskAssignment, error) {
+	r.w.recordVersioned("Assignments.ClaimLead", tenant, taskID, version)
+	return r.SetLead(ctx, tenant, taskID, id, version)
+}
+
 func (r wkactAssignments) SetLead(_ context.Context, tenant, taskID, id uuid.UUID, version int64) (*domain.TaskAssignment, error) {
 	r.w.recordVersioned("Assignments.SetLead", tenant, taskID, version)
 	a, ok := r.w.assignments[id]

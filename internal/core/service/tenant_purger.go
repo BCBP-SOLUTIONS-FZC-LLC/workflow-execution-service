@@ -50,7 +50,7 @@ func (p *TenantPurger) Tick(ctx context.Context) error {
 	for _, d := range due {
 		err := p.purgeTenant(ctx, d.TenantID, d.RecordVersion)
 		if errors.Is(err, port.ErrTenantRetentionChanged) {
-			p.deps.Logger.Info("tenant purge skipped: its record changed", map[string]any{"tenant_id": d.TenantID})
+			p.deps.Logger.Info("tenant purge skipped: its record changed or another replica is purging it", map[string]any{"tenant_id": d.TenantID})
 			continue
 		}
 		if err != nil {

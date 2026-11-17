@@ -47,7 +47,7 @@ func newDelegationReconcilerHarness() (*service.DelegationReconciler, *fakeInsta
 		Instances: instances, Tasks: tasks, Assignments: assignments,
 		Outbox: outbox, Signals: outbox, Transactor: fakeTransactor{}, Temporal: temporal,
 		Definitions: definitions, Eligibility: eligibility, Validator: realValidator(),
-		Availability: newFakeUserAvailability(), Locks: &fakeLocker{},
+		Availability: newFakeUserAvailability(), Locks: &fakeLocker{}, Ended: newFakeEndedDelegations(),
 	}
 	return svc, instances, tasks, assignments, outbox, temporal, definitions, eligibility
 }
@@ -94,7 +94,7 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 			}
 		}
 		require.NotNil(t, found)
-		assert.Equal(t, "delegation:"+delegationID.String(), found.Reason)
+		assert.Equal(t, "delegation:"+delegationID.String()+":"+delegatorID.String(), found.Reason)
 	})
 
 	t.Run("a failed eligibility read fails the reroute so the event is retried, and asks for the delegate's tenant", func(t *testing.T) {
@@ -552,7 +552,7 @@ func TestDelegationReconciler_CommitReassignments(t *testing.T) {
 			Instances: instances, Tasks: tasks, Assignments: assignments,
 			Outbox: outbox, Signals: outbox, Transactor: fakeTransactor{}, Temporal: temporal,
 			Definitions: definitions, Eligibility: eligibility, Validator: failingValidator{},
-			Availability: newFakeUserAvailability(), Locks: &fakeLocker{},
+			Availability: newFakeUserAvailability(), Locks: &fakeLocker{}, Ended: newFakeEndedDelegations(),
 		}
 		tenantID, delegatorID, delegateID := uuid.New(), uuid.New(), uuid.New()
 		seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "biz-1", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
@@ -824,7 +824,8 @@ func TestDelegationReconciler_Reverse_LocksOnlyTheShortPart(t *testing.T) {
 		TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, EndedReason: "delegate_disabled",
 	}))
 
-	assert.Equal(t, []string{port.UserAvailabilityScope(tenantID, delegatorID)}, locker.keys, "the reversal takes the delegator's availability lock")
+	scope := port.UserAvailabilityScope(tenantID, delegatorID)
+	assert.Equal(t, []string{scope, scope}, locker.keys, "the reversal takes the delegator's availability lock twice, once to record the end and once to move the work")
 	assert.False(t, eligibilityHeld, "the slow reads stay outside the lock, which pins one of four lock connections")
 	assert.True(t, availabilityHeld, "the status is read under the lock")
 	assert.True(t, pauseHeld, "the pause is sent under the lock")

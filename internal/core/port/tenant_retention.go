@@ -22,7 +22,6 @@ type TenantRetentionRepository interface {
 	ListDue(ctx context.Context, now time.Time, limit int) ([]TenantPurgeDue, error)
 	MarkPurged(ctx context.Context, tenantID uuid.UUID, version int64, at time.Time) (int64, error)
 	RecordFailure(ctx context.Context, tenantID uuid.UUID, version int64, attempts int, next time.Time) error
-	Current(ctx context.Context, tenantID uuid.UUID, version int64) error
 }
 
 type TenantDataPurger interface {

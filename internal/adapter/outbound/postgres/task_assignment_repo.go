@@ -103,6 +103,30 @@ func (r *TaskAssignmentRepo) ListActiveByUser(
 	return assignments, err
 }
 
+func (r *TaskAssignmentRepo) ListActiveByReasonTag(
+	ctx context.Context,
+	tenantID uuid.UUID,
+	tag string,
+) ([]*domain.TaskAssignment, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var assignments []*domain.TaskAssignment
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		rows, err := db.New(dbtx).ListActiveAssignmentsByReasonTag(ctx, db.ListActiveAssignmentsByReasonTagParams{
+			TenantID: tenantID,
+			Tag:      tag,
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		assignments = make([]*domain.TaskAssignment, len(rows))
+		for i, row := range rows {
+			assignments[i] = taskAssignmentFromDB(row)
+		}
+		return nil
+	})
+	return assignments, err
+}
+
 func (r *TaskAssignmentRepo) CountActiveByTasks(ctx context.Context, tenantID uuid.UUID, taskIDs []uuid.UUID) (map[uuid.UUID]int, error) {
 	counts := make(map[uuid.UUID]int, len(taskIDs))
 	if len(taskIDs) == 0 {
@@ -243,6 +267,19 @@ func (r *TaskAssignmentRepo) Complete(
 }
 
 func (r *TaskAssignmentRepo) SetLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {
+	return r.moveLead(ctx, tenantID, taskID, id, taskRecordVersion, (*db.Queries).SetTaskAssignmentLead)
+}
+
+func (r *TaskAssignmentRepo) ClaimLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {
+	return r.moveLead(ctx, tenantID, taskID, id, taskRecordVersion, (*db.Queries).ClaimTaskAssignmentLead)
+}
+
+func (r *TaskAssignmentRepo) moveLead(
+	ctx context.Context,
+	tenantID, taskID, id uuid.UUID,
+	taskRecordVersion int64,
+	promote func(*db.Queries, context.Context, uuid.UUID) (db.WorkflowTaskAssignment, error),
+) (*domain.TaskAssignment, error) {
 	ctx = withTenantGUC(ctx, tenantID)
 	var assignment *domain.TaskAssignment
 	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
@@ -256,7 +293,7 @@ func (r *TaskAssignmentRepo) SetLead(ctx context.Context, tenantID, taskID, id u
 		}); err != nil {
 			return mapErr(err)
 		}
-		row, err := q.SetTaskAssignmentLead(ctx, id)
+		row, err := promote(q, ctx, id)
 		if err != nil {
 			return mapErr(err)
 		}

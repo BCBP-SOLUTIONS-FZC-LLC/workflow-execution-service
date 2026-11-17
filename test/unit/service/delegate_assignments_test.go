@@ -134,7 +134,7 @@ func csaNewClientHarness() *csaClientHarness {
 		assignments: csaWrapAssignments(newFakeAssignmentRepo()),
 		outbox:      &fakeOutbox{},
 	}
-	h.svc = &service.WorkflowClient{Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments, Transactor: fakeTransactor{}, Outbox: h.outbox, Signals: h.outbox, Validator: realValidator()}
+	h.svc = &service.WorkflowClient{Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments, Transactor: fakeTransactor{}, Outbox: h.outbox, Signals: h.outbox, Validator: realValidator(), Ended: newFakeEndedDelegations()}
 	return h
 }
 
@@ -416,7 +416,7 @@ func TestWorkflowClient_DelegateWork_IgnoresTaskAndInstanceStatus(t *testing.T) 
 	seedAll := func(h *csaClientHarness, tenantID, user uuid.UUID) []csaHeld {
 		var out []csaHeld
 		for _, s := range specs {
-			out = append(out, h.seed(tenantID, user, "", s.task, s.instance))
+			out = append(out, h.seed(tenantID, user, "delegation:"+uuid.NewString(), s.task, s.instance))
 		}
 		return out
 	}

@@ -111,6 +111,9 @@ type TaskAssignmentRepository interface {
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error)
 	ListActiveByTask(ctx context.Context, tenantID, taskID uuid.UUID) ([]*domain.TaskAssignment, error)
 	ListActiveByUser(ctx context.Context, tenantID, userID uuid.UUID) ([]*domain.TaskAssignment, error)
+	// ListActiveByReasonTag returns the tenant's active assignments whose reason contains the
+	// tag, whoever holds them; the caller checks that the tag stands on its own in the reason.
+	ListActiveByReasonTag(ctx context.Context, tenantID uuid.UUID, tag string) ([]*domain.TaskAssignment, error)
 	// CountActiveByTasks returns the number of active assignments of each task in one query; a task
 	// with none is absent from the map.
 	CountActiveByTasks(ctx context.Context, tenantID uuid.UUID, taskIDs []uuid.UUID) (map[uuid.UUID]int, error)
@@ -125,7 +128,11 @@ type TaskAssignmentRepository interface {
 	VacateActive(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error)
 	VacateAllActiveByUser(ctx context.Context, tenantID, userID uuid.UUID) ([]*domain.TaskAssignment, error)
 	Complete(ctx context.Context, tenantID, id uuid.UUID, resultJSON json.RawMessage, taskRecordVersion int64) (*domain.TaskAssignment, error)
+	// SetLead makes the assignment the task's only lead, whoever moved it there.
 	SetLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error)
+	// ClaimLead is SetLead for the assignee claiming the task: it also records when the
+	// assignee claimed it, keeping the first time.
+	ClaimLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error)
 }
 
 type AssigneeOverrideRepository interface {

@@ -219,7 +219,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 	workflowClient := &service.WorkflowClient{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Transactor: transactor, Outbox: outboxRepo, Signals: outboxRepo,
-		Validator: validator, Eligibility: eligibility, Definitions: definitions, Log: log,
+		Validator: validator, Eligibility: eligibility, Definitions: definitions, Ended: postgres.NewEndedDelegationRepo(appPool), Log: log,
 	}
 	guard := &service.ArchiveGuard{Instances: instances}
 	pauser := &service.UserTaskPauser{
@@ -229,7 +229,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	delegationReconciler := &service.DelegationReconciler{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Outbox: outboxRepo, Signals: outboxRepo,
 		Transactor: transactor, Temporal: temporal, Definitions: definitions, Eligibility: eligibility,
-		Validator: validator, Availability: availability, Locks: recency, Log: log,
+		Validator: validator, Availability: availability, Locks: recency, Ended: postgres.NewEndedDelegationRepo(appPool), Log: log,
 	}
 	tenantLifecycleReconciler := &service.TenantLifecycleReconciler{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Queues: queues, Outbox: outboxRepo,

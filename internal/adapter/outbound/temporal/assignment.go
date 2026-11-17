@@ -34,7 +34,7 @@ func (d *Deps) ClaimAssignment(ctx context.Context, in port.ClaimAssignmentInput
 		if err != nil {
 			return fmt.Errorf("get task: %w", err)
 		}
-		if _, err := d.Assignments.SetLead(ctx, tenantID, existing.TaskID, assignmentID, task.RecordVersion); err != nil {
+		if _, err := d.Assignments.ClaimLead(ctx, tenantID, existing.TaskID, assignmentID, task.RecordVersion); err != nil {
 			return fmt.Errorf("set lead: %w", err)
 		}
 		core, err := d.instanceCore(ctx, tenantID, task.WorkflowInstanceID)

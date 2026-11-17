@@ -19,7 +19,11 @@ CREATE TABLE workflow_instance (
     completed_at          TIMESTAMPTZ,
     record_version        BIGINT                   NOT NULL DEFAULT 1 CHECK (record_version > 0),
     created_at            TIMESTAMPTZ              NOT NULL DEFAULT now(),
-    updated_at            TIMESTAMPTZ              NOT NULL DEFAULT now()
+    updated_at            TIMESTAMPTZ              NOT NULL DEFAULT now(),
+    -- The target of the children's (tenant_id, parent id) foreign keys, so a
+    -- child row cannot name another tenant's parent (row-level security does
+    -- not apply to foreign-key checks).
+    UNIQUE (tenant_id, id)
 );
 
 -- One row per dispatched stage/task (prep/review/approve, unrecognized-Type
@@ -27,7 +31,7 @@ CREATE TABLE workflow_instance (
 CREATE TABLE workflow_task (
     id                    UUID                 PRIMARY KEY,
     tenant_id             UUID                 NOT NULL,
-    workflow_instance_id  UUID                 NOT NULL REFERENCES workflow_instance(id) ON DELETE RESTRICT,
+    workflow_instance_id  UUID                 NOT NULL,
     node_key              TEXT                 NOT NULL,
     -- Snapshotted from the compiled plan at task creation.
     department_id         UUID                 NOT NULL,
@@ -46,19 +50,22 @@ CREATE TABLE workflow_task (
     -- reason department_id is already a real column.
     connector_type        TEXT,
     extras_json           JSONB,
-    deferred_from_task_id UUID                 REFERENCES workflow_task(id) ON DELETE RESTRICT,
+    deferred_from_task_id UUID,
     due_at                TIMESTAMPTZ,
     follow_up_at          TIMESTAMPTZ,
     created_at            TIMESTAMPTZ          NOT NULL DEFAULT now(),
     updated_at            TIMESTAMPTZ          NOT NULL DEFAULT now(),
-    completed_at          TIMESTAMPTZ
+    completed_at          TIMESTAMPTZ,
+    UNIQUE (tenant_id, id),
+    FOREIGN KEY (tenant_id, workflow_instance_id) REFERENCES workflow_instance (tenant_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (tenant_id, deferred_from_task_id) REFERENCES workflow_task (tenant_id, id) ON DELETE RESTRICT
 );
 
 -- One row per assignee on a task; carries claim/completion/reassignment state (LLD §4.4).
 CREATE TABLE workflow_task_assignment (
     id            UUID        PRIMARY KEY,
     tenant_id     UUID        NOT NULL,
-    task_id       UUID        NOT NULL REFERENCES workflow_task(id) ON DELETE RESTRICT,
+    task_id       UUID        NOT NULL,
     user_id       UUID        NOT NULL,
     assigned_by   UUID,
     reason        TEXT,
@@ -69,7 +76,8 @@ CREATE TABLE workflow_task_assignment (
     completed_at  TIMESTAMPTZ,
     result_json   JSONB,
     vacated_at    TIMESTAMPTZ,
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (tenant_id, task_id) REFERENCES workflow_task (tenant_id, id) ON DELETE RESTRICT
 );
 
 -- Registry of tenant-isolated Temporal task queues (LLD §4.6). A row is never
@@ -92,13 +100,14 @@ CREATE TABLE active_task_queues (
 CREATE TABLE assignee_overrides (
     id                    UUID        PRIMARY KEY,
     tenant_id             UUID        NOT NULL,
-    workflow_instance_id  UUID        NOT NULL REFERENCES workflow_instance(id) ON DELETE RESTRICT,
+    workflow_instance_id  UUID        NOT NULL,
     node_key              TEXT        NOT NULL,
     previous_user_id      UUID,
     new_user_id           UUID        NOT NULL,
     reason                TEXT,
     actor_user_id         UUID        NOT NULL,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (tenant_id, workflow_instance_id) REFERENCES workflow_instance (tenant_id, id) ON DELETE RESTRICT
 );
 
 -- outbox_events / outbox_dead_letters are NOT created here — platform-events

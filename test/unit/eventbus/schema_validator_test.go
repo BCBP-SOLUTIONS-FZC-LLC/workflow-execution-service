@@ -73,7 +73,7 @@ var allEvents = []eventCase{
 		name:      "WorkflowInstanceTerminated",
 		eventType: domain.EventWorkflowInstanceTerminated,
 		payload: func() any {
-			return domain.NewWorkflowInstanceTerminatedPayload(testCore(), uuid.New(), domain.TerminatedInitiatorAdmin, nil)
+			return domain.NewWorkflowInstanceTerminatedPayload(testCore(), uuid.New(), domain.TerminatedInitiatorAdmin, nil, nil)
 		},
 		dropField: "initiator",
 	},

@@ -74,7 +74,7 @@ func TestWorkflowClient_ReassignDelegate_APlanThatCannotBeReadFailsTheCallAndIsN
 			var held []csaHeld
 			instanceID := uuid.New()
 			for i := 0; i < 2; i++ {
-				held = append(held, h.seedOnInstance(tenantID, oldDelegate, instanceID, "", domain.TaskStatusReady, domain.InstanceStatusRunning))
+				held = append(held, h.seedOnInstance(tenantID, oldDelegate, instanceID, "delegation:"+uuid.NewString(), domain.TaskStatusReady, domain.InstanceStatusRunning))
 				held[i].instance.WorkflowVersionID = versionID
 				held[i].task.NodeKey = "finance/review"
 				held[i].task.DepartmentID = financeDept
@@ -114,7 +114,7 @@ func TestWorkflowClient_ReassignDelegate_APlanThatCannotBeReadFailsTheCallAndIsN
 		instanceID := uuid.New()
 		var held []csaHeld
 		for i := 0; i < 3; i++ {
-			held = append(held, h.seedOnInstance(tenantID, oldDelegate, instanceID, "", domain.TaskStatusReady, domain.InstanceStatusRunning))
+			held = append(held, h.seedOnInstance(tenantID, oldDelegate, instanceID, "delegation:"+uuid.NewString(), domain.TaskStatusReady, domain.InstanceStatusRunning))
 			held[i].instance.WorkflowVersionID = versionID
 			held[i].task.NodeKey = "finance/review"
 			held[i].task.DepartmentID = financeDept
