@@ -22,6 +22,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/aliasconfig"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-connectors/v2/pkg/connectors/docref"
@@ -302,7 +303,9 @@ func buildPools(cfg *config.Config, connectorSet map[string]connectors.Connector
 		registry.TypeChatNotify:      cfg.ConnectorTimeoutChatNotify,
 	}
 	pools := make(map[string]*typePool, len(connectorSet))
+	deadLetterTypes := make([]string, 0, len(connectorSet))
 	for typ, conn := range connectorSet {
+		deadLetterTypes = append(deadLetterTypes, typ)
 		size := sizes[typ]
 		if size <= 0 {
 			size = 1
@@ -315,5 +318,6 @@ func buildPools(cfg *config.Config, connectorSet map[string]connectors.Connector
 			connector:     conn,
 		}
 	}
+	observability.PreCreateConnectorDeadLetterSeries(deadLetterTypes...)
 	return pools
 }

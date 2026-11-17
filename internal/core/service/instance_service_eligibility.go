@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/google/uuid"
 
@@ -108,7 +109,9 @@ func (s *InstanceService) validateAssigneeEligibility(ctx context.Context, tenan
 				return fmt.Errorf("check assignee eligibility: %w", result.Err)
 			}
 			if !result.Eligible {
-				ineligibleNodes = append(ineligibleNodes, checks[i].nodeKey)
+				if !slices.Contains(ineligibleNodes, checks[i].nodeKey) {
+					ineligibleNodes = append(ineligibleNodes, checks[i].nodeKey)
+				}
 			}
 		}
 	}

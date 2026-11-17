@@ -58,6 +58,7 @@ var (
 	EntitlementsStaleServedTotal       prometheus.Counter
 	EntitlementsOldestServedAgeSeconds prometheus.Gauge
 	EntitlementsReadPanicsTotal        prometheus.Counter
+	GlueSchemaStaleServedTotal         prometheus.Counter
 
 	WFCacheHitsTotal   prometheus.Counter
 	WFCacheMissesTotal prometheus.Counter
@@ -85,7 +86,7 @@ func registerServiceMetrics() {
 		"Total internal event ingest calls, by event_type and result.", "event_type", "result"))
 	DelegationScopeUnhandledTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_delegation_scope_unhandled_total",
-		"Delegations arriving with a scope this service has no case for, by scope. They match no assignment.", "scope"))
+		"Delegations arriving with a scope this service has no case for, by scope (always unknown, so a producer cannot create a series per value). They match no assignment.", "scope"))
 	RetentionRowsDeletedTotal = must(gincommon.NewCounterVec(nil,
 		"workflow_execution_service_retention_rows_deleted_total",
 		"Rows the retention sweeps deleted, by table (outbox_events, processed_events, or a tenant's purged tables).", "table"))
@@ -174,6 +175,9 @@ func registerServiceMetrics() {
 	EntitlementsReadPanicsTotal = must(gincommon.NewCounter(nil,
 		"workflow_execution_service_entitlements_read_panics_total",
 		"Entitlements reads that panicked and were recovered; each counts as a failed read."))
+	GlueSchemaStaleServedTotal = must(gincommon.NewCounter(nil,
+		"workflow_execution_service_glue_schema_stale_served_total",
+		"Outbound events encoded with the last known schema version id (counted once per event) because the schema registry could not be read; the id is served for at most GLUE_SCHEMA_MAX_STALENESS past its cache TTL."))
 	WFCacheHitsTotal = must(gincommon.NewCounter(nil,
 		"workflow_execution_service_wf_cache_hits_total",
 		"Total compiled-plan cache hits."))
@@ -205,6 +209,23 @@ func preInitializeClosedLabelSets() {
 	}
 	for _, dep := range []string{"definition_service", "iam"} {
 		UpstreamDependencyErrorsTotal.WithLabelValues(dep)
+	}
+	WorkflowReplayFailuresTotal.WithLabelValues(executeWorkflowType)
+	DelegationScopeUnhandledTotal.WithLabelValues(UnhandledScopeLabel)
+}
+
+const (
+	executeWorkflowType = "Execute"
+	UnhandledScopeLabel = "unknown"
+	unknownConnector    = "unknown"
+)
+
+func PreCreateConnectorDeadLetterSeries(connectorTypes ...string) {
+	if ConnectorDispatchDeadLetteredTotal == nil {
+		return
+	}
+	for _, connectorType := range append(connectorTypes, unknownConnector) {
+		ConnectorDispatchDeadLetteredTotal.WithLabelValues(connectorType)
 	}
 }
 

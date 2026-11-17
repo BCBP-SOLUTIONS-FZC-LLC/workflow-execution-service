@@ -75,9 +75,11 @@ func retryable(err error) bool {
 		exhausted   *serviceerror.ResourceExhausted
 		aborted     *serviceerror.Aborted
 		internal    *serviceerror.Internal
+		notReady    *serviceerror.WorkflowNotReady
+		nsStandby   *serviceerror.NamespaceNotActive
 	)
 	return errors.As(err, &unavailable) || errors.As(err, &nsDown) || errors.As(err, &deadline) || errors.As(err, &exhausted) ||
-		errors.As(err, &aborted) || errors.As(err, &internal)
+		errors.As(err, &aborted) || errors.As(err, &internal) || errors.As(err, &notReady) || errors.As(err, &nsStandby)
 }
 
 func (c *Client) SignalWorkflow(ctx context.Context, temporalWorkflowID string, instanceID uuid.UUID, signalName string, payload any) error {
@@ -114,7 +116,10 @@ func (c *Client) UpdateWorkflow(ctx context.Context, temporalWorkflowID string, 
 	if errors.As(err, &appErr) && appErr.Type() == port.UpdateRefusedErrorType {
 		return fmt.Errorf("%w: %s", port.ErrUpdateRefused, appErr.Message())
 	}
-	return fmt.Errorf("update workflow %q: %w", name, err)
+	if errors.As(err, &appErr) {
+		return fmt.Errorf("update workflow %q: %w", name, err)
+	}
+	return clusterFailure(fmt.Sprintf("update workflow %q", name), err)
 }
 
 func (c *Client) TerminateWorkflow(ctx context.Context, temporalWorkflowID, runID, reason string) error {
@@ -129,7 +134,11 @@ func (c *Client) TerminateWorkflow(ctx context.Context, temporalWorkflowID, runI
 func (c *Client) QueryWorkflow(ctx context.Context, temporalWorkflowID, queryType string, out any) error {
 	val, err := c.sdk.QueryWorkflow(ctx, temporalWorkflowID, "", queryType)
 	if err != nil {
-		return fmt.Errorf("query workflow: %w", err)
+		var notFound *serviceerror.NotFound
+		if errors.As(err, &notFound) {
+			return fmt.Errorf("query workflow %q: %w: %w", queryType, port.ErrWorkflowNotFound, err)
+		}
+		return clusterFailure(fmt.Sprintf("query workflow %q", queryType), err)
 	}
 	if err := val.Get(out); err != nil {
 		return fmt.Errorf("decode query workflow result: %w", err)

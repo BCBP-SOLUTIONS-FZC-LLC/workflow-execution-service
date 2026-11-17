@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
@@ -59,7 +60,7 @@ func WithIdempotency(cache port.CacheStore, ttl time.Duration, log port.Logger, 
 		}
 		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
-		cacheKey := "idem:" + idempotencyScopePrefix(c) + c.Request.Method + ":" + c.Request.URL.Path + ":" + key
+		cacheKey := "idem:" + idempotencyScopePrefix(c, bodyBytes) + c.Request.Method + ":" + c.Request.URL.Path + ":" + key
 
 		claimed, err := cache.SetNX(c.Request.Context(), cacheKey, idempotencyClaim, ttl)
 		if err != nil {
@@ -89,12 +90,17 @@ func WithIdempotency(cache port.CacheStore, ttl time.Duration, log port.Logger, 
 	}
 }
 
-func idempotencyScopePrefix(c *gin.Context) string {
-	rc, ok := gincommon.RequestContext(c)
-	if !ok || rc.TenantID == "" {
+func idempotencyScopePrefix(c *gin.Context, body []byte) string {
+	if rc, ok := gincommon.RequestContext(c); ok && rc.TenantID != "" {
+		return rc.TenantID + ":" + rc.UserID + ":"
+	}
+	var scoped struct {
+		TenantID string `json:"tenant_id"`
+	}
+	if json.Unmarshal(body, &scoped) != nil || scoped.TenantID == "" {
 		return ""
 	}
-	return rc.TenantID + ":" + rc.UserID + ":"
+	return scoped.TenantID + ":" + domain.SystemCaller + ":"
 }
 
 func idempotencyLogWarn(log port.Logger, msg string, fields map[string]any) {

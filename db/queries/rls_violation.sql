@@ -1,10 +1,10 @@
--- name: LatestRLSViolationID :one
-SELECT COALESCE(max(id), 0)::bigint AS latest_id FROM rls_violation_log;
+-- name: RLSViolationHorizon :one
+SELECT (now() - make_interval(secs => @lag_seconds::double precision))::timestamptz AS horizon;
 
--- name: CountRLSViolationsAfter :many
-SELECT violation_type, count(*)::bigint AS total, max(id)::bigint AS newest_id
+-- name: CountRLSViolationsBetween :many
+SELECT violation_type, count(*)::bigint AS total
 FROM rls_violation_log
-WHERE id > $1
+WHERE occurred_at > @after AND occurred_at <= @up_to
 GROUP BY violation_type;
 
 -- name: PruneRLSViolationsBefore :execrows

@@ -50,20 +50,43 @@ func (c *EligibilityClient) CheckEligibilityBatch(
 	tenantID uuid.UUID,
 	requests []port.EligibilityCheckRequest,
 ) ([]port.EligibilityResult, error) {
+	parent := ctx
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	results := make([]port.EligibilityResult, len(requests))
-	var wg sync.WaitGroup
+	var (
+		wg       sync.WaitGroup
+		failOnce sync.Once
+		firstErr error
+	)
 	sem := make(chan struct{}, maxEligibilityBatchConcurrency)
+	launched := 0
 	for i, req := range requests {
-		wg.Add(1)
 		sem <- struct{}{}
+		if ctx.Err() != nil {
+			<-sem
+			break
+		}
+		launched++
+		wg.Add(1)
 		go func(i int, req port.EligibilityCheckRequest) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			eligible, err := c.CheckEligibility(ctx, tenantID, req.NewUserID, req.DepartmentID, req.RequiredLevel)
+			if err != nil {
+				failOnce.Do(func() { firstErr = err })
+				cancel()
+			}
 			results[i] = port.EligibilityResult{Eligible: eligible, Err: err}
 		}(i, req)
 	}
 	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	if launched < len(requests) {
+		return nil, fmt.Errorf("%w: eligibility batch stopped before every check was sent: %w", ErrUpstreamUnavailable, context.Cause(parent))
+	}
 	return results, nil
 }
 
@@ -116,7 +139,7 @@ func (c *EligibilityClient) tryCheckEligibility(
 ) (answer eligibilityAnswer, retryable bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return eligibilityAnswer{}, false, fmt.Errorf("build eligibility request: %w", err)
+		return eligibilityAnswer{}, false, fmt.Errorf("%w: build eligibility request: %w", ErrUpstreamUnavailable, err)
 	}
 	req.Header.Set("x-user-id", domain.SystemCaller)
 	req.Header.Set("x-tenant-roles", domain.SystemCaller)

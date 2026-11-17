@@ -221,3 +221,56 @@ tests:
       - eval_time: 25m
         alertname: ConnectorTaskStuckReady
         exp_alerts: []
+
+  - name: the first unclassified connector failure after a start warns
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_connector_task_failures_total{connector_type="rest-call",provider="",class="unknown",retried="false"}'
+        values: '_ _ 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ConnectorTaskUnknownFailure
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: ConnectorTaskUnknownFailure
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              connector_type: rest-call
+            exp_annotations:
+              runbook: workflow-execution-service/connector-unknown-failure
+              summary: "Connector calls of type rest-call are failing with an unknown error class"
+              description: "The connector worker could not tell whether a failed call was transient or permanent, so the call was not retried. Search the worker's logs for the Warn line connector call failed with its task id."
+      - eval_time: 9m
+        alertname: ConnectorTaskUnknownFailure
+        exp_alerts: []
+
+  - name: a further unclassified connector failure warns on an existing series
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_connector_task_failures_total{connector_type="storage",provider="",class="unknown",retried="false"}'
+        values: '1 1 1 1 1 1 2 2 2 2 2 2 2 2 2'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: ConnectorTaskUnknownFailure
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              connector_type: storage
+            exp_annotations:
+              runbook: workflow-execution-service/connector-unknown-failure
+              summary: "Connector calls of type storage are failing with an unknown error class"
+              description: "The connector worker could not tell whether a failed call was transient or permanent, so the call was not retried. Search the worker's logs for the Warn line connector call failed with its task id."
+      - eval_time: 13m
+        alertname: ConnectorTaskUnknownFailure
+        exp_alerts: []
+
+  - name: transient and permanent connector failures do not raise the unknown-class warning
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_connector_task_failures_total{connector_type="rest-call",provider="",class="transient",retried="true"}'
+        values: '_ _ 1 2 3 4 5 6'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ConnectorTaskUnknownFailure
+        exp_alerts: []

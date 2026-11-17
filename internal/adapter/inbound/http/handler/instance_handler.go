@@ -206,6 +206,15 @@ func (h *Handler) StartInstance(c *gin.Context) {
 	c.JSON(http.StatusCreated, toInstanceSummaryResp(instance))
 }
 
+var knownInstanceStatuses = map[port.InstanceStatus]bool{
+	port.InstanceStatusRunning:    true,
+	port.InstanceStatusPaused:     true,
+	port.InstanceStatusCompleted:  true,
+	port.InstanceStatusTerminated: true,
+	port.InstanceStatusFailed:     true,
+	port.InstanceStatusDegraded:   true,
+}
+
 func (h *Handler) ListInstances(c *gin.Context) {
 	tenantID, userID, ok := callerIdentity(c)
 	if !ok {
@@ -215,6 +224,10 @@ func (h *Handler) ListInstances(c *gin.Context) {
 	var filter port.InstanceFilter
 	if v := c.Query("status"); v != "" {
 		s := port.InstanceStatus(v)
+		if !knownInstanceStatuses[s] {
+			writeInvalidParam(c, "status", "invalid status query parameter")
+			return
+		}
 		filter.Status = &s
 	}
 	if v := c.Query("subject_id"); v != "" {

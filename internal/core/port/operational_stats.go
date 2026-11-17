@@ -8,8 +8,8 @@ import (
 )
 
 type RLSViolationLog interface {
-	LatestID(ctx context.Context) (int64, error)
-	CountsAfter(ctx context.Context, afterID int64) ([]domain.RLSViolationCount, int64, error)
+	Horizon(ctx context.Context, lag time.Duration) (time.Time, error)
+	CountsBetween(ctx context.Context, after, upTo time.Time) ([]domain.RLSViolationCount, error)
 	PruneBefore(ctx context.Context, cutoff time.Time) (int64, error)
 }
 

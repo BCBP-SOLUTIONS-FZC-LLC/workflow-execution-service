@@ -12,9 +12,9 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-// A base URL that cannot be turned into a request is a configuration fault, not "no principal" and not an upstream
-// outage: the error matches neither sentinel, so callers answer it as an internal error.
-func TestAutomationPrincipal_MalformedBaseURL_FailsToBuildTheRequestWithNeitherSentinel(t *testing.T) {
+// A base URL that cannot be turned into a request is not "no principal": it fails closed as an upstream failure,
+// so callers answer 503 like any other failed call to the token service.
+func TestAutomationPrincipal_MalformedBaseURL_FailsToBuildTheRequestAsAnUpstreamFailure(t *testing.T) {
 	for name, base := range map[string]string{"unterminated host": "http://[::1", "bad scheme": "ht!tp://token-service"} {
 		t.Run(name, func(t *testing.T) {
 			c := httpadapter.NewAutomationPrincipalClient(base, time.Second, time.Minute)
@@ -24,7 +24,7 @@ func TestAutomationPrincipal_MalformedBaseURL_FailsToBuildTheRequestWithNeitherS
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "build token service request")
 			assert.NotErrorIs(t, err, port.ErrNoAutomationPrincipal)
-			assert.NotErrorIs(t, err, httpadapter.ErrUpstreamUnavailable)
+			assert.ErrorIs(t, err, httpadapter.ErrUpstreamUnavailable)
 			assert.Equal(t, port.AutomationPrincipal{}, principal)
 		})
 	}

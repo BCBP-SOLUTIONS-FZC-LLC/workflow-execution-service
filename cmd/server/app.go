@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -41,24 +44,55 @@ type app struct {
 	sdkClient client.Client
 
 	tracingShutdown func()
+
+	shuttingDown *atomic.Bool
+	sleep        func(time.Duration)
 }
 
-func (a *app) run() {
-	a.startServers()
+func (a *app) run() error {
+	serveErrs := a.startServers()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-quit
-	a.log.Info("shutting down", map[string]any{"signal": sig.String()})
+	stopCause := a.awaitStop(quit, serveErrs)
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 	a.stopServers(shutdownCtx)
 
 	a.log.Info("server stopped", nil)
+	return stopCause
 }
 
-func (a *app) startServers() {
+func (a *app) awaitStop(quit <-chan os.Signal, serveErrs <-chan error) error {
+	select {
+	case sig := <-quit:
+		a.log.Info("shutting down", map[string]any{"signal": sig.String()})
+		a.drain()
+		return nil
+	case err := <-serveErrs:
+		a.log.Error("a listener failed; shutting down", map[string]any{"error": err.Error()})
+		return err
+	}
+}
+
+func (a *app) drain() {
+	a.shuttingDown.Store(true)
+	if a.cfg.ShutdownDrainDelay > 0 {
+		a.sleep(a.cfg.ShutdownDrainDelay)
+	}
+}
+
+func (a *app) listen(name string, srv *http.Server, serveErrs chan<- error) {
+	go func() {
+		a.log.Info(name+" server starting", map[string]any{"addr": srv.Addr})
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErrs <- fmt.Errorf("%s server: %w", name, err)
+		}
+	}()
+}
+
+func (a *app) startServers() <-chan error {
 	exportCtx, cancelExporters := context.WithCancel(context.Background())
 	a.cancelExporters = cancelExporters
 	go a.rlsExporter.Run(exportCtx)
@@ -68,21 +102,9 @@ func (a *app) startServers() {
 		go a.tenantPurger.Run(exportCtx)
 	}
 
-	go func() {
-		a.log.Info("HTTP server starting", map[string]any{"addr": a.httpServer.Addr})
-		if err := a.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			a.log.Error("HTTP server error", map[string]any{"error": err.Error()})
-			os.Exit(1)
-		}
-	}()
-
-	go func() {
-		a.log.Info("metrics server starting", map[string]any{"addr": a.metricsServer.Addr})
-		if err := a.metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			a.log.Error("metrics server error", map[string]any{"error": err.Error()})
-			os.Exit(1)
-		}
-	}()
+	serveErrs := make(chan error, 2)
+	a.listen("HTTP", a.httpServer, serveErrs)
+	a.listen("metrics", a.metricsServer, serveErrs)
 
 	go func() {
 		a.log.Info("outbox relay starting", map[string]any{
@@ -93,6 +115,7 @@ func (a *app) startServers() {
 			a.log.Error("outbox relay exited", map[string]any{"error": err.Error()})
 		}
 	}()
+	return serveErrs
 }
 
 func (a *app) stopServers(ctx context.Context) {

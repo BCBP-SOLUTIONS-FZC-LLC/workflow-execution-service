@@ -223,9 +223,8 @@ func TestNewEligibilityClient(t *testing.T) {
 }
 
 // A base URL containing a control character fails http.NewRequestWithContext's
-// own URL parsing before any network call is attempted — a malformed-request
-// error, not an upstream one, so it must fail closed on the first attempt
-// without retrying.
+// own URL parsing before any network call is attempted. The read still fails
+// closed as an upstream failure, so the start answers 503 like any other failed read.
 func TestCheckEligibility_MalformedBaseURLFailsWithoutRetry(t *testing.T) {
 	client := httpadapter.NewEligibilityClient("http://example.invalid\x7f", 5*time.Second)
 
@@ -233,8 +232,7 @@ func TestCheckEligibility_MalformedBaseURLFailsWithoutRetry(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "build eligibility request")
-	assert.False(t, errors.Is(err, httpadapter.ErrUpstreamUnavailable),
-		"a malformed request is rejected, not an upstream failure")
+	assert.ErrorIs(t, err, httpadapter.ErrUpstreamUnavailable)
 }
 
 func TestCheckEligibilityBatch(t *testing.T) {
@@ -262,42 +260,6 @@ func TestCheckEligibilityBatch(t *testing.T) {
 			assert.True(t, result.Eligible)
 		}
 		assert.Equal(t, int32(3), atomic.LoadInt32(&calls))
-	})
-
-	t.Run("one request failing does not discard the others' results", func(t *testing.T) {
-		// One user's department (dept 1, below) always 500s; the other two
-		// succeed with different eligible/ineligible outcomes. A single
-		// failing request must not poison the whole batch (the fan-out's own
-		// prior all-or-nothing behavior, fixed as a real reliability gap).
-		failingDept := uuid.New()
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			department := uuid.MustParse(r.URL.Query().Get("department_id"))
-			if department == failingDept {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			eligible := department != uuid.Nil
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]bool{"eligible": eligible})
-		}))
-		defer srv.Close()
-
-		client := httpadapter.NewEligibilityClient(srv.URL, 200*time.Millisecond)
-		eligibleDept := uuid.New()
-		requests := []port.EligibilityCheckRequest{
-			{NewUserID: uuid.New(), DepartmentID: eligibleDept, RequiredLevel: "reviewer"},
-			{NewUserID: uuid.New(), DepartmentID: failingDept, RequiredLevel: "reviewer"},
-			{NewUserID: uuid.New(), DepartmentID: uuid.Nil, RequiredLevel: "reviewer"},
-		}
-
-		results, err := client.CheckEligibilityBatch(context.Background(), uuid.New(), requests)
-		require.NoError(t, err, "a per-item failure must not surface as a whole-batch error")
-		require.Len(t, results, 3)
-		assert.NoError(t, results[0].Err)
-		assert.True(t, results[0].Eligible, "the eligible-department request must still succeed despite request 1 failing")
-		assert.Error(t, results[1].Err, "the failing request's own error must be reported on its own result")
-		assert.NoError(t, results[2].Err)
-		assert.False(t, results[2].Eligible, "the third request must resolve on its own, independent of request 1's failure")
 	})
 
 	t.Run("empty request list returns an empty, non-nil-error result", func(t *testing.T) {

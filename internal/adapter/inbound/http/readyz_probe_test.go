@@ -22,9 +22,6 @@ func TestReadyz_FailingDependency_Returns503AndIsLoggedAtErrorAndCountedAs5xx(t 
 		{name: "database", failing: "db", arrange: func(rig *hrfRig) {
 			rig.db.fn = func(context.Context) inboundhttp.DBHealth { return inboundhttp.DBHealth{Healthy: false} }
 		}},
-		{name: "cache", failing: "cache", arrange: func(rig *hrfRig) {
-			rig.cacheP.fn = func(context.Context) error { return errors.New("valkey down") }
-		}},
 		{name: "temporal", failing: "temporal", arrange: func(rig *hrfRig) {
 			rig.temporal.fn = func(context.Context) error { return errors.New("temporal down") }
 		}},
@@ -71,12 +68,6 @@ func TestReadyz_DependencyProbe_GetsATwoSecondBoundedContext_AndItsFailureReturn
 				return inboundhttp.DBHealth{Healthy: false}
 			}
 		}},
-		{name: "cache", failing: "cache", arrange: func(rig *hrfRig, r *hrfRecordDeadline) {
-			rig.cacheP.fn = func(ctx context.Context) error {
-				r.record(ctx)
-				return errors.New("valkey timed out")
-			}
-		}},
 		{name: "temporal", failing: "temporal", arrange: func(rig *hrfRig, r *hrfRecordDeadline) {
 			rig.temporal.fn = func(ctx context.Context) error {
 				r.record(ctx)
@@ -114,4 +105,22 @@ func TestReadyz_HeadRequest_Returns404WithoutPingingAnyDependency(t *testing.T) 
 	assert.Zero(t, rig.db.calls)
 	assert.Zero(t, rig.cacheP.calls)
 	assert.Zero(t, rig.temporal.calls)
+}
+
+func TestReadyz_CachePing_GetsATwoSecondBoundedContext_AndItsFailureOnlyDegrades(t *testing.T) {
+	rig := hrfNewRig(t, "test")
+	rec := &hrfRecordDeadline{}
+	rig.cacheP.fn = func(ctx context.Context) error {
+		rec.record(ctx)
+		return errors.New("valkey timed out")
+	}
+
+	w := rig.do(http.MethodGet, "/readyz", nil)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "degraded", hrfBody(t, w)["cache"])
+	require.True(t, rec.sawDeadline, "the probe must hand the cache a bounded context")
+	remaining := time.Until(rec.deadline)
+	assert.Positive(t, remaining)
+	assert.LessOrEqual(t, remaining, 2*time.Second)
 }

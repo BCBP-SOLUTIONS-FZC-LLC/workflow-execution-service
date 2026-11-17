@@ -13,6 +13,7 @@ import (
 	sdkworkflow "go.temporal.io/sdk/workflow"
 
 	outboundtemporal "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
@@ -47,6 +48,35 @@ func (r *workerRegistry) has(queueName string) bool {
 	return ok
 }
 
+func (r *workerRegistry) names() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, 0, len(r.workers))
+	for name := range r.workers {
+		out = append(out, name)
+	}
+	return out
+}
+
+func (r *workerRegistry) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.workers)
+}
+
+func (r *workerRegistry) get(queueName string) (worker.Worker, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	w, ok := r.workers[queueName]
+	return w, ok
+}
+
+func (r *workerRegistry) remove(queueName string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.workers, queueName)
+}
+
 func (r *workerRegistry) all() []worker.Worker {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -55,6 +85,20 @@ func (r *workerRegistry) all() []worker.Worker {
 		out = append(out, w)
 	}
 	return out
+}
+
+func stopTopology(cancelPoll context.CancelFunc, pollDone <-chan struct{}, registry *workerRegistry) {
+	cancelPoll()
+	<-pollDone
+	var wg sync.WaitGroup
+	for _, w := range registry.all() {
+		wg.Add(1)
+		go func(w worker.Worker) {
+			defer wg.Done()
+			w.Stop()
+		}(w)
+	}
+	wg.Wait()
 }
 
 func registerAll(w worker.Worker, deps *outboundtemporal.Deps) {
@@ -71,6 +115,8 @@ func startWorkerForQueue(sdk client.Client, deps *outboundtemporal.Deps, queueNa
 	return w, nil
 }
 
+var startQueueWorker = startWorkerForQueue
+
 func pollQueueTopology(
 	ctx context.Context,
 	sdk client.Client,
@@ -81,6 +127,8 @@ func pollQueueTopology(
 	registry *workerRegistry,
 	log port.Logger,
 ) {
+	pollQueueTopologyOnce(ctx, sdk, deps, queues, defaultQueue, registry, log)
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -112,9 +160,32 @@ func pollQueueTopologyOnce(
 		return
 	}
 
-	observability.WorkerActiveQueues.Set(float64(len(active)))
 	observability.WorkerQueueLastPollTimestamp.WithLabelValues(defaultQueue).SetToCurrentTime()
 
+	retireGoneQueues(active, defaultQueue, registry, log)
+	startMissingQueues(sdk, deps, active, defaultQueue, registry, log)
+	observability.WorkerActiveQueues.Set(float64(registry.count()))
+}
+
+func retireGoneQueues(active []*domain.ActiveTaskQueue, defaultQueue string, registry *workerRegistry, log port.Logger) {
+	listed := make(map[string]bool, len(active))
+	for _, q := range active {
+		listed[q.QueueName] = true
+	}
+	for _, name := range registry.names() {
+		if name == defaultQueue || listed[name] {
+			continue
+		}
+		if w, ok := registry.get(name); ok {
+			w.Stop()
+			registry.remove(name)
+		}
+		observability.WorkerQueueLastPollTimestamp.DeleteLabelValues(name)
+		log.Info("stopped worker for a queue no longer registered", map[string]any{"queue": name})
+	}
+}
+
+func startMissingQueues(sdk client.Client, deps *outboundtemporal.Deps, active []*domain.ActiveTaskQueue, defaultQueue string, registry *workerRegistry, log port.Logger) {
 	for _, q := range active {
 		if q.QueueName == defaultQueue {
 			continue
@@ -123,7 +194,7 @@ func pollQueueTopologyOnce(
 			observability.WorkerQueueLastPollTimestamp.WithLabelValues(q.QueueName).SetToCurrentTime()
 			continue
 		}
-		w, err := startWorkerForQueue(sdk, deps, q.QueueName, dynamicQueueWorkerOptions)
+		w, err := startQueueWorker(sdk, deps, q.QueueName, dynamicQueueWorkerOptions)
 		if err != nil {
 			log.Error("failed to start worker for queue", map[string]any{"queue": q.QueueName, "error": err.Error()})
 			continue

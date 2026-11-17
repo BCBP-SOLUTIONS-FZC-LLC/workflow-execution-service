@@ -23,6 +23,8 @@ excludeFiles:
   # main's startup path) and the same container fixtures, so the same narrow
   # file-name exemption applies.
   - "cmd/worker/.*_integration_test\\.go$"
+  # cmd/server's integration-tagged test reads the relay role against the same container fixtures.
+  - "cmd/server/.*_integration_test\\.go$"
 
 allow:
   # Only check inter-component project imports; vendor packages are unrestricted.
@@ -57,6 +59,10 @@ components:
     in: "internal/eventschema/**"
   adapter:
     in: "internal/adapter/**"
+  # The embedded AsyncAPI document (go:embed only), declared separately so
+  # the AsyncAPI page handler can import it.
+  apispec:
+    in: "api"
   db_migrations:
     in: "db/**"
   cmd:
@@ -90,6 +96,7 @@ deps:
       - service       # handlers reference service request/response types
       - db            # sqlc-generated types
       - eventschema   # eventbus.SchemaValidator embeds the event JSON Schemas
+      - apispec       # the AsyncAPI page serves the embedded document
       - observability # internal_events.go records the centralized ingest/reroute/last-received metrics
   cmd:
     mayDependOn:

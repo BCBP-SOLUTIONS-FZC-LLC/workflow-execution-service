@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
@@ -27,7 +28,7 @@ type DefinitionClient struct {
 }
 
 func NewDefinitionClient(baseURL string, timeout time.Duration) *DefinitionClient {
-	return &DefinitionClient{baseURL: baseURL, client: NewClient(timeout)}
+	return &DefinitionClient{baseURL: strings.TrimRight(baseURL, "/"), client: NewClient(timeout)}
 }
 
 type compiledPlanResp struct {

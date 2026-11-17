@@ -57,13 +57,13 @@ func TestReadyz_DBUnhealthy_Returns503(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 
-func TestReadyz_CacheUnreachable_Returns503(t *testing.T) {
+func TestReadyz_CacheUnreachable_StaysReady(t *testing.T) {
 	r := testRouter(fakeDBPinger{health: DBHealth{Healthy: true}}, fakePinger{err: errors.New("valkey down")}, fakePinger{})
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 
-	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestReadyz_TemporalUnreachable_Returns503(t *testing.T) {
