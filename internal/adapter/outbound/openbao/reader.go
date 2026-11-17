@@ -59,7 +59,7 @@ func (r *Reader) Read(ctx context.Context, path, fieldName string) (string, erro
 		return r.extractField(resp.Body, path, fieldName)
 	case http.StatusNotFound:
 		return "", fmt.Errorf("%w: %q", ErrSecretNotFound, path)
-	case http.StatusForbidden:
+	case http.StatusUnauthorized, http.StatusForbidden:
 		return "", fmt.Errorf("%w: openbao read %q", ErrUnauthorized, path)
 	default:
 		return "", fmt.Errorf("%w: openbao read %q field %q: status %d", ErrUpstreamUnavailable, path, fieldName, resp.StatusCode)

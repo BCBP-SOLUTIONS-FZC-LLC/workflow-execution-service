@@ -69,7 +69,7 @@ func newLockPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgc
 	return pool, nil
 }
 
-func newCacheStore(ctx context.Context, cfg *config.Config) (port.CacheStore, *redis.Client, error) {
+func newCacheStore(ctx context.Context, cfg *config.Config, log port.Logger) (port.CacheStore, *redis.Client) {
 	client := redis.NewClient(&redis.Options{
 		Addr:         cfg.ValkeyAddr,
 		Password:     cfg.ValkeyPassword,
@@ -78,12 +78,12 @@ func newCacheStore(ctx context.Context, cfg *config.Config) (port.CacheStore, *r
 		WriteTimeout: cfg.ValkeyWriteTimeout,
 	})
 	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, nil, fmt.Errorf("valkey ping: %w", err)
+		log.Warn("valkey did not answer at start; serving without it until it does", map[string]any{"addr": cfg.ValkeyAddr, "error": err.Error()})
 	}
-	return valkey.NewCache(client), client, nil
+	return valkey.NewCache(client), client
 }
 
-func newGlueCodec(ctx context.Context, cfg *config.Config) (*glue.Codec, error) {
+func newGlueCodec(ctx context.Context, cfg *config.Config, log port.Logger) (*glue.Codec, error) {
 	var awsCfg aws.Config
 	var err error
 	if !cfg.AWSUseStub {
@@ -92,7 +92,9 @@ func newGlueCodec(ctx context.Context, cfg *config.Config) (*glue.Codec, error) 
 			return nil, fmt.Errorf("load aws config for glue: %w", err)
 		}
 	}
-	return glue.NewCodec(awsCfg, cfg.GlueRegistryName, cfg.AWSUseStub, cfg.AWSEndpointURL, cfg.GlueSchemaCacheTTL), nil
+	codec := glue.NewCodec(awsCfg, cfg.GlueRegistryName, cfg.AWSUseStub, cfg.AWSEndpointURL, cfg.GlueSchemaCacheTTL)
+	codec.MaxStaleness = cfg.GlueSchemaMaxStaleness
+	return codec.WithLogger(log), nil
 }
 
 func newPublisher(cfg *config.Config, log port.Logger, codec events.Codec) (events.Publisher, error) {

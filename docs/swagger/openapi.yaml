@@ -637,7 +637,7 @@ components:
     GatewayAuthError:
       type: object
       required: [error, status]
-      description: The flat envelope the shared HTTP library writes before a handler runs (a missing identity, the request timeout, a recovered panic).
+      description: The flat envelope the shared HTTP library writes before a handler runs (a missing identity, a request that outlived the request timeout, answered 503 after the handler returns, a recovered panic).
       properties:
         error:      { type: string, example: "missing or invalid authentication headers" }
         status:     { type: integer, example: 401 }
@@ -874,8 +874,10 @@ paths:
       tags: [Ops]
       summary: Readiness probe
       description: >
-        Returns 200 while the database, the cache and the Temporal frontend answer.
-        Served at the root, outside the `/api/v1` prefix.
+        Returns 200 while the database and the Temporal frontend answer. An unreachable cache does not
+        remove the service from rotation: the body reports `cache: degraded` and the status stays 200.
+        Once the process has been told to stop, it answers 503 with `shutting_down: true` while it drains,
+        before it closes its listener. Served at the root, outside the `/api/v1` prefix.
       security: []
       responses:
         "200":
@@ -901,8 +903,12 @@ paths:
                     type: integer
                     example: 10
                     description: Configured pool maximum.
+                  cache:
+                    type: string
+                    enum: [degraded]
+                    description: Present only while the cache does not answer; the service keeps serving without it.
         "503":
-          description: A dependency is unreachable; the first failing check is named.
+          description: A dependency is unreachable, or the process is shutting down; the first failing check is named.
           content:
             application/json:
               schema:
@@ -915,12 +921,12 @@ paths:
                   db:
                     type: string
                     enum: [unreachable]
-                  cache:
-                    type: string
-                    enum: [unreachable]
                   temporal:
                     type: string
                     enum: [unreachable]
+                  shutting_down:
+                    type: boolean
+                    enum: [true]
               example:
                 status: unavailable
                 temporal: unreachable

@@ -235,6 +235,20 @@ spec:
             summary: "A connector task has been READY for over {{ div (.Values.alerts.connectorTaskReadyAgeSeconds | int) 60 }} minutes"
             description: "A connector task was created but its connector has not run or reported: the oldest has been READY for {{ "{{" }} $value | humanizeDuration {{ "}}" }}. Look for an event the ingest route refused (a stage whose department is not in the plan), a dead-lettered stream entry or a stopped connector worker."
 
+        - alert: ConnectorTaskUnknownFailure
+          expr: |
+            sum by (connector_type) (increase(workflow_execution_service_connector_task_failures_total{class="unknown"}[5m])) > 0
+            or
+            sum by (connector_type) (workflow_execution_service_connector_task_failures_total{class="unknown"})
+            unless
+            sum by (connector_type) (workflow_execution_service_connector_task_failures_total{class="unknown"} offset 5m)
+          labels:
+            severity: warning
+          annotations:
+            runbook: "workflow-execution-service/connector-unknown-failure"
+            summary: "Connector calls of type {{ "{{" }} $labels.connector_type {{ "}}" }} are failing with an unknown error class"
+            description: "The connector worker could not tell whether a failed call was transient or permanent, so the call was not retried. Search the worker's logs for the Warn line connector call failed with its task id."
+
         - alert: TenantPurgeFailing
           expr: increase(workflow_execution_service_tenant_purge_failures_total[{{ include "workflow-execution-service.purgeAlertWindow" . }}]) > 0
           for: 5m

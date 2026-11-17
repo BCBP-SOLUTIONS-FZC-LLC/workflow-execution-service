@@ -29,14 +29,17 @@ type activityMetrics struct {
 	interceptor.ActivityInboundInterceptorBase
 }
 
-func (a *activityMetrics) ExecuteActivity(ctx context.Context, in *interceptor.ExecuteActivityInput) (interface{}, error) {
+func (a *activityMetrics) ExecuteActivity(ctx context.Context, in *interceptor.ExecuteActivityInput) (result interface{}, err error) {
 	start := time.Now()
-	result, err := a.Next.ExecuteActivity(ctx, in)
-	outcome := "success"
-	if err != nil {
-		outcome = "error"
+	name := activity.GetInfo(ctx).ActivityType.Name
+	outcome := "error"
+	defer func() {
+		ObserveHistogramVec(WorkflowActivityDurationSeconds, time.Since(start).Seconds(), name, outcome)
+	}()
+	result, err = a.Next.ExecuteActivity(ctx, in)
+	if err == nil {
+		outcome = "success"
 	}
-	ObserveHistogramVec(WorkflowActivityDurationSeconds, time.Since(start).Seconds(), activity.GetInfo(ctx).ActivityType.Name, outcome)
 	return result, err //nolint:wrapcheck // the SDK classifies activity errors by type, so they pass through unwrapped
 }
 

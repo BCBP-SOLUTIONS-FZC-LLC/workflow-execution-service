@@ -3,17 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/logger"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/contrib/opentelemetry"
 	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/worker"
 
@@ -57,21 +54,23 @@ func main() {
 	}
 	defer tracingShutdown()
 
+	bound, err := bindListeners(context.Background(), fmt.Sprintf(":%d", cfg.WorkerHealthPort), fmt.Sprintf(":%d", cfg.WorkerMetricsPort))
+	if err != nil {
+		fatal(wlog, tracingShutdown, "startup failed", err)
+	}
+	defer bound.close()
+
 	deps, queueRepo, pool, cleanup, err := buildDeps(cfg, wlog)
 	if err != nil {
 		fatal(wlog, tracingShutdown, "startup failed", err)
 	}
 	defer cleanup()
 
-	var clientInterceptors []interceptor.ClientInterceptor
-	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
-		tracingInterceptor, err := observability.NewTemporalTracingInterceptor(opentelemetry.TracerOptions{})
-		if err != nil {
-			fatal(wlog, func() { cleanup(); tracingShutdown() }, "temporal tracing interceptor", err)
-		}
-		clientInterceptors = append(clientInterceptors, tracingInterceptor)
+	dialOptions, err := temporalDialOptions(cfg)
+	if err != nil {
+		fatal(wlog, func() { cleanup(); tracingShutdown() }, "temporal client options", err)
 	}
-	sdk, err := client.Dial(client.Options{HostPort: cfg.TemporalHostPort, Namespace: cfg.TemporalNamespace, Interceptors: clientInterceptors})
+	sdk, err := client.Dial(dialOptions)
 	if err != nil {
 		fatal(wlog, func() { cleanup(); tracingShutdown() }, "dial temporal", err)
 	}
@@ -89,21 +88,17 @@ func main() {
 	registry.add(cfg.TemporalTaskQueue, defaultWorker)
 
 	pollCtx, cancelPoll := context.WithCancel(context.Background())
-	go pollQueueTopology(pollCtx, sdk, deps, queueRepo, cfg.TemporalTaskQueue, cfg.QueueTopologyPollInterval, registry, wlog)
-
-	healthSrv := newHealthServer(fmt.Sprintf(":%d", cfg.WorkerHealthPort), pool, sdk)
+	pollDone := make(chan struct{})
 	go func() {
-		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			wlog.Error("health server exited", map[string]any{"error": err.Error()})
-		}
+		defer close(pollDone)
+		pollQueueTopology(pollCtx, sdk, deps, queueRepo, cfg.TemporalTaskQueue, cfg.QueueTopologyPollInterval, registry, wlog)
 	}()
 
-	metricsSrv := newMetricsServer(fmt.Sprintf(":%d", cfg.WorkerMetricsPort))
-	go func() {
-		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			wlog.Error("metrics server exited", map[string]any{"error": err.Error()})
-		}
-	}()
+	healthSrv := newHealthServer(bound.health.Addr().String(), pool, sdk)
+	serveOn("health", healthSrv, bound.health, wlog)
+
+	metricsSrv := newMetricsServer(bound.metrics.Addr().String())
+	serveOn("metrics", metricsSrv, bound.metrics, wlog)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -121,15 +116,7 @@ func main() {
 		wlog.Warn("metrics server shutdown error", map[string]any{"error": err.Error()})
 	}
 
-	var wg sync.WaitGroup
-	for _, w := range registry.all() {
-		wg.Add(1)
-		go func(w worker.Worker) {
-			defer wg.Done()
-			w.Stop()
-		}(w)
-	}
-	wg.Wait()
+	stopTopology(cancelPoll, pollDone, registry)
 }
 
 func buildDeps(cfg *config.Config, wlog port.Logger) (*outboundtemporal.Deps, port.ActiveTaskQueueRepository, *pgcommon.Pool, func(), error) {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"go.temporal.io/sdk/worker"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -131,6 +132,8 @@ func TestPollQueueTopologyOnce_SkipsTheDefaultQueueTheMainWorkerAlreadyServes(t 
 	obstest.Init(t)
 	const defaultQueue = "wkboot-skipdefault-default"
 	registry := newWorkerRegistry()
+	mainWorker := &topoFakeWorker{}
+	registry.add(defaultQueue, mainWorker)
 	log := &wkbootRecordingLog{}
 	repo := &wkbootQueueRepo{active: []*domain.ActiveTaskQueue{{TenantID: uuid.New(), QueueName: defaultQueue, Routable: true}}}
 	observability.WorkerActiveQueues.Set(0)
@@ -140,14 +143,14 @@ func TestPollQueueTopologyOnce_SkipsTheDefaultQueueTheMainWorkerAlreadyServes(t 
 	// A nil client makes any attempt to start a second worker panic.
 	pollQueueTopologyOnce(context.Background(), nil, nil, repo, defaultQueue, registry, log)
 
-	if registry.has(defaultQueue) {
-		t.Error("the default queue was registered by the poll: it would get a second worker")
+	if got := registry.all(); len(got) != 1 || got[0] != worker.Worker(mainWorker) {
+		t.Errorf("registry holds %v, want only the main worker: the default queue would get a second worker", got)
 	}
-	if got := len(registry.all()); got != 0 {
-		t.Errorf("registry holds %d workers, want none", got)
+	if mainWorker.stopCount() != 0 {
+		t.Error("the main worker for the default queue was stopped")
 	}
 	if got := testutil.ToFloat64(observability.WorkerActiveQueues); got != 1 {
-		t.Errorf("active queue gauge = %v, want 1 (the default queue counts as active)", got)
+		t.Errorf("active queue gauge = %v, want 1 (the one running worker)", got)
 	}
 	if got := testutil.ToFloat64(defaultGauge); got <= 1 {
 		t.Errorf("default queue poll timestamp = %v, want it refreshed by the successful poll", got)

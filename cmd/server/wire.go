@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
+	"sync/atomic"
 	"time"
 
 	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/contrib/opentelemetry"
-	"go.temporal.io/sdk/interceptor"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/outbox"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
@@ -73,6 +71,10 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, err
 	}
 	cleanups = append(cleanups, relayPool.Close)
+	if err := checkRelayRole(ctx, roleBypassesRLS(relayPool), cfg, log); err != nil {
+		unwind()
+		return nil, err
+	}
 
 	lockPool, err := newLockPool(ctx, cfg, log)
 	if err != nil {
@@ -81,16 +83,12 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 	cleanups = append(cleanups, lockPool.Close)
 
-	cache, cacheClient, err := newCacheStore(ctx, cfg)
-	if err != nil {
-		unwind()
-		return nil, err
-	}
+	cache, cacheClient := newCacheStore(ctx, cfg, log)
 	cleanups = append(cleanups, func() { _ = cacheClient.Close() })
 
 	connectorEvents := valkeystream.NewEventPublisher(valkeystream.NewProducer(cacheClient), cfg.ConnectorStreamKey)
 
-	glueCodec, err := newGlueCodec(ctx, cfg)
+	glueCodec, err := newGlueCodec(ctx, cfg, log)
 	if err != nil {
 		unwind()
 		return nil, err
@@ -102,20 +100,12 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, err
 	}
 
-	var interceptors []interceptor.ClientInterceptor
-	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
-		tracingInterceptor, err := observability.NewTemporalTracingInterceptor(opentelemetry.TracerOptions{})
-		if err != nil {
-			unwind()
-			return nil, err
-		}
-		interceptors = append(interceptors, tracingInterceptor)
+	dialOptions, err := temporalDialOptions(cfg)
+	if err != nil {
+		unwind()
+		return nil, err
 	}
-	sdkClient, err := client.Dial(client.Options{
-		HostPort:     cfg.TemporalHostPort,
-		Namespace:    cfg.TemporalNamespace,
-		Interceptors: interceptors,
-	})
+	sdkClient, err := client.Dial(dialOptions)
 	if err != nil {
 		unwind()
 		return nil, fmt.Errorf("dial temporal: %w", err)
@@ -254,6 +244,7 @@ func newApp(cfg *config.Config) (*app, error) {
 		Log: log,
 	})
 
+	shuttingDown := &atomic.Bool{}
 	router := httpadapter.NewRouter(httpadapter.RouterConfig{
 		GinConfig: ginCfg,
 		AppEnv:    cfg.AppEnv,
@@ -261,15 +252,10 @@ func newApp(cfg *config.Config) (*app, error) {
 		DB:        dbPinger{pool: appPool},
 		Cache:     cache,
 		Temporal:  temporalPinger{sdk: sdkClient},
+
+		ShuttingDown: shuttingDown.Load,
 	})
-	httpServer := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.HTTPPort),
-		Handler:           router.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
+	httpServer := newHTTPServer(fmt.Sprintf(":%d", cfg.HTTPPort), router.Handler())
 
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", gincommon.MetricsHandler())
@@ -298,5 +284,28 @@ func newApp(cfg *config.Config) (*app, error) {
 		tenantPurger:     tenantPurger,
 		sdkClient:        sdkClient,
 		tracingShutdown:  tracingShutdown,
+		shuttingDown:     shuttingDown,
+		sleep:            time.Sleep,
 	}, nil
+}
+
+const writeTimeoutMargin = 5 * time.Second
+
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      httpadapter.RequestTimeout + writeTimeoutMargin,
+		IdleTimeout:       60 * time.Second,
+	}
+}
+
+func temporalDialOptions(cfg *config.Config) (client.Options, error) {
+	interceptors, err := observability.TracingClientInterceptors(cfg.TraceExportEnabled())
+	if err != nil {
+		return client.Options{}, err
+	}
+	return temporalclient.DialOptions(cfg.TemporalHostPort, cfg.TemporalNamespace, cfg.TemporalTLSCertPath, cfg.TemporalTLSKeyPath, interceptors)
 }

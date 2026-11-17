@@ -20,30 +20,25 @@ func TestRouter_UnmatchedInternalPath_Returns404NotAnAuthFailure(t *testing.T) {
 	assert.Equal(t, "/api/v1/internal/does-not-exist", body["instance"])
 }
 
-func TestRouter_TrailingSlashOnGetRoute_Redirects301WithoutObservabilityHeaders(t *testing.T) {
+func TestRouter_TrailingSlashOnGetRoute_Answers404Problem(t *testing.T) {
 	rig := hrfNewRig(t, "test")
-	before := hrfRequestsTotal(t, http.MethodGet, "unknown", "2xx")
 
 	w := rig.do(http.MethodGet, "/healthz/", nil)
 
-	assert.Equal(t, http.StatusMovedPermanently, w.Code)
-	assert.Equal(t, "/healthz", w.Header().Get("Location"))
-	assert.Empty(t, w.Header().Get("X-Request-ID"), "the redirect is issued before the observability middlewares run")
-	assert.Empty(t, w.Header().Get("X-Trace-ID"))
-	assert.Empty(t, rig.logger.accessLogs(), "a redirect writes no access log entry")
-	assert.Equal(t, before, hrfRequestsTotal(t, http.MethodGet, "unknown", "2xx"), "a redirect is not counted as a request")
+	require.Equal(t, http.StatusNotFound, w.Code)
+	assert.Empty(t, w.Header().Get("Location"))
+	assert.Equal(t, "NOT_FOUND", hrfBody(t, w)["code"])
 }
 
-func TestRouter_TrailingSlashOnPostRoute_Redirects307BeforeAuthAndHandler(t *testing.T) {
+func TestRouter_TrailingSlashOnPostRoute_Answers404BeforeAuthAndHandler(t *testing.T) {
 	rig := hrfNewRig(t, "test")
 	claimsBefore := rig.cache.claimCount()
 
 	w := rig.do(http.MethodPost, "/api/v1/instances/", map[string]string{"Idempotency-Key": "hrf-trailing-slash"})
 
-	assert.Equal(t, http.StatusTemporaryRedirect, w.Code, "not 401: the redirect precedes the auth middlewares")
-	assert.Equal(t, "/api/v1/instances", w.Header().Get("Location"))
+	assert.Equal(t, http.StatusNotFound, w.Code, "not 401: no route matches, so no auth middleware runs")
+	assert.Empty(t, w.Header().Get("Location"))
 	assert.Equal(t, claimsBefore, rig.cache.claimCount(), "the idempotency wrapper and handler must not run")
-	assert.Empty(t, rig.logger.accessLogs())
 }
 
 func TestRouter_MethodNotRegisteredForPath_Returns404NotAFallbackToGet(t *testing.T) {
@@ -86,13 +81,13 @@ func TestRouter_ScannerPath_UsesUnknownRouteLabelInMetricsAndAccessLog(t *testin
 	assert.Equal(t, "warn", logs[0].level)
 }
 
-func TestRouter_DevTrailingSlashOnAsyncAPI_Redirects301(t *testing.T) {
+func TestRouter_DevTrailingSlashOnAsyncAPI_Answers404(t *testing.T) {
 	rig := hrfNewRig(t, "dev")
 
 	w := rig.do(http.MethodGet, "/asyncapi/", nil)
 
-	assert.Equal(t, http.StatusMovedPermanently, w.Code)
-	assert.Equal(t, "/asyncapi", w.Header().Get("Location"))
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Empty(t, w.Header().Get("Location"))
 }
 
 func TestRouter_DevPathsBelowAsyncAPI_Return404Problem(t *testing.T) {

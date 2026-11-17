@@ -37,9 +37,11 @@ type RouterConfig struct {
 	DB       DBPinger
 	Cache    Pinger
 	Temporal Pinger
+
+	ShuttingDown func() bool
 }
 
-const requestTimeout = 30 * time.Second
+const RequestTimeout = 30 * time.Second
 
 type Router struct {
 	engine *gin.Engine
@@ -54,6 +56,8 @@ func NewRouter(cfg RouterConfig) *Router {
 	}
 	r := gin.New()
 	r.UseRawPath = true
+	r.RedirectTrailingSlash = false
+	r.RedirectFixedPath = false
 	h := cfg.Handler
 	r.NoRoute(handler.NotFound)
 
@@ -61,13 +65,13 @@ func NewRouter(cfg RouterConfig) *Router {
 		r.GET("/asyncapi", AsyncAPIHandler)
 	}
 
-	cfg.GinConfig.RequestTimeout = requestTimeout
+	cfg.GinConfig.RequestTimeout = RequestTimeout
 	for _, mw := range gincommon.ObservabilityMiddlewares(cfg.GinConfig) {
 		r.Use(mw)
 	}
 
 	r.GET("/healthz", gincommon.HealthHandler())
-	r.GET("/readyz", readyzHandler(cfg.DB, cfg.Cache, cfg.Temporal))
+	r.GET("/readyz", readyzHandler(cfg.DB, cfg.Cache, cfg.Temporal, cfg.ShuttingDown))
 
 	internal := r.Group("/api/v1/internal")
 	internal.Use(middleware.RequireSystemCaller())
@@ -121,20 +125,18 @@ func NewRouter(cfg RouterConfig) *Router {
 	return &Router{engine: r}
 }
 
-func readyzHandler(db DBPinger, cache, temporal Pinger) gin.HandlerFunc {
+func readyzHandler(db DBPinger, cache, temporal Pinger, shuttingDown func() bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if shuttingDown != nil && shuttingDown() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable", "shutting_down": true})
+			return
+		}
+
 		dbCtx, dbCancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		defer dbCancel()
 		hs := db.Health(dbCtx)
 		if !hs.Healthy {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable", "db": "unreachable"})
-			return
-		}
-
-		cacheCtx, cacheCancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
-		defer cacheCancel()
-		if err := cache.Ping(cacheCtx); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable", "cache": "unreachable"})
 			return
 		}
 
@@ -145,11 +147,17 @@ func readyzHandler(db DBPinger, cache, temporal Pinger) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
+		body := gin.H{
 			"status":         "OK",
 			"db_utilization": hs.Utilization,
 			"db_conns":       hs.AcquiredConns,
 			"db_max_conns":   hs.MaxConns,
-		})
+		}
+		cacheCtx, cacheCancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cacheCancel()
+		if err := cache.Ping(cacheCtx); err != nil {
+			body["cache"] = "degraded"
+		}
+		c.JSON(http.StatusOK, body)
 	}
 }

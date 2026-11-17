@@ -45,13 +45,15 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 |---|---|---|---|
 | `workflow_execution_service_connector_alias_registry_age_seconds` | gauge | - | Seconds since the connector worker last applied a fresh alias registry, updated on every refresh tick (a failed or empty refresh lets it grow). |
 | `workflow_execution_service_connector_dispatch_dead_lettered_total` | counter | `connector_type` | Connector stream entries moved to the dead-letter stream (delivery cap exceeded or entry unreadable), by connector_type. |
+| `workflow_execution_service_connector_task_failures_total` | counter | `class`, `connector_type`, `provider`, `retried` | Failed connector calls, by connector_type, provider, error class (transient, permanent or unknown) and whether the call was retried. |
 | `workflow_execution_service_delegation_reroute_duration_seconds` | histogram | - | Envelope-time to reroute-commit latency for DelegationStarted handling (LLD §6.7 SLO, p99 <= 4s). |
-| `workflow_execution_service_delegation_scope_unhandled_total` | counter | `scope` | Delegations arriving with a scope this service has no case for, by scope. They match no assignment. |
+| `workflow_execution_service_delegation_scope_unhandled_total` | counter | `scope` | Delegations arriving with a scope this service has no case for, by scope (always unknown, so a producer cannot create a series per value). They match no assignment. |
 | `workflow_execution_service_entitlements_call_duration_seconds` | histogram | `outcome` | Latency of one Entitlements feature-flag read, by outcome (success or error). |
 | `workflow_execution_service_entitlements_call_errors_total` | counter | `reason` | Failed Entitlements feature-flag reads, by reason (transport, status or response). |
 | `workflow_execution_service_entitlements_oldest_served_age_seconds` | gauge | - | Age in seconds of the oldest held feature-flag set served past its TTL, over the last TTL window; 0 when none was. |
 | `workflow_execution_service_entitlements_read_panics_total` | counter | - | Entitlements reads that panicked and were recovered; each counts as a failed read. |
 | `workflow_execution_service_entitlements_stale_served_total` | counter | - | Feature-flag answers served from a held set older than its TTL while a refresh runs or backs off. |
+| `workflow_execution_service_glue_schema_stale_served_total` | counter | - | Outbound events encoded with the last known schema version id (counted once per event) because the schema registry could not be read; the id is served for at most GLUE_SCHEMA_MAX_STALENESS past its cache TTL. |
 | `workflow_execution_service_instance_degraded_current` | gauge | - | Live count of instances currently DEGRADED. |
 | `workflow_execution_service_instance_degraded_oldest_age_seconds` | gauge | - | Age in seconds of the longest-parked DEGRADED instance. |
 | `workflow_execution_service_instance_degraded_total` | counter | - | Total instances that entered DEGRADED. |

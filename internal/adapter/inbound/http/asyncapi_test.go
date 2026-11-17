@@ -16,6 +16,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const asyncAPISpecPath = "api/asyncapi.yaml"
+
 // repoRoot locates the module root from this test file's own path so the
 // real api/asyncapi.yaml (loaded relative to the process's working
 // directory, per asyncAPISpecPath) can be found regardless of go test's
@@ -96,39 +98,9 @@ func TestAsyncAPIHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("missing spec file returns 500", func(t *testing.T) {
-		t.Chdir(t.TempDir())
-
-		r := gin.New()
-		r.GET("/asyncapi", AsyncAPIHandler)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/asyncapi", nil))
-
-		if w.Code != http.StatusInternalServerError {
-			t.Fatalf("status = %d, want 500", w.Code)
-		}
-		var resp map[string]any
-		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-			t.Fatalf("decode error body: %v", err)
-		}
-		if resp["code"] != "INTERNAL_ERROR" || strings.Contains(w.Body.String(), "asyncapi.yaml") {
-			t.Errorf("body = %s, want an INTERNAL_ERROR problem that does not name its cause", w.Body.String())
-		}
-	})
-
 	t.Run("unparseable spec file returns 500", func(t *testing.T) {
-		tmp := t.TempDir()
-		specDir := filepath.Join(tmp, filepath.Dir(asyncAPISpecPath))
-		if err := os.MkdirAll(specDir, 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(tmp, asyncAPISpecPath), []byte("asyncapi: [1, 2\n"), 0o644); err != nil {
-			t.Fatalf("write bad spec: %v", err)
-		}
-		t.Chdir(tmp)
-
 		r := gin.New()
-		r.GET("/asyncapi", AsyncAPIHandler)
+		r.GET("/asyncapi", asyncAPIHandlerFor([]byte("asyncapi: [1, 2\n")))
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/asyncapi", nil))
 

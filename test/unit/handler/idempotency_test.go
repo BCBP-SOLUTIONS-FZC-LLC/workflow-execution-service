@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
@@ -304,7 +305,7 @@ func TestIdempotency_CorruptedCacheEntry_RejectsReplay(t *testing.T) {
 
 	// Seed a cache entry that isn't valid JSON under the exact key
 	// WithIdempotency will compute, simulating a corrupted/foreign entry.
-	cache.data["idem:POST:/api/v1/internal/workflows/reassign-delegate:key-1"] = "not-json"
+	cache.data[internalReassignKey("key-1")] = "not-json"
 
 	w := do(router, r)
 
@@ -339,7 +340,7 @@ func TestIdempotency_ConcurrentSameKey_SecondRequestRejected(t *testing.T) {
 	r.Header.Set("Idempotency-Key", "key-1")
 
 	// Simulate a concurrent in-flight request already holding the claim.
-	cache.data["idem:POST:/api/v1/internal/workflows/reassign-delegate:key-1"] = "CLAIMED"
+	cache.data[internalReassignKey("key-1")] = "CLAIMED"
 
 	w := do(router, r)
 
@@ -364,7 +365,7 @@ func TestIdempotency_ClaimedKeyGetError_RejectsReplay(t *testing.T) {
 		},
 	}
 	cache := newFakeCacheStore()
-	cache.data["idem:POST:/api/v1/internal/workflows/reassign-delegate:key-1"] = "CLAIMED"
+	cache.data[internalReassignKey("key-1")] = "CLAIMED"
 	var warned bool
 	log := &fakeLogger{warn: func(string, map[string]any) { warned = true }}
 	router := newInternalRouter(newDelegateHandlerWithCacheAndLog(fake, cache, log))
@@ -466,4 +467,8 @@ func TestIdempotency_ClaimTask_ReplaySameBody_ReturnsCachedResponse(t *testing.T
 	require.Equal(t, http.StatusAccepted, w2.Code)
 	assert.Equal(t, w1.Body.String(), w2.Body.String())
 	assert.Equal(t, 1, calls, "a safe retry with the same Idempotency-Key must not re-invoke the handler")
+}
+
+func internalReassignKey(key string) string {
+	return "idem:" + testTenantID.String() + ":" + domain.SystemCaller + ":POST:/api/v1/internal/workflows/reassign-delegate:" + key
 }

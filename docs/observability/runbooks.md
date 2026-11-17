@@ -8,7 +8,7 @@ Common starting points:
 
 - Pods: `kubectl get pods -l app.kubernetes.io/name=workflow-execution-service`, then `kubectl logs` of the failing pod; log lines carry `trace_id` and `request_id`.
 - Error bodies are RFC 9457 problem documents with a stable `code`, `trace_id` and `request_id`.
-- Readiness: `GET /readyz` answers 503 naming the first unreachable dependency among Postgres, Valkey and Temporal.
+- Readiness: `GET /readyz` answers 503 naming the first unreachable dependency among Postgres and Temporal. A Valkey outage keeps it at 200 and adds `cache: degraded` to the body. After SIGTERM the API answers 503 with `shutting_down: true` for `SHUTDOWN_DRAIN_DELAY` before it closes its listener.
 - Metric names are in [`metric-registry.md`](metric-registry.md).
 
 ## Availability
@@ -129,6 +129,14 @@ Common starting points:
 3. **The connector worker is stopped or stuck.** Check its pods and its logs for the connector type; a pool that never frees (a connector that does not return) holds its type's entries.
 
 Fix the cause first. A task whose entry was lost is not redispatched by itself.
+
+### ConnectorTaskUnknownFailure
+
+`runbook: workflow-execution-service/connector-unknown-failure`
+
+**Meaning.** A connector call failed with the error class `unknown`: the worker could tell neither a transient nor a permanent cause, so the call was not retried and its task failed. The alert fires on the first unknown-class failure of a connector type after a process start, and on every later increase.
+
+**Triage.** Search the connector worker's logs for the Warn line `connector-worker: connector call failed` with the connector type; it names the task, the attempt and the classifier's reason. An unknown class usually means an error the classifier has no rule for (a new provider answer, a cancelled call, an email whose delivery is unknown). Fix the cause, or add a classifier rule in the connectors library.
 
 ### OutboxDeadLettered
 

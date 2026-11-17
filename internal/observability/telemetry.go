@@ -3,6 +3,11 @@ package observability
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
+
+	"go.temporal.io/sdk/contrib/opentelemetry"
+	"go.temporal.io/sdk/interceptor"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
@@ -27,6 +32,7 @@ func GinConfig(serviceName, buildVersion, environment string, log Logger) gincom
 }
 
 func InitTelemetry(ginCfg gincommon.Config, log Logger) (func(), error) {
+	disableExportWhenNoEndpoint()
 	shutdown, err := gincommon.InitTracingWithConfig(gincommon.TracingConfig{
 		ServiceName:  ginCfg.ServiceName,
 		BuildVersion: ginCfg.BuildVersion,
@@ -63,6 +69,24 @@ func InitTelemetry(ginCfg gincommon.Config, log Logger) (func(), error) {
 	}
 
 	return shutdown, nil
+}
+
+// The library falls back to localhost:4317 for an unset endpoint; this service treats unset as export off.
+func disableExportWhenNoEndpoint() {
+	if strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")) == "" && os.Getenv("OTEL_TRACES_EXPORTER") == "" {
+		_ = os.Setenv("OTEL_TRACES_EXPORTER", "none")
+	}
+}
+
+func TracingClientInterceptors(exportEnabled bool) ([]interceptor.ClientInterceptor, error) {
+	if !exportEnabled {
+		return nil, nil
+	}
+	tracing, err := NewTemporalTracingInterceptor(opentelemetry.TracerOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return []interceptor.ClientInterceptor{tracing}, nil
 }
 
 func StartSpan(ctx context.Context, name string) (context.Context, func()) {

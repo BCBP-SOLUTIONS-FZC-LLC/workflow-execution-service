@@ -101,7 +101,7 @@ var ruleMetricPattern = regexp.MustCompile(`workflow_execution_service_[a-z_]+`)
 func exerciseEveryCollector() {
 	observability.IncCounterVec(observability.RecordVersionConflictTotal, "workflow_instance")
 	observability.IncCounterVec(observability.InternalEventsIngestTotal, "DelegationStarted", "ok")
-	observability.IncCounterVec(observability.DelegationScopeUnhandledTotal, "some-new-scope")
+	observability.IncCounterVec(observability.DelegationScopeUnhandledTotal, observability.UnhandledScopeLabel)
 	observability.AddRetentionRowsDeleted("outbox_events", 1)
 	observability.IncCounterVec(observability.ConnectorDispatchDeadLetteredTotal, "send-email")
 	observability.ObserveHistogram(observability.DelegationRerouteDurationSeconds, 1)
@@ -124,4 +124,6 @@ func exerciseEveryCollector() {
 	observability.IncCounter(observability.EntitlementsStaleServedTotal)
 	observability.SetGauge(observability.EntitlementsOldestServedAgeSeconds, 1)
 	observability.IncCounter(observability.EntitlementsReadPanicsTotal)
+	observability.IncCounterVec(observability.ConnectorTaskFailuresTotal, "rest-call", "generic", "unknown", "false")
+	observability.IncCounter(observability.GlueSchemaStaleServedTotal)
 }

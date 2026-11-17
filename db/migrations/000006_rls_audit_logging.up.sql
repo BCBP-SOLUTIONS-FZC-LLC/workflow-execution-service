@@ -13,7 +13,7 @@ CREATE TABLE rls_violation_log (
     client_addr       inet DEFAULT inet_client_addr(),
     application_name  text DEFAULT current_setting('application_name', true),
     query_text        text,
-    occurred_at       timestamptz NOT NULL DEFAULT now()
+    occurred_at       timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 
 -- RLS disabled: log_rls_violation fires from inside another table's RLS

@@ -10,6 +10,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- Readiness and shutdown:
+  - `/readyz` stays 200 and reports `cache: degraded` when Valkey is down (it used to answer 503 and pull every API pod out of rotation), and the API starts when Valkey does not answer;
+  - on SIGTERM the API answers `/readyz` 503 with `shutting_down: true` and waits `SHUTDOWN_DRAIN_DELAY` (default 5s) before closing its listener;
+  - a bind failure on the API HTTP or metrics port goes through the normal shutdown, and the worker refuses to start when its health or metrics port cannot be bound.
+- Start-up checks:
+  - outside dev the API and worker refuse to start without `TEMPORAL_HOST_PORT` and `TEMPORAL_NAMESPACE` (they used to fall back to localhost and `default`);
+  - the API and worker present the mounted Temporal client certificate (`TEMPORAL_TLS_CERT_PATH`, `TEMPORAL_TLS_KEY_PATH`);
+  - the API checks that the outbox relay role bypasses row-level security, refusing to start outside dev and warning in dev;
+  - the API binary exits 2 with usage for any first argument other than `migrate` or `version` (a mistyped command used to boot a second server);
+  - an unset OTLP endpoint turns trace export off, and the Temporal tracing interceptor is registered only when export is on.
+- HTTP:
+  - the write timeout is the 30s request timeout plus 5s, so the 503 timeout answer reaches the caller instead of a connection reset;
+  - a path with an added or missing trailing slash answers 404 instead of redirecting before authentication;
+  - the waiting-external query answers 409 `INVALID_INSTANCE_STATE` for a gone execution and 503 for a Temporal outage, and a defer that cannot reach Temporal answers 503 `UPSTREAM_UNAVAILABLE` (both used to answer 500).
+- Worker queues: the queue registry is read at start (tenant queues used to wait a full poll interval for a poller), a purged queue's worker is stopped and its last-poll series removed, `worker_active_queues` counts running workers, and on SIGTERM the worker waits for the topology poll and stops every queue worker, including one started or retired during shutdown.
+- A Temporal readiness race (workflow not ready, namespace not active on this cluster) answers 503 `UPSTREAM_UNAVAILABLE` (it used to answer 500).
+- `PROCESSED_EVENT_RETENTION` defaults to 16 days so it outlives the 14-day queue retention (a late redelivery used to be processed twice).
+- Event schema registry: during a registry outage the last known schema id is served for up to `GLUE_SCHEMA_MAX_STALENESS` (default 1h) past its cache TTL, logged and counted per event in `glue_schema_stale_served_total`, only for a retryable registry failure while the publish itself is still live (an access-denied or not-found registry answer is never served stale); a transient registry failure is retried instead of dead-lettering the event; a slow lookup for one schema no longer delays others; a schema version id that is not a UUID is not cached.
+- Outbound clients:
+  - the first failed eligibility read ends the check, so a start answers 503 promptly; checks cut short by the caller's context ending answer 503, not 422 `ASSIGNEE_INELIGIBLE`; and each ineligible node is named once in `invalid_params`;
+  - a bad eligibility or token-service address answers 503 `UPSTREAM_UNAVAILABLE` instead of 500, and a base URL ending in a slash no longer breaks every call;
+  - an OpenBao 401 reports `secret_unauthorized` instead of `upstream_error`.
+- Observability:
+  - the RLS violation exporter retries its start read instead of stopping until a restart, and counts rows by database time; a violation is stamped when it is logged, not when its transaction began, so violations in long transactions are counted;
+  - the replay-failure and connector dead-letter counters exist at zero from start, so the first event after a restart pages;
+  - an activity that panics is recorded as an error in the activity latency histogram, and the unhandled-scope counter uses the label `unknown` instead of the raw scope;
+  - a new warning alert fires on connector calls that fail with the unknown error class.
+- `GET /instances` with an unknown `status` answers 400 naming `status` (it answered 500).
+- Internal reassign-delegate and cancel-by-delegate answers are keyed by tenant and system caller, so two tenants may reuse one idempotency key.
+- `GET /asyncapi` works from the container image, because the document is embedded in the binary, and a cyclic schema reference answers the 500 problem instead of crashing the process.
+
 - Terminate and offboarding: terminating an instance, or offboarding a tenant, queues a task-failed event for every open task (cascade source `instance_terminate`), and the terminated event carries the reason; before, only the instance event was sent and the reason went only to Temporal.
 - Internal events:
   - a user-availability or tenant-state event with an unrecognised status is acknowledged and ignored, with nothing paused, terminated or stored and the recency value unchanged, and is counted as `result="ignored"` in `internal_events_ingest_total` (a tenant event with such a status used to pause every instance);

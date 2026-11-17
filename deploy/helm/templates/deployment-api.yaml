@@ -63,6 +63,8 @@ spec:
               value: {{ .Values.env.otelExporterInsecure | quote }}
             - name: OTEL_TRACES_SAMPLER_RATIO
               value: {{ .Values.env.otelTracesSamplerRatio | quote }}
+            - name: SHUTDOWN_DRAIN_DELAY
+              value: {{ .Values.env.shutdownDrainDelay | quote }}
             - name: TEMPORAL_NAMESPACE
               value: {{ .Values.env.temporalNamespace | quote }}
             - name: TEMPORAL_TASK_QUEUE
@@ -73,6 +75,8 @@ spec:
               value: {{ .Values.env.awsUseStub | quote }}
             - name: GLUE_REGISTRY_NAME
               value: {{ .Values.env.glueRegistryName | quote }}
+            - name: GLUE_SCHEMA_MAX_STALENESS
+              value: {{ .Values.env.glueSchemaMaxStaleness | quote }}
             - name: TOKEN_SERVICE_BASE_URL
               value: {{ required "env.tokenServiceBaseURL is required: the API reads each tenant's automation principal from it and refuses to start without it" .Values.env.tokenServiceBaseURL | quote }}
             - name: ELIGIBILITY_BASE_URL

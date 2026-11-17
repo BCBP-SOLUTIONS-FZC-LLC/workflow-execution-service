@@ -26,6 +26,7 @@ type Config struct {
 
 	OTELServiceName        string
 	OTELExporterEndpoint   string
+	OTELTracesExporter     string
 	OTELExporterInsecure   bool
 	OTELTracesSamplerRatio float64
 
@@ -46,6 +47,11 @@ type Config struct {
 	TemporalHostPort  string
 	TemporalNamespace string
 	TemporalTaskQueue string
+
+	TemporalTLSCertPath string
+	TemporalTLSKeyPath  string
+
+	ShutdownDrainDelay time.Duration
 
 	AWSUseStub     bool
 	AWSRegion      string
@@ -86,8 +92,9 @@ type Config struct {
 	QueueTopologyPollInterval time.Duration
 	WorkflowCacheSize         int
 
-	GlueRegistryName   string
-	GlueSchemaCacheTTL time.Duration
+	GlueRegistryName       string
+	GlueSchemaCacheTTL     time.Duration
+	GlueSchemaMaxStaleness time.Duration
 
 	ConnectorStreamKey                 string
 	ConnectorStreamGroup               string
@@ -170,8 +177,9 @@ func Load() (*Config, error) {
 		return v
 	}
 
+	appEnv := getEnvOrDefault("APP_ENV", "dev")
 	cfg := &Config{
-		AppEnv:       getEnvOrDefault("APP_ENV", "dev"),
+		AppEnv:       appEnv,
 		BuildVersion: getEnvOrDefault("BUILD_VERSION", "dev"),
 
 		HTTPPort:          envInt("HTTP_PORT", 8080),
@@ -180,7 +188,8 @@ func Load() (*Config, error) {
 		WorkerMetricsPort: envInt("WORKER_METRICS_PORT", 8082),
 
 		OTELServiceName:        getEnvOrDefault("OTEL_SERVICE_NAME", "workflow-execution-service"),
-		OTELExporterEndpoint:   getEnvOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
+		OTELExporterEndpoint:   getEnvOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+		OTELTracesExporter:     getEnvOrDefault("OTEL_TRACES_EXPORTER", ""),
 		OTELExporterInsecure:   envBool("OTEL_EXPORTER_OTLP_INSECURE", true),
 		OTELTracesSamplerRatio: envFloat64("OTEL_TRACES_SAMPLER_RATIO", 1.0),
 
@@ -198,9 +207,14 @@ func Load() (*Config, error) {
 		ValkeyWriteTimeout: envDuration("VALKEY_WRITE_TIMEOUT", 1*time.Second),
 		IdempotencyTTL:     envDuration("IDEMPOTENCY_TTL", 24*time.Hour),
 
-		TemporalHostPort:  getEnvOrDefault("TEMPORAL_HOST_PORT", "localhost:7233"),
-		TemporalNamespace: getEnvOrDefault("TEMPORAL_NAMESPACE", "default"),
+		TemporalHostPort:  getEnvOrDefault("TEMPORAL_HOST_PORT", devDefault(appEnv, "localhost:7233")),
+		TemporalNamespace: getEnvOrDefault("TEMPORAL_NAMESPACE", devDefault(appEnv, "default")),
 		TemporalTaskQueue: getEnvOrDefault("TEMPORAL_TASK_QUEUE", "wf-queue-default"),
+
+		TemporalTLSCertPath: getEnvOrDefault("TEMPORAL_TLS_CERT_PATH", ""),
+		TemporalTLSKeyPath:  getEnvOrDefault("TEMPORAL_TLS_KEY_PATH", ""),
+
+		ShutdownDrainDelay: envDuration("SHUTDOWN_DRAIN_DELAY", 5*time.Second),
 
 		AWSUseStub:     envBool("AWS_USE_STUB", true),
 		AWSRegion:      getEnvOrDefault("AWS_REGION", "us-east-1"),
@@ -215,7 +229,7 @@ func Load() (*Config, error) {
 		TenantPurgeEnabled:         envBool("TENANT_PURGE_ENABLED", true),
 		TenantHistoryRetention:     envDuration("TENANT_HISTORY_RETENTION", 7*365*24*time.Hour),
 		StartRefusedStatuses:       startRefusedStatuses(os.Getenv("START_REFUSED_STATUSES")),
-		ProcessedEventRetention:    envDuration("PROCESSED_EVENT_RETENTION", 7*24*time.Hour),
+		ProcessedEventRetention:    envDuration("PROCESSED_EVENT_RETENTION", 16*24*time.Hour),
 		RetentionSweepInterval:     envDuration("RETENTION_SWEEP_INTERVAL", 24*time.Hour),
 		RetentionSweepBatch:        envInt("RETENTION_SWEEP_BATCH", 1000),
 		OperationalStatsInterval:   envDuration("OPERATIONAL_STATS_INTERVAL", 30*time.Second),
@@ -240,8 +254,9 @@ func Load() (*Config, error) {
 		QueueTopologyPollInterval: envDuration("QUEUE_TOPOLOGY_POLL_INTERVAL", 60*time.Second),
 		WorkflowCacheSize:         envInt("WORKFLOW_CACHE_SIZE", 0),
 
-		GlueRegistryName:   getEnvOrDefault("GLUE_REGISTRY_NAME", ""),
-		GlueSchemaCacheTTL: envDuration("GLUE_SCHEMA_CACHE_TTL", 5*time.Minute),
+		GlueRegistryName:       getEnvOrDefault("GLUE_REGISTRY_NAME", ""),
+		GlueSchemaCacheTTL:     envDuration("GLUE_SCHEMA_CACHE_TTL", 5*time.Minute),
+		GlueSchemaMaxStaleness: envDuration("GLUE_SCHEMA_MAX_STALENESS", time.Hour),
 
 		ConnectorStreamKey:                 getEnvOrDefault("CONNECTOR_STREAM_KEY", "connector-tasks"),
 		ConnectorStreamGroup:               getEnvOrDefault("CONNECTOR_STREAM_GROUP", "connector-worker"),
@@ -296,7 +311,24 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+const maxShutdownDrainDelay = 15 * time.Second
+
 var appEnvs = []string{"local", "dev", "test", "staging", "prod"}
+
+func devDefault(appEnv, value string) string {
+	if appEnv == "dev" || appEnv == "local" {
+		return value
+	}
+	return ""
+}
+
+func (c *Config) TraceExportEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(c.OTELExporterEndpoint)) {
+	case "", "none", "off", "disabled":
+		return false
+	}
+	return !strings.EqualFold(strings.TrimSpace(c.OTELTracesExporter), "none")
+}
 
 func (c *Config) IsDev() bool {
 	return c.AppEnv == "dev" || c.AppEnv == "local"
@@ -389,6 +421,15 @@ func (c *Config) validate() error {
 	if c.EntitlementsFreshnessBound <= 0 || c.EntitlementsFreshnessBound < c.EntitlementsCacheTTL {
 		return fmt.Errorf("ENTITLEMENTS_FRESHNESS_BOUND must be > 0 and not below ENTITLEMENTS_CACHE_TTL")
 	}
+	if (c.TemporalTLSCertPath == "") != (c.TemporalTLSKeyPath == "") {
+		return fmt.Errorf("TEMPORAL_TLS_CERT_PATH and TEMPORAL_TLS_KEY_PATH must be set together: a client certificate needs its key")
+	}
+	if c.ShutdownDrainDelay < 0 || c.ShutdownDrainDelay >= maxShutdownDrainDelay {
+		return fmt.Errorf("SHUTDOWN_DRAIN_DELAY must be >= 0 and below %s: the drain and the 30s shutdown deadline must fit the API pod's 45s grace period", maxShutdownDrainDelay)
+	}
+	if c.GlueSchemaMaxStaleness < 0 {
+		return fmt.Errorf("GLUE_SCHEMA_MAX_STALENESS must be >= 0: 0 disables serving a stale schema version id")
+	}
 	if c.WorkflowCacheSize < 0 {
 		return fmt.Errorf("WORKFLOW_CACHE_SIZE must be >= 0")
 	}
@@ -421,6 +462,9 @@ func (c *Config) RequireServer() error {
 	if err := c.requireIdentityServiceAddress(); err != nil {
 		return err
 	}
+	if err := c.requireTemporal(); err != nil {
+		return err
+	}
 	if c.AWSUseStub && !c.IsDev() {
 		return fmt.Errorf("AWS_USE_STUB must be false outside dev and local")
 	}
@@ -443,6 +487,19 @@ func (c *Config) RequireServer() error {
 	return nil
 }
 
+func (c *Config) requireTemporal() error {
+	if c.IsDev() {
+		return nil
+	}
+	if c.TemporalHostPort == "" {
+		return fmt.Errorf("TEMPORAL_HOST_PORT is required outside dev and local")
+	}
+	if c.TemporalNamespace == "" {
+		return fmt.Errorf("TEMPORAL_NAMESPACE is required outside dev and local")
+	}
+	return nil
+}
+
 func (c *Config) requireIdentityServiceAddress() error {
 	if c.TokenServiceBaseURL == "" {
 		return fmt.Errorf("TOKEN_SERVICE_BASE_URL is required: the API reads each tenant's automation principal from the identity service")
@@ -461,7 +518,7 @@ func (c *Config) RequireWorker() error {
 	if c.DefinitionServiceURL == "" {
 		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
 	}
-	return nil
+	return c.requireTemporal()
 }
 
 func (c *Config) RequireConnectorWorker() error {

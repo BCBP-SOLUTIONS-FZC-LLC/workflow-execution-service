@@ -346,6 +346,8 @@ func TestRequire(t *testing.T) {
 		c.AWSUseStub = false
 		c.SNSTopicARN = "arn:aws:sns:x"
 		c.GlueRegistryName = "wf-workflow-events"
+		c.TemporalHostPort = "temporal:7233"
+		c.TemporalNamespace = "workflow"
 	}
 	base := func() *Config {
 		return &Config{
@@ -383,7 +385,11 @@ func TestRequire(t *testing.T) {
 		{"server behind a pooler may share the database in dev", (*Config).RequireServer, func(c *Config) { c.PGBouncerMode = true }, ""},
 
 		{"worker valid in dev", (*Config).RequireWorker, func(c *Config) {}, ""},
-		{"worker valid in production without the api's settings", (*Config).RequireWorker, func(c *Config) { c.AppEnv = "prod" }, ""},
+		{"worker valid in production without the api's settings", (*Config).RequireWorker, func(c *Config) {
+			c.AppEnv = "prod"
+			c.TemporalHostPort = "temporal:7233"
+			c.TemporalNamespace = "workflow"
+		}, ""},
 		{"worker needs a database", (*Config).RequireWorker, func(c *Config) { c.DatabaseURL = "" }, "DATABASE_URL"},
 		{"worker needs the definition service", (*Config).RequireWorker, func(c *Config) { c.DefinitionServiceURL = "" }, "DEFINITION_SERVICE_URL"},
 
@@ -445,7 +451,7 @@ func TestLoad_RetentionDefaultsFollowTheLLD(t *testing.T) {
 	if want := 7 * 365 * 24 * time.Hour; cfg.OutboxRetention != want {
 		t.Errorf("OutboxRetention = %v, want the %v audit floor: outbox_events is the audit trail", cfg.OutboxRetention, want)
 	}
-	if want := 7 * 24 * time.Hour; cfg.ProcessedEventRetention != want {
+	if want := 16 * 24 * time.Hour; cfg.ProcessedEventRetention != want {
 		t.Errorf("ProcessedEventRetention = %v, want %v", cfg.ProcessedEventRetention, want)
 	}
 	if cfg.RetentionSweepInterval != 24*time.Hour || cfg.RetentionSweepBatch != 1000 {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,7 +37,7 @@ type cachedPrincipal struct {
 
 func NewAutomationPrincipalClient(baseURL string, timeout, cacheTTL time.Duration) *AutomationPrincipalClient {
 	return &AutomationPrincipalClient{
-		baseURL: baseURL,
+		baseURL: strings.TrimRight(baseURL, "/"),
 		client:  NewClient(timeout),
 		ttl:     cacheTTL,
 		known:   make(map[uuid.UUID]cachedPrincipal),
@@ -54,7 +55,7 @@ func (c *AutomationPrincipalClient) AutomationPrincipal(ctx context.Context, ten
 	url := fmt.Sprintf("%s/api/v1/internal/tenants/%s/service-accounts/platform-automation", c.baseURL, tenantID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return port.AutomationPrincipal{}, fmt.Errorf("build token service request: %w", err)
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: build token service request: %w", ErrUpstreamUnavailable, err)
 	}
 	req.Header.Set("x-user-id", iamSystemUserID)
 	req.Header.Set("x-tenant-id", tenantID.String())

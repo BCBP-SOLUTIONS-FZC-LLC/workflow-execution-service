@@ -14,10 +14,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/api"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
 )
-
-const asyncAPISpecPath = "api/asyncapi.yaml"
 
 //go:embed static/asyncapi.css
 var asyncAPICSS string
@@ -143,24 +142,27 @@ func flattenTypeNode(n *yaml.Node) string {
 	}
 }
 
-func AsyncAPIHandler(c *gin.Context) {
-	raw, err := os.ReadFile(asyncAPISpecPath)
-	if err != nil {
-		handler.SpecUnavailable(c)
-		return
+var AsyncAPIHandler = asyncAPIHandlerFor(api.AsyncAPI)
+
+func asyncAPIHandlerFor(document []byte) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var spec asyncSpec
+		if err := yaml.Unmarshal(document, &spec); err != nil {
+			handler.SpecUnavailable(c)
+			return
+		}
+
+		if hasSchemaCycle(&spec.Comps) {
+			handler.SpecUnavailable(c)
+			return
+		}
+
+		var buf bytes.Buffer
+		renderPage(&buf, &spec, os.Getenv("ENV"))
+
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(http.StatusOK, buf.String())
 	}
-
-	var spec asyncSpec
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		handler.SpecUnavailable(c)
-		return
-	}
-
-	var buf bytes.Buffer
-	renderPage(&buf, &spec, os.Getenv("ENV"))
-
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.String(http.StatusOK, buf.String())
 }
 
 func renderPage(w *bytes.Buffer, s *asyncSpec, env string) {
@@ -487,6 +489,56 @@ func resolveSchema(sc *asyncSchema, comps *asyncComponents) *asyncSchema {
 		}
 	}
 	return merged
+}
+
+const schemaRefPrefix = "#/components/schemas/"
+
+func hasSchemaCycle(comps *asyncComponents) bool {
+	const (
+		inProgress = 1
+		finished   = 2
+	)
+	state := make(map[string]int, len(comps.Schemas))
+	var visit func(name string) bool
+	visit = func(name string) bool {
+		switch state[name] {
+		case inProgress:
+			return true
+		case finished:
+			return false
+		}
+		state[name] = inProgress
+		sc, known := comps.Schemas[name]
+		if known {
+			for _, next := range resolvedRefs(&sc) {
+				if visit(next) {
+					return true
+				}
+			}
+		}
+		state[name] = finished
+		return false
+	}
+	for name := range comps.Schemas {
+		if visit(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func resolvedRefs(sc *asyncSchema) []string {
+	if len(sc.AllOf) == 0 {
+		if sc.Ref == "" {
+			return nil
+		}
+		return []string{strings.TrimPrefix(sc.Ref, schemaRefPrefix)}
+	}
+	var refs []string
+	for i := range sc.AllOf {
+		refs = append(refs, resolvedRefs(&sc.AllOf[i])...)
+	}
+	return refs
 }
 
 func propType(p *asyncProp) string {

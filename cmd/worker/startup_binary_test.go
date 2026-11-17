@@ -6,9 +6,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -83,9 +86,9 @@ func wkbootRunWorker(t *testing.T, bin string, env []string, args ...string) wkb
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Env = env
+	cmd.Env = wkbootWithFreePorts(t, env)
 	if dir := wkbootCoverDir(); dir != "" {
-		cmd.Env = append(append([]string{}, env...), "GOCOVERDIR="+dir)
+		cmd.Env = append(cmd.Env, "GOCOVERDIR="+dir)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -101,6 +104,26 @@ func wkbootRunWorker(t *testing.T, bin string, env []string, args ...string) wkb
 		t.Fatalf("run worker binary: %v (stderr: %s)", err, res.stderr)
 	}
 	return res
+}
+
+// wkbootWithFreePorts gives the child free health and metrics ports unless the environment names
+// them: the worker binds both before it touches any dependency, and the default ports can be taken
+// on a developer machine.
+func wkbootWithFreePorts(t *testing.T, env []string) []string {
+	t.Helper()
+	out := append([]string{}, env...)
+	for _, key := range []string{"WORKER_HEALTH_PORT", "WORKER_METRICS_PORT"} {
+		if slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, key+"=") }) {
+			continue
+		}
+		ln, err := net.Listen("tcp", ":0")
+		if err != nil {
+			t.Fatalf("find a free port: %v", err)
+		}
+		out = append(out, key+"="+strconv.Itoa(ln.Addr().(*net.TCPAddr).Port))
+		_ = ln.Close()
+	}
+	return out
 }
 
 func TestWorkerBinary_VersionArgumentPrintsTheBuildVersionAndExitsBeforeReadingConfig(t *testing.T) {

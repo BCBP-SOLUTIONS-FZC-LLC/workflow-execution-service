@@ -196,6 +196,8 @@ env:
   awsUseStub: "false"
   # Glue schema registry the API's SNS codec encodes against; required while awsUseStub is false.
   glueRegistryName: wf-workflow-events
+  # How long an expired schema version id may still be served when the registry cannot be reached; 0s disables it.
+  glueSchemaMaxStaleness: 1h
   # The Org & Membership base URL; the API reads assignee eligibility under it. Required: the API refuses to start without it.
   eligibilityBaseURL: ""
   # The identity subsystem's Token Service, read for each tenant's automation principal. Required: the API refuses to start without it.
@@ -219,6 +221,9 @@ env:
   # secret.secretValues.LOCK_DATABASE_URL is required.
   pgBouncerMode: "false"
   queueTopologyPollInterval: 60s
+  # How long the API answers 503 on /readyz after SIGTERM before it closes its listener, so the load balancer stops routing first.
+  # It and the 30s shutdown deadline must fit the 45s grace period: keep it below 15s.
+  shutdownDrainDelay: 5s
   # Temporal sticky workflow cache entries per worker process; 0 keeps the SDK default of 10,000, which
   # does not fit a small memory limit.
   workflowCacheSize: "0"

@@ -21,31 +21,29 @@ func NewRLSViolationRepo(pool *pgcommon.Pool) *RLSViolationRepo {
 	return &RLSViolationRepo{pool: pool}
 }
 
-func (r *RLSViolationRepo) LatestID(ctx context.Context) (int64, error) {
-	var id int64
+func (r *RLSViolationRepo) Horizon(ctx context.Context, lag time.Duration) (time.Time, error) {
+	var horizon time.Time
 	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
-		v, err := db.New(dbtx).LatestRLSViolationID(ctx)
-		id = v
+		v, err := db.New(dbtx).RLSViolationHorizon(ctx, lag.Seconds())
+		horizon = v
 		return mapErr(err)
 	})
-	return id, err
+	return horizon, err
 }
 
-func (r *RLSViolationRepo) CountsAfter(ctx context.Context, afterID int64) ([]domain.RLSViolationCount, int64, error) {
+func (r *RLSViolationRepo) CountsBetween(ctx context.Context, after, upTo time.Time) ([]domain.RLSViolationCount, error) {
 	var counts []domain.RLSViolationCount
-	newest := afterID
 	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
-		rows, err := db.New(dbtx).CountRLSViolationsAfter(ctx, afterID)
+		rows, err := db.New(dbtx).CountRLSViolationsBetween(ctx, db.CountRLSViolationsBetweenParams{After: after, UpTo: upTo})
 		if err != nil {
 			return mapErr(err)
 		}
 		for _, row := range rows {
 			counts = append(counts, domain.RLSViolationCount{ViolationType: row.ViolationType, Count: row.Total})
-			newest = max(newest, row.NewestID)
 		}
 		return nil
 	})
-	return counts, newest, err
+	return counts, err
 }
 
 func (r *RLSViolationRepo) PruneBefore(ctx context.Context, cutoff time.Time) (int64, error) {

@@ -18,13 +18,19 @@ func main() {
 		return
 	}
 
+	cmd, err := parseCommand(os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		os.Exit(1)
 	}
 
-	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+	if cmd == migrateCommand {
 		if err := cfg.RequireMigrate(); err != nil {
 			fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 			os.Exit(1)
@@ -51,5 +57,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "cmd/server: %v\n", err)
 		os.Exit(1)
 	}
-	a.run()
+	if err := a.run(); err != nil {
+		fmt.Fprintf(os.Stderr, "cmd/server: %v\n", err)
+		os.Exit(1)
+	}
 }
