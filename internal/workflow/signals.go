@@ -202,11 +202,7 @@ func (in *interpreter) handleStageTransition(ctx wf.Context, sig stageTransition
 	if sig.NodeID == "" {
 		key = domain.NodeKey(sig.DeptID + "/" + sig.ToStage)
 	}
-	visit := int64(0)
-	if getVersion(ctx, nodeVisitKeyChangeID) != wf.DefaultVersion {
-		visit = sig.VisitCount
-	}
-	in.deliverResult(ctx, SignalStageTransition, nodeVisitKey{Node: key, Visit: visit}, sig)
+	in.deliverResult(ctx, SignalStageTransition, nodeVisitKey{Node: key, Visit: sig.VisitCount}, sig)
 }
 
 func (in *interpreter) deliverResult(ctx wf.Context, signal string, visitKey nodeVisitKey, sig stageTransitionSignal) {
@@ -241,11 +237,7 @@ func (in *interpreter) handleStageFail(ctx wf.Context, sig stageFailSignal) {
 		VisitCount: sig.VisitCount,
 	}
 	key := domain.NodeKey(sig.DeptID + "/" + sig.NodeID)
-	visit := int64(0)
-	if getVersion(ctx, nodeVisitKeyChangeID) != wf.DefaultVersion {
-		visit = sig.VisitCount
-	}
-	in.deliverResult(ctx, SignalStageFail, nodeVisitKey{Node: key, Visit: visit}, transition)
+	in.deliverResult(ctx, SignalStageFail, nodeVisitKey{Node: key, Visit: sig.VisitCount}, transition)
 }
 
 func (in *interpreter) routeAdminSignal(ctx wf.Context, kind string, sig adminSignal) {
@@ -254,7 +246,7 @@ func (in *interpreter) routeAdminSignal(ctx wf.Context, kind string, sig adminSi
 		return
 	}
 	if in.parallelDepth > 0 {
-		if gw := in.forceForwardOwner(ctx, kind, sig); gw != nil {
+		if gw := in.forceForwardOwner(kind, sig); gw != nil {
 			gw.own.Send(ctx, envelope)
 			return
 		}
@@ -264,8 +256,8 @@ func (in *interpreter) routeAdminSignal(ctx wf.Context, kind string, sig adminSi
 	}
 }
 
-func (in *interpreter) forceForwardOwner(ctx wf.Context, kind string, sig adminSignal) *gateway {
-	if kind != SignalInstanceForceFwd || getVersion(ctx, nestedForceForwardChangeID) == wf.DefaultVersion {
+func (in *interpreter) forceForwardOwner(kind string, sig adminSignal) *gateway {
+	if kind != SignalInstanceForceFwd {
 		return nil
 	}
 	return in.innermostGatewayRunning(sig.TargetDeptID)

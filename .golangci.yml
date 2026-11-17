@@ -109,10 +109,6 @@ linters:
           - gosec
           - contextcheck
           - bodyclose
-      - path: ^test/workflow/replay/gen/
-        text: exitAfterDefer
-        linters:
-          - gocritic
       - path: internal/
         text: "exported: "
         linters:

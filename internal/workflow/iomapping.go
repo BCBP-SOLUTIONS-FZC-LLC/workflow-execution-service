@@ -7,7 +7,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
-func applyIOMapping(contextJSON string, m *dsl.IOMapping, byInputRule bool) (string, error) {
+func applyIOMapping(contextJSON string, m *dsl.IOMapping) (string, error) {
 	if m == nil || len(m.Inputs) == 0 {
 		return contextJSON, nil
 	}
@@ -21,11 +21,7 @@ func applyIOMapping(contextJSON string, m *dsl.IOMapping, byInputRule bool) (str
 		vars = map[string]any{}
 	}
 	for _, in := range m.Inputs {
-		if byInputRule {
-			vars[in.Target] = in.InputValue(vars)
-		} else {
-			vars[in.Target] = vars[in.Source]
-		}
+		vars[in.Target] = in.InputValue(vars)
 	}
 	out, err := json.Marshal(vars)
 	if err != nil {

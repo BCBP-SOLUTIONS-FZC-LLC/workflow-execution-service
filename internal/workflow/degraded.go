@@ -43,7 +43,7 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 
 	settle := wf.NewChannel(ctx)
 	deptIDs := make([]string, 0, len(branches))
-	keys := branchKeys(ctx, branches)
+	keys := branchKeys(branches)
 	cancels := make(map[string]wf.CancelFunc, len(branches))
 	branchSteps := make(map[string][]dsl.ExecutionStep, len(branches))
 	resolved := make(map[string]bool, len(branches))
@@ -148,7 +148,7 @@ const parkTerminate = "park-terminate"
 
 func (in *interpreter) openPark(ctx wf.Context, plan *dsl.CompiledPlan, failed []failedBranch) *park {
 	if len(in.parks) == 0 {
-		in.degradedKeepsPause = getVersion(ctx, pauseSurvivesDegradedChangeID) != wf.DefaultVersion
+		in.degradedKeepsPause = true
 	}
 	p := &park{ch: wf.NewBufferedChannel(ctx, 8), depts: map[string]bool{}}
 	for _, fb := range failed {
@@ -397,14 +397,10 @@ func (in *interpreter) innermostGatewayRunning(deptID string) *gateway {
 	return nil
 }
 
-func branchKeys(ctx wf.Context, branches []dsl.ParallelBranch) []string {
-	byPlace := getVersion(ctx, parallelJoinByBranchChangeID) != wf.DefaultVersion
+func branchKeys(branches []dsl.ParallelBranch) []string {
 	keys := make([]string, len(branches))
-	for i, b := range branches {
-		keys[i] = b.DeptID
-		if byPlace {
-			keys[i] = strconv.Itoa(i)
-		}
+	for i := range branches {
+		keys[i] = strconv.Itoa(i)
 	}
 	return keys
 }

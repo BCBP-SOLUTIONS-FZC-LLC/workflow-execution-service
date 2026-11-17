@@ -37,7 +37,7 @@ func (in *interpreter) runStepItems(ctx wf.Context, plan *dsl.CompiledPlan, step
 		step := &steps[i]
 
 		if step.IOMapping != nil {
-			ctxJSON, err := applyIOMapping(in.contextJSON, step.IOMapping, getVersion(ctx, ioInputRuleChangeID) != wf.DefaultVersion)
+			ctxJSON, err := applyIOMapping(in.contextJSON, step.IOMapping)
 			if err != nil {
 				return stepOutcome{LastNode: last, LastResult: lastResult}, err
 			}
@@ -242,9 +242,6 @@ func (in *interpreter) runExclusive(ctx wf.Context, plan *dsl.CompiledPlan, bran
 		return out, errPathEnded
 	}
 	if winner.Terminates {
-		if getVersion(ctx, exclusiveEndCompletesPathChangeID) == wf.DefaultVersion {
-			return stepOutcome{Terminated: true}, nil
-		}
 		return outcome, errPathEnded
 	}
 

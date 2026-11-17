@@ -12,8 +12,6 @@ import (
 )
 
 func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
-	getVersion(ctx, initialInterpreterChangeID)
-
 	planOut, err := getCompiledPlan(ctx, port.GetCompiledPlanInput{TenantID: input.TenantID, VersionID: input.VersionID})
 	if err != nil {
 		_ = updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{

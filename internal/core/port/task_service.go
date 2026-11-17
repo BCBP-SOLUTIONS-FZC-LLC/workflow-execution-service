@@ -26,7 +26,6 @@ type Task struct {
 	NodeKey            string
 	TaskType           string
 	DepartmentID       uuid.UUID
-	RequiredLevel      string
 	Status             TaskStatus
 	RecordVersion      int64
 	AssigneeMode       string
@@ -122,7 +121,6 @@ type AssigneeOverride struct {
 type TaskService interface {
 	List(ctx context.Context, tenantID uuid.UUID, scope ReadScope, filter TaskFilter, page Page) (PageResult[*Task], error)
 	Get(ctx context.Context, tenantID, taskID uuid.UUID, scope ReadScope) (*Task, []*TaskAssignment, error)
-	GetByNode(ctx context.Context, tenantID, instanceID uuid.UUID, nodeKey string) (*Task, error)
 
 	Claim(ctx context.Context, tenantID, taskID, userID uuid.UUID, recordVersion int64) (*Task, error)
 	Complete(ctx context.Context, tenantID, taskID, userID uuid.UUID, resultJSON json.RawMessage, recordVersion int64) (*Task, error)

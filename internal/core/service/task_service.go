@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -128,40 +127,6 @@ func (s *TaskService) taskInScope(scope port.ReadScope, task *domain.Task, assig
 		}
 	}
 	return false
-}
-
-func (s *TaskService) GetByNode(ctx context.Context, tenantID, instanceID uuid.UUID, nodeKey string) (*port.Task, error) {
-	task, err := s.Tasks.GetByInstanceAndNode(ctx, tenantID, instanceID, nodeKey)
-	if err != nil {
-		return nil, wrapTaskErr(err)
-	}
-	out := toPortTask(task)
-	if s.Definitions != nil {
-		if err := s.fillRequiredLevel(ctx, tenantID, task, out); err != nil {
-			return nil, err
-		}
-	}
-	counted, err := toPortTasksWithCounts(ctx, s.Assignments, tenantID, []*domain.Task{task})
-	if err != nil {
-		return nil, err
-	}
-	out.AssigneeCount = counted[0].AssigneeCount
-	return out, nil
-}
-
-func (s *TaskService) fillRequiredLevel(ctx context.Context, tenantID uuid.UUID, task *domain.Task, out *port.Task) error {
-	inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
-	if err != nil {
-		return wrapInstanceErr(err)
-	}
-	plan, err := newCompiledPlanCache(s.Definitions, s.logger()).backedBy(s.Cache).mainPlan(ctx, tenantID, inst.WorkflowVersionID)
-	if err != nil {
-		return fmt.Errorf("get compiled plan for the task's required level: %w", err)
-	}
-	if level, ok := requiredLevelForTask(plan, task); ok {
-		out.RequiredLevel = level
-	}
-	return nil
 }
 
 func (s *TaskService) ActiveByUser(ctx context.Context, tenantID, userID uuid.UUID, page port.Page) (port.PageResult[*port.ActiveUserTask], error) {
@@ -568,7 +533,7 @@ func (s *TaskService) OverrideAssignee(ctx context.Context, in port.AssigneeOver
 // committed the relay delivers the move even if Temporal is down. It returns the version the task now has.
 func (s *TaskService) storeOverride(ctx context.Context, in port.AssigneeOverrideInput, inst *domain.Instance, task *domain.Task, previousUserID uuid.UUID) (*domain.AssigneeOverride, int64, error) {
 	override := &domain.AssigneeOverride{
-		ID: deterministicOverrideID(in, task.RecordVersion), TenantID: in.TenantID, WorkflowInstanceID: in.InstanceID, NodeKey: in.NodeKey,
+		ID: uuid.New(), TenantID: in.TenantID, WorkflowInstanceID: in.InstanceID, NodeKey: in.NodeKey,
 		PreviousUserID: domain.OptionalUserID(previousUserID), NewUserID: in.NewUserID, Reason: in.Reason, ActorUserID: in.ActorUserID,
 	}
 	var bumped *domain.Task
@@ -589,15 +554,4 @@ func (s *TaskService) storeOverride(ctx context.Context, in port.AssigneeOverrid
 		return nil, 0, err
 	}
 	return override, bumped.RecordVersion, nil
-}
-
-// deterministicOverrideID names the override by the action it records, so a retry after a failed
-// signal derives the same id and the insert ignores it. The record version separates a later,
-// genuinely new override of the same node to the same user.
-func deterministicOverrideID(in port.AssigneeOverrideInput, recordVersion int64) uuid.UUID {
-	name := strings.Join([]string{
-		"execution_service:assignee_override", in.TenantID.String(), in.InstanceID.String(), in.NodeKey,
-		in.NewUserID.String(), strconv.FormatInt(recordVersion, 10),
-	}, "/")
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(name))
 }

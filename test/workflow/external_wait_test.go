@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"go.temporal.io/sdk/testsuite"
-	wf "go.temporal.io/sdk/workflow"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
@@ -123,39 +122,6 @@ func TestExecute_CompletedTaskResultsBecomeVariables(t *testing.T) {
 	want := map[string]any{"tenderId": "T-7", "answer": "yes", "count": float64(2)}
 	if got := rec.variables(t, "Ops/Second"); !reflect.DeepEqual(got, want) {
 		t.Errorf("Second was created with %v, want %v", got, want)
-	}
-}
-
-// TestExecute_TaskResults_BeforeTheChangeAreNotVariables pins that a history
-// recorded before change id task-result-variables replays as it ran: the task
-// after one is created with the start context alone.
-func TestExecute_TaskResults_BeforeTheChangeAreNotVariables(t *testing.T) {
-	var suite testsuite.WorkflowTestSuite
-	env := suite.NewTestWorkflowEnvironment()
-	env.OnGetVersion("task-result-variables", wf.DefaultVersion, 1).Return(wf.DefaultVersion)
-	collab := opsCollaboration(
-		dsl.StageDef{Type: "prep", NodeID: "First"},
-		dsl.StageDef{Type: "prep", NodeID: "Second"},
-	)
-	rec := &contextRecorder{}
-	registerFakeActivities(env, collab, rec.hooks())
-
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "Ops", NodeID: "First", ResultJSON: `{"answer":"yes"}`, RecordVersion: 1, VisitCount: 1,
-		})
-	}, afterStart)
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-			DeptID: "Ops", NodeID: "Second", ResultJSON: `{}`, RecordVersion: 1, VisitCount: 1,
-		})
-	}, afterAnswer)
-
-	if got := runToCompletion(t, env, collab, `{"tenderId":"T-7"}`); got != domain.InstanceStatusCompleted {
-		t.Fatalf("Status = %v, want COMPLETED", got)
-	}
-	if got := rec.variables(t, "Ops/Second"); !reflect.DeepEqual(got, map[string]any{"tenderId": "T-7"}) {
-		t.Errorf("Second was created with %v, want the start context alone", got)
 	}
 }
 

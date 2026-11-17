@@ -105,19 +105,6 @@ func TestTaskGet_CarriesItsTypeAndActiveAssigneeCount(t *testing.T) {
 	}
 }
 
-func TestTaskGetByNode_CarriesItsTypeAndActiveAssigneeCount(t *testing.T) {
-	svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
-	w := newTrpWorld(tasks, assignments)
-
-	for _, task := range []*domain.Task{w.user, w.service, w.empty} {
-		got, err := svc.GetByNode(context.Background(), w.tenantID, w.instanceID, task.NodeKey)
-
-		require.NoError(t, err)
-		assert.Equal(t, w.wantType(task), got.TaskType, task.NodeKey)
-		assert.Equal(t, w.wantCount(task), got.AssigneeCount, task.NodeKey)
-	}
-}
-
 func TestInstanceGet_EveryTaskCarriesItsTypeAndActiveAssigneeCount(t *testing.T) {
 	svc, instances, tasks, assignments, _, _, _, _ := newInstanceServiceHarness()
 	w := newTrpWorld(tasks, assignments)

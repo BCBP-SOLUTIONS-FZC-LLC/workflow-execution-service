@@ -53,29 +53,3 @@ func TestTaskService_OverrideAssignee_RetryOnTheOldVersionAfterTheCommit_Answers
 	assert.Len(t, w.overrides.created, 1, "the retry writes no second audit row")
 	assert.Len(t, w.outbox.signals, 1, "the move was queued with the first call, so the retry needs no second signal")
 }
-
-func TestTaskService_OverrideAssignee_DistinctActionsGetDistinctIDs(t *testing.T) {
-	base := newTskfixOverrideWorld()
-	baseline, err := base.run(base.in)
-	require.NoError(t, err)
-
-	cases := map[string]func(*port.AssigneeOverrideInput){
-		"another new user": func(in *port.AssigneeOverrideInput) { in.NewUserID = uuid.New() },
-		"another version":  func(in *port.AssigneeOverrideInput) { in.RecordVersion = 5 },
-	}
-	for name, mutate := range cases {
-		t.Run(name, func(t *testing.T) {
-			svc, instances, tasks, assignments, _, _ := newTaskServiceHarness()
-			instances.byID[base.in.InstanceID] = &domain.Instance{ID: base.in.InstanceID, TenantID: base.in.TenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
-			task := newReadyTask(base.in.TenantID, base.in.InstanceID)
-			in := base.in
-			mutate(&in)
-			task.RecordVersion = in.RecordVersion
-			tasks.byID[task.ID] = task
-			assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: task.TenantID, TaskID: task.ID, UserID: uuid.New(), IsActive: true}
-			got, err := svc.OverrideAssignee(context.Background(), in)
-			require.NoError(t, err)
-			assert.NotEqual(t, baseline.ID, got.ID)
-		})
-	}
-}
