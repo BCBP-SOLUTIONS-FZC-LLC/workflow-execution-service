@@ -55,8 +55,10 @@ func w9aEmptyPostgres(t *testing.T) string {
 			Image:        "postgres:18-alpine",
 			ExposedPorts: []string{"5432/tcp"},
 			Env:          map[string]string{"POSTGRES_USER": "postgres", "POSTGRES_PASSWORD": "postgres", "POSTGRES_DB": "postgres"},
-			WaitingFor: wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).WithStartupTimeout(120 * time.Second),
+			WaitingFor: wait.ForAll(
+				wait.ForLog("database system is ready to accept connections").WithOccurrence(2),
+				wait.ForListeningPort("5432/tcp"),
+			).WithDeadline(120 * time.Second),
 		},
 		Started: true,
 	})
@@ -66,18 +68,9 @@ func w9aEmptyPostgres(t *testing.T) string {
 	require.NoError(t, err)
 	host, err := container.Host(ctx)
 	require.NoError(t, err)
-	var port string
-	deadline := time.Now().Add(20 * time.Second)
-	for {
-		p, portErr := container.MappedPort(ctx, "5432")
-		if portErr == nil {
-			port = p.Port()
-			break
-		}
-		require.True(t, time.Now().Before(deadline), "the container never published its port: %v", portErr)
-		time.Sleep(200 * time.Millisecond)
-	}
-	return fmt.Sprintf("postgres://postgres:postgres@%s:%s/postgres?sslmode=disable", host, port)
+	port, err := container.MappedPort(ctx, "5432/tcp")
+	require.NoError(t, err)
+	return fmt.Sprintf("postgres://postgres:postgres@%s:%s/postgres?sslmode=disable", host, port.Port())
 }
 
 var w9aDatabaseSeq atomic.Int64
