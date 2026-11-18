@@ -11,6 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 ### Tests
 
 - Service tests for error and branch paths of the connector callbacks, delegation moves and cancels, out-of-office availability, force-route open tasks, tenant lifecycle and pause at an unchanged record version.
+- Service and Postgres tests for retention sweeps, instance lifecycle and task claim and read failures, repository reads and creates under tenant row-level security, tenant purge failures, recency-guard locks, outbox signal marshalling and the version-checked defer under concurrency.
 
 ### Removed
 
