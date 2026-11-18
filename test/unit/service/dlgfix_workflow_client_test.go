@@ -201,7 +201,7 @@ func dlgfixNewClient(t *testing.T) *dlgfixClient {
 	h.tx.outbox = h.outbox
 	h.svc = &service.WorkflowClient{
 		Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments,
-		Transactor: h.tx, Outbox: h.outbox, Signals: h.outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(), Log: &fakeLogger{},
+		Transactor: h.tx, Outbox: h.outbox, Signals: h.outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(), Locks: &fakeLocker{}, Log: &fakeLogger{},
 	}
 	return h
 }

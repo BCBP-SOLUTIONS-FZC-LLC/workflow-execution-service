@@ -1010,4 +1010,11 @@ func (f *fakeLocker) WithLock(ctx context.Context, scopeKey string, fn func(cont
 	return fn(ctx)
 }
 
-var _ port.ScopeLocker = (*fakeLocker)(nil)
+func (f *fakeLocker) WithLocks(ctx context.Context, scopeKeys []string, fn func(context.Context) error) error {
+	f.keys = append(f.keys, scopeKeys...)
+	f.held = true
+	defer func() { f.held = false }()
+	return fn(ctx)
+}
+
+var _ port.ScopeSetLocker = (*fakeLocker)(nil)

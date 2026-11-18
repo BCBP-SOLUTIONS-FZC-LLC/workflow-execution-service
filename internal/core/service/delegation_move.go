@@ -169,6 +169,48 @@ func handOver(ctx context.Context, repo port.TaskAssignmentRepository, tasks por
 	})
 }
 
+// leadUnclaimedHolder makes a user who already held an unclaimed all-assignee
+// task its lead after a delegation moved the task to them, the way an admin
+// override to an existing holder does (execution LLD §6.2). It changes nothing
+// when the task has a lead, is not an all-assignee task, or the user did not
+// already hold it; the move itself has already carried a lead over.
+// A user who did not hold the task when the move began got a new row, which is
+// not a lead move, so that case costs no reads. Otherwise the task version is
+// read before the assignments are re-read, so a claim that
+// commits after the re-read moves the version and fails the lead move with a
+// record-version conflict, which fails the event so it is retried.
+func leadUnclaimedHolder(ctx context.Context, repo port.TaskAssignmentRepository, tasks port.TaskRepository, tenantID uuid.UUID, vacated *domain.TaskAssignment, movedFrom []*domain.TaskAssignment, taskID, userID uuid.UUID) error {
+	if vacated.IsLead || activeAssignmentOfUser(movedFrom, userID) == nil {
+		return nil
+	}
+	current, err := tasks.GetByID(ctx, tenantID, taskID)
+	if err != nil {
+		return err
+	}
+	if current.AssigneeMode != "all" {
+		return nil
+	}
+	active, err := repo.ListActiveByTask(ctx, tenantID, taskID)
+	if err != nil {
+		return err
+	}
+	holder := activeAssignmentOfUser(active, userID)
+	if holder == nil || hasActiveLead(active) {
+		return nil
+	}
+	_, err = repo.SetLead(ctx, tenantID, taskID, holder.ID, current.RecordVersion)
+	return err
+}
+
+func hasActiveLead(active []*domain.TaskAssignment) bool {
+	for _, a := range active {
+		if a.IsLead {
+			return true
+		}
+	}
+	return false
+}
+
 // enqueueTaskReassigned records the WorkflowTaskReassigned event of a delegation
 // move in the caller's transaction.
 func enqueueTaskReassigned(ctx context.Context, outbox port.OutboxRepository, validator port.EventValidator, inst *domain.Instance, task *domain.Task, oldUserID, newUserID uuid.UUID, delegationID *uuid.UUID) error {

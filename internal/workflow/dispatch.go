@@ -109,8 +109,14 @@ func (in *interpreter) runDepartmentFrom(ctx wf.Context, plan *dsl.CompiledPlan,
 	var last domain.NodeKey
 	var lastResult string
 	for i := startIdx; i < len(dept.Stages); i++ {
-		in.checkPaused(ctx, deptID)
+		if err := in.checkPaused(ctx, deptID); err != nil {
+			return last, lastResult, err
+		}
 		node, result, err := in.runStage(ctx, plan, deptID, &dept.Stages[i])
+		if errors.Is(err, errStageDeferred) {
+			i--
+			continue
+		}
 		if err != nil {
 			return last, lastResult, err
 		}

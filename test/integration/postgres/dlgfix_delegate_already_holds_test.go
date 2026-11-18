@@ -56,7 +56,7 @@ func TestReassignDelegate_ADelegateWhoAlreadyHoldsTheTaskKeepsOneActiveRow(t *te
 	client := &service.WorkflowClient{
 		Instances: instanceRepo, Tasks: taskRepo, Assignments: assignmentRepo,
 		Transactor: postgres.NewTransactor(appPool), Outbox: postgres.NewOutboxRepo(appPool),
-		Signals: postgres.NewOutboxRepo(appPool), Validator: validator,
+		Signals: postgres.NewOutboxRepo(appPool), Validator: validator, Locks: postgres.NewRecencyGuardRepo(appPool, appPool),
 	}
 	ctx := context.Background()
 

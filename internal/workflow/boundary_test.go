@@ -198,11 +198,13 @@ func TestCheckPausedBlocksUntilResumed(t *testing.T) {
 
 		var resumed bool
 		wf.Go(ctx, func(gctx wf.Context) {
-			in.resumeDept(gctx, "deptA")
+			in.resumeDept("deptA")
 			resumed = true
 		})
 
-		in.checkPaused(ctx, "deptA")
+		if err := in.checkPaused(ctx, "deptA"); err != nil {
+			return err
+		}
 		resumedBeforeReturn = resumed
 		return nil
 	})
@@ -220,8 +222,7 @@ func TestCheckPausedWithoutAGateIsANoOp(t *testing.T) {
 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		in := newInterpreter("tenant", "instance", "", nil, nil)
-		in.checkPaused(ctx, "deptA") // no gate armed — must return immediately
-		return nil
+		return in.checkPaused(ctx, "deptA") // no gate armed — must return immediately
 	})
 	if err := env.GetWorkflowError(); err != nil {
 		t.Fatalf("workflow returned error: %v", err)

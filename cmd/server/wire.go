@@ -209,7 +209,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 	workflowClient := &service.WorkflowClient{
 		Instances: instances, Tasks: tasks, Assignments: assignments, Transactor: transactor, Outbox: outboxRepo, Signals: outboxRepo,
-		Validator: validator, Eligibility: eligibility, Definitions: definitions, Ended: postgres.NewEndedDelegationRepo(appPool), Log: log,
+		Validator: validator, Eligibility: eligibility, Definitions: definitions, Ended: postgres.NewEndedDelegationRepo(appPool), Locks: recency, Log: log,
 	}
 	guard := &service.ArchiveGuard{Instances: instances}
 	pauser := &service.UserTaskPauser{

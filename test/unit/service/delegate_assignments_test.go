@@ -134,7 +134,7 @@ func csaNewClientHarness() *csaClientHarness {
 		assignments: csaWrapAssignments(newFakeAssignmentRepo()),
 		outbox:      &fakeOutbox{},
 	}
-	h.svc = &service.WorkflowClient{Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments, Transactor: fakeTransactor{}, Outbox: h.outbox, Signals: h.outbox, Validator: realValidator(), Ended: newFakeEndedDelegations()}
+	h.svc = &service.WorkflowClient{Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments, Transactor: fakeTransactor{}, Outbox: h.outbox, Signals: h.outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(), Locks: &fakeLocker{}}
 	return h
 }
 

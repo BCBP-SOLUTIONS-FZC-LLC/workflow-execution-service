@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -10,6 +11,8 @@ import (
 )
 
 type endedDelegationKey struct{ tenantID, delegationID uuid.UUID }
+
+type endedDelegateKey struct{ tenantID, delegateID uuid.UUID }
 
 // fakeEndedDelegations remembers ended delegations per tenant and records what it was asked.
 type fakeEndedDelegations struct {
@@ -20,10 +23,12 @@ type fakeEndedDelegations struct {
 	checkErr error
 	onMark   func()
 	onCheck  func()
+
+	delegates map[endedDelegateKey]time.Time
 }
 
 func newFakeEndedDelegations() *fakeEndedDelegations {
-	return &fakeEndedDelegations{ended: map[endedDelegationKey]bool{}}
+	return &fakeEndedDelegations{ended: map[endedDelegationKey]bool{}, delegates: map[endedDelegateKey]time.Time{}}
 }
 
 func (f *fakeEndedDelegations) MarkEnded(_ context.Context, tenantID, delegationID uuid.UUID) error {
@@ -54,3 +59,20 @@ func (f *fakeEndedDelegations) IsEnded(_ context.Context, tenantID, delegationID
 }
 
 var _ port.EndedDelegationRepository = (*fakeEndedDelegations)(nil)
+
+func (f *fakeEndedDelegations) MarkDelegateEnded(_ context.Context, tenantID, delegateID uuid.UUID, endedAt time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := endedDelegateKey{tenantID, delegateID}
+	if endedAt.After(f.delegates[key]) {
+		f.delegates[key] = endedAt
+	}
+	return nil
+}
+
+func (f *fakeEndedDelegations) DelegateEndedAt(_ context.Context, tenantID, delegateID uuid.UUID) (time.Time, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	at, ok := f.delegates[endedDelegateKey{tenantID, delegateID}]
+	return at, ok, nil
+}

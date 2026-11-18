@@ -15,7 +15,9 @@ type DelegationRerouteInput struct {
 	Scope        string
 	ScopeID      *string
 	StartsAt     time.Time
-	EndsAt       *time.Time
+	// EmittedAt is when the start event was sent, which orders it against a cancel by the delegate; zero blocks nothing.
+	EmittedAt time.Time
+	EndsAt    *time.Time
 }
 type DelegationReversalInput struct {
 	TenantID     uuid.UUID

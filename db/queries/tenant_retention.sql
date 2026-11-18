@@ -87,6 +87,10 @@ WHERE (tenant_id, user_id) IN (SELECT u.tenant_id, u.user_id FROM user_availabil
 DELETE FROM ended_delegation
 WHERE (tenant_id, delegation_id) IN (SELECT e.tenant_id, e.delegation_id FROM ended_delegation e WHERE e.tenant_id = $1 LIMIT $2);
 
+-- name: PurgeTenantEndedDelegates :execrows
+DELETE FROM ended_delegate
+WHERE (tenant_id, delegate_id) IN (SELECT e.tenant_id, e.delegate_id FROM ended_delegate e WHERE e.tenant_id = $1 LIMIT $2);
+
 -- name: PurgeTenantQueues :execrows
 DELETE FROM active_task_queues WHERE tenant_id = $1;
 
@@ -109,6 +113,7 @@ SELECT (
     OR EXISTS (SELECT 1 FROM connector_send_intents s WHERE s.tenant_id = @tenant_text::text)
     OR EXISTS (SELECT 1 FROM user_availability u WHERE u.tenant_id = @tenant_id::uuid)
     OR EXISTS (SELECT 1 FROM ended_delegation ed WHERE ed.tenant_id = @tenant_id::uuid)
+    OR EXISTS (SELECT 1 FROM ended_delegate eg WHERE eg.tenant_id = @tenant_id::uuid)
     OR EXISTS (SELECT 1 FROM active_task_queues q WHERE q.tenant_id = @tenant_id::uuid)
     OR EXISTS (SELECT 1 FROM event_recency_guard g WHERE g.scope_key = @tenant_scope::text OR g.scope_key LIKE @user_scope::text)
 )::boolean AS has_rows;

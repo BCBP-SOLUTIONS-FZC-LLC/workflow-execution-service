@@ -26,7 +26,7 @@ func TestCancelByDelegate_RecordsTheNamedDelegationAsEndedUnderRowLevelSecurity(
 	ended := postgres.NewEndedDelegationRepo(appPool)
 	client := &service.WorkflowClient{
 		Instances: instanceRepo, Tasks: taskRepo, Assignments: assignmentRepo,
-		Transactor: postgres.NewTransactor(appPool), Signals: postgres.NewOutboxRepo(appPool), Ended: ended,
+		Transactor: postgres.NewTransactor(appPool), Signals: postgres.NewOutboxRepo(appPool), Ended: ended, Locks: postgres.NewRecencyGuardRepo(appPool, appPool),
 	}
 	ctx := context.Background()
 	tenantID, delegate, delegationID := uuid.New(), uuid.New(), uuid.New()

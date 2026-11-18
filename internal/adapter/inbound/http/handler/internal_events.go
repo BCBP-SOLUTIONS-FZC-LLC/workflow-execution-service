@@ -339,6 +339,7 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 		Scope:        p.Scope,
 		ScopeID:      p.ScopeID,
 		StartsAt:     startsAt,
+		EmittedAt:    env.Timestamp,
 		EndsAt:       endsAt,
 	})
 	if err != nil {

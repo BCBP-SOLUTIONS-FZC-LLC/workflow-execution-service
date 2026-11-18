@@ -15,6 +15,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- A defer of a task inside a parallel step that is still running sends the work back to the step before the fork, as an admin force-back does: the other branches keep their open tasks and resume where they were, the step before the fork runs again, and the deferring branch gets a new task afterwards. It used to rerun that step beside the deferring branch, which kept waiting on its closed task, so the parallel step never joined and the instance stopped.
+- A defer returns to the step before the innermost parallel step that contains the deferred task, and only that step's branches are saved and resumed. It used to go to whichever inner step was parked, so a defer in an outer branch reran the inner step instead.
+- A delegation that hands an unclaimed all-assignee task to a user who already holds an assignment on it makes that user the lead; they used to stay a plain co-assignee.
+- A delegation start and a cancel by the delegate no longer overlap. A start that loses the race to a cancel of that delegation moves nothing, and so does a start event emitted before a cancel of every delegation to that delegate; one emitted after such a cancel moves work whatever its own start date. A start used to be able to move work after the cancel had read the delegate's rows.
+
 - An override or reassign on an all-assignee task nobody has claimed, to a user who already holds an assignment on it, makes that user the lead (it used to answer 200 and change nothing).
 - A retried force-route finds its earlier record with one lookup by id instead of reading the instance's event list.
 - Deferring a task on a degraded instance sends the work back to the step before the fork (it used to be refused with 409 `INVALID_INSTANCE_STATE`); a defer whose fork is the plan's first step is still refused with 409.

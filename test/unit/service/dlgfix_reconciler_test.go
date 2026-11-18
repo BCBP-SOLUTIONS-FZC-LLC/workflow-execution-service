@@ -415,7 +415,8 @@ func TestDelegationReroute_ResumesAnInstancePausedForTheDelegatorsAbsence(t *tes
 			assert.Contains(t, string(raw), `"Initiator":"`+domain.InitiatorOOO+`"`, "only the pause that out of office made can be released by it")
 			assert.Equal(t, first.instance.TemporalWorkflowID, s.TemporalWorkflowID)
 		}
-		assert.Equal(t, []string{port.UserAvailabilityScope(h.tenantID, h.delegator)}, h.locker.keys, "the status is read under the delegator's availability lock")
+		require.NotEmpty(t, h.locker.keys)
+		assert.Equal(t, port.UserAvailabilityScope(h.tenantID, h.delegator), h.locker.keys[0], "the status is read under the delegator's availability lock")
 	})
 
 	t.Run("a paused instance of a delegator who is available is left paused", func(t *testing.T) {

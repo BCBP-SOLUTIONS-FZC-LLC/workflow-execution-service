@@ -29,6 +29,64 @@ type gateway struct {
 	keys        []string
 	branchSteps map[string][]dsl.ExecutionStep
 	resolved    map[string]bool
+	preFork     domain.NodeKey
+	park        *park
+
+	rerunDone wf.Channel
+	rerunning bool
+}
+
+// signalBuffer is the size of the admin-signal channel of a fork and of a park.
+const signalBuffer = 8
+
+// holds reports whether a task of deptID belongs to this fork: it runs in one
+// of its branches, or it is the step before the fork while that step reruns.
+func (g *gateway) holds(deptID string) bool {
+	if g.rerunning && deptID == deptFromNodeKey(g.preFork) {
+		return true
+	}
+	for _, key := range g.keys {
+		if stepsRun(g.branchSteps[key], deptID) {
+			return true
+		}
+	}
+	return false
+}
+
+// depts lists every department the fork's branches run, nested forks included.
+func (g *gateway) depts() []string {
+	var out []string
+	for _, key := range g.keys {
+		out = appendStepDepts(out, g.branchSteps[key])
+	}
+	return out
+}
+
+// pausedDepts is what a rerun holds: every department the branches run except
+// the step before the fork, which is the one being rerun.
+func (g *gateway) pausedDepts() []string {
+	preForkDept := deptFromNodeKey(g.preFork)
+	return slices.DeleteFunc(g.depts(), func(d string) bool { return d == preForkDept })
+}
+
+func appendStepDepts(out []string, steps []dsl.ExecutionStep) []string {
+	for _, st := range steps {
+		for _, d := range st.Sequential {
+			if !slices.Contains(out, d) {
+				out = append(out, d)
+			}
+		}
+		for _, b := range st.Parallel {
+			out = appendStepDepts(out, b.Steps)
+		}
+		for _, b := range st.Exclusive {
+			out = appendStepDepts(out, b.Steps)
+		}
+		if st.SubWorkflow != nil {
+			out = appendStepDepts(out, st.SubWorkflow.Plan.Steps)
+		}
+	}
+	return out
 }
 
 func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branches []dsl.ParallelBranch, admin wf.Channel) (stepOutcome, error) {
@@ -42,16 +100,16 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 	}()
 
 	settle := wf.NewChannel(ctx)
-	deptIDs := make([]string, 0, len(branches))
 	keys := branchKeys(branches)
 	cancels := make(map[string]wf.CancelFunc, len(branches))
 	branchSteps := make(map[string][]dsl.ExecutionStep, len(branches))
 	resolved := make(map[string]bool, len(branches))
-	gw := &gateway{own: wf.NewBufferedChannel(ctx, 8), keys: keys, branchSteps: branchSteps, resolved: resolved}
+	gw := &gateway{own: wf.NewBufferedChannel(ctx, signalBuffer), keys: keys, branchSteps: branchSteps, resolved: resolved,
+		preFork: preFork, rerunDone: wf.NewChannel(ctx)}
 	in.gateways = append(in.gateways, gw)
 	defer func() { in.gateways = slices.DeleteFunc(in.gateways, func(g *gateway) bool { return g == gw }) }()
+	defer in.releaseForkRerun(gw)
 	for i, b := range branches {
-		deptIDs = append(deptIDs, b.DeptID)
 		key, deptID, steps := keys[i], b.DeptID, b.Steps
 		branchSteps[key] = steps
 		bctx, cancel := wf.WithCancel(ctx)
@@ -69,16 +127,22 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 	var failed []failedBranch
 	remaining := len(branches)
 	terminated := false
-	for remaining > 0 && !terminated {
+	for (remaining > 0 || gw.rerunning) && !terminated {
 		sel := wf.NewSelector(ctx)
 		var envelope adminSignalEnvelope
-		gotAdmin := false
+		var rerun rerunOutcome
+		gotAdmin, gotRerun, abandoned := false, false, false
 		receiveAdmin := func(c wf.ReceiveChannel, more bool) {
 			c.Receive(ctx, &envelope)
 			gotAdmin = true
 		}
 		sel.AddReceive(admin, receiveAdmin)
 		sel.AddReceive(gw.own, receiveAdmin)
+		sel.AddReceive(gw.rerunDone, func(c wf.ReceiveChannel, more bool) {
+			c.Receive(ctx, &rerun)
+			gotRerun = true
+		})
+		sel.AddReceive(ctx.Done(), func(c wf.ReceiveChannel, more bool) { abandoned = true })
 		sel.AddReceive(settle, func(c wf.ReceiveChannel, more bool) {
 			var out branchOutcome
 			c.Receive(ctx, &out)
@@ -99,6 +163,14 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 		})
 		sel.Select(ctx)
 
+		if abandoned {
+			return stepOutcome{}, errStageAbandoned
+		}
+		if gotRerun {
+			if err := in.endForkRerun(gw, rerun.Err); err != nil {
+				return stepOutcome{}, err
+			}
+		}
 		if !gotAdmin {
 			continue
 		}
@@ -117,7 +189,7 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 			}
 
 		case SignalInstanceForceBack:
-			if err := in.handleParallelForceBack(ctx, plan, deptIDs, preFork, envelope.Signal); err != nil {
+			if err := in.handleParallelForceBack(ctx, plan, gw, envelope.Signal); err != nil {
 				return stepOutcome{}, err
 			}
 		}
@@ -129,13 +201,17 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 	if len(failed) == 0 {
 		return stepOutcome{LastNode: preFork}, nil
 	}
-	return in.enterDegraded(ctx, plan, preFork, completed, failed, admin)
+	return in.enterDegraded(ctx, plan, gw, preFork, completed, failed, admin)
 }
 
 type park struct {
+	gw       *gateway
 	ch       wf.Channel
 	depts    map[string]bool
 	branches []domain.FailedBranch
+
+	// ended is set once the park's loop no longer reads its channel.
+	ended bool
 
 	respawnCancels []wf.CancelFunc
 	rerunCancel    wf.CancelFunc
@@ -146,17 +222,21 @@ type rerunOutcome struct{ Err error }
 
 const parkTerminate = "park-terminate"
 
-func (in *interpreter) openPark(ctx wf.Context, plan *dsl.CompiledPlan, failed []failedBranch) *park {
+func (in *interpreter) openPark(ctx wf.Context, plan *dsl.CompiledPlan, gw *gateway, failed []failedBranch) *park {
 	if len(in.parks) == 0 {
 		in.degradedKeepsPause = true
 	}
-	p := &park{ch: wf.NewBufferedChannel(ctx, 8), depts: map[string]bool{}}
+	p := &park{gw: gw, ch: wf.NewBufferedChannel(ctx, signalBuffer), depts: map[string]bool{}}
+	if gw != nil {
+		gw.park = p
+	}
 	for _, fb := range failed {
 		p.depts[fb.DeptID] = true
 	}
 	p.branches = parkedBranches(plan, failed)
 	in.parks = append(in.parks, p)
 	in.status = domain.InstanceStatusDegraded
+	in.statusRestorePending = false
 	return p
 }
 
@@ -173,6 +253,10 @@ func parkedBranches(plan *dsl.CompiledPlan, failed []failedBranch) []domain.Fail
 }
 
 func (in *interpreter) closePark(p *park) {
+	p.ended = true
+	if p.gw != nil && p.gw.park == p {
+		p.gw.park = nil
+	}
 	in.parks = slices.DeleteFunc(in.parks, func(q *park) bool { return q == p })
 	if len(in.parks) == 0 {
 		in.degradedKeepsPause = false
@@ -184,19 +268,28 @@ func (in *interpreter) writeDegraded(ctx wf.Context) error {
 	for _, p := range in.parks {
 		branches = append(branches, p.branches...)
 	}
-	return updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
+	if err := updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
 		InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusDegraded, FailedBranches: branches,
-	})
+	}); err != nil {
+		return err
+	}
+	in.statusRestorePending = false
+	return nil
+}
+
+func (in *interpreter) liveParks() []*park {
+	return slices.DeleteFunc(slices.Clone(in.parks), func(p *park) bool { return p.ended })
 }
 
 func (in *interpreter) routeToParks(ctx wf.Context, envelope adminSignalEnvelope) bool {
-	if len(in.parks) == 0 {
+	parks := in.liveParks()
+	if len(parks) == 0 {
 		return false
 	}
 	switch envelope.Kind {
 	case SignalInstanceCancel:
-		in.parks[0].ch.Send(ctx, envelope)
-		for _, p := range in.parks[1:] {
+		parks[0].ch.Send(ctx, envelope)
+		for _, p := range parks[1:] {
 			p.ch.Send(ctx, adminSignalEnvelope{Kind: parkTerminate})
 		}
 		return true
@@ -205,20 +298,20 @@ func (in *interpreter) routeToParks(ctx wf.Context, envelope adminSignalEnvelope
 		if target == "" {
 			target = deptFromNodeKey(envelope.Signal.TargetNodeKey)
 		}
-		for _, p := range in.parks {
+		for _, p := range parks {
 			if p.depts[target] {
 				p.ch.Send(ctx, envelope)
 				return true
 			}
 		}
-		in.parks[len(in.parks)-1].ch.Send(ctx, envelope)
+		parks[len(parks)-1].ch.Send(ctx, envelope)
 		return true
 	}
 	return false
 }
 
-func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, preFork domain.NodeKey, completed []completedBranch, failed []failedBranch, admin wf.Channel) (stepOutcome, error) {
-	p := in.openPark(ctx, plan, failed)
+func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, gw *gateway, preFork domain.NodeKey, completed []completedBranch, failed []failedBranch, admin wf.Channel) (stepOutcome, error) {
+	p := in.openPark(ctx, plan, gw, failed)
 	if err := in.writeDegraded(ctx); err != nil {
 		in.closePark(p)
 		return stepOutcome{}, err
@@ -230,7 +323,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 
 	for len(failed) > 0 || respawning > 0 || p.rerunning {
 		sel := wf.NewSelector(ctx)
-		var terminated bool
+		var terminated, abandoned bool
 		var cancelErr, fatal error
 
 		sel.AddReceive(p.ch, func(c wf.ReceiveChannel, more bool) {
@@ -296,7 +389,12 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 			}
 		})
 
+		sel.AddReceive(ctx.Done(), func(c wf.ReceiveChannel, more bool) { abandoned = true })
+
 		sel.Select(ctx)
+		if abandoned || errors.Is(fatal, errStageAbandoned) {
+			return in.abandonPark(ctx, p)
+		}
 		if fatal != nil {
 			in.closePark(p)
 			return stepOutcome{}, fatal
@@ -308,6 +406,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 		p.branches = parkedBranches(plan, failed)
 	}
 
+	p.ended = true
 	if len(in.parks) > 1 {
 		in.closePark(p)
 		if err := in.writeDegraded(ctx); err != nil {
@@ -327,6 +426,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 		in.closePark(p)
 		return stepOutcome{}, err
 	}
+	in.statusRestorePending = false
 	if keepsPause && in.pauseHeld {
 		in.closePark(p)
 		in.leaveParkPaused(ctx)
@@ -338,7 +438,62 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, pre
 	return stepOutcome{LastNode: preFork}, nil
 }
 
+// abandonPark closes a park whose run was cancelled from outside (an interrupting
+// boundary ended the path holding the fork) and settles the instance status for
+// the parks still open. Nobody is left to receive an error from this run, so a
+// refused status write is logged and retried at the next step result.
+func (in *interpreter) abandonPark(ctx wf.Context, p *park) (stepOutcome, error) {
+	in.closePark(p)
+	dctx, _ := wf.NewDisconnectedContext(ctx)
+	in.settleStatusAfterAbandonedPark(dctx)
+	return stepOutcome{}, errStageAbandoned
+}
+
+// settleStatusAfterAbandonedPark gives the instance the status the parks still
+// open call for. Settles run one at a time and read the parks inside the lock,
+// so two parks abandoned together cannot write their statuses out of order. The
+// status counts in memory even when the write is refused.
+func (in *interpreter) settleStatusAfterAbandonedPark(ctx wf.Context) {
+	if in.settleLock == nil {
+		in.settleLock = wf.NewBufferedChannel(ctx, 1)
+	}
+	in.settleLock.Send(ctx, struct{}{})
+	defer in.settleLock.Receive(ctx, nil)
+	if in.status != domain.InstanceStatusDegraded && !in.statusRestorePending {
+		return
+	}
+	if err := in.writeStatusForParks(ctx); err != nil {
+		in.statusRestorePending = true
+		wf.GetLogger(ctx).Warn("restoring the instance status after an abandoned park failed; it is retried at the next step result", "error", err)
+		return
+	}
+	in.statusRestorePending = false
+}
+
+func (in *interpreter) writeStatusForParks(ctx wf.Context) error {
+	if len(in.parks) > 0 {
+		in.status = domain.InstanceStatusDegraded
+		return in.writeDegraded(ctx)
+	}
+	if in.pauseHeld {
+		in.leaveParkPaused(ctx)
+		return nil
+	}
+	in.status = domain.InstanceStatusRunning
+	return updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
+		InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusRunning,
+	})
+}
+
+// retryStatusRestore runs again a status restore that was refused.
+func (in *interpreter) retryStatusRestore(ctx wf.Context) {
+	if in.statusRestorePending && !in.finishing {
+		in.settleStatusAfterAbandonedPark(ctx)
+	}
+}
+
 func (in *interpreter) leaveParkPaused(ctx wf.Context) {
+	in.statusRestorePending = false
 	in.degradedKeepsPause = false
 	in.status = domain.InstanceStatusPaused
 	if err := pauseInstance(ctx, port.PauseInstanceInput{
@@ -366,6 +521,9 @@ func (in *interpreter) handleParallelForceForward(ctx wf.Context, plan *dsl.Comp
 		if droppedRoute(ctx, err, "target_dept_id", deptID) {
 			return completedBranch{}, false, nil
 		}
+		if abandonedMidActivity(ctx) {
+			return completedBranch{}, false, errStageAbandoned
+		}
 		return completedBranch{}, false, err
 	}
 	if cancel, ok := cancels[key]; ok {
@@ -392,6 +550,15 @@ func (in *interpreter) innermostGatewayRunning(deptID string) *gateway {
 		gw := in.gateways[i]
 		if branchRunning(gw.keys, gw.branchSteps, gw.resolved, deptID) != "" {
 			return gw
+		}
+	}
+	return nil
+}
+
+func (in *interpreter) innermostGatewayHolding(deptID string) *gateway {
+	for i := len(in.gateways) - 1; i >= 0; i-- {
+		if in.gateways[i].holds(deptID) {
+			return in.gateways[i]
 		}
 	}
 	return nil
@@ -441,28 +608,85 @@ func stepsRun(steps []dsl.ExecutionStep, deptID string) bool {
 	return false
 }
 
-func (in *interpreter) handleParallelForceBack(ctx wf.Context, plan *dsl.CompiledPlan, deptIDs []string, preFork domain.NodeKey, sig adminSignal) error {
-	if preFork == "" {
-		wf.GetLogger(ctx).Warn("instance-force-back: no completed node to return to; dropping")
+// handleParallelForceBack answers a force-back, or a defer, inside a running
+// fork (execution LLD §2.7): every branch saves its position at its next step,
+// the step before the fork runs again beside the fork loop, and the saved
+// branches resume when it ends (endForkRerun). A defer also ends the stage that
+// waits on its own closed task, so that branch's department creates a new task
+// when it resumes.
+func (in *interpreter) handleParallelForceBack(ctx wf.Context, plan *dsl.CompiledPlan, gw *gateway, sig adminSignal) error {
+	if gw.rerunning && !sig.FromDefer {
+		wf.GetLogger(ctx).Warn("instance-force-back: the step before the fork already runs again; dropping")
 		return nil
 	}
-	entry := departmentEntryNode(plan, deptFromNodeKey(preFork), preFork)
-	if err := in.recordAndRedirect(ctx, in.currentPendingNodes(), entry, domain.ForceRouteDirectionBack, sig); err != nil {
-		return err
+	if !gw.rerunning {
+		started, err := in.startForkRerun(ctx, plan, gw, sig)
+		if err != nil || !started {
+			return err
+		}
 	}
-	for _, d := range deptIDs {
+	if sig.FromDefer {
+		in.endDeferredStage(sig.DeferredTaskID)
+	}
+	return nil
+}
+
+func (in *interpreter) startForkRerun(ctx wf.Context, plan *dsl.CompiledPlan, gw *gateway, sig adminSignal) (bool, error) {
+	if gw.preFork == "" {
+		wf.GetLogger(ctx).Warn("instance-force-back: no completed node to return to; dropping")
+		return false, nil
+	}
+	deptID := deptFromNodeKey(gw.preFork)
+	if err := in.recordAndRedirect(ctx, in.currentPendingNodes(), departmentEntryNode(plan, deptID, gw.preFork), domain.ForceRouteDirectionBack, sig); err != nil {
+		if abandonedMidActivity(ctx) {
+			return false, errStageAbandoned
+		}
+		return false, err
+	}
+	for _, d := range gw.pausedDepts() {
 		in.pauseDept(ctx, d)
 	}
-	popped := in.history.PopTo(preFork)
-	in.msgBuf.ResetSpan(popped)
-	_, _, err := in.runDepartment(ctx, plan, deptFromNodeKey(preFork))
-	if errors.Is(err, errPathEnded) {
-		err = nil
+	in.msgBuf.ResetSpan(in.history.PopTo(gw.preFork))
+	gw.rerunning = true
+	wf.Go(ctx, func(gctx wf.Context) {
+		_, _, err := in.runDepartment(gctx, plan, deptID)
+		gw.rerunDone.Send(gctx, rerunOutcome{Err: err})
+	})
+	return true, nil
+}
+
+// releaseForkRerun opens the departments a fork held for its rerun when the
+// fork itself is abandoned.
+func (in *interpreter) releaseForkRerun(gw *gateway) {
+	if gw.rerunning {
+		gw.rerunning = false
+		for _, d := range gw.pausedDepts() {
+			in.resumeDept(d)
+		}
 	}
-	for _, d := range deptIDs {
-		in.resumeDept(ctx, d)
+}
+
+func (in *interpreter) endForkRerun(gw *gateway, err error) error {
+	gw.rerunning = false
+	for _, d := range gw.pausedDepts() {
+		in.resumeDept(d)
+	}
+	if errors.Is(err, errPathEnded) {
+		return nil
 	}
 	return err
+}
+
+// endDeferredStage ends the stage waiting on a deferred task. A defer applied
+// before its stage is waiting is remembered, and the stage ends as it starts.
+func (in *interpreter) endDeferredStage(taskID string) {
+	if ch, ok := in.deferCh[taskID]; ok {
+		ch.SendAsync(struct{}{})
+		return
+	}
+	if !in.stageExited[taskID] {
+		in.deferEarly[taskID] = true
+	}
 }
 
 func (in *interpreter) handleDegradedForceForward(ctx wf.Context, failed []failedBranch, sig adminSignal) ([]failedBranch, completedBranch, bool, error) {
@@ -476,6 +700,9 @@ func (in *interpreter) handleDegradedForceForward(ctx wf.Context, failed []faile
 	if err := in.recordAndRedirect(ctx, []domain.NodeKey{fb.LastCompletedNode}, sig.TargetNodeKey, domain.ForceRouteDirectionForward, sig); err != nil {
 		if droppedRoute(ctx, err, "target_node_key", string(sig.TargetNodeKey)) {
 			return failed, completedBranch{}, false, nil
+		}
+		if abandonedMidActivity(ctx) {
+			return failed, completedBranch{}, false, errStageAbandoned
 		}
 		return failed, completedBranch{}, false, err
 	}
@@ -499,6 +726,9 @@ func (in *interpreter) startParkRerun(ctx wf.Context, plan *dsl.CompiledPlan, p 
 	}
 	deptID := deptFromNodeKey(preFork)
 	if err := in.recordAndRedirect(ctx, in.currentPendingNodes(), departmentEntryNode(plan, deptID, preFork), domain.ForceRouteDirectionBack, sig); err != nil {
+		if abandonedMidActivity(ctx) {
+			return errStageAbandoned
+		}
 		return err
 	}
 	if !p.rerunning {

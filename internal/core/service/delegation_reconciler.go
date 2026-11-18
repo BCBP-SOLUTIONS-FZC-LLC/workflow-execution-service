@@ -26,7 +26,7 @@ type DelegationReconciler struct {
 	Eligibility  port.EligibilityChecker
 	Validator    port.EventValidator
 	Availability port.UserAvailabilityRepository
-	Locks        port.ScopeLocker
+	Locks        port.ScopeSetLocker
 	Ended        port.EndedDelegationRepository
 	Log          port.Logger
 }
@@ -141,7 +141,7 @@ func (s *DelegationReconciler) eligibleCandidates(ctx context.Context, plans *co
 // move, its event and its signal; the outbox relay delivers the signal after
 // the commit. A row whose assignment ended after it was read gets no new
 // assignment, no event and no signal.
-func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID uuid.UUID, rows []delegationCandidate, newUserID uuid.UUID, reasonFor func(*domain.TaskAssignment) string, delegationID *uuid.UUID) error {
+func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID uuid.UUID, rows []delegationCandidate, newUserID uuid.UUID, reasonFor func(*domain.TaskAssignment) string, delegationID *uuid.UUID, leadsUnclaimed bool) error {
 	return s.Transactor.RunInTx(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
 		for _, c := range rows {
 			active, ok, err := vacateIfActive(ctx, s.Assignments, tenantID, c.assignment)
@@ -153,6 +153,11 @@ func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID
 			}
 			if err := handOver(ctx, s.Assignments, s.Tasks, tenantID, c.assignment, active, c.task, newUserID, reasonFor(c.assignment)); err != nil {
 				return err
+			}
+			if leadsUnclaimed {
+				if err := leadUnclaimedHolder(ctx, s.Assignments, s.Tasks, tenantID, c.assignment, active, c.task.ID, newUserID); err != nil {
+					return err
+				}
 			}
 			if err := enqueueTaskReassigned(ctx, s.Outbox, s.Validator, c.instance, c.task, c.assignment.UserID, newUserID, delegationID); err != nil {
 				return err
@@ -204,18 +209,46 @@ func (s *DelegationReconciler) Reroute(ctx context.Context, in port.DelegationRe
 		return nil
 	}
 
-	return s.Locks.WithLock(ctx, port.UserAvailabilityScope(in.TenantID, in.DelegatorID), func(ctx context.Context) error {
-		ended, err := s.Ended.IsEnded(ctx, in.TenantID, in.DelegationID)
-		if err != nil || ended {
+	return s.Locks.WithLocks(ctx, startScopes(in), func(ctx context.Context) error {
+		stopped, err := s.endedBeforeMove(ctx, in)
+		if err != nil || stopped {
 			return err
 		}
 		return s.moveToDelegate(ctx, in, candidates, eligible)
 	})
 }
 
-// moveToDelegate runs under the delegator's lock, which the end of the same
-// delegation takes before it is recorded, so a start that read "not ended" has
-// committed its move before the end looks for work to return.
+// startScopes are the locks a start holds while it moves work: the delegator's,
+// which the end of the same delegation takes before it is recorded, and the
+// delegation's and the delegate's, which a cancel by the delegate takes (the
+// delegation's when it names one, the delegate's when it names none). A cancel
+// therefore reads the delegate's rows only after a start that read "not ended"
+// has committed its move, or finds the cancel recorded before it moves anything.
+func startScopes(in port.DelegationRerouteInput) []string {
+	return []string{
+		port.UserAvailabilityScope(in.TenantID, in.DelegatorID),
+		port.DelegationScope(in.TenantID, in.DelegationID),
+		port.DelegateScope(in.TenantID, in.DelegateID),
+	}
+}
+
+// endedBeforeMove reports whether the delegation has ended, or every delegation
+// to the delegate was cancelled after this start event was emitted (execution
+// LLD §6.2). The delegation's own start date is not compared: it is a business
+// date from the producer and says nothing about when the delegation was created.
+func (s *DelegationReconciler) endedBeforeMove(ctx context.Context, in port.DelegationRerouteInput) (bool, error) {
+	ended, err := s.Ended.IsEnded(ctx, in.TenantID, in.DelegationID)
+	if err != nil || ended {
+		return ended, err
+	}
+	cancelledAt, found, err := s.Ended.DelegateEndedAt(ctx, in.TenantID, in.DelegateID)
+	if err != nil {
+		return false, err
+	}
+	return found && !in.EmittedAt.IsZero() && cancelledAt.After(in.EmittedAt), nil
+}
+
+// moveToDelegate runs under the locks of startScopes.
 func (s *DelegationReconciler) moveToDelegate(ctx context.Context, in port.DelegationRerouteInput, candidates, eligible []delegationCandidate) error {
 	if settled := instancesFullyMoved(candidates, eligible); len(settled) > 0 {
 		if err := s.resumeForAbsentDelegator(ctx, in.TenantID, in.DelegatorID, settled); err != nil {
@@ -225,7 +258,7 @@ func (s *DelegationReconciler) moveToDelegate(ctx context.Context, in port.Deleg
 	hop := delegationHop(in.DelegationID, in.DelegatorID)
 	return s.commitReassignments(ctx, in.TenantID, eligible, in.DelegateID, func(a *domain.TaskAssignment) string {
 		return appendDelegationHop(a.Reason, hop)
-	}, &in.DelegationID)
+	}, &in.DelegationID, true)
 }
 
 // instancesFullyMoved returns one row per instance whose every task the
@@ -309,7 +342,7 @@ func (s *DelegationReconciler) Reverse(ctx context.Context, in port.DelegationRe
 		}
 		return s.commitReassignments(ctx, in.TenantID, eligible, in.DelegatorID, func(a *domain.TaskAssignment) string {
 			return reasonBeforeDelegation(a.Reason, tag)
-		}, &in.DelegationID)
+		}, &in.DelegationID, false)
 	})
 }
 

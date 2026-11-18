@@ -29,6 +29,7 @@ type WorkflowClient struct {
 	Eligibility port.EligibilityChecker
 	Definitions port.DefinitionServiceClient
 	Ended       port.EndedDelegationRepository
+	Locks       port.ScopeSetLocker
 	Log         port.Logger
 }
 
@@ -163,13 +164,33 @@ func (s *WorkflowClient) moveToNewDelegate(ctx context.Context, in port.Reassign
 	return moved, nil
 }
 
-// CancelByDelegate reads the task and instance of every selected assignment
-// first, then vacates them, and records the named delegation as ended, in one
+// CancelByDelegate runs under the lock a start of the same delegation takes: the
+// named delegation's, or the delegate's when none is named, so a start either
+// commits its move before the cancel reads the delegate's rows or finds the end
+// recorded (execution LLD §6.2).
+func (s *WorkflowClient) CancelByDelegate(ctx context.Context, in port.CancelByDelegateInput) (int, error) {
+	scope := port.DelegateScope(in.TenantID, in.DelegateUserID)
+	if in.DelegationID != nil {
+		scope = port.DelegationScope(in.TenantID, *in.DelegationID)
+	}
+	var cancelled int
+	err := s.Locks.WithLock(ctx, scope, func(ctx context.Context) (err error) {
+		cancelled, err = s.cancelByDelegate(ctx, in)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return cancelled, nil
+}
+
+// cancelByDelegate reads the task and instance of every selected assignment
+// first, then vacates them, and records the cancel as ended, in one
 // transaction; a task left with no active
 // assignee gets a signal recorded in the same transaction, so the workflow
 // learns of it (execution LLD §5.8). A failed read or write changes nothing
 // and fails the call so the caller retries.
-func (s *WorkflowClient) CancelByDelegate(ctx context.Context, in port.CancelByDelegateInput) (int, error) {
+func (s *WorkflowClient) cancelByDelegate(ctx context.Context, in port.CancelByDelegateInput) (int, error) {
 	active, err := s.Assignments.ListActiveByUser(ctx, in.TenantID, in.DelegateUserID)
 	if err != nil {
 		return 0, err
@@ -222,9 +243,13 @@ func (s *WorkflowClient) CancelByDelegate(ctx context.Context, in port.CancelByD
 }
 
 // markDelegationEnded records the named delegation as ended, so a start of it
-// delivered later moves nothing; a cancel that names no delegation ends none.
+// delivered later moves nothing; a cancel that names none records the time for
+// the delegate, so a start of any delegation that began before it moves nothing.
 func (s *WorkflowClient) markDelegationEnded(ctx context.Context, in port.CancelByDelegateInput) error {
 	if in.DelegationID == nil {
+		if err := s.Ended.MarkDelegateEnded(ctx, in.TenantID, in.DelegateUserID, time.Now().UTC()); err != nil {
+			return fmt.Errorf("cancel by delegate: record every delegation to %s as ended: %w", in.DelegateUserID, err)
+		}
 		return nil
 	}
 	if err := s.Ended.MarkEnded(ctx, in.TenantID, *in.DelegationID); err != nil {
