@@ -41,7 +41,7 @@ func TestConnectorTaskService_FailPath_AnAbsorbedRepeatNeitherAssignsNorSignals(
 	}{
 		{"a fail already delivered is acknowledged", "fail", "delivered", nil, 0},
 		{"a fail still reserved by another attempt is told to retry later", "fail", "reserved", port.ErrCallbackInFlight, 0},
-		{"a complete already delivered acknowledges the fail and gives back the reservation it took", "complete", "delivered", nil, 1},
+		{"a complete already delivered acknowledges the fail without taking a reservation", "complete", "delivered", nil, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

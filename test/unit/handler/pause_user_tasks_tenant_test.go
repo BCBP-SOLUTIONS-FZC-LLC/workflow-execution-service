@@ -22,7 +22,7 @@ func TestPauseUserTasks_AllZeroTenantID_Returns400(t *testing.T) {
 	assert.Equal(t, "BAD_REQUEST", p.Code)
 	require.Len(t, p.InvalidParams, 1)
 	assert.Equal(t, "tenant_id", p.InvalidParams[0].Name)
-	assert.Equal(t, "is required", p.InvalidParams[0].Reason)
+	assert.Equal(t, "is not valid", p.InvalidParams[0].Reason)
 	hhaAssertNoInternalText(t, w)
 	assert.Empty(t, pauser.calls, "an all-zero tenant must not pause anyone's tasks")
 }

@@ -365,8 +365,9 @@ paths:
         The Definition Service's archive guard: it refuses to archive a
         workflow while this reports an instance RUNNING or PAUSED. Writes
         nothing. A workflow_id or tenant_id that is not a UUID, or is the all-zero UUID, is
-        refused 400 BAD_REQUEST naming the field in invalid_params, so a malformed request
-        never reads as "no live instances".
+        refused 400 BAD_REQUEST naming the field in invalid_params with the reason "is not
+        valid"; an absent tenant_id is refused the same way with the reason "is required".
+        A malformed request never reads as "no live instances".
       parameters:
         - in: path
           name: workflow_id
@@ -419,6 +420,11 @@ paths:
         holding a task of the user is signalled, as a full membership
         revocation needs. The pause stops the whole instance, so an instance
         that also holds the user's task in another department is paused too.
+        An id (user_id, tenant_id, department_id) that is not a UUID or is the all-zero UUID
+        is refused 400 BAD_REQUEST with invalid_params naming the field and the reason "is
+        not valid"; an absent or null tenant_id has the reason "is required". Every offending
+        body field is listed (a request with an all-zero tenant_id and department_id lists
+        both). Nothing is paused.
       parameters:
         - in: path
           name: user_id
@@ -634,7 +640,10 @@ paths:
         by hand or by other means are not counted), and one page of the affected workflow
         instance IDs. With delegation_id, only that delegation's assignments count. Used by
         Org & Membership to preview the impact of ending or creating a delegation before
-        committing to it.
+        committing to it. A tenant_id, delegate_user_id or delegation_id that is not a UUID
+        or is the all-zero UUID is refused 400 BAD_REQUEST with invalid_params naming the
+        field and the reason "is not valid"; an absent tenant_id or delegate_user_id has the
+        reason "is required". Only the first offending field is named.
       security:
         - InternalServiceAuth: []
       parameters:

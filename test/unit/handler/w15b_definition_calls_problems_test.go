@@ -76,12 +76,13 @@ func TestActiveInstances_RefusedRequest_Returns400NamingTheParameter(t *testing.
 		query      string
 		wantDetail string
 		wantParam  string
+		wantReason string
 	}{
-		{"workflow_id not a UUID", "abc", "tenant_id=" + validTenant, "invalid workflow_id path parameter", "workflow_id"},
-		{"workflow_id all zero", uuid.Nil.String(), "tenant_id=" + validTenant, "invalid workflow_id path parameter", "workflow_id"},
-		{"tenant_id absent", validWorkflow, "", "tenant_id must be a UUID", "tenant_id"},
-		{"tenant_id empty", validWorkflow, "tenant_id=", "tenant_id must be a UUID", "tenant_id"},
-		{"tenant_id all zero", validWorkflow, "tenant_id=" + uuid.Nil.String(), "tenant_id must be a non-zero UUID", "tenant_id"},
+		{"workflow_id not a UUID", "abc", "tenant_id=" + validTenant, "invalid workflow_id path parameter", "workflow_id", "is not valid"},
+		{"workflow_id all zero", uuid.Nil.String(), "tenant_id=" + validTenant, "invalid workflow_id path parameter", "workflow_id", "is not valid"},
+		{"tenant_id absent", validWorkflow, "", "tenant_id query parameter is required", "tenant_id", "is required"},
+		{"tenant_id empty", validWorkflow, "tenant_id=", "invalid tenant_id query parameter", "tenant_id", "is not valid"},
+		{"tenant_id all zero", validWorkflow, "tenant_id=" + uuid.Nil.String(), "invalid tenant_id query parameter", "tenant_id", "is not valid"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -101,7 +102,7 @@ func TestActiveInstances_RefusedRequest_Returns400NamingTheParameter(t *testing.
 			assert.Equal(t, w15bBadRequestType, p.Type)
 			assert.Equal(t, tc.wantDetail, p.Detail)
 			require.Len(t, p.InvalidParams, 1)
-			assert.Equal(t, w15bInvalidParam{Name: tc.wantParam, Reason: "is not valid"}, p.InvalidParams[0])
+			assert.Equal(t, w15bInvalidParam{Name: tc.wantParam, Reason: tc.wantReason}, p.InvalidParams[0])
 			assert.Empty(t, guard.calls, "a refused request must not reach the guard")
 		})
 	}

@@ -28,6 +28,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- A repeated connector callback whose outcome, or the other outcome, was already delivered is acknowledged without asking the token service for the automation principal, and one still in flight is answered 503 without it. A repeat used to fail with the lookup error while the token service was down, so the connector worker kept retrying.
+- The internal active-instances, pause-tasks and delegate-impact calls refuse any all-zero id (tenant, user, delegate, delegation or department) with 400 BAD_REQUEST naming the field. Pause-tasks used to pause tasks for an all-zero user, and delegate-impact ran with all-zero ids.
+- On those three calls an absent id gives `invalid_params` reason `is required` and a malformed or all-zero one gives `is not valid`; delegate-impact lists `invalid_params` too. The reasons used to differ from call to call.
 - A delegation-started event whose scope is not `all`, `department` or `tender`, or whose `department` or `tender` scope has a missing or non-UUID `scope_id`, is refused with 400, so the consumer dead-letters it. It used to be acknowledged while nothing moved.
 - A delegation scoped to a tender or department matches when the ids are the same UUID in a different letter case. A scope id that is not a UUID matches nothing; it used to match by exact text.
 - Instance start and force-forward answer 409 `VERSION_INVALID` when the stored plan has no main plan or its JSON cannot be decoded. Start used to answer 500; force-forward answered 500 for unreadable JSON and 409 `TARGET_NODE_NOT_FOUND` for a missing main plan.

@@ -321,7 +321,11 @@ func TestFailConnectorTask_PrincipalLookupFails_Returns409AndChangesNothing(t *t
 	p := w11aProblemOf(t, w, http.StatusConflict)
 	assert.Equal(t, "NO_AUTOMATION_PRINCIPAL", p.Code)
 	assert.Equal(t, []uuid.UUID{h.tenant}, h.principals.tenants)
-	assert.Empty(t, h.cache.ops, "no dedup key is reserved")
+	assert.NotEmpty(t, h.cache.ops, "the earlier outcomes were read before the lookup")
+	for _, op := range h.cache.ops {
+		assert.Equal(t, "get", op.Op, "no dedup key is reserved or released: %v", op)
+	}
+	assert.Empty(t, h.cache.values, "no dedup key is left behind")
 	assert.Empty(t, h.assignments.attempts, "no assignment is written")
 	assert.Empty(t, h.temporal.signals, "no signal is sent")
 }
