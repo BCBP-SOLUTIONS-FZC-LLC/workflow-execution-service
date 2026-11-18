@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Tests
 
+- Table-driven route tests through the production router for request validation, a 401 for an identity that is missing or not a UUID, and Idempotency-Key replay, changed-body and in-flight answers on seven routes, plus the department header on task reads.
 - Stronger tests for configuration loading, validation and defaults and the connector worker's configuration guards, and for instance terminate, force-forward and force-back through the real service and Temporal client, with a two-tenant Postgres test for the cross-tenant answers.
 - Stronger handler, service, workflow and Postgres tests for instance start, outside answers, instance lists and reads, instance events and pause and resume: failure answers that hide internal error text, paging cursors, signal refusals, admin resume of owned pauses, and tenant isolation and same-transaction writes against real Postgres.
 - Stronger handler and Postgres tests for the inbound event routes (delegation, user, membership, tenant and workflow-task events): problem bodies that hide internal errors, unmarked failed deliveries and their redelivery, ingest counters, the automation principal lookup, tenant isolation of user deletion, delegation moves and tenant offboarding against real Postgres, and the idempotency bypass.
