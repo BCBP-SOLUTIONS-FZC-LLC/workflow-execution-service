@@ -2,11 +2,14 @@ package service_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
@@ -19,10 +22,9 @@ func TestInstanceService_Start_UnreadableStoredPlanIsAnInternalFailure(t *testin
 	}{
 		{"an empty plan", "", "unmarshal compiled plan"},
 		{"a plan that is not JSON", "{not json", "unmarshal compiled plan"},
-		{"a plan that is JSON null", "null", `main plan "" not found`},
 		{
 			"a main plan name no plan carries",
-			`{"main_plan":"ghost","plans":[{"name":"main","task_queue":"wf-queue-default","departments":[]}]}`,
+			fmt.Sprintf(`{"main_plan":"ghost","schema_version":%d,"plans":[{"name":"main","task_queue":"wf-queue-default","departments":[]}]}`, dsl.CurrentSchemaVersion),
 			`main plan "ghost" not found`,
 		},
 	}

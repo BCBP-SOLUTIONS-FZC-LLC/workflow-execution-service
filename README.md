@@ -193,7 +193,7 @@ Logs, metrics and traces go through `platform-gincommon`; every binary calls the
 | `internal/**/*_test.go`, `test/unit/` | Unit tests | `make test` |
 | `test/workflow/` | Temporal workflow tests on the test environment | `make test` |
 | `test/contract/` | Internal API and Definition client contract tests, chart environment check | `make test` |
-| `test/integration/` | Postgres, Valkey, Temporal via testcontainers | `make test-integration` |
+| `test/integration/`, and the `integration`-tagged tests in `cmd/server/` and `cmd/worker/` | Postgres, Valkey, Temporal via testcontainers; the server and worker binaries' startup, migration, shutdown and readiness | `make test-integration` |
 | `test/e2e/` | The API and worker against real Temporal, Postgres and Valkey, driven over HTTP | `make test-e2e` |
 | `test/compat/` | The Definition Service (`DEFINITION_SERVICE_DIR`, default `../definition_service`), this repository's connector worker and the Workflow-Events Consumer (`EVENT_CONSUMER_DIR`, default `../event_consumer`) as real binaries against this service's real API, worker and stores, with LocalStack SNS and SQS | `make test-compat` |
 

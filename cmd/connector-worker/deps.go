@@ -67,6 +67,8 @@ type deps struct {
 	retry        retryBounds
 	// gate says whether a connector may still run for a task; nil runs every entry.
 	gate port.ConnectorDispatchGate
+	// readBackoff pauses the dispatch loop after a failed read; nil waits readFailureBackoff.
+	readBackoff func(ctx context.Context)
 
 	streamKey    string
 	streamGroup  string

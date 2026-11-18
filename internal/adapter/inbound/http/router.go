@@ -96,6 +96,7 @@ func NewRouter(cfg RouterConfig) *Router {
 	for _, mw := range gincommon.ProtectedMiddlewares(cfg.GinConfig) {
 		api.Use(mw)
 	}
+	api.Use(middleware.RequireUUIDIdentity(cfg.GinConfig.Logger))
 
 	tasks := api.Group("/tasks")
 	tasks.GET("", h.ListTasks)

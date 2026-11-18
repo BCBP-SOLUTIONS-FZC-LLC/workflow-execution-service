@@ -151,12 +151,17 @@ func TestExecute_CancelWhileTheStepBeforeAForkRunsAgainTerminatesTheInstance(t *
 	wflRegisterAll(env, fakes, wflForkAfterIntake())
 	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("intake", "A1", 1))
 	dfkDefer(env, "defer-1", 4*time.Second, "billing", "B1", &updateAnswer{})
+	var siblingBeforeCancel []domain.TaskStatus
+	env.RegisterDelayedCallback(func() {
+		siblingBeforeCancel = wflTaskStatusesOf(fakes, "warehouse/Pack")
+	}, 5*time.Second)
 	wflCancelAt(env, 6*time.Second)
 
 	status, err := wflStart(t, env, fakes, "")
 
 	wflAssertCancelEndedTheInstance(t, fakes, status, err)
-	assert.Empty(t, wflTaskStatusesOf(fakes, "warehouse/Pack"), "the defer did not supersede the sibling's task")
+	// Read before the cancel: the cancel itself may close the sibling's task.
+	assert.Empty(t, siblingBeforeCancel, "the defer did not supersede the sibling's task")
 }
 
 // A fork that is the plan's first step has no step to return to: the defer is

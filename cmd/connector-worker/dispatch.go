@@ -46,7 +46,7 @@ func runDispatchLoop(ctx context.Context, d *deps, wg *sync.WaitGroup, wlog port
 			if recreateLostGroup(ctx, d, err, wlog) {
 				continue
 			}
-			waitReadBackoff(ctx)
+			waitReadBackoff(ctx, d)
 			continue
 		}
 		dispatchBatch(ctx, d, wg, entries, wlog)

@@ -10,6 +10,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Tests
 
+- Stronger tests for delegation moves and events, out-of-office availability, tenant lifecycle, entitlements and plan caches, connector dispatch gates and signals, the user task pauser, delegate impact paging and force-back targets.
+- Stronger service, handler and Postgres tests for connector callbacks (reservations, in-flight retries, unreadable mappings), delegate reassignment and cancellation, delegate impact pages, the user task pauser, the delegation reconciler and internal problem bodies.
 - Route, handler and middleware tests through the production router (task actions, outside answers, public routes, idempotent replays, internal caller identity), configuration defaults, event payload strictness, connector-worker group recovery and instance list filters under tenant row-level security.
 - Server start, migration, readiness and shutdown tests against real Postgres and Temporal containers; port, cursor and activity-name tests; observability tests for telemetry warnings, metric labels and interceptors; workflow tests for parked branches abandoned or refused and for deterministic map order.
 - Service tests for error and branch paths of the connector callbacks, delegation moves and cancels, out-of-office availability, force-route open tasks, tenant lifecycle and pause at an unchanged record version.
@@ -22,6 +24,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- Starting an instance when the eligibility check answers with fewer or more entries than asked answers 503 UPSTREAM_UNAVAILABLE and creates nothing; a short answer used to count as eligible and a long one could panic.
+- Force-forward and force-back on an ended instance answer 409 INSTANCE_ALREADY_TERMINAL even with a stale record version, as pause, resume and cancel do; they used to answer RECORD_VERSION_CONFLICT.
+- Task detail and instance events no longer show extras or event data that cannot be read as a JSON object for redaction; the field is left out (task) or null (event) instead of returned as stored.
+- When work moves between a delegator and a delegate, the pause or resume of an affected instance is recorded with the move that actually happened, and only for instances whose work moved; it used to be sent to the workflow before the move committed.
+- A request whose `x-tenant-id` or `x-user-id` is not a UUID gets 401, the same as a missing identity; it used to get 500.
+- Creating an instance with an id that already exists returns the already-exists error; it used to return the raw database key violation.
+- `workflow_execution_service_record_version_conflict_total` shows its `table=workflow_instance` and `table=workflow_task` series from start-up; they used to appear only after the first conflict.
+- The retention sweeper with a batch size of 0 prunes each table once and stops; it used to loop on the outbox.
 - A defer of a task inside a parallel step that is still running sends the work back to the step before the fork, as an admin force-back does: the other branches keep their open tasks and resume where they were, the step before the fork runs again, and the deferring branch gets a new task afterwards. It used to rerun that step beside the deferring branch, which kept waiting on its closed task, so the parallel step never joined and the instance stopped.
 - A defer returns to the step before the innermost parallel step that contains the deferred task, and only that step's branches are saved and resumed. It used to go to whichever inner step was parked, so a defer in an outer branch reran the inner step instead.
 - A delegation that hands an unclaimed all-assignee task to a user who already holds an assignment on it makes that user the lead; they used to stay a plain co-assignee.
@@ -186,6 +196,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- A stored plan whose schema version is not the current one is refused as 409 VERSION_INVALID wherever the service reads a plan; it used to be read without expanding its plan calls.
+- A failed eligibility read while a delegate cancels a delegation is a named error callers can check; the HTTP answer is the same.
+- `make test-integration` also runs the integration-tagged tests in `cmd/server`.
 - Contract copies: a copy in `api/contracts/` that differs from its source no longer fails `make contract-check` unless the source has a breaking change (oasdiff) on a route this service calls (the compiled-plan read and the alias list, a fifth column in `api/contracts/SOURCES`). The copy of the Definition Service's internal spec is refreshed from its corrected version. LLD copy 1.154.
 - CI: a change that touches only documentation (Markdown, Mermaid, `.claude/`, `docs/` except `docs/swagger/`, `LICENSE`) runs the CI gate and reports the required checks as skipped, not pending; the workflow no longer uses `paths-ignore`. No job or check name changes.
 - CI: the `sqlc` binary and, in the test and quality jobs, the `.tools` directory are cached by the Makefile hash, so a job no longer compiles them on every run. `make test-ci` runs the unit and integration suites at the same time, then merges their coverage. No job, dependency or check name changes.

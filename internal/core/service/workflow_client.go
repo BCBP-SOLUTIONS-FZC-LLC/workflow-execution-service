@@ -3,7 +3,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -15,8 +14,6 @@ import (
 )
 
 var _ port.WorkflowClient = (*WorkflowClient)(nil)
-
-var errEligibilityRead = errors.New("eligibility read failed")
 
 type WorkflowClient struct {
 	Instances   port.InstanceRepository
@@ -402,7 +399,7 @@ func (s *WorkflowClient) checkAssigneeEligible(ctx context.Context, plans *compi
 	}
 	eligible, err := s.Eligibility.CheckEligibility(ctx, tenantID, newUserID, task.DepartmentID, level)
 	if err != nil {
-		return false, fmt.Errorf("%w: %w", errEligibilityRead, err)
+		return false, fmt.Errorf("%w: %w", port.ErrEligibilityRead, err)
 	}
 	answered[pair] = eligible
 	return eligible, nil

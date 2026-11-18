@@ -9,9 +9,7 @@ import (
 )
 
 func TestReassignTask_UnusableCallerIdentity_Returns500(t *testing.T) {
-	cases := hreIdentityCases()
-	cases = append(cases, hreIdentityCase{name: "malformed tenant id is reported before the admin check", header: "x-tenant-id", bad: "not-a-uuid", nonAdmin: true, wantDetail: "malformed tenant id in request context"})
-	for _, tc := range cases {
+	for _, tc := range hreIdentityCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			fake, calls := hreTaskFake()
 			h := newHandler(fake, &fakeEligibilityChecker{})

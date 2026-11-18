@@ -52,7 +52,7 @@ func (s *RetentionSweeper) pruneOutbox(ctx context.Context) error {
 			return fmt.Errorf("prune published outbox events: %w", err)
 		}
 		s.deps.Record(retentionTableOutbox, deleted)
-		if deleted < int64(s.deps.Batch) {
+		if deleted == 0 || deleted < int64(s.deps.Batch) {
 			return nil
 		}
 		if err := ctx.Err(); err != nil {

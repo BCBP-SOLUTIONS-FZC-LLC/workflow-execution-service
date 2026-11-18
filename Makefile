@@ -189,7 +189,7 @@ test-integration:
 	    -coverpkg=$$(go list ./internal/... | grep -v '$(COVER_EXCLUDE_PKG)' | tr '\n' ',' | sed 's/,$$//') \
 	    -coverprofile=$(COVERAGE_DIR)/integration.out \
 	    -covermode=atomic \
-	    ./test/integration/...
+	    ./test/integration/... ./cmd/server/... ./cmd/worker/...
 	@grep -v '$(COVER_EXCLUDE_FILE)' $(COVERAGE_DIR)/integration.out > $(COVERAGE_DIR)/integration.out.filtered && mv $(COVERAGE_DIR)/integration.out.filtered $(COVERAGE_DIR)/integration.out
 	@go tool cover -func=$(COVERAGE_DIR)/integration.out | tail -1
 

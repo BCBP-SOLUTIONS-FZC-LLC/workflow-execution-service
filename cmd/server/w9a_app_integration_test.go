@@ -175,6 +175,7 @@ func w9aAppConfig(t *testing.T, pgDSN, temporalAddr string, env map[string]strin
 	t.Helper()
 	base := map[string]string{
 		"APP_ENV":                "test",
+		"BUILD_VERSION":          "test",
 		"TEMPORAL_NAMESPACE":     "default",
 		"DATABASE_URL":           pgDSN,
 		"TEMPORAL_HOST_PORT":     temporalAddr,

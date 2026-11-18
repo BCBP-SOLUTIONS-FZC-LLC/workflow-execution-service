@@ -53,6 +53,13 @@ var (
 	// ErrCallbackInFlight: an earlier attempt of the same connector callback has not delivered its
 	// signal yet; the caller retries later.
 	ErrCallbackInFlight = errors.New("an earlier attempt of this callback is still in progress")
+
+	// ErrEligibilityAnswerCount: the eligibility answer has a different number of entries than the
+	// request, so no entry can be trusted; the caller retries.
+	ErrEligibilityAnswerCount = errors.New("eligibility answer count differs from request count")
+
+	// ErrEligibilityRead: an assignee eligibility read failed, as opposed to a compiled-plan read.
+	ErrEligibilityRead = errors.New("eligibility read failed")
 )
 
 type AssigneeIneligibleError struct {

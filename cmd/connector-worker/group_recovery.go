@@ -31,7 +31,11 @@ func recreateLostGroup(ctx context.Context, d *deps, readErr error, wlog port.Lo
 }
 
 // waitReadBackoff pauses after a failed read and ends at once on shutdown.
-func waitReadBackoff(ctx context.Context) {
+func waitReadBackoff(ctx context.Context, d *deps) {
+	if d.readBackoff != nil {
+		d.readBackoff(ctx)
+		return
+	}
 	timer := time.NewTimer(readFailureBackoff)
 	defer timer.Stop()
 	select {

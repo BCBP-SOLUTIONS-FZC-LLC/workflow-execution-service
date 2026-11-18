@@ -55,8 +55,9 @@ func TestInstanceStart_RetryCompletesAFailedStartThroughTheDatabase(t *testing.T
 	require.NoError(t, err)
 	temporal := &flakyTemporal{failures: 3}
 	plan, err := json.Marshal(dsl.CompiledCollaboration{
-		MainPlan: "main",
-		Plans:    []*dsl.CompiledPlan{{Name: "main", TaskQueue: "wf-queue-default"}},
+		SchemaVersion: dsl.CurrentSchemaVersion,
+		MainPlan:      "main",
+		Plans:         []*dsl.CompiledPlan{{Name: "main", TaskQueue: "wf-queue-default"}},
 	})
 	require.NoError(t, err)
 	versionID := uuid.New()

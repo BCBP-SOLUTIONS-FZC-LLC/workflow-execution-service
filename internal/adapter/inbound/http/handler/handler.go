@@ -119,16 +119,9 @@ func callerIdentity(c *gin.Context) (tenantID, userID uuid.UUID, ok bool) {
 		writeProblem(c, http.StatusInternalServerError, CodeInternal, "missing request context", nil)
 		return uuid.Nil, uuid.Nil, false
 	}
-	tenantID, err := uuid.Parse(rc.TenantID)
-	if err != nil {
-		writeProblem(c, http.StatusInternalServerError, CodeInternal, "malformed tenant id in request context", nil)
-		return uuid.Nil, uuid.Nil, false
-	}
-	userID, err = uuid.Parse(rc.UserID)
-	if err != nil {
-		writeProblem(c, http.StatusInternalServerError, CodeInternal, "malformed user id in request context", nil)
-		return uuid.Nil, uuid.Nil, false
-	}
+	// Both ids are UUIDs here: RequireUUIDIdentity refuses anything else before a /api/v1 handler runs.
+	tenantID, _ = uuid.Parse(rc.TenantID)
+	userID, _ = uuid.Parse(rc.UserID)
 	return tenantID, userID, true
 }
 

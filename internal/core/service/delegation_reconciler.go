@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -79,8 +78,6 @@ func (s *DelegationReconciler) requirePlans(ctx context.Context, plans *compiled
 	return nil
 }
 
-var errEligibilityAnswerCount = errors.New("eligibility answer count differs from request count")
-
 type eligibilityPair struct {
 	department uuid.UUID
 	level      string
@@ -119,7 +116,7 @@ func (s *DelegationReconciler) eligibleCandidates(ctx context.Context, plans *co
 	}
 	if len(answers) != len(requests) {
 		s.logger().Error(logPrefix+": eligibility answer count differs from request count", map[string]any{"requests": len(requests), "answers": len(answers)})
-		return nil, fmt.Errorf("%w: %s: %d answers for %d requests", errEligibilityAnswerCount, logPrefix, len(answers), len(requests))
+		return nil, fmt.Errorf("%w: %s: %d answers for %d requests", port.ErrEligibilityAnswerCount, logPrefix, len(answers), len(requests))
 	}
 	for _, result := range answers {
 		if result.Err != nil {
@@ -140,8 +137,9 @@ func (s *DelegationReconciler) eligibleCandidates(ctx context.Context, plans *co
 // commitReassignments moves the rows in one transaction and records, with each
 // move, its event and its signal; the outbox relay delivers the signal after
 // the commit. A row whose assignment ended after it was read gets no new
-// assignment, no event and no signal.
-func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID uuid.UUID, rows []delegationCandidate, newUserID uuid.UUID, reasonFor func(*domain.TaskAssignment) string, delegationID *uuid.UUID, leadsUnclaimed bool) error {
+// assignment, no event and no signal. beforeSignal, when set, runs inside the same
+// transaction for each row that moved, just before that row's own signal.
+func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID uuid.UUID, rows []delegationCandidate, newUserID uuid.UUID, reasonFor func(*domain.TaskAssignment) string, delegationID *uuid.UUID, leadsUnclaimed bool, beforeSignal func(context.Context, delegationCandidate) error) error {
 	return s.Transactor.RunInTx(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
 		for _, c := range rows {
 			active, ok, err := vacateIfActive(ctx, s.Assignments, tenantID, c.assignment)
@@ -161,6 +159,11 @@ func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID
 			}
 			if err := enqueueTaskReassigned(ctx, s.Outbox, s.Validator, c.instance, c.task, c.assignment.UserID, newUserID, delegationID); err != nil {
 				return err
+			}
+			if beforeSignal != nil {
+				if err := beforeSignal(ctx, c); err != nil {
+					return err
+				}
 			}
 			if err := recordWorkflowSignal(ctx, s.Signals, c.instance, port.SignalInstanceReassign, reassignSignalWire{
 				TaskID: c.task.ID.String(), OldUserID: c.assignment.UserID.String(), NewUserID: newUserID.String(), RecordVersion: c.task.RecordVersion, RecordedAt: time.Now().UTC(),
@@ -250,15 +253,20 @@ func (s *DelegationReconciler) endedBeforeMove(ctx context.Context, in port.Dele
 
 // moveToDelegate runs under the locks of startScopes.
 func (s *DelegationReconciler) moveToDelegate(ctx context.Context, in port.DelegationRerouteInput, candidates, eligible []delegationCandidate) error {
+	var recordResume func(context.Context, delegationCandidate) error
 	if settled := instancesFullyMoved(candidates, eligible); len(settled) > 0 {
-		if err := s.resumeForAbsentDelegator(ctx, in.TenantID, in.DelegatorID, settled); err != nil {
+		absent, err := s.isOutOfOffice(ctx, in.TenantID, in.DelegatorID)
+		if err != nil {
 			return err
+		}
+		if absent {
+			recordResume = s.instanceSignalRecorder(settled, port.SignalInstanceResume)
 		}
 	}
 	hop := delegationHop(in.DelegationID, in.DelegatorID)
 	return s.commitReassignments(ctx, in.TenantID, eligible, in.DelegateID, func(a *domain.TaskAssignment) string {
 		return appendDelegationHop(a.Reason, hop)
-	}, &in.DelegationID, true)
+	}, &in.DelegationID, true, recordResume)
 }
 
 // instancesFullyMoved returns one row per instance whose every task the
@@ -291,15 +299,28 @@ func instancesFullyMoved(all, moved []delegationCandidate) []delegationCandidate
 	return out
 }
 
-// resumeForAbsentDelegator resumes the instances an out-of-office pause left
-// waiting for a delegator whose work now has an available owner. The workflow
-// only honours the resume when the pause came from out of office.
-func (s *DelegationReconciler) resumeForAbsentDelegator(ctx context.Context, tenantID, delegatorID uuid.UUID, rows []delegationCandidate) error {
-	absent, err := s.isOutOfOffice(ctx, tenantID, delegatorID)
-	if err != nil || !absent {
-		return err
+// instanceSignalRecorder returns the step that records, inside the move's
+// transaction, one pause or resume signal for an instance among the rows, the
+// first time a row of that instance has actually moved; an instance whose rows
+// all lost the race gets none. The signal is tagged as out of office: the
+// workflow only honours a resume when the pause came from out of office.
+func (s *DelegationReconciler) instanceSignalRecorder(rows []delegationCandidate, signalName string) func(context.Context, delegationCandidate) error {
+	wanted := make(map[uuid.UUID]struct{}, len(rows))
+	for _, c := range rows {
+		wanted[c.instance.ID] = struct{}{}
 	}
-	return s.signalOncePerInstance(ctx, rows, port.SignalInstanceResume)
+	return func(ctx context.Context, moved delegationCandidate) error {
+		id := moved.instance.ID
+		if _, ok := wanted[id]; !ok {
+			return nil
+		}
+		delete(wanted, id)
+		wire := adminSignalWire{Initiator: domain.InitiatorOOO, RecordVersion: moved.instance.RecordVersion}
+		if err := recordWorkflowSignal(ctx, s.Signals, moved.instance, signalName, wire); err != nil {
+			return fmt.Errorf("delegation: record %s of instance %s: %w", signalName, id, err)
+		}
+		return nil
+	}
 }
 
 func (s *DelegationReconciler) Reverse(ctx context.Context, in port.DelegationReversalInput) error {
@@ -337,12 +358,13 @@ func (s *DelegationReconciler) Reverse(ctx context.Context, in port.DelegationRe
 	}
 
 	return s.Locks.WithLock(ctx, port.UserAvailabilityScope(in.TenantID, in.DelegatorID), func(ctx context.Context) error {
-		if err := s.settleOutOfOfficePauses(ctx, in, eligible); err != nil {
+		recordSignals, err := s.outOfOfficePauseRecorder(ctx, in, eligible)
+		if err != nil {
 			return err
 		}
 		return s.commitReassignments(ctx, in.TenantID, eligible, in.DelegatorID, func(a *domain.TaskAssignment) string {
 			return reasonBeforeDelegation(a.Reason, tag)
-		}, &in.DelegationID, false)
+		}, &in.DelegationID, false, recordSignals)
 	})
 }
 
@@ -352,19 +374,25 @@ func (s *DelegationReconciler) recordEnded(ctx context.Context, in port.Delegati
 	})
 }
 
-func (s *DelegationReconciler) settleOutOfOfficePauses(ctx context.Context, in port.DelegationReversalInput, rows []delegationCandidate) error {
+// outOfOfficePauseRecorder reads the delegator's availability, under the caller's
+// lock, and returns the step that records the pause or resume the restored work
+// needs; it is nil when none is needed. The move runs it inside its transaction
+// for each row that moved.
+func (s *DelegationReconciler) outOfOfficePauseRecorder(ctx context.Context, in port.DelegationReversalInput, rows []delegationCandidate) (func(context.Context, delegationCandidate) error, error) {
 	absent, err := s.isOutOfOffice(ctx, in.TenantID, in.DelegatorID)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var signalName string
 	switch {
 	case !absent:
-		return s.signalRestoredInstances(ctx, rows, port.SignalInstanceResume)
+		signalName, rows = port.SignalInstanceResume, pausedInstances(rows)
 	case in.EndedReason == port.DelegationEndedReassigned:
-		return nil
+		return nil, nil
 	default:
-		return s.signalRestoredInstances(ctx, rows, port.SignalInstancePause)
+		signalName = port.SignalInstancePause
 	}
+	return s.instanceSignalRecorder(rows, signalName), nil
 }
 
 func (s *DelegationReconciler) isOutOfOffice(ctx context.Context, tenantID, userID uuid.UUID) (bool, error) {
@@ -375,30 +403,12 @@ func (s *DelegationReconciler) isOutOfOffice(ctx context.Context, tenantID, user
 	return found && status == port.AvailabilityOOO, nil
 }
 
-func (s *DelegationReconciler) signalRestoredInstances(ctx context.Context, rows []delegationCandidate, signalName string) error {
-	if signalName != port.SignalInstanceResume {
-		return s.signalOncePerInstance(ctx, rows, signalName)
-	}
+func pausedInstances(rows []delegationCandidate) []delegationCandidate {
 	paused := make([]delegationCandidate, 0, len(rows))
 	for _, c := range rows {
 		if c.instance.Status == domain.InstanceStatusPaused {
 			paused = append(paused, c)
 		}
 	}
-	return s.signalOncePerInstance(ctx, paused, signalName)
-}
-
-func (s *DelegationReconciler) signalOncePerInstance(ctx context.Context, rows []delegationCandidate, signalName string) error {
-	signalled := make(map[uuid.UUID]struct{}, len(rows))
-	for _, c := range rows {
-		if _, ok := signalled[c.instance.ID]; ok {
-			continue
-		}
-		signalled[c.instance.ID] = struct{}{}
-		wire := adminSignalWire{Initiator: domain.InitiatorOOO, RecordVersion: c.instance.RecordVersion}
-		if err := s.Temporal.SignalWorkflow(ctx, c.instance.TemporalWorkflowID, c.instance.ID, signalName, wire); err != nil {
-			return fmt.Errorf("delegation: %s instance %s: %w", signalName, c.instance.ID, err)
-		}
-	}
-	return nil
+	return paused
 }

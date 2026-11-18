@@ -44,7 +44,7 @@ func TestWorkflowClient_ReassignDelegate_APlanThatCannotBeReadFailsTheCallAndIsN
 			dsl.DepartmentDef{ID: "finance", IAMDepartmentID: financeDept.String(), Stages: []dsl.StageDef{{Type: "userTask", NodeID: "review", Role: "reviewer"}}}))
 	}
 	withMainPlan := func(versionID uuid.UUID, mainPlan string) *port.CompiledWorkflow {
-		collab := dsl.CompiledCollaboration{MainPlan: mainPlan, Plans: []*dsl.CompiledPlan{{Name: "main", TaskQueue: "q"}}}
+		collab := dsl.CompiledCollaboration{SchemaVersion: dsl.CurrentSchemaVersion, MainPlan: mainPlan, Plans: []*dsl.CompiledPlan{{Name: "main", TaskQueue: "q"}}}
 		raw, err := json.Marshal(collab)
 		require.NoError(t, err)
 		return publishedCompiledWorkflow(uuid.New(), versionID, string(raw))

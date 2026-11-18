@@ -34,7 +34,7 @@ func Sum(tb testing.TB, name string, labels map[string]string) float64 {
 		}
 		for _, m := range f.GetMetric() {
 			if matches(m, labels) {
-				total += value(f.GetType(), m)
+				total += value(tb, f.GetName(), f.GetType(), m)
 			}
 		}
 	}
@@ -56,7 +56,8 @@ func matches(m *dto.Metric, labels map[string]string) bool {
 	return true
 }
 
-func value(t dto.MetricType, m *dto.Metric) float64 {
+func value(tb testing.TB, name string, t dto.MetricType, m *dto.Metric) float64 {
+	tb.Helper()
 	if t == dto.MetricType_COUNTER {
 		return m.GetCounter().GetValue()
 	}
@@ -66,5 +67,6 @@ func value(t dto.MetricType, m *dto.Metric) float64 {
 	if t == dto.MetricType_HISTOGRAM {
 		return float64(m.GetHistogram().GetSampleCount())
 	}
+	tb.Fatalf("obstest: metric %s has type %s, which Sum does not support", name, t)
 	return 0
 }

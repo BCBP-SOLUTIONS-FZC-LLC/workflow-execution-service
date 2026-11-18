@@ -58,7 +58,8 @@ func TestInstanceAnswer_AssigneeVisibilityReadsOnlyActiveAssignments(t *testing.
 	ctx := context.Background()
 
 	plan, err := json.Marshal(dsl.CompiledCollaboration{
-		MainPlan: "main",
+		SchemaVersion: dsl.CurrentSchemaVersion,
+		MainPlan:      "main",
 		Plans: []*dsl.CompiledPlan{{
 			Name: "main", TaskQueue: "wf-queue-default",
 			Departments: []dsl.DepartmentDef{{ID: "finance", Label: "Finance", Stages: []dsl.StageDef{
