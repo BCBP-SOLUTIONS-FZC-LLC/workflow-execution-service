@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Tests
 
+- Stronger tests for delegation moves and events, out-of-office availability, tenant lifecycle, entitlements and plan caches, connector dispatch gates and signals, the user task pauser, delegate impact paging and force-back targets.
 - Stronger service, handler and Postgres tests for connector callbacks (reservations, in-flight retries, unreadable mappings), delegate reassignment and cancellation, delegate impact pages, the user task pauser, the delegation reconciler and internal problem bodies.
 - Route, handler and middleware tests through the production router (task actions, outside answers, public routes, idempotent replays, internal caller identity), configuration defaults, event payload strictness, connector-worker group recovery and instance list filters under tenant row-level security.
 - Server start, migration, readiness and shutdown tests against real Postgres and Temporal containers; port, cursor and activity-name tests; observability tests for telemetry warnings, metric labels and interceptors; workflow tests for parked branches abandoned or refused and for deterministic map order.
