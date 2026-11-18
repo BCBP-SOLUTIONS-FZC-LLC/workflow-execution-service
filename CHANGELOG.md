@@ -8,6 +8,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## [Unreleased]
 
+### Tests
+
+- Service tests for error and branch paths of the connector callbacks, delegation moves and cancels, out-of-office availability, force-route open tasks, tenant lifecycle and pause at an unchanged record version.
+
 ### Removed
 
 - Workflow code kept for histories recorded by earlier interpreter versions: every workflow version marker, the older-history branches behind them, and the replay fixtures and tests that exercised them. Every run takes the current path; nothing is deployed yet, so no recorded history needs the old paths. The pull-request check that asked for a version marker on each interpreter change is removed with them.
