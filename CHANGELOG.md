@@ -10,6 +10,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Tests
 
+- Stronger tests for instance terminate cascades (including a rollback against real Postgres), connector failure retries, retention sweeps, background job loops, tenant purges, the RLS violation exporter, instance event payloads, task lists and their scope, boundary fires, outside-answer caching and envelope wrapping.
+- Stronger handler and service tests for the delegate reassign and cancel bodies, idempotent repeats and size limits, connector callback bodies, delegate impact queries and cursors, the problem bodies of the Definition Service calls, the delegation event route envelope, and a failing active-instance count.
 - Stronger tests for compiled-plan reads, force-route walks, instance actions by state, task eligibility, delegation moves, transactions and events, entitlement and availability races, task claim races, completed steps, connector output, instance events and run ids, instance start refusals from events, retention sweeps and tenant lifecycle retries.
 - Stronger tests for force-route targets, task actions and reads, the user safety net, delegation cancel reads, delegate reassignment, instance start refusals, instance lifecycle and tenant lifecycle, and the problem body of a start whose plan cannot be read.
 - Stronger tests for delegation moves and events, out-of-office availability, tenant lifecycle, entitlements and plan caches, connector dispatch gates and signals, the user task pauser, delegate impact paging and force-back targets.
