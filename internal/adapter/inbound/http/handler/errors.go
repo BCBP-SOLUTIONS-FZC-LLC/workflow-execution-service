@@ -310,7 +310,7 @@ func upstreamDependency(err error) string {
 	if errors.Is(err, port.ErrDefinitionUnavailable) || errors.Is(err, port.ErrDefinitionRejected) {
 		return "definition_service"
 	}
-	if errors.Is(err, adapterhttp.ErrUpstreamUnavailable) {
+	if errors.Is(err, adapterhttp.ErrUpstreamUnavailable) || errors.Is(err, port.ErrEligibilityAnswerCount) {
 		return "iam"
 	}
 	return ""
@@ -377,7 +377,7 @@ func mapErr(err error) (status int, code ErrCode, detail string) {
 	case errors.Is(err, port.ErrNoAutomationPrincipal):
 		return http.StatusConflict, CodeNoAutomationPrincipal, err.Error()
 	case errors.Is(err, port.ErrCallbackInFlight):
-		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "an earlier attempt of this callback is still in progress; retry later"
+		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "an earlier attempt is still in progress; retry later"
 	case errors.Is(err, port.ErrEligibilityAnswerCount):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "the eligibility check did not answer every assignee; retry the call"
 	case errors.Is(err, adapterhttp.ErrUpstreamUnavailable):

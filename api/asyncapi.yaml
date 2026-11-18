@@ -800,7 +800,7 @@ components:
         delegator_id:  { type: string, format: uuid }
         delegate_id:   { type: string, format: uuid }
         scope:         { type: string, enum: [all, department, tender] }
-        scope_id:      { type: string, format: uuid, description: omitted by the producer when the scope names no single object }
+        scope_id:      { type: string, format: uuid, description: omitted by the producer when the scope names no single object; required when scope is department or tender, and an event without it is refused with 400 so the consumer dead-letters it }
         starts_at:     { type: string, format: date-time }
         ends_at:       { type: string, format: date-time, description: omitted by the producer for an open-ended delegation }
     DelegationEndedInbound:

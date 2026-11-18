@@ -111,9 +111,21 @@ func TestDelegationReroute_DepartmentScope_OnlyATaskOfAPlanDepartmentMoves(t *te
 			})
 
 			require.NoError(t, err)
-			assert.Equal(t, []w11bUserListCall{{tenantID: h.tenantID, userID: h.delegator}}, assignments.calls)
-			assert.Equal(t, []w11bIDCall{{tenantID: h.tenantID, id: row.task.ID}}, tasks.gets)
-			assert.Equal(t, []w11bInstanceRead{{tenantID: h.tenantID, id: row.instance.ID}}, instances.reads)
+			reads := 1
+			if tc.wantMoved {
+				reads = 2 // the move lists the delegator's rows again under the lock
+			}
+			var wantLists []w11bUserListCall
+			var wantTasks []w11bIDCall
+			var wantInstances []w11bInstanceRead
+			for range reads {
+				wantLists = append(wantLists, w11bUserListCall{tenantID: h.tenantID, userID: h.delegator})
+				wantTasks = append(wantTasks, w11bIDCall{tenantID: h.tenantID, id: row.task.ID})
+				wantInstances = append(wantInstances, w11bInstanceRead{tenantID: h.tenantID, id: row.instance.ID})
+			}
+			assert.Equal(t, wantLists, assignments.calls)
+			assert.Equal(t, wantTasks, tasks.gets)
+			assert.Equal(t, wantInstances, instances.reads)
 			if tc.wantMoved {
 				assert.False(t, row.assignment.IsActive, "the control row is moved, so the other case stays put only because of its department")
 				assert.Equal(t, 1, w11bActiveRowsOf(h, h.delegate))
@@ -239,7 +251,7 @@ func TestDelegationReverse_AvailabilityOrSignalRecordingFails_RollsBackAndTheRed
 	}{
 		{
 			name: "the availability read fails", status: domain.InstanceStatusRunning, failAvail: true,
-			wantRollbacks: 0, wantAfter: []string{port.SignalInstanceReassign},
+			wantRollbacks: 0, wantAfter: []string{port.SignalInstanceResume, port.SignalInstanceReassign},
 		},
 		{
 			name: "the pause of an out-of-office delegator cannot be recorded", outOfOffice: true, status: domain.InstanceStatusRunning,

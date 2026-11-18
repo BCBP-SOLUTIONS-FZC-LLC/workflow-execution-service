@@ -10,6 +10,29 @@
     "starts_at"
   ],
   "additionalProperties": true,
+  "if": {
+    "required": [
+      "scope"
+    ],
+    "properties": {
+      "scope": {
+        "enum": [
+          "department",
+          "tender"
+        ]
+      }
+    }
+  },
+  "then": {
+    "required": [
+      "scope_id"
+    ],
+    "properties": {
+      "scope_id": {
+        "minLength": 1
+      }
+    }
+  },
   "properties": {
     "delegation_id": {
       "type": "string",

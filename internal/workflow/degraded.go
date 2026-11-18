@@ -34,6 +34,9 @@ type gateway struct {
 
 	rerunDone wf.Channel
 	rerunning bool
+	// heldBacks are the admin force-backs that arrived while the rerun ran, in
+	// arrival order; each runs after the rerun in front of it ends.
+	heldBacks []adminSignal
 }
 
 // signalBuffer is the size of the admin-signal channel of a fork and of a park.
@@ -108,7 +111,7 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 		preFork: preFork, rerunDone: wf.NewChannel(ctx)}
 	in.gateways = append(in.gateways, gw)
 	defer func() { in.gateways = slices.DeleteFunc(in.gateways, func(g *gateway) bool { return g == gw }) }()
-	defer in.releaseForkRerun(gw)
+	defer in.releaseForkRerun(ctx, gw)
 	for i, b := range branches {
 		key, deptID, steps := keys[i], b.DeptID, b.Steps
 		branchSteps[key] = steps
@@ -167,7 +170,7 @@ func (in *interpreter) runParallel(ctx wf.Context, plan *dsl.CompiledPlan, branc
 			return stepOutcome{}, errStageAbandoned
 		}
 		if gotRerun {
-			if err := in.endForkRerun(gw, rerun.Err); err != nil {
+			if err := in.endForkRerun(ctx, plan, gw, rerun.Err); err != nil {
 				return stepOutcome{}, err
 			}
 		}
@@ -616,11 +619,11 @@ func stepsRun(steps []dsl.ExecutionStep, deptID string) bool {
 // when it resumes.
 func (in *interpreter) handleParallelForceBack(ctx wf.Context, plan *dsl.CompiledPlan, gw *gateway, sig adminSignal) error {
 	if gw.rerunning && !sig.FromDefer {
-		wf.GetLogger(ctx).Warn("instance-force-back: the step before the fork already runs again; dropping")
+		gw.heldBacks = append(gw.heldBacks, sig)
 		return nil
 	}
 	if !gw.rerunning {
-		started, err := in.startForkRerun(ctx, plan, gw, sig)
+		started, err := in.startForkRerun(ctx, plan, gw, sig, false)
 		if err != nil || !started {
 			return err
 		}
@@ -631,7 +634,9 @@ func (in *interpreter) handleParallelForceBack(ctx wf.Context, plan *dsl.Compile
 	return nil
 }
 
-func (in *interpreter) startForkRerun(ctx wf.Context, plan *dsl.CompiledPlan, gw *gateway, sig adminSignal) (bool, error) {
+// startForkRerun returns the fork to the step before it. alreadyPaused says the
+// saved branches are still held from the rerun before it, so they are not held twice.
+func (in *interpreter) startForkRerun(ctx wf.Context, plan *dsl.CompiledPlan, gw *gateway, sig adminSignal, alreadyPaused bool) (bool, error) {
 	if gw.preFork == "" {
 		wf.GetLogger(ctx).Warn("instance-force-back: no completed node to return to; dropping")
 		return false, nil
@@ -643,8 +648,10 @@ func (in *interpreter) startForkRerun(ctx wf.Context, plan *dsl.CompiledPlan, gw
 		}
 		return false, err
 	}
-	for _, d := range gw.pausedDepts() {
-		in.pauseDept(ctx, d)
+	if !alreadyPaused {
+		for _, d := range gw.pausedDepts() {
+			in.pauseDept(ctx, d)
+		}
 	}
 	in.msgBuf.ResetSpan(in.history.PopTo(gw.preFork))
 	gw.rerunning = true
@@ -655,9 +662,29 @@ func (in *interpreter) startForkRerun(ctx wf.Context, plan *dsl.CompiledPlan, gw
 	return true, nil
 }
 
+// replayHeldBack starts the next held force-back as a rerun of its own. The
+// saved branches stay held from the rerun that just ended, so none advances
+// while the replay's audit is written; gw.rerunning stays true for the same
+// reason, which lets releaseForkRerun open them if the replay fails.
+func (in *interpreter) replayHeldBack(ctx wf.Context, plan *dsl.CompiledPlan, gw *gateway) error {
+	sig := gw.heldBacks[0]
+	gw.heldBacks = gw.heldBacks[1:]
+	started, err := in.startForkRerun(ctx, plan, gw, sig, true)
+	if err == nil && !started {
+		in.releaseForkRerun(ctx, gw)
+	}
+	return err
+}
+
 // releaseForkRerun opens the departments a fork held for its rerun when the
-// fork itself is abandoned.
-func (in *interpreter) releaseForkRerun(gw *gateway) {
+// fork ends before the rerun does (cancel, abandon, terminate or a failed
+// rerun). Force-backs still held are not carried out: the instance is ending,
+// so they get no audit, only a warning with their count.
+func (in *interpreter) releaseForkRerun(ctx wf.Context, gw *gateway) {
+	if n := len(gw.heldBacks); n > 0 {
+		wf.GetLogger(ctx).Warn("instance-force-back: the fork ended before its held force-backs ran; dropping held force-backs", "count", n)
+		gw.heldBacks = nil
+	}
 	if gw.rerunning {
 		gw.rerunning = false
 		for _, d := range gw.pausedDepts() {
@@ -666,7 +693,10 @@ func (in *interpreter) releaseForkRerun(gw *gateway) {
 	}
 }
 
-func (in *interpreter) endForkRerun(gw *gateway, err error) error {
+func (in *interpreter) endForkRerun(ctx wf.Context, plan *dsl.CompiledPlan, gw *gateway, err error) error {
+	if (err == nil || errors.Is(err, errPathEnded)) && len(gw.heldBacks) > 0 {
+		return in.replayHeldBack(ctx, plan, gw)
+	}
 	gw.rerunning = false
 	for _, d := range gw.pausedDepts() {
 		in.resumeDept(d)

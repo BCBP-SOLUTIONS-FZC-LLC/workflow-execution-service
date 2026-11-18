@@ -309,8 +309,8 @@ func TestWorkflowClient_DelegateImpact_DelegationFilterExcludesOtherReasons(t *t
 
 	unfiltered, err := h.svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: delegate, Page: port.Page{Limit: 10}})
 	require.NoError(t, err)
-	assert.Equal(t, 5, unfiltered.ActiveAssignments, "without a delegation id every active assignment is counted")
-	assert.Equal(t, 5, unfiltered.ActiveWorkflows)
+	assert.Equal(t, 2, unfiltered.ActiveAssignments, "without a delegation id every delegated assignment is counted, and nothing else")
+	assert.Equal(t, 2, unfiltered.ActiveWorkflows)
 }
 
 func TestWorkflowClient_DelegateImpact_EachTenantSeesOnlyItsOwnAssignments(t *testing.T) {
@@ -318,10 +318,10 @@ func TestWorkflowClient_DelegateImpact_EachTenantSeesOnlyItsOwnAssignments(t *te
 	tenantA, tenantB, tenantC, delegate := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	var heldA, heldB []uuid.UUID
 	for i := 0; i < 2; i++ {
-		heldA = append(heldA, h.seed(tenantA, delegate, "", domain.TaskStatusReady, domain.InstanceStatusRunning).instance.ID)
+		heldA = append(heldA, h.seed(tenantA, delegate, "delegation:"+uuid.NewString(), domain.TaskStatusReady, domain.InstanceStatusRunning).instance.ID)
 	}
 	for i := 0; i < 3; i++ {
-		heldB = append(heldB, h.seed(tenantB, delegate, "", domain.TaskStatusReady, domain.InstanceStatusRunning).instance.ID)
+		heldB = append(heldB, h.seed(tenantB, delegate, "delegation:"+uuid.NewString(), domain.TaskStatusReady, domain.InstanceStatusRunning).instance.ID)
 	}
 
 	for _, tc := range []struct {
@@ -360,7 +360,7 @@ func TestWorkflowClient_DelegateImpact_CursorBeyondTheLastIDGivesAnEmptyPageWith
 		h := csaNewClientHarness()
 		tenantID, delegate := uuid.New(), uuid.New()
 		for i, id := range []uuid.UUID{ids[0], ids[1], ids[1], ids[2]} {
-			held := h.seedOnInstance(tenantID, delegate, id, "", domain.TaskStatusReady, domain.InstanceStatusRunning)
+			held := h.seedOnInstance(tenantID, delegate, id, "delegation:"+uuid.NewString(), domain.TaskStatusReady, domain.InstanceStatusRunning)
 			held.task.CreatedAt = time.Date(2026, 1, 1, 0, 0, i, 0, time.UTC)
 		}
 		return h, tenantID, delegate

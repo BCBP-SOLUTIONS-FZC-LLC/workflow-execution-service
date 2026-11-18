@@ -380,7 +380,8 @@ func TestDelegationReconciler_Reverse(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, assignments.byID[a.ID].IsActive)
 		require.Len(t, outbox.enqueued, 1)
-		require.Len(t, outbox.signals, 1)
+		require.Len(t, outbox.signalsNamed(port.SignalInstanceReassign), 1)
+		assert.Len(t, outbox.signalsNamed(port.SignalInstanceResume), 1, "an available delegator gets a resume, which the workflow drops when it has no use for it")
 		assert.Empty(t, temporal.signals)
 
 		var restored *domain.TaskAssignment
@@ -780,13 +781,14 @@ func TestDelegationReconciler_Reverse_ReleasesAnOutOfOfficePauseLeftByAFailedAtt
 		assert.Equal(t, domain.InitiatorOOO, initiator, "the workflow honours the resume only for an ooo pause")
 	})
 
-	t.Run("a running instance is left alone", func(t *testing.T) {
+	t.Run("a running instance gets the resume too, because its pause may land after the read", func(t *testing.T) {
 		svc, outbox, in := setup(t, domain.InstanceStatusRunning)
 
 		require.NoError(t, svc.Reverse(context.Background(), in))
 
-		n, _ := resumes(outbox)
-		assert.Zero(t, n)
+		n, initiator := resumes(outbox)
+		assert.Equal(t, 1, n, "the workflow drops a resume it cannot use")
+		assert.Equal(t, domain.InitiatorOOO, initiator)
 	})
 }
 

@@ -217,7 +217,7 @@ func (s *DelegationReconciler) Reroute(ctx context.Context, in port.DelegationRe
 		if err != nil || stopped {
 			return err
 		}
-		return s.moveToDelegate(ctx, in, candidates, eligible)
+		return s.moveToDelegate(ctx, in, eligible)
 	})
 }
 
@@ -251,10 +251,18 @@ func (s *DelegationReconciler) endedBeforeMove(ctx context.Context, in port.Dele
 	return found && !in.EmittedAt.IsZero() && cancelledAt.After(in.EmittedAt), nil
 }
 
-// moveToDelegate runs under the locks of startScopes.
-func (s *DelegationReconciler) moveToDelegate(ctx context.Context, in port.DelegationRerouteInput, candidates, eligible []delegationCandidate) error {
+// moveToDelegate runs under the locks of startScopes. The delegator's rows are
+// listed again here, because the list read before the lock may have lost a row
+// to a concurrent change or missed one it gained; only rows still held count as
+// moved, and an instance settles only when no other row of the delegator's is
+// left on it.
+func (s *DelegationReconciler) moveToDelegate(ctx context.Context, in port.DelegationRerouteInput, eligible []delegationCandidate) error {
+	held, err := s.delegatorRows(ctx, in)
+	if err != nil {
+		return err
+	}
 	var recordResume func(context.Context, delegationCandidate) error
-	if settled := instancesFullyMoved(candidates, eligible); len(settled) > 0 {
+	if settled := instancesFullyMoved(held, stillHeld(eligible, held)); len(settled) > 0 {
 		absent, err := s.isOutOfOffice(ctx, in.TenantID, in.DelegatorID)
 		if err != nil {
 			return err
@@ -269,10 +277,33 @@ func (s *DelegationReconciler) moveToDelegate(ctx context.Context, in port.Deleg
 	}, &in.DelegationID, true, recordResume)
 }
 
+func (s *DelegationReconciler) delegatorRows(ctx context.Context, in port.DelegationRerouteInput) ([]delegationCandidate, error) {
+	active, err := s.Assignments.ListActiveByUser(ctx, in.TenantID, in.DelegatorID)
+	if err != nil {
+		return nil, err
+	}
+	return s.resolveCandidates(ctx, in.TenantID, active)
+}
+
+// stillHeld keeps the rows of moving that the delegator still holds.
+func stillHeld(moving, held []delegationCandidate) []delegationCandidate {
+	heldIDs := make(map[uuid.UUID]struct{}, len(held))
+	for _, c := range held {
+		heldIDs[c.assignment.ID] = struct{}{}
+	}
+	out := make([]delegationCandidate, 0, len(moving))
+	for _, c := range moving {
+		if _, ok := heldIDs[c.assignment.ID]; ok {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // instancesFullyMoved returns one row per instance whose every task the
 // delegator holds is being moved, so nothing the delegator still owns keeps the
 // instance waiting for their absence. It does not look at the instance status:
-// the row was read before the lock, and a pause can land after it.
+// a pause can land after the row was read.
 func instancesFullyMoved(all, moved []delegationCandidate) []delegationCandidate {
 	movedIDs := make(map[uuid.UUID]struct{}, len(moved))
 	for _, c := range moved {
@@ -314,11 +345,11 @@ func (s *DelegationReconciler) instanceSignalRecorder(rows []delegationCandidate
 		if _, ok := wanted[id]; !ok {
 			return nil
 		}
-		delete(wanted, id)
 		wire := adminSignalWire{Initiator: domain.InitiatorOOO, RecordVersion: moved.instance.RecordVersion}
 		if err := recordWorkflowSignal(ctx, s.Signals, moved.instance, signalName, wire); err != nil {
 			return fmt.Errorf("delegation: record %s of instance %s: %w", signalName, id, err)
 		}
+		delete(wanted, id)
 		return nil
 	}
 }
@@ -386,7 +417,7 @@ func (s *DelegationReconciler) outOfOfficePauseRecorder(ctx context.Context, in 
 	var signalName string
 	switch {
 	case !absent:
-		signalName, rows = port.SignalInstanceResume, pausedInstances(rows)
+		signalName = port.SignalInstanceResume
 	case in.EndedReason == port.DelegationEndedReassigned:
 		return nil, nil
 	default:
@@ -401,14 +432,4 @@ func (s *DelegationReconciler) isOutOfOffice(ctx context.Context, tenantID, user
 		return false, fmt.Errorf("delegation: read availability: %w", err)
 	}
 	return found && status == port.AvailabilityOOO, nil
-}
-
-func pausedInstances(rows []delegationCandidate) []delegationCandidate {
-	paused := make([]delegationCandidate, 0, len(rows))
-	for _, c := range rows {
-		if c.instance.Status == domain.InstanceStatusPaused {
-			paused = append(paused, c)
-		}
-	}
-	return paused
 }

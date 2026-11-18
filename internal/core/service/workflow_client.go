@@ -41,13 +41,6 @@ func delegationReasonTag(delegationID uuid.UUID) string {
 	return delegationTagPrefix + delegationID.String()
 }
 
-func matchingAssignments(assignments []*domain.TaskAssignment, delegationID *uuid.UUID) []*domain.TaskAssignment {
-	if delegationID == nil {
-		return assignments
-	}
-	return delegatedAssignments(assignments, delegationID)
-}
-
 // delegatedAssignments selects the assignments a delegation created: those that
 // carry the delegation's tag, or any delegation's tag when none is named.
 func delegatedAssignments(assignments []*domain.TaskAssignment, delegationID *uuid.UUID) []*domain.TaskAssignment {
@@ -319,7 +312,7 @@ func (s *WorkflowClient) DelegateImpact(ctx context.Context, in port.DelegateImp
 	if err != nil {
 		return port.DelegateImpactResult{}, err
 	}
-	matched := matchingAssignments(active, in.DelegationID)
+	matched := delegatedAssignments(active, in.DelegationID)
 	affected, err := s.affectedWorkflows(ctx, in.TenantID, matched)
 	if err != nil {
 		return port.DelegateImpactResult{}, err

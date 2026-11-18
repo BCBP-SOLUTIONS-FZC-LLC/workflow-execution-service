@@ -309,7 +309,7 @@ func TestDelegationMove_ReadOfTheTasksAssignmentsOrTheVacateFails_FailsTheEventA
 				assert.Equal(t, []uuid.UUID{mv.to(rig)}, rig.holders(row.task.ID))
 			}
 			assert.Len(t, rig.outbox.enqueued, 2)
-			assert.Len(t, rig.outbox.signals, 2)
+			assert.Len(t, rig.outbox.signalsNamed(port.SignalInstanceReassign), 2, "one reassign signal per moved row; an available delegator also gets a resume per instance")
 			assert.Equal(t, 1, rig.tx.commits)
 			assert.Zero(t, rig.tx.rollbacks)
 		})
@@ -330,8 +330,9 @@ func TestDelegationMove_AnAssignmentDeletedAfterItWasRead_IsSkippedAndTheOthersM
 			require.Len(t, rig.outbox.enqueued, 1, "one event, for the row that moved")
 			assert.Contains(t, string(rig.outbox.enqueued[0].Payload), rows[0].task.ID.String())
 			assert.NotContains(t, string(rig.outbox.enqueued[0].Payload), rows[1].task.ID.String())
-			require.Len(t, rig.outbox.signals, 1)
-			assert.Equal(t, rows[0].instance.ID, rig.outbox.signals[0].InstanceID)
+			reassigns := rig.outbox.signalsNamed(port.SignalInstanceReassign)
+			require.Len(t, reassigns, 1)
+			assert.Equal(t, rows[0].instance.ID, reassigns[0].InstanceID)
 			assert.Equal(t, 1, rig.tx.commits)
 		})
 	}

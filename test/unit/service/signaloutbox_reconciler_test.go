@@ -67,7 +67,7 @@ func TestDelegationReverse_RecordsTheReassignSignalThatHandsTheTaskBack(t *testi
 	require.Len(t, reassigns, 1)
 	assert.Equal(t, row.instance.ID, reassigns[0].InstanceID)
 	assert.Equal(t, csaReassignWire{TaskID: row.task.ID.String(), OldUserID: h.delegate.String(), NewUserID: h.delegator.String()}, csaDecodeReassign(t, reassigns[0].Payload))
-	assert.Equal(t, []bool{true}, runningAtRecord)
+	assert.Equal(t, []bool{true, true}, runningAtRecord, "the resume for the available delegator and the reassign are both recorded inside the transaction")
 	assert.Empty(t, h.temporal.signalsNamed(port.SignalInstanceReassign), "no direct reassign signal")
 }
 

@@ -22,7 +22,7 @@ type taskResp struct {
 	Status             string     `json:"status"`
 	RecordVersion      int64      `json:"record_version"`
 	AssigneeMode       string     `json:"assignee_mode"`
-	AssigneeCount      int        `json:"assignee_count"`
+	AssigneeCount      *int       `json:"assignee_count,omitempty"`
 	DueAt              *time.Time `json:"due_at,omitempty"`
 	DeferredFromTaskID *uuid.UUID `json:"deferred_from_task_id,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
@@ -70,6 +70,10 @@ type activeUserTasksListResp struct {
 }
 
 func toTaskResp(t *port.Task) taskResp {
+	var assigneeCount *int
+	if !t.AssigneeCountUnavailable {
+		assigneeCount = &t.AssigneeCount
+	}
 	return taskResp{
 		ID:                 t.ID,
 		WorkflowInstanceID: t.WorkflowInstanceID,
@@ -80,7 +84,7 @@ func toTaskResp(t *port.Task) taskResp {
 		Status:             string(t.Status),
 		RecordVersion:      t.RecordVersion,
 		AssigneeMode:       t.AssigneeMode,
-		AssigneeCount:      t.AssigneeCount,
+		AssigneeCount:      assigneeCount,
 		DueAt:              t.DueAt,
 		DeferredFromTaskID: t.DeferredFromTaskID,
 		CreatedAt:          t.CreatedAt,

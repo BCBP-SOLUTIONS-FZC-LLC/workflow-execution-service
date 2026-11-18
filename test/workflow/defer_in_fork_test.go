@@ -225,9 +225,9 @@ func TestExecute_ASecondDeferWhileTheStepBeforeTheForkRunsAgainJoinsTheSameRerun
 }
 
 // An admin force-back that arrives while the step before the fork already runs
-// again changes nothing: the same return is already under way, so it is not
-// recorded and the step does not run a third time.
-func TestExecute_ForceBackWhileTheStepBeforeAForkRunsAgainIsDropped(t *testing.T) {
+// again is held, not dropped: the admin was told it was accepted, so it is
+// recorded and carried out as one more return once the rerun in front of it ends.
+func TestExecute_ForceBackWhileTheStepBeforeAForkRunsAgainIsHeldAndReplayedAfterTheRerun(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	fakes := wflNewFakes()
@@ -236,6 +236,7 @@ func TestExecute_ForceBackWhileTheStepBeforeAForkRunsAgainIsDropped(t *testing.T
 	dfkDefer(env, "defer-1", 4*time.Second, "billing", "B1", &updateAnswer{})
 	wflSignalAt(env, 5*time.Second, "instance-force-back", adminSignalWire{AdminUserID: "admin-5", RecordVersion: 7})
 	wflSignalAt(env, 6*time.Second, "stage-transition", wflDone("intake", "A1", 2))
+	wflSignalAt(env, 7*time.Second, "stage-transition", wflDone("intake", "A1", 3))
 	wflSignalAt(env, 8*time.Second, "stage-transition", wflDone("warehouse", "Pack", 1))
 	wflSignalAt(env, 10*time.Second, "stage-transition", wflDone("billing", "B1", 2))
 
@@ -243,8 +244,11 @@ func TestExecute_ForceBackWhileTheStepBeforeAForkRunsAgainIsDropped(t *testing.T
 
 	require.NoError(t, err)
 	assert.Equal(t, domain.InstanceStatusCompleted, status)
-	assert.Equal(t, []int64{1, 2}, dfkVisitsOf(fakes, "intake/A1"))
-	assert.Empty(t, wflInputs[port.RecordForceRouteInput](fakes, port.ActivityRecordForceRoute))
+	assert.Equal(t, []int64{1, 2, 3}, dfkVisitsOf(fakes, "intake/A1"))
+	audits := wflInputs[port.RecordForceRouteInput](fakes, port.ActivityRecordForceRoute)
+	require.Len(t, audits, 1)
+	assert.Equal(t, "admin-5", audits[0].AdminUserID)
+	assert.Equal(t, domain.ForceRouteDirectionBack, audits[0].Direction)
 }
 
 // A force-forward to a department of the fork that arrives while the step

@@ -91,15 +91,32 @@ func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID uu
 	}
 
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
-	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-transition", stageTransitionWire{
+	return s.sendOutcomeSignal(ctx, outcomeComplete, taskID, inst, "stage-transition", stageTransitionWire{
 		DeptID: deptID, NodeID: nodeID, UserID: actorUserID.String(),
 		ResultJSON: string(resultJSON), RecordVersion: task.RecordVersion,
 		VisitCount: task.VisitCount,
-	}); err != nil {
-		s.releaseSignalReservation(ctx, outcomeComplete, taskID)
-		return fmt.Errorf("signal stage-transition: %w", err)
+	})
+}
+
+// sendOutcomeSignal sends the task's one outcome signal. A workflow that no
+// longer exists has nothing left to resolve, so the callback is acknowledged
+// and marked delivered; any other failure releases the reservation so the
+// worker's retry signals.
+func (s *ConnectorTaskService) sendOutcomeSignal(
+	ctx context.Context, outcome string, taskID uuid.UUID, inst *domain.Instance, signalName string, payload any,
+) error {
+	err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, signalName, payload)
+	switch {
+	case err == nil:
+	case errors.Is(err, port.ErrWorkflowNotFound):
+		s.logger().Info("connector task callback acknowledged: the workflow no longer exists", map[string]any{
+			"task_id": taskID, "instance_id": inst.ID, "signal": signalName,
+		})
+	default:
+		s.releaseSignalReservation(ctx, outcome, taskID)
+		return fmt.Errorf("signal %s: %w", signalName, err)
 	}
-	s.markSignalDelivered(ctx, outcomeComplete, taskID)
+	s.markSignalDelivered(ctx, outcome, taskID)
 	return nil
 }
 
@@ -140,15 +157,10 @@ func (s *ConnectorTaskService) failTask(
 	})
 
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
-	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-fail", stageFailWire{
+	return s.sendOutcomeSignal(ctx, outcomeFail, task.ID, inst, "stage-fail", stageFailWire{
 		DeptID: deptID, NodeID: nodeID, ConnectorType: *task.ConnectorType, ErrorClass: errorClass, RecordVersion: task.RecordVersion,
 		VisitCount: task.VisitCount,
-	}); err != nil {
-		s.releaseSignalReservation(ctx, outcomeFail, task.ID)
-		return fmt.Errorf("signal stage-fail: %w", err)
-	}
-	s.markSignalDelivered(ctx, outcomeFail, task.ID)
-	return nil
+	})
 }
 
 func (s *ConnectorTaskService) instanceAcceptingCallback(ctx context.Context, tenantID uuid.UUID, task *domain.Task) (*domain.Instance, bool, error) {
@@ -278,7 +290,7 @@ func (s *ConnectorTaskService) releaseSignalReservation(ctx context.Context, out
 	if s.Cache == nil {
 		return
 	}
-	if err := s.Cache.Del(ctx, connectorSignalKey(outcome, taskID)); err != nil {
+	if err := s.Cache.Del(context.WithoutCancel(ctx), connectorSignalKey(outcome, taskID)); err != nil {
 		s.logger().Warn("connector-task signal dedup release failed after a failed signal", map[string]any{"task_id": taskID, "error": err.Error()})
 	}
 }

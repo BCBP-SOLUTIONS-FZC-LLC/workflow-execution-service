@@ -40,6 +40,18 @@ func (s *TenantLifecycleReconciler) logger() port.Logger {
 }
 
 func (s *TenantLifecycleReconciler) Apply(ctx context.Context, in port.TenantLifecycleInput) error {
+	if err := s.applyStatus(ctx, in); err != nil {
+		return err
+	}
+	if in.Plan != "" && in.Plan != in.PreviousPlan {
+		if err := s.applyPlanChange(ctx, in); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *TenantLifecycleReconciler) applyStatus(ctx context.Context, in port.TenantLifecycleInput) error {
 	if !domain.IsKnownTenantStatus(in.Status) {
 		s.logger().Warn("tenant lifecycle: ignoring unrecognised status", map[string]any{"tenant_id": in.TenantID})
 		return nil
@@ -47,17 +59,10 @@ func (s *TenantLifecycleReconciler) Apply(ctx context.Context, in port.TenantLif
 	if err := s.recordStatus(ctx, in); err != nil {
 		return err
 	}
-	if in.Status != in.PreviousStatus {
-		if err := s.applyStatusTransition(ctx, in); err != nil {
-			return err
-		}
+	if in.Status == in.PreviousStatus {
+		return nil
 	}
-	if in.Plan != in.PreviousPlan {
-		if err := s.applyPlanChange(ctx, in); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.applyStatusTransition(ctx, in)
 }
 
 func (s *TenantLifecycleReconciler) recordStatus(ctx context.Context, in port.TenantLifecycleInput) error {

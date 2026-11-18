@@ -325,6 +325,11 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 		endsAt = &v
 	}
 
+	if scopeNamesObject(p.Scope) && (p.ScopeID == nil || *p.ScopeID == "") {
+		h.badPayload(c, eventType, "scope_id is required when scope is "+p.Scope)
+		return
+	}
+
 	if h.alreadyProcessed(c, eventID, port.ConsumerMembership, eventType) {
 		return
 	}
@@ -349,6 +354,12 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 	observeDelegationReroute(time.Since(start).Seconds())
 
 	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
+}
+
+// scopeNamesObject reports the delegation scopes that point at one department or tender
+// and so cannot be applied without its id.
+func scopeNamesObject(scope string) bool {
+	return scope == "department" || scope == "tender"
 }
 
 type delegationEndedPayload struct {
@@ -669,7 +680,7 @@ func (h *Handler) handleTenantMembershipsPurged(c *gin.Context, env events.Envel
 		return
 	}
 
-	if err := h.applyTenantLifecycleLocked(c, eventType, port.TenantLifecycleInput{
+	if err := h.applyTenantLifecycleLocked(c, eventType, true, port.TenantLifecycleInput{
 		TenantID:       tenantID,
 		Status:         domain.TenantStatusOffboarded,
 		PreviousStatus: "active",
@@ -728,13 +739,18 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 		return
 	}
 
-	if !domain.IsKnownTenantStatus(p.Status) {
+	knownStatus := domain.IsKnownTenantStatus(p.Status)
+	if !knownStatus {
 		h.logWarn("internal events: ignoring unrecognised tenant status", map[string]any{"event_type": eventType, "event_id": eventID})
-		h.respondIgnored(c, eventID, port.ConsumerMembership, eventType)
-		return
+		if p.Plan == "" || p.Plan == p.PreviousPlan {
+			h.respondIgnored(c, eventID, port.ConsumerMembership, eventType)
+			return
+		}
 	}
 
-	if err := h.applyTenantLifecycleLocked(c, eventType, port.TenantLifecycleInput{
+	// An unrecognised status is not kept, so it commits no recency: the plan change applies and an
+	// earlier valid status event still does.
+	if err := h.applyTenantLifecycleLocked(c, eventType, knownStatus, port.TenantLifecycleInput{
 		TenantID:       tenantID,
 		Status:         p.Status,
 		PreviousStatus: p.PreviousStatus,
@@ -757,7 +773,7 @@ func (h *Handler) shouldApplyTenantChange(ctx context.Context, scopeKey string, 
 	return h.recency.ShouldApply(ctx, scopeKey, in.ChangedAt)
 }
 
-func (h *Handler) applyTenantLifecycleLocked(c *gin.Context, eventType string, in port.TenantLifecycleInput) error {
+func (h *Handler) applyTenantLifecycleLocked(c *gin.Context, eventType string, commitRecency bool, in port.TenantLifecycleInput) error {
 	scopeKey := "tenant:" + in.TenantID.String()
 	return h.recency.WithLock(c.Request.Context(), scopeKey, func(ctx context.Context) error {
 		shouldApply, err := h.shouldApplyTenantChange(ctx, scopeKey, in)
@@ -770,6 +786,9 @@ func (h *Handler) applyTenantLifecycleLocked(c *gin.Context, eventType string, i
 
 		if err := h.tenantLifecycle.Apply(guCtx(ctx, in.TenantID), in); err != nil {
 			return err
+		}
+		if !commitRecency {
+			return nil
 		}
 
 		if err := h.recency.Commit(ctx, scopeKey, in.ChangedAt); err != nil {

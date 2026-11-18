@@ -49,7 +49,7 @@ func (d *Deps) GetCompiledPlan(ctx context.Context, in port.GetCompiledPlanInput
 	}
 	expanded, err := dsl.ExpandCalls(&collab, domain.MaxPlanStages)
 	if err != nil {
-		return port.GetCompiledPlanOutput{}, nonRetryable("DefinitionServiceClientError", fmt.Errorf("expand compiled plan: %w", err))
+		return port.GetCompiledPlanOutput{}, nonRetryable("DefinitionServiceClientError", fmt.Errorf("%w: expand compiled plan: %w", port.ErrVersionInvalid, err))
 	}
 	return port.GetCompiledPlanOutput{Collaboration: *expanded}, nil
 }
