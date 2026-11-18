@@ -87,13 +87,9 @@ func (s *InstanceService) Start(ctx context.Context, in port.StartInstanceInput)
 		return nil, port.ErrVersionInvalid
 	}
 
-	collab, err := decodeCollaboration(compiled.CompiledPlanJSON)
+	mainPlan, err := decodeMainPlan(s.logger(), compiled.CompiledPlanJSON)
 	if err != nil {
 		return nil, err
-	}
-	mainPlan := findPlan(collab, collab.MainPlan)
-	if mainPlan == nil {
-		return nil, fmt.Errorf("main plan %q not found in compiled collaboration", collab.MainPlan)
 	}
 
 	if err := validateOverrideMap(mainPlan, in.OverrideMap); err != nil {
@@ -315,7 +311,11 @@ func (s *InstanceService) afterWorkflowStarted(ctx context.Context, tenantID uui
 			})
 		}
 	}
-	return toPortInstance(current)
+	answer := toPortInstance(current)
+	if answer.TemporalRunID == "" {
+		answer.TemporalRunID = inst.TemporalRunID
+	}
+	return answer
 }
 
 const startWorkflowMaxAttempts = 3

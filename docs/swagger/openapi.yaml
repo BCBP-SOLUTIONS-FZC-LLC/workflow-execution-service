@@ -980,8 +980,9 @@ paths:
                   description: >
                     The entity this run is about, opaque to the engine. Addressable on its
                     own: it is what a subject-scoped delegation resolves against and what
-                    GET /instances?subject_id= filters on.
-                  example: "tender-abc-001"
+                    GET /instances?subject_id= filters on. A tender-scoped delegation matches
+                    only when subject_id is a UUID (compared by value, not by text).
+                  example: "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
                 business_key:
                   type: string
                   minLength: 2
@@ -1038,7 +1039,7 @@ paths:
             DUPLICATE_BUSINESS_KEY — a live instance for this subject_id and business_key already exists and is not this caller's own unfinished start (a RUNNING instance of the same version started by the same caller with the same context_json and override_map is the same start sent again and is returned with 201);
             TENANT_NOT_ACTIVE — the tenant is offboarded, or its recorded status is one the service is configured to refuse starts for (no other status by default);
             VERSION_NOT_PUBLISHED — the referenced version is DRAFT or ARCHIVED;
-            VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked), or the compiled plan has a schema version this service does not read.
+            VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked), or the compiled plan has a schema version this service does not read, is not valid JSON, or names no main plan.
           content:
             application/problem+json:
               schema:
@@ -1855,7 +1856,7 @@ paths:
             compiled plan and the instance's current state before the signal is sent: the node is
             not in the plan the instance runs (a called plan counts once expanded), or, inside a
             parallel step of a RUNNING instance, its department is not a branch of that step;
-            VERSION_INVALID — the stored plan has a schema version this service does not read;
+            VERSION_INVALID — the stored plan has a schema version this service does not read, is not valid JSON, or names no main plan;
             RECORD_VERSION_CONFLICT — record_version is stale;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:

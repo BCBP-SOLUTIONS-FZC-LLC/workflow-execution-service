@@ -26,6 +26,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- A delegation-started event whose scope is not `all`, `department` or `tender`, or whose `department` or `tender` scope has a missing or non-UUID `scope_id`, is refused with 400, so the consumer dead-letters it. It used to be acknowledged while nothing moved.
+- A delegation scoped to a tender or department matches when the ids are the same UUID in a different letter case. A scope id that is not a UUID matches nothing; it used to match by exact text.
+- Instance start and force-forward answer 409 `VERSION_INVALID` when the stored plan has no main plan or its JSON cannot be decoded. Start used to answer 500; force-forward answered 500 for unreadable JSON and 409 `TARGET_NODE_NOT_FOUND` for a missing main plan.
+- When a workflow started but its run id could not be saved, instance start still returns the run id the workflow started under instead of an empty one.
+- Cancelling an instance while a stage's boundary event is superseding its task now waits for that write to finish. Before, the run could complete first and leave the task open.
 - An admin force-back that arrives while a deferred task's return to the step before a fork is still running is carried out once that return ends, with its audit record; it used to be dropped with a warning although the admin had received 202.
 - A task whose creation finishes after a force-route or cancel has abandoned its stage is marked SUPERSEDED; it used to stay open for a step the instance had left.
 - A tenant state event with an unrecognised status is still not recorded, but its plan change is applied; it used to be acknowledged and ignored whole, so the Enterprise queue was never registered. A tenant event that carries no plan no longer stops routing to an Enterprise tenant's dedicated queue.

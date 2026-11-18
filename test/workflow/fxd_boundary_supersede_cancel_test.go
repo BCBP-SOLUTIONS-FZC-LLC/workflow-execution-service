@@ -1,10 +1,12 @@
 package workflow_test
 
 import (
-	"sync"
+	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/testsuite"
 
@@ -34,16 +36,20 @@ func TestExecute_CancelWhileAnInterruptingBoundarySupersedesItsTaskStillSupersed
 		}},
 	}
 	fakes := wflNewFakes()
-	var once sync.Once
-	fakes.failFor = func(_ string, in any) error {
-		if v, ok := in.(port.UpdateTaskStatusInput); ok && v.Status == domain.TaskStatusSuperseded {
-			once.Do(func() {
-				env.SignalWorkflow("instance-cancel:"+wflInstance, adminSignalWire{AdminUserID: "admin-9", RecordVersion: 4})
-			})
-		}
-		return nil
-	}
 	wflRegisterAll(env, fakes, collab)
+	record := func(_ context.Context, in port.UpdateTaskStatusInput) error {
+		return fakes.begin(port.ActivityUpdateTaskStatus, in)
+	}
+	env.OnActivity(port.ActivityUpdateTaskStatus, mock.Anything, mock.MatchedBy(func(in port.UpdateTaskStatusInput) bool {
+		return in.Status == domain.TaskStatusSuperseded
+	})).After(3 * time.Second).Return(record).Once()
+	env.OnActivity(port.ActivityUpdateTaskStatus, mock.Anything, mock.Anything).Return(record)
+	// The boundary fires at one hour and its first supersede write takes three
+	// seconds, so the cancel lands while that write is in flight and the write
+	// never finishes; the repeat on the outliving context runs at once.
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow("instance-cancel:"+wflInstance, adminSignalWire{AdminUserID: "admin-9", RecordVersion: 4})
+	}, time.Hour+time.Second)
 
 	_, _ = wflStart(t, env, fakes, "")
 
@@ -54,6 +60,6 @@ func TestExecute_CancelWhileAnInterruptingBoundarySupersedesItsTaskStillSupersed
 			superseded++
 		}
 	}
-	assert.Equal(t, 2, superseded, "the in-flight write and its repeat after the cancel")
+	assert.Equal(t, 1, superseded, "the repeat after the cancel superseded the task")
 	assert.Equal(t, []domain.NodeKey{"ops/Prepare"}, wflNodesCreated(fakes), "the escalation path did not start")
 }

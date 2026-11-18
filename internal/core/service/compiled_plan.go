@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -33,11 +34,11 @@ func scopeMatches(ctx context.Context, log port.Logger, plans *compiledPlanCache
 			if dept.ID != taskDeptID {
 				continue
 			}
-			return dept.IAMDepartmentID == *scopeID && deptUUID(&dept) == c.task.DepartmentID
+			return sameUUID(dept.IAMDepartmentID, *scopeID) && deptUUID(&dept) == c.task.DepartmentID
 		}
 		return false
 	case scopeTender:
-		return scopeID != nil && c.instance.SubjectID == *scopeID
+		return scopeID != nil && sameUUID(c.instance.SubjectID, *scopeID)
 	default:
 		observability.IncCounterVec(observability.DelegationScopeUnhandledTotal, observability.UnhandledScopeLabel)
 		log.Warn("scope match: delegation scope is unknown to this service, matching nothing", map[string]any{
@@ -45,6 +46,17 @@ func scopeMatches(ctx context.Context, log port.Logger, plans *compiledPlanCache
 		})
 		return false
 	}
+}
+
+// sameUUID compares two ids by value; text that is not a UUID, or is the nil UUID, on either
+// side matches nothing.
+func sameUUID(a, b string) bool {
+	left, err := uuid.Parse(a)
+	if err != nil || left == uuid.Nil {
+		return false
+	}
+	right, err := uuid.Parse(b)
+	return err == nil && left == right
 }
 
 type compiledPlanCache struct {
@@ -126,13 +138,9 @@ func (c *compiledPlanCache) readMainPlan(ctx context.Context, tenantID, versionI
 	if err != nil {
 		return nil, err
 	}
-	collab, err := decodeCollaboration(compiled.CompiledPlanJSON)
+	plan, err := mainPlanOfJSON(compiled.CompiledPlanJSON)
 	if err != nil {
 		return nil, err
-	}
-	plan := findPlan(collab, collab.MainPlan)
-	if plan == nil {
-		return nil, fmt.Errorf("main plan %q not found in compiled collaboration", collab.MainPlan)
 	}
 	c.byVersion[versionID] = plan
 	return plan, nil
@@ -151,6 +159,44 @@ func requiredLevelForTask(plan *dsl.CompiledPlan, task *domain.Task) (string, bo
 		}
 	}
 	return "", false
+}
+
+// decodeMainPlan reads the plan an instance start or a force-forward works from. A stored plan
+// that does not decode, or names no main plan, is a broken version (ErrVersionInvalid) for the
+// caller; the decoder's own text is logged, not returned.
+func decodeMainPlan(log port.Logger, planJSON string) (*dsl.CompiledPlan, error) {
+	plan, err := mainPlanOfJSON(planJSON)
+	var noMain *noMainPlanError
+	switch {
+	case err == nil:
+		return plan, nil
+	case errors.Is(err, port.ErrVersionInvalid):
+		return nil, err
+	case errors.As(err, &noMain):
+		return nil, fmt.Errorf("%w: %s", port.ErrVersionInvalid, err.Error())
+	}
+	log.Warn("stored compiled plan does not decode", map[string]any{"error": err.Error()})
+	return nil, fmt.Errorf("%w: compiled plan is not valid JSON", port.ErrVersionInvalid)
+}
+
+type noMainPlanError struct{ name string }
+
+func (e *noMainPlanError) Error() string {
+	return fmt.Sprintf("main plan %q not found in compiled collaboration", e.name)
+}
+
+// mainPlanOfJSON decodes a stored plan and picks its main plan, with the raw decoder errors:
+// the one place both readers of a stored plan share.
+func mainPlanOfJSON(planJSON string) (*dsl.CompiledPlan, error) {
+	collab, err := decodeCollaboration(planJSON)
+	if err != nil {
+		return nil, err
+	}
+	plan := findPlan(collab, collab.MainPlan)
+	if plan == nil {
+		return nil, &noMainPlanError{name: collab.MainPlan}
+	}
+	return plan, nil
 }
 
 func decodeCollaboration(planJSON string) (*dsl.CompiledCollaboration, error) {

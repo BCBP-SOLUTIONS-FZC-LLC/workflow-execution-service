@@ -42,11 +42,7 @@ func (s *InstanceService) mainPlanOf(ctx context.Context, tenantID, versionID uu
 	if err != nil {
 		return nil, err
 	}
-	collab, err := decodeCollaboration(compiled.CompiledPlanJSON)
-	if err != nil {
-		return nil, err
-	}
-	return findPlan(collab, collab.MainPlan), nil
+	return decodeMainPlan(s.logger(), compiled.CompiledPlanJSON)
 }
 
 func targetRefused(format string, args ...any) error {
@@ -63,7 +59,7 @@ func (s *InstanceService) validateForwardTarget(ctx context.Context, tenantID uu
 	if err != nil {
 		return err
 	}
-	if plan == nil || !planHasNode(plan, targetNodeKey) {
+	if !planHasNode(plan, targetNodeKey) {
 		return port.ErrTargetNodeNotFound
 	}
 	if inst.Status != domain.InstanceStatusRunning {
