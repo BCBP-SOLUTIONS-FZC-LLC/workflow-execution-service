@@ -3,7 +3,7 @@
   "title": "WorkflowTaskSupersededPayload",
   "type": "object",
   "additionalProperties": true,
-  "required": ["workflow_instance_id", "subject_id", "business_key", "workflow_version_id", "task_id", "node_key", "department_id", "assignee_user_ids", "actor_user_id"],
+  "required": ["workflow_instance_id", "subject_id", "business_key", "workflow_version_id", "task_id", "node_key", "department_id", "assignee_user_ids"],
   "properties": {
     "workflow_instance_id": { "type": "string", "format": "uuid" },
     "subject_id": { "type": "string" },

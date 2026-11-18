@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -152,7 +153,39 @@ func (s *InstanceService) Terminate(ctx context.Context, tenantID, instanceID, a
 		return fmt.Errorf("terminate workflow: %w", err)
 	}
 
-	txErr := s.Transactor.RunInTxWithRetry(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
+	inst, txErr := s.markTerminated(ctx, tenantID, instanceID, actorUserID, reason)
+	if txErr != nil {
+		return txErr
+	}
+
+	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, inst.TemporalRunID, reason); err != nil {
+		s.logger().Error("TerminateWorkflow failed after the instance was marked terminated", map[string]any{
+			"instance_id": instanceID, "tenant_id": tenantID, "error": err.Error(),
+		})
+	}
+	return nil
+}
+
+// terminateAttempts bounds how often a terminate transaction is repeated after a concurrent
+// change: the request carries no record version and the run is already ended, so a bump by
+// the workflow's last write must not leave the row running.
+const terminateAttempts = 3
+
+func (s *InstanceService) markTerminated(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string) (*domain.Instance, error) {
+	var err error
+	for attempt := 0; attempt < terminateAttempts; attempt++ {
+		var inst *domain.Instance
+		inst, err = s.terminateOnce(ctx, tenantID, instanceID, actorUserID, reason)
+		if !errors.Is(err, port.ErrRecordVersionConflict) {
+			return inst, err
+		}
+	}
+	return nil, err
+}
+
+func (s *InstanceService) terminateOnce(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string) (*domain.Instance, error) {
+	var inst *domain.Instance
+	err := s.Transactor.RunInTx(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
 		current, err := s.Instances.GetByID(ctx, tenantID, instanceID)
 		if err != nil {
 			return wrapInstanceErr(err)
@@ -173,16 +206,7 @@ func (s *InstanceService) Terminate(ctx context.Context, tenantID, instanceID, a
 		return sink.enqueueInstanceEvent(ctx, tenantID.String(), domain.EventWorkflowInstanceTerminated, instanceID.String(),
 			actorUserID.String(), domain.NewWorkflowInstanceTerminatedPayload(instanceCore(inst), inst.StartedByUserID, domain.TerminatedInitiatorAdmin, &actorUserID, &reason))
 	})
-	if txErr != nil {
-		return txErr
-	}
-
-	if err := s.Temporal.TerminateWorkflow(ctx, inst.TemporalWorkflowID, inst.TemporalRunID, reason); err != nil {
-		s.logger().Error("TerminateWorkflow failed after the instance was marked terminated", map[string]any{
-			"instance_id": instanceID, "tenant_id": tenantID, "error": err.Error(),
-		})
-	}
-	return nil
+	return inst, err
 }
 
 type taskCascade struct {

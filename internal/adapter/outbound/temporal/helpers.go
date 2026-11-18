@@ -65,3 +65,22 @@ func (d *Deps) instanceCore(ctx context.Context, tenantID, instanceID uuid.UUID)
 func deterministicAssignmentID(taskID, userID uuid.UUID) uuid.UUID {
 	return domain.DeterministicAssignmentID(taskID, userID)
 }
+
+// reassignedAssignmentID names the assignment a reassignment creates. The task's record version
+// the caller read stays the same across a retry and moves on with every committed change, so a
+// retry finds its own row while a later move back to the same user gets a fresh one.
+func reassignedAssignmentID(taskID, userID uuid.UUID, recordVersion int64) uuid.UUID {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("execution_service:reassigned_assignment:"+taskID.String()+"/"+userID.String()+"/"+strconv.FormatInt(recordVersion, 10)))
+}
+
+// assignmentExists reports whether an earlier attempt already committed this assignment row.
+func (d *Deps) assignmentExists(ctx context.Context, tenantID, assignmentID uuid.UUID) (bool, error) {
+	_, err := d.Assignments.GetByID(ctx, tenantID, assignmentID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("look up assignment before creating it: %w", err)
+	}
+	return true, nil
+}

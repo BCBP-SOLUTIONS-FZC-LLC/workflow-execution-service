@@ -287,6 +287,12 @@ func decodeOneValue(body []byte, obj any, disallowUnknown bool) error {
 }
 
 func errResponse(c *gin.Context, err error) {
+	_ = c.Error(err)
+	writeMappedProblem(c, err)
+}
+
+// writeMappedProblem answers err without attaching it to the request, for a caller that logs the cause itself.
+func writeMappedProblem(c *gin.Context, err error) {
 	status, code, detail := mapErr(err)
 	if dependency := upstreamDependency(err); dependency != "" {
 		observability.IncCounterVec(observability.UpstreamDependencyErrorsTotal, dependency)
@@ -316,66 +322,76 @@ func upstreamDependency(err error) string {
 	return ""
 }
 
+type refusal struct {
+	sentinel error
+	status   int
+	code     ErrCode
+}
+
+// refusals answer with the sentinel's own text as the detail; a wrapped cause (SDK text, channel names) stays out of the body.
+var refusals = []refusal{
+	{port.ErrTaskNotFound, http.StatusNotFound, CodeTaskNotFound},
+	{port.ErrNotAssignee, http.StatusForbidden, CodeNotAssignee},
+	{port.ErrNotAuthorizedForRead, http.StatusForbidden, CodeNotAuthorizedForResource},
+	{port.ErrRecordVersionConflict, http.StatusConflict, CodeRecordVersionConflict},
+	{port.ErrTaskAlreadyClaimed, http.StatusConflict, CodeTaskAlreadyClaimed},
+	{port.ErrClaimNotApplicable, http.StatusConflict, CodeClaimNotApplicable},
+	{port.ErrInvalidTaskState, http.StatusConflict, CodeInvalidTaskState},
+	{port.ErrNodeAlreadyResolved, http.StatusConflict, CodeNodeAlreadyResolved},
+	{port.ErrTenantMismatch, http.StatusForbidden, CodeTenantMismatch},
+	{port.ErrIdempotencyKeyReplay, http.StatusConflict, CodeIdempotencyReplay},
+	{port.ErrOverrideNoOp, http.StatusBadRequest, CodeOverrideNoOp},
+	{port.ErrInstanceNotFound, http.StatusNotFound, CodeInstanceNotFound},
+	{port.ErrTargetNodeNotFound, http.StatusConflict, CodeTargetNodeNotFound},
+	{port.ErrWaitNotFound, http.StatusNotFound, CodeWaitNotFound},
+	{port.ErrNotWaiting, http.StatusConflict, CodeNotWaiting},
+	{port.ErrDuplicateBusinessKey, http.StatusConflict, CodeDuplicateBusinessKey},
+	{port.ErrTenantNotActive, http.StatusConflict, CodeTenantNotActive},
+	{port.ErrVersionNotPublished, http.StatusConflict, CodeVersionNotPublished},
+	{port.ErrVersionInvalid, http.StatusConflict, CodeVersionInvalid},
+	{port.ErrVersionNotFound, http.StatusNotFound, CodeVersionNotFound},
+	{port.ErrInstanceAlreadyTerminal, http.StatusConflict, CodeInstanceAlreadyTerminal},
+	{port.ErrInvalidInstanceState, http.StatusConflict, CodeInvalidInstanceState},
+	{port.ErrWorkflowNotFound, http.StatusConflict, CodeInvalidInstanceState},
+	{port.ErrForceBackNoSavedBranch, http.StatusConflict, CodeForceBackNoSavedBranch},
+	{port.ErrOverrideMapInvalid, http.StatusUnprocessableEntity, CodeOverrideMapInvalid},
+	{port.ErrAssigneeIneligible, http.StatusUnprocessableEntity, CodeAssigneeIneligible},
+	{port.ErrTaskNotHumanActionable, http.StatusConflict, CodeTaskNotHumanActionable},
+	{port.ErrTaskNotConnectorTyped, http.StatusConflict, CodeTaskNotConnectorTyped},
+	{port.ErrNoAutomationPrincipal, http.StatusConflict, CodeNoAutomationPrincipal},
+}
+
+// actionableRefusals are wrapped by the service with text built from the request (why the target was refused,
+// which node key is invalid), so the caller gets that text to act on.
+var actionableRefusals = map[error]bool{
+	port.ErrTargetNodeNotFound: true,
+	port.ErrOverrideMapInvalid: true,
+}
+
+func mapRefusal(err error) (status int, code ErrCode, detail string, ok bool) {
+	for _, r := range refusals {
+		if errors.Is(err, r.sentinel) {
+			detail = r.sentinel.Error()
+			if actionableRefusals[r.sentinel] {
+				detail = err.Error()
+			}
+			if ineligible, typed := errors.AsType[*port.AssigneeIneligibleError](err); typed {
+				detail = ineligible.Error()
+			}
+			return r.status, r.code, detail, true
+		}
+	}
+	return 0, "", "", false
+}
+
 func mapErr(err error) (status int, code ErrCode, detail string) {
-	switch {
-	case errors.Is(err, port.ErrUserPauseIncomplete):
+	if errors.Is(err, port.ErrUserPauseIncomplete) {
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "some of the user's instances could not be paused; retry the call"
-	case errors.Is(err, port.ErrTaskNotFound):
-		return http.StatusNotFound, CodeTaskNotFound, err.Error()
-	case errors.Is(err, port.ErrNotAssignee):
-		return http.StatusForbidden, CodeNotAssignee, err.Error()
-	case errors.Is(err, port.ErrNotAuthorizedForRead):
-		return http.StatusForbidden, CodeNotAuthorizedForResource, err.Error()
-	case errors.Is(err, port.ErrRecordVersionConflict):
-		return http.StatusConflict, CodeRecordVersionConflict, err.Error()
-	case errors.Is(err, port.ErrTaskAlreadyClaimed):
-		return http.StatusConflict, CodeTaskAlreadyClaimed, err.Error()
-	case errors.Is(err, port.ErrClaimNotApplicable):
-		return http.StatusConflict, CodeClaimNotApplicable, err.Error()
-	case errors.Is(err, port.ErrInvalidTaskState):
-		return http.StatusConflict, CodeInvalidTaskState, err.Error()
-	case errors.Is(err, port.ErrNodeAlreadyResolved):
-		return http.StatusConflict, CodeNodeAlreadyResolved, err.Error()
-	case errors.Is(err, port.ErrTenantMismatch):
-		return http.StatusForbidden, CodeTenantMismatch, err.Error()
-	case errors.Is(err, port.ErrIdempotencyKeyReplay):
-		return http.StatusConflict, CodeIdempotencyReplay, err.Error()
-	case errors.Is(err, port.ErrOverrideNoOp):
-		return http.StatusBadRequest, CodeOverrideNoOp, err.Error()
-	case errors.Is(err, port.ErrInstanceNotFound):
-		return http.StatusNotFound, CodeInstanceNotFound, err.Error()
-	case errors.Is(err, port.ErrTargetNodeNotFound):
-		return http.StatusConflict, CodeTargetNodeNotFound, err.Error()
-	case errors.Is(err, port.ErrWaitNotFound):
-		return http.StatusNotFound, CodeWaitNotFound, err.Error()
-	case errors.Is(err, port.ErrNotWaiting):
-		return http.StatusConflict, CodeNotWaiting, err.Error()
-	case errors.Is(err, port.ErrDuplicateBusinessKey):
-		return http.StatusConflict, CodeDuplicateBusinessKey, err.Error()
-	case errors.Is(err, port.ErrTenantNotActive):
-		return http.StatusConflict, CodeTenantNotActive, err.Error()
-	case errors.Is(err, port.ErrVersionNotPublished):
-		return http.StatusConflict, CodeVersionNotPublished, err.Error()
-	case errors.Is(err, port.ErrVersionInvalid):
-		return http.StatusConflict, CodeVersionInvalid, err.Error()
-	case errors.Is(err, port.ErrVersionNotFound):
-		return http.StatusNotFound, CodeVersionNotFound, err.Error()
-	case errors.Is(err, port.ErrInstanceAlreadyTerminal):
-		return http.StatusConflict, CodeInstanceAlreadyTerminal, err.Error()
-	case errors.Is(err, port.ErrInvalidInstanceState), errors.Is(err, port.ErrWorkflowNotFound):
-		return http.StatusConflict, CodeInvalidInstanceState, err.Error()
-	case errors.Is(err, port.ErrForceBackNoSavedBranch):
-		return http.StatusConflict, CodeForceBackNoSavedBranch, err.Error()
-	case errors.Is(err, port.ErrOverrideMapInvalid):
-		return http.StatusUnprocessableEntity, CodeOverrideMapInvalid, err.Error()
-	case errors.Is(err, port.ErrAssigneeIneligible):
-		return http.StatusUnprocessableEntity, CodeAssigneeIneligible, err.Error()
-	case errors.Is(err, port.ErrTaskNotHumanActionable):
-		return http.StatusConflict, CodeTaskNotHumanActionable, err.Error()
-	case errors.Is(err, port.ErrTaskNotConnectorTyped):
-		return http.StatusConflict, CodeTaskNotConnectorTyped, err.Error()
-	case errors.Is(err, port.ErrNoAutomationPrincipal):
-		return http.StatusConflict, CodeNoAutomationPrincipal, err.Error()
+	}
+	if status, code, detail, ok := mapRefusal(err); ok {
+		return status, code, detail
+	}
+	switch {
 	case errors.Is(err, port.ErrCallbackInFlight):
 		return http.StatusServiceUnavailable, CodeUpstreamUnavailable, "an earlier attempt is still in progress; retry later"
 	case errors.Is(err, port.ErrEligibilityAnswerCount):

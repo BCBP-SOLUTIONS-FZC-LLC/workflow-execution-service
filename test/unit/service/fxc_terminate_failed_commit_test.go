@@ -18,12 +18,12 @@ type fxcFailFirstTx struct {
 	failed bool
 }
 
-func (t *fxcFailFirstTx) RunInTxWithRetry(ctx context.Context, fn func(context.Context) error) error {
+func (t *fxcFailFirstTx) RunInTx(ctx context.Context, fn func(context.Context) error) error {
 	if !t.failed {
 		t.failed = true
 		return domain.ErrRecordVersionConflict
 	}
-	return t.Transactor.RunInTxWithRetry(ctx, fn)
+	return t.Transactor.RunInTx(ctx, fn)
 }
 
 func TestInstanceService_Terminate_AFailedCommitLeavesTheRowRunningAndTheRetryFinishesTheTermination(t *testing.T) {

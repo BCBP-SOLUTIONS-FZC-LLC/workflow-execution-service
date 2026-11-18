@@ -85,6 +85,7 @@ func TestCompleteOutsideWait_SignalFails_AnswersByTheKindOfFailure(t *testing.T)
 			name:       "the workflow is gone",
 			err:        fmt.Errorf("%w: %w", port.ErrWorkflowNotFound, errW18aTemporal),
 			wantStatus: http.StatusConflict, wantCode: "INVALID_INSTANCE_STATE",
+			wantDetail: "workflow execution not found", hidesCause: true,
 		},
 		{
 			name:       "any other failure",

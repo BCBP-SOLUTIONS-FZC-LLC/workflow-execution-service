@@ -190,7 +190,7 @@ func TestRecordForceRoute_TasksAcrossSeveralPages_SupersedesOnlyOpenTasksOfBypas
 	superseded := rig.eventsOfType(domain.EventWorkflowTaskSuperseded)
 	assert.Len(t, superseded, len(wantSuperseded))
 	for _, env := range superseded {
-		assert.Equal(t, admin, w22aDecode[domain.WorkflowTaskSupersededPayload](t, env).ActorUserID, "a force route supersedes in the admin's name")
+		assert.Equal(t, &admin, w22aDecode[domain.WorkflowTaskSupersededPayload](t, env).ActorUserID, "a force route supersedes in the admin's name")
 	}
 	assert.Len(t, rig.eventsOfType(domain.EventWorkflowInstanceForceRouted), 1)
 	assert.Equal(t, domain.EventWorkflowInstanceForceRouted, rig.outbox[len(rig.outbox)-1].Type, "the route is announced after the supersedes")
@@ -223,7 +223,7 @@ func TestRecordForceRoute_BypassedTaskWithAssignees_VacatesThemAndNamesThemInThe
 	assert.Equal(t, task.ID, payload.TaskID)
 	assert.Equal(t, w22aReviewNode, payload.NodeKey)
 	assert.Equal(t, task.DepartmentID, payload.DepartmentID)
-	assert.Equal(t, admin, payload.ActorUserID)
+	assert.Equal(t, &admin, payload.ActorUserID)
 	assert.ElementsMatch(t, []uuid.UUID{lead.UserID, second.UserID, third.UserID}, payload.AssigneeUserIDs)
 	assert.Equal(t, inst.SubjectID, payload.SubjectID)
 	assert.Equal(t, inst.BusinessKey, payload.BusinessKey)

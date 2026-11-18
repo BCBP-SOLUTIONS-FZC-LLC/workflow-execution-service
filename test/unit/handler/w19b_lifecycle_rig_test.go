@@ -164,9 +164,11 @@ func (w19bAcceptingValidator) Validate(context.Context, string, json.RawMessage)
 type w19bTransactor struct {
 	port.Transactor
 	retried int
+	plain   int
 }
 
-func (w19bTransactor) RunInTx(ctx context.Context, fn func(context.Context) error) error {
+func (x *w19bTransactor) RunInTx(ctx context.Context, fn func(context.Context) error) error {
+	x.plain++
 	return fn(ctx)
 }
 
