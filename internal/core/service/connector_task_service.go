@@ -65,6 +65,9 @@ func (s *ConnectorTaskService) Complete(ctx context.Context, tenantID, taskID uu
 	if err != nil || !accepted {
 		return err
 	}
+	if settled, err := s.settledWithoutSignal(ctx, outcomeComplete, taskID); err != nil || settled {
+		return err
+	}
 	actorUserID, err := s.automationPrincipal(ctx, tenantID)
 	if err != nil {
 		return err
@@ -127,6 +130,9 @@ func (s *ConnectorTaskService) Fail(ctx context.Context, tenantID, taskID uuid.U
 	}
 	inst, accepted, err := s.instanceAcceptingCallback(ctx, tenantID, task)
 	if err != nil || !accepted {
+		return err
+	}
+	if settled, err := s.settledWithoutSignal(ctx, outcomeFail, taskID); err != nil || settled {
 		return err
 	}
 	actorUserID, err := s.automationPrincipal(ctx, tenantID)
@@ -229,6 +235,24 @@ func otherOutcome(outcome string) string {
 		return outcomeFail
 	}
 	return outcomeComplete
+}
+
+// settledWithoutSignal reads, without taking anything, both outcomes'
+// reservations before the callback makes any outside call. A delivered one
+// acknowledges (true, nil), a reserved one asks for a retry (an error), and
+// absent or unreadable means this callback signals, so the caller goes on and
+// reserveSignal takes the reservation atomically.
+func (s *ConnectorTaskService) settledWithoutSignal(ctx context.Context, outcome string, taskID uuid.UUID) (bool, error) {
+	if s.Cache == nil {
+		return false, nil
+	}
+	for _, o := range []string{outcome, otherOutcome(outcome)} {
+		proceed, err := s.verdictFor(ctx, connectorSignalKey(o, taskID), taskID)
+		if err != nil || !proceed {
+			return true, err
+		}
+	}
+	return false, nil
 }
 
 // reserveSignal decides whether the caller signals now (true), is acknowledged

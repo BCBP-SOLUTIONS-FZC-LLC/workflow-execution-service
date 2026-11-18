@@ -90,22 +90,17 @@ func toDelegateImpactResp(r port.DelegateImpactResult) delegateImpactResp {
 }
 
 func (h *Handler) DelegateImpact(c *gin.Context) {
-	tenantID, ok := parseUUIDQuery(c, "tenant_id")
+	tenantID, ok := internalIDQuery(c, "tenant_id")
 	if !ok {
 		return
 	}
-	delegateUserID, ok := parseUUIDQuery(c, "delegate_user_id")
+	delegateUserID, ok := internalIDQuery(c, "delegate_user_id")
 	if !ok {
 		return
 	}
-	var delegationID *uuid.UUID
-	if raw := c.Query("delegation_id"); raw != "" {
-		id, err := uuid.Parse(raw)
-		if err != nil {
-			writeProblem(c, http.StatusBadRequest, CodeBadRequest, "invalid delegation_id query parameter", nil)
-			return
-		}
-		delegationID = &id
+	delegationID, ok := internalOptionalIDQuery(c, "delegation_id")
+	if !ok {
+		return
 	}
 
 	page, ok := pageParams(c)

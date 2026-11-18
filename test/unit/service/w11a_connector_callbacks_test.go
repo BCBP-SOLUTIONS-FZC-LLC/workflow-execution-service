@@ -527,8 +527,8 @@ func TestConnectorTaskService_Complete_OtherOutcomeReadFailsOrIsAbsent_SignalsAn
 			require.NoError(t, h.complete(map[string]any{}))
 
 			require.Len(t, h.temporal.sent(), 1)
-			assert.Len(t, h.cache.opsNamed("get", h.key("fail")), 1, "the other outcome's reservation was read")
-			assert.Empty(t, h.cache.opsNamed("get", h.key("complete")))
+			assert.Len(t, h.cache.opsNamed("get", h.key("fail")), 2, "the other outcome's reservation was read before the principal lookup and again when reserving")
+			assert.Len(t, h.cache.opsNamed("get", h.key("complete")), 1, "the callback's own reservation was read once, before the principal lookup")
 			state, _ := h.cache.value(h.key("complete"))
 			assert.Equal(t, "delivered", state)
 			warns := h.log.at("warn")
@@ -536,9 +536,11 @@ func TestConnectorTaskService_Complete_OtherOutcomeReadFailsOrIsAbsent_SignalsAn
 				assert.Empty(t, warns, "a missing key is an absent reservation, not an error")
 				return
 			}
-			require.Len(t, warns, 1)
-			assert.Equal(t, h.task.ID, warns[0].Fields["task_id"])
-			assert.Equal(t, tc.readErr.Error(), warns[0].Fields["error"])
+			require.Len(t, warns, 2, "one warning per failed read")
+			for _, w := range warns {
+				assert.Equal(t, h.task.ID, w.Fields["task_id"])
+				assert.Equal(t, tc.readErr.Error(), w.Fields["error"])
+			}
 		})
 	}
 }
@@ -824,7 +826,8 @@ func TestConnectorTaskService_Fail_PrincipalUnavailable_ReservesNothingAndChange
 
 			require.ErrorIs(t, err, tc.err)
 			assert.Equal(t, []uuid.UUID{h.tenant}, h.principals.tenants, "the lookup was for the task's tenant")
-			assert.Zero(t, h.cache.opCount(), "no reservation is taken or read")
+			assert.Empty(t, h.cache.opsNamed("setnx", h.key("fail")), "no reservation is taken before the principal is known")
+			assert.Empty(t, h.cache.values, "and nothing is left in the cache")
 			attempts, _ := h.assignments.counts()
 			assert.Zero(t, attempts)
 			assert.Empty(t, h.temporal.sent())

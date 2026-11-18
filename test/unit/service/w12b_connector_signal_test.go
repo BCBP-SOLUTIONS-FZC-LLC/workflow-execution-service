@@ -260,6 +260,8 @@ func TestConnectorTaskService_TheDeliveredMarkLivesFiveMinutesAndACallbackAfterI
 
 			h.requireSignals(t, outcome, 1)
 			assert.Equal(t, []w12bConnCacheOp{
+				{op: "get", key: key},
+				{op: "get", key: h.key(w12bOtherOutcome(outcome))},
 				{op: "setnx", key: key, value: "reserved", ttl: 30 * time.Second},
 				{op: "get", key: h.key(w12bOtherOutcome(outcome))},
 				{op: "set", key: key, value: "delivered", ttl: 5 * time.Minute},
@@ -304,21 +306,23 @@ func TestConnectorTaskService_AnUnreadableSignalStateFailsOpenWithAWarning(t *te
 
 			h.requireSignals(t, tc.outcome, 1)
 			assert.Equal(t, "delivered", h.cache.values[h.key(tc.outcome)])
-			reads := 0
+			reads := map[string]int{}
 			for _, o := range h.cache.ops {
 				if o.op == "get" {
-					reads++
-					assert.Equal(t, h.key(other), o.key, "the state read is the other outcome's")
+					reads[o.key]++
 				}
 			}
-			assert.Equal(t, 1, reads)
+			assert.Equal(t, map[string]int{h.key(tc.outcome): 1, h.key(other): 2}, reads,
+				"each state is read before the principal lookup; the other outcome's is read again when reserving")
 			if !tc.readFails {
 				assert.Empty(t, h.log.dedupWarns())
 				return
 			}
-			require.Len(t, h.log.dedupWarns(), 1)
-			assert.Equal(t, h.task.ID, h.log.dedupWarns()[0].fields["task_id"])
-			assert.Equal(t, errW12bConnCacheDown.Error(), h.log.dedupWarns()[0].fields["error"])
+			require.Len(t, h.log.dedupWarns(), 2, "one warning per failed read")
+			for _, w := range h.log.dedupWarns() {
+				assert.Equal(t, h.task.ID, w.fields["task_id"])
+				assert.Equal(t, errW12bConnCacheDown.Error(), w.fields["error"])
+			}
 		})
 	}
 }

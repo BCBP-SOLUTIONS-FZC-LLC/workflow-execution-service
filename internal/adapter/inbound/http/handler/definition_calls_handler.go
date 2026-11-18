@@ -18,13 +18,8 @@ func (h *Handler) ActiveInstances(c *gin.Context) {
 		writeInvalidParam(c, "workflow_id", "invalid workflow_id path parameter")
 		return
 	}
-	tenantID, err := uuid.Parse(c.Query("tenant_id"))
-	if err != nil {
-		writeInvalidParam(c, "tenant_id", "tenant_id must be a UUID")
-		return
-	}
-	if tenantID == uuid.Nil {
-		writeInvalidParam(c, "tenant_id", "tenant_id must be a non-zero UUID")
+	tenantID, ok := internalIDQuery(c, "tenant_id")
+	if !ok {
 		return
 	}
 	hasActive, count, err := h.archiveGuard.CheckActiveInstances(c.Request.Context(), tenantID, workflowID)
@@ -36,13 +31,24 @@ func (h *Handler) ActiveInstances(c *gin.Context) {
 }
 
 type pauseUserTasksReq struct {
-	TenantID     uuid.UUID  `json:"tenant_id" binding:"required"`
+	TenantID     *uuid.UUID `json:"tenant_id" binding:"required"`
 	DepartmentID *uuid.UUID `json:"department_id"`
 }
 
+func (r pauseUserTasksReq) allZeroFields() []string {
+	var names []string
+	if *r.TenantID == uuid.Nil {
+		names = append(names, "tenant_id")
+	}
+	if r.DepartmentID != nil && *r.DepartmentID == uuid.Nil {
+		names = append(names, "department_id")
+	}
+	return names
+}
+
 func (h *Handler) PauseUserTasks(c *gin.Context) {
-	userID, err := uuid.Parse(c.Param("user_id"))
-	if err != nil {
+	userID, ok := parseNonZeroUUID(c.Param("user_id"))
+	if !ok {
 		writeInvalidParam(c, "user_id", "invalid user_id path parameter")
 		return
 	}
@@ -50,11 +56,11 @@ func (h *Handler) PauseUserTasks(c *gin.Context) {
 	if !bindInternalJSON(c, &req) {
 		return
 	}
-	if req.DepartmentID != nil && *req.DepartmentID == uuid.Nil {
-		writeProblem(c, http.StatusBadRequest, CodeBadRequest, "department_id must be a non-zero UUID", nil)
+	if names := req.allZeroFields(); len(names) > 0 {
+		writeInvalidFields(c, names)
 		return
 	}
-	if err := h.userTaskPauser.PauseUserTasks(c.Request.Context(), req.TenantID, userID, req.DepartmentID); err != nil {
+	if err := h.userTaskPauser.PauseUserTasks(c.Request.Context(), *req.TenantID, userID, req.DepartmentID); err != nil {
 		errResponse(c, err)
 		return
 	}

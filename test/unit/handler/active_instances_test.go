@@ -85,7 +85,7 @@ func TestActiveInstances_TenantIDNotAUUID_Returns400(t *testing.T) {
 
 	p := hhaDecodeProblem(t, w, http.StatusBadRequest)
 	assert.Equal(t, "BAD_REQUEST", p.Code)
-	assert.Equal(t, "tenant_id must be a UUID", p.Detail)
+	assert.Equal(t, "invalid tenant_id query parameter", p.Detail)
 	hhaAssertNoInternalText(t, w)
 	assert.Empty(t, guard.calls, "a refused tenant_id must not reach the guard")
 }

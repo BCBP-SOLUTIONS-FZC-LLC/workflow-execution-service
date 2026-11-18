@@ -113,10 +113,10 @@ func TestDelegateImpact_RefusedQuery_Returns400WithTheProblemBody(t *testing.T) 
 		query      url.Values
 		wantDetail string
 	}{
-		{"tenant_id absent", with("tenant_id", nil), "invalid tenant_id query parameter"},
+		{"tenant_id absent", with("tenant_id", nil), "tenant_id query parameter is required"},
 		{"tenant_id empty", with("tenant_id", str("")), "invalid tenant_id query parameter"},
 		{"tenant_id not a UUID", with("tenant_id", str("tenant-one")), "invalid tenant_id query parameter"},
-		{"delegate_user_id absent", with("delegate_user_id", nil), "invalid delegate_user_id query parameter"},
+		{"delegate_user_id absent", with("delegate_user_id", nil), "delegate_user_id query parameter is required"},
 		{"delegate_user_id empty", with("delegate_user_id", str("")), "invalid delegate_user_id query parameter"},
 		{"delegate_user_id not a UUID", with("delegate_user_id", str("12345")), "invalid delegate_user_id query parameter"},
 		{"delegation_id not a UUID", with("delegation_id", str("not-a-uuid")), "invalid delegation_id query parameter"},
