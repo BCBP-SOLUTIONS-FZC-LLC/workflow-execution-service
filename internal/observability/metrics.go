@@ -195,6 +195,9 @@ func preInitializeClosedLabelSets() {
 	for _, violationType := range []string{"missing_or_invalid_guc", "cross_tenant_access"} {
 		RLSViolationsTotal.WithLabelValues(violationType)
 	}
+	for _, table := range []string{"workflow_instance", "workflow_task"} {
+		RecordVersionConflictTotal.WithLabelValues(table)
+	}
 	for _, stage := range []string{"read_task", "read_instance", "signal"} {
 		UserPauseFailuresTotal.WithLabelValues(stage)
 	}

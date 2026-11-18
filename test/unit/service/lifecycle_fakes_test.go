@@ -342,7 +342,8 @@ func cscPlanJSON(t *testing.T, deptID string, nodeIDs ...string) string {
 		stages[i] = dsl.StageDef{Type: "userTask", NodeID: n}
 	}
 	collab := dsl.CompiledCollaboration{
-		MainPlan: "main",
+		SchemaVersion: dsl.CurrentSchemaVersion,
+		MainPlan:      "main",
 		Plans: []*dsl.CompiledPlan{{
 			Name:        "main",
 			TaskQueue:   "wf-queue-default",

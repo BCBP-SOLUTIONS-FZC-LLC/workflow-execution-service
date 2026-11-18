@@ -147,14 +147,25 @@ func TestGetCompiledPlan_UnexpandablePlan_IsNonRetryable(t *testing.T) {
 	requireNonRetryable(t, err)
 }
 
-// Expansion follows the current schema; a plan of another major is handed to
-// the workflow as stored, whose schema check refuses or normalizes it.
-func TestGetCompiledPlan_OtherSchemaVersionIsNotExpanded(t *testing.T) {
+// A plan stored under another schema version is refused, not handed on.
+func TestGetCompiledPlan_OtherSchemaVersionIsRefused(t *testing.T) {
 	other := `{"main_plan":"main","schema_version":99,"plans":[{"name":"main","departments":[],"execution":{"steps":[{"call_plan":{"node_id":"CA_1","plan":"Nowhere"}}]}}]}`
-	out, err := readPlan(planDeps(t, other))
-	require.NoError(t, err)
-	assert.Equal(t, 99, out.Collaboration.SchemaVersion)
-	assert.NotNil(t, out.Collaboration.Plans[0].Execution.Steps[0].CallPlan)
+	_, err := readPlan(planDeps(t, other))
+	requireNonRetryable(t, err)
+	assert.ErrorIs(t, err, port.ErrVersionInvalid)
+}
+
+func TestGetCompiledPlan_SchemaVersionZeroAndCurrentPlusOneAreRefused(t *testing.T) {
+	for _, version := range []int{0, dsl.CurrentSchemaVersion + 1} {
+		t.Run(fmt.Sprintf("schema_version_%d", version), func(t *testing.T) {
+			raw := fmt.Sprintf(`{"main_plan":"main","schema_version":%d,"plans":[{"name":"main","departments":[],"execution":{"steps":[]}}]}`, version)
+
+			_, err := readPlan(planDeps(t, raw))
+
+			requireNonRetryable(t, err)
+			assert.ErrorIs(t, err, port.ErrVersionInvalid)
+		})
+	}
 }
 
 func sizedPlan(stages int) string {

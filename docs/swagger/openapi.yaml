@@ -1022,7 +1022,7 @@ paths:
             DUPLICATE_BUSINESS_KEY — a live instance for this subject_id and business_key already exists and is not this caller's own unfinished start (a RUNNING instance of the same version started by the same caller with the same context_json and override_map is the same start sent again and is returned with 201);
             TENANT_NOT_ACTIVE — the tenant is offboarded, or its recorded status is one the service is configured to refuse starts for (no other status by default);
             VERSION_NOT_PUBLISHED — the referenced version is DRAFT or ARCHIVED;
-            VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked).
+            VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked), or the compiled plan has a schema version this service does not read.
           content:
             application/problem+json:
               schema:
@@ -1672,6 +1672,7 @@ paths:
           description: >
             INVALID_INSTANCE_STATE: the instance is not RUNNING or DEGRADED;
             NOT_WAITING: the instance is not waiting in that step now;
+            VERSION_INVALID: the stored plan has a schema version this service does not read;
             IDEMPOTENCY_KEY_REPLAY: same key reused with a different request body.
           content:
             application/problem+json:
@@ -1754,6 +1755,7 @@ paths:
           description: >
             INVALID_INSTANCE_STATE: the instance is not RUNNING or DEGRADED;
             NOT_WAITING: the instance is not waiting in that boundary now;
+            VERSION_INVALID: the stored plan has a schema version this service does not read;
             IDEMPOTENCY_KEY_REPLAY: same key reused with a different request body.
           content:
             application/problem+json:
@@ -1837,6 +1839,7 @@ paths:
             compiled plan and the instance's current state before the signal is sent: the node is
             not in the plan the instance runs (a called plan counts once expanded), or, inside a
             parallel step of a RUNNING instance, its department is not a branch of that step;
+            VERSION_INVALID — the stored plan has a schema version this service does not read;
             RECORD_VERSION_CONFLICT — record_version is stale;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:
@@ -2780,6 +2783,7 @@ paths:
             State conflict. See code field:
             INVALID_TASK_STATE — task is already COMPLETED, DEFERRED, or FAILED;
             INVALID_INSTANCE_STATE — the instance is not RUNNING or DEGRADED;
+            VERSION_INVALID — the eligibility check reads the compiled plan, and its schema version is not one this service reads;
             RECORD_VERSION_CONFLICT — record_version is stale;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:

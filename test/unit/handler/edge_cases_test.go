@@ -16,28 +16,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-// --- callerIdentity edge cases ---
-
-func TestCallerIdentity_MalformedTenantID(t *testing.T) {
-	router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
-
-	r := req(http.MethodGet, "/api/v1/tasks", nil)
-	r.Header.Set("x-tenant-id", "not-a-uuid")
-	w := do(router, r)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-}
-
-func TestCallerIdentity_MalformedUserID(t *testing.T) {
-	router := newRouter(newHandler(&fakeTaskService{}, &fakeEligibilityChecker{}))
-
-	r := req(http.MethodGet, "/api/v1/tasks", nil)
-	r.Header.Set("x-user-id", "not-a-uuid")
-	w := do(router, r)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-}
-
 // --- path/query parsing edge cases ---
 
 func TestGetTask_InvalidID(t *testing.T) {

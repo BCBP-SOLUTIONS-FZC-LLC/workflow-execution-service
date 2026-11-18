@@ -205,10 +205,10 @@ func TestDelegationCancel_PlanOrEligibilityReadFails_VacatesNothingAndRecordsNoE
 
 			require.ErrorIs(t, err, assert.AnError)
 			if tc.wantEligible {
-				assert.ErrorContains(t, err, "eligibility read failed", "an eligibility failure is told apart from a plan failure")
+				assert.ErrorIs(t, err, port.ErrEligibilityRead, "an eligibility failure is told apart from a plan failure")
 				assert.Equal(t, []w7bEligibilityAsk{{tenantID: h.tenantID, userID: delegator, departmentID: held.task.DepartmentID, level: "reviewer"}}, asked)
 			} else {
-				assert.NotContains(t, err.Error(), "eligibility read failed")
+				assert.NotErrorIs(t, err, port.ErrEligibilityRead)
 				assert.Empty(t, asked, "no one is asked when the plan is unknown")
 			}
 			assert.Zero(t, count)

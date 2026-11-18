@@ -95,7 +95,7 @@ func frfixTask(nodeKey string, status domain.TaskStatus) *domain.Task {
 func TestForceForward_NodeOnlyInAPlanTheMainPlanNeverReaches_IsRefusedBeforeTheSignal(t *testing.T) {
 	main := &dsl.CompiledPlan{Name: "main", Departments: []dsl.DepartmentDef{frfixDept("finance", "settlement")}}
 	orphan := &dsl.CompiledPlan{Name: "orphan", Departments: []dsl.DepartmentDef{frfixDept("legal", "review")}}
-	rig := newFrfixRig(t, domain.InstanceStatusRunning, frfixPlanJSON(t, 0, main, orphan))
+	rig := newFrfixRig(t, domain.InstanceStatusRunning, frfixPlanJSON(t, dsl.CurrentSchemaVersion, main, orphan))
 
 	err := rig.forward("legal/review")
 
@@ -125,7 +125,7 @@ func TestForceForward_NodeOfACalledPlan_IsAcceptedOnceExpanded(t *testing.T) {
 }
 
 func TestForceForward_StageOfAnotherDepartment_IsRefusedBeforeTheSignal(t *testing.T) {
-	rig := newFrfixRig(t, domain.InstanceStatusRunning, frfixPlanJSON(t, 0, frfixParallelMain()))
+	rig := newFrfixRig(t, domain.InstanceStatusRunning, frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixParallelMain()))
 
 	err := rig.forward("finance/review")
 
@@ -134,7 +134,7 @@ func TestForceForward_StageOfAnotherDepartment_IsRefusedBeforeTheSignal(t *testi
 }
 
 func TestForceForward_InsideAParallelStep_TargetMustBeABranchOfThatStep(t *testing.T) {
-	plan := frfixPlanJSON(t, 0, frfixParallelMain())
+	plan := frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixParallelMain())
 	running := []*domain.Task{frfixTask("legal/review", domain.TaskStatusReady)}
 
 	cases := []struct {
@@ -166,7 +166,7 @@ func TestForceForward_InsideAParallelStep_TargetMustBeABranchOfThatStep(t *testi
 }
 
 func TestForceForward_OutsideAParallelStep_AnyNodeOfThePlanIsAccepted(t *testing.T) {
-	rig := newFrfixRig(t, domain.InstanceStatusRunning, frfixPlanJSON(t, 0, frfixParallelMain()),
+	rig := newFrfixRig(t, domain.InstanceStatusRunning, frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixParallelMain()),
 		frfixTask("intake/open", domain.TaskStatusReady), frfixTask("legal/review", domain.TaskStatusCompleted))
 
 	require.NoError(t, rig.forward("archive/file"))
@@ -174,7 +174,7 @@ func TestForceForward_OutsideAParallelStep_AnyNodeOfThePlanIsAccepted(t *testing
 }
 
 func TestForceForward_Degraded_AnyNodeOfThePlanIsAccepted(t *testing.T) {
-	plan := frfixPlanJSON(t, 0, frfixParallelMain())
+	plan := frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixParallelMain())
 	staleFailure := frfixTask("legal/review", domain.TaskStatusFailed)
 
 	t.Run("a node of a branch with no failed task is accepted", func(t *testing.T) {
@@ -195,7 +195,7 @@ func TestForceForward_Degraded_AnyNodeOfThePlanIsAccepted(t *testing.T) {
 }
 
 func TestForceBack_DegradedWithATarget_IsSignalledWithoutABranchCheck(t *testing.T) {
-	rig := newFrfixRig(t, domain.InstanceStatusDegraded, frfixPlanJSON(t, 0, frfixParallelMain()),
+	rig := newFrfixRig(t, domain.InstanceStatusDegraded, frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixParallelMain()),
 		frfixTask("legal/review", domain.TaskStatusFailed))
 
 	require.NoError(t, rig.back("finance/check"))
@@ -223,7 +223,7 @@ func frfixRoutedMain() *dsl.CompiledPlan {
 					{SubWorkflow: &dsl.SubWorkflowStep{
 						Plan:       dsl.ExecutionPlan{Steps: []dsl.ExecutionStep{{Sequential: []string{"sub"}}}},
 						TimerPaths: []dsl.TimerPath{{Duration: "PT1H", TargetDept: "late"}},
-						ErrorPaths: []dsl.ErrorPath{{Steps: []dsl.ExecutionStep{{Parallel: []dsl.ParallelBranch{
+						ErrorPaths: []dsl.ErrorPath{{Terminates: true, Steps: []dsl.ExecutionStep{{Parallel: []dsl.ParallelBranch{
 							{DeptID: "inner1", Steps: []dsl.ExecutionStep{{Sequential: []string{"inner1"}}}},
 							{DeptID: "inner2", Steps: []dsl.ExecutionStep{{Sequential: []string{"inner2"}}}},
 						}}}}},
@@ -243,7 +243,7 @@ func frfixRoutedMain() *dsl.CompiledPlan {
 }
 
 func TestForceForward_InsideAParallelStep_AcceptsDepartmentsTheInterpreterReachesFromTheBranch(t *testing.T) {
-	plan := frfixPlanJSON(t, 0, frfixRoutedMain())
+	plan := frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixRoutedMain())
 
 	cases := []struct {
 		name    string

@@ -30,7 +30,8 @@ func assignedStage(nodeID string) dsl.StageDef {
 func compiledPlanJSON(t *testing.T, stages ...dsl.StageDef) string {
 	t.Helper()
 	collab := dsl.CompiledCollaboration{
-		MainPlan: "main",
+		SchemaVersion: dsl.CurrentSchemaVersion,
+		MainPlan:      "main",
 		Plans: []*dsl.CompiledPlan{
 			{
 				Name:      "main",

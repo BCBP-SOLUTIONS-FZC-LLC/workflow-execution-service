@@ -101,7 +101,7 @@ func csbCalledPlanJSON(t *testing.T, schemaVersion int) string {
 	return string(b)
 }
 
-func TestAnswerOutsideWait_AnOlderPlanSchemaIsReadWithoutExpandingItsCalls(t *testing.T) {
+func TestAnswerOutsideWait_AnOlderPlanSchemaIsRefusedAndTheCurrentOneIsExpanded(t *testing.T) {
 	var current dsl.CompiledCollaboration
 	require.NoError(t, json.Unmarshal([]byte(csbCalledPlanJSON(t, dsl.CurrentSchemaVersion)), &current))
 	expanded, err := dsl.ExpandCalls(&current, domain.MaxPlanStages)
@@ -117,12 +117,12 @@ func TestAnswerOutsideWait_AnOlderPlanSchemaIsReadWithoutExpandingItsCalls(t *te
 		require.Len(t, temporal.signals, 1)
 	})
 
-	t.Run("an older schema is not expanded, so the same key is not an outside wait", func(t *testing.T) {
+	t.Run("an older schema is refused, so the same key is not answered", func(t *testing.T) {
 		svc, inst, temporal, queries := csbOutsideSetup(t, csbCalledPlanJSON(t, dsl.CurrentSchemaVersion-1), domain.InstanceStatusRunning, callKey)
 
 		err := svc.AnswerOutsideWait(context.Background(), inst.TenantID, inst.ID, adminScope(), callKey, nil)
 
-		require.ErrorIs(t, err, port.ErrWaitNotFound)
+		require.ErrorIs(t, err, port.ErrVersionInvalid)
 		assert.Empty(t, temporal.signals)
 		assert.Zero(t, *queries)
 	})

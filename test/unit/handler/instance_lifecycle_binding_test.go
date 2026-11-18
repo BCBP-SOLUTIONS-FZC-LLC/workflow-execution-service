@@ -282,8 +282,6 @@ func TestForceBackInstance_UnusableCallerIdentity_Returns500(t *testing.T) {
 		bare       bool
 		wantDetail string
 	}{
-		{name: "malformed tenant id", header: "x-tenant-id", bad: "not-a-uuid", wantDetail: "malformed tenant id in request context"},
-		{name: "malformed user id", header: "x-user-id", bad: "not-a-uuid", wantDetail: "malformed user id in request context"},
 		{name: "no request context", bare: true, wantDetail: "missing request context"},
 	}
 	for _, tc := range cases {

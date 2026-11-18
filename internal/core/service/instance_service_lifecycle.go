@@ -88,6 +88,9 @@ func (s *InstanceService) ForceForward(ctx context.Context, tenantID, instanceID
 	if err != nil {
 		return wrapInstanceErr(err)
 	}
+	if isTerminalInstanceStatus(inst.Status) {
+		return port.ErrInstanceAlreadyTerminal
+	}
 	if inst.RecordVersion != recordVersion {
 		return staleInstanceVersion()
 	}
@@ -106,6 +109,9 @@ func (s *InstanceService) ForceBack(ctx context.Context, tenantID, instanceID, a
 	inst, err := s.Instances.GetByID(ctx, tenantID, instanceID)
 	if err != nil {
 		return wrapInstanceErr(err)
+	}
+	if isTerminalInstanceStatus(inst.Status) {
+		return port.ErrInstanceAlreadyTerminal
 	}
 	if inst.RecordVersion != recordVersion {
 		return staleInstanceVersion()

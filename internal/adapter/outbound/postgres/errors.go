@@ -12,6 +12,7 @@ import (
 const (
 	constraintInstanceBusinessKey  = "uq_workflow_instance_business_key"
 	constraintTaskAssignmentActive = "uq_workflow_task_assignment_active"
+	constraintInstancePK           = "workflow_instance_pkey"
 	constraintTaskPK               = "workflow_task_pkey"
 	constraintTaskAssignmentPK     = "workflow_task_assignment_pkey"
 	constraintSLAEventTaskUnique   = "idx_outbox_events_sla_task_unique"
@@ -40,7 +41,7 @@ func mapErr(err error) error {
 			return domain.ErrDuplicateBusinessKey
 		case constraintTaskAssignmentActive:
 			return domain.ErrDuplicateActiveAssignment
-		case constraintTaskPK, constraintTaskAssignmentPK:
+		case constraintInstancePK, constraintTaskPK, constraintTaskAssignmentPK:
 			return domain.ErrAlreadyExists
 		case constraintSLAEventTaskUnique:
 			return domain.ErrAlreadyExists

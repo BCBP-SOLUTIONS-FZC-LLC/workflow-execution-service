@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -179,7 +180,7 @@ func TestDelegationReroute_ACompiledPlanThatCannotBeReadFailsTheEventAndChangesN
 		{"the plan cannot be decoded", func(h *dlgfixRecon, v uuid.UUID) { h.definitions.byVersion[v].CompiledPlanJSON = "not json" },
 			func(t *testing.T, err error) { assert.ErrorContains(t, err, "unmarshal compiled plan") }},
 		{"the main plan is missing", func(h *dlgfixRecon, v uuid.UUID) {
-			h.definitions.byVersion[v].CompiledPlanJSON = `{"main_plan":"ghost","plans":[]}`
+			h.definitions.byVersion[v].CompiledPlanJSON = fmt.Sprintf(`{"main_plan":"ghost","schema_version":%d,"plans":[]}`, dsl.CurrentSchemaVersion)
 		}, func(t *testing.T, err error) { assert.ErrorContains(t, err, "ghost") }},
 	}
 	for _, tc := range causes {
@@ -385,7 +386,7 @@ func TestDelegationReverse_AnAssignmentThatEndedBetweenTheReadAndTheWriteIsLeftA
 
 func dlgfixResumeCount(h *dlgfixRecon, instanceID uuid.UUID) int {
 	n := 0
-	for _, s := range h.temporal.signals {
+	for _, s := range h.outbox.signals {
 		if s.SignalName == port.SignalInstanceResume && s.InstanceID == instanceID {
 			n++
 		}
@@ -406,7 +407,7 @@ func TestDelegationReroute_ResumesAnInstancePausedForTheDelegatorsAbsence(t *tes
 		assert.False(t, first.assignment.IsActive)
 		assert.False(t, second.assignment.IsActive)
 		assert.Equal(t, 1, dlgfixResumeCount(h, first.instance.ID), "one resume for the instance, not one per task")
-		for _, s := range h.temporal.signals {
+		for _, s := range h.outbox.signals {
 			if s.SignalName != port.SignalInstanceResume {
 				continue
 			}
@@ -464,12 +465,13 @@ func TestDelegationReroute_ResumesAnInstancePausedForTheDelegatorsAbsence(t *tes
 		assert.Zero(t, dlgfixResumeCount(h, moved.instance.ID), "the delegator is still absent from work on this instance")
 	})
 
-	t.Run("a resume that cannot be sent fails the event before anything changes", func(t *testing.T) {
+	t.Run("a resume that cannot be recorded fails the event before anything changes", func(t *testing.T) {
 		h := dlgfixNewRecon()
 		row := h.seed(t, "reviewer")
 		row.instance.Status = domain.InstanceStatusPaused
 		require.NoError(t, h.store.byRecord(h.tenantID, h.delegator, "ooo"))
-		h.temporal.signalFunc = func(context.Context, string, uuid.UUID, string, any) error { return errors.New("temporal down") }
+		h.outbox.signalErr = errors.New("outbox down")
+		h.transactional()
 
 		require.Error(t, h.reroute())
 

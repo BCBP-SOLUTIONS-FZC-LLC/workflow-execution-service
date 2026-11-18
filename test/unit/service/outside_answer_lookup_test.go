@@ -53,8 +53,7 @@ func (w *cseOutsideWorld) requireUntouchedWorkflow(t *testing.T) {
 }
 
 func TestAnswerOutsideWait_AMainPlanThatNamesNoPlanHasNoWaits(t *testing.T) {
-	// The schema version decides whether the stored plan is expanded first.
-	for _, schemaVersion := range []int{0, dsl.CurrentSchemaVersion} {
+	for _, schemaVersion := range []int{dsl.CurrentSchemaVersion} {
 		t.Run(fmt.Sprintf("schema version %d", schemaVersion), func(t *testing.T) {
 			raw, err := json.Marshal(dsl.CompiledCollaboration{
 				MainPlan:      "MainPlan",

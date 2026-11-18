@@ -104,6 +104,9 @@ func (s *InstanceService) validateAssigneeEligibility(ctx context.Context, tenan
 		if err != nil {
 			return err
 		}
+		if len(results) != len(requests) {
+			return fmt.Errorf("%w: %d answers for %d requests", port.ErrEligibilityAnswerCount, len(results), len(requests))
+		}
 		for i, result := range results {
 			if result.Err != nil {
 				return fmt.Errorf("check assignee eligibility: %w", result.Err)

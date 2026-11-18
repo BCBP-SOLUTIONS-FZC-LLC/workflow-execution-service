@@ -782,7 +782,14 @@ paths:
                 instance: "/api/v1/internal/workflows/reassign-delegate"
                 code: "TENANT_MISMATCH"
         "409":
-          $ref: "#/components/responses/IdempotencyKeyReplay"
+          description: >
+            VERSION_INVALID: the eligibility check reads the compiled plan of an affected instance,
+            and its schema version is not one this service reads;
+            IDEMPOTENCY_KEY_REPLAY: the Idempotency-Key was used before with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "415":
@@ -865,7 +872,14 @@ paths:
                 instance: "/api/v1/internal/workflows/cancel-by-delegate"
                 code: "TENANT_MISMATCH"
         "409":
-          $ref: "#/components/responses/IdempotencyKeyReplay"
+          description: >
+            VERSION_INVALID: the eligibility check reads the compiled plan of an affected instance,
+            and its schema version is not one this service reads;
+            IDEMPOTENCY_KEY_REPLAY: the Idempotency-Key was used before with a different request body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "415":

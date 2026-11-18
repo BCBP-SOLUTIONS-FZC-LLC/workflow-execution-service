@@ -44,7 +44,8 @@ func (d *Deps) GetCompiledPlan(ctx context.Context, in port.GetCompiledPlanInput
 		return port.GetCompiledPlanOutput{}, nonRetryable("DefinitionServiceClientError", fmt.Errorf("unmarshal compiled plan: %w", err))
 	}
 	if collab.SchemaVersion != dsl.CurrentSchemaVersion {
-		return port.GetCompiledPlanOutput{Collaboration: collab}, nil
+		return port.GetCompiledPlanOutput{}, nonRetryable("DefinitionServiceClientError",
+			fmt.Errorf("%w: compiled plan has schema version %d, this service reads %d", port.ErrVersionInvalid, collab.SchemaVersion, dsl.CurrentSchemaVersion))
 	}
 	expanded, err := dsl.ExpandCalls(&collab, domain.MaxPlanStages)
 	if err != nil {

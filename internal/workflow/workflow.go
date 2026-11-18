@@ -20,16 +20,7 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 		return ExecuteOutput{Status: domain.InstanceStatusFailed}, err
 	}
 
-	strategy, ok := resolveSchemaStrategy(planOut.Collaboration.SchemaVersion)
-	if !ok {
-		_ = updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
-			InstanceID: input.InstanceID, TenantID: input.TenantID, Status: domain.InstanceStatusFailed,
-		})
-		return ExecuteOutput{Status: domain.InstanceStatusFailed}, fmt.Errorf("workflow: unsupported dsl schema version %d", planOut.Collaboration.SchemaVersion)
-	}
-	collab := strategy.normalize(&planOut.Collaboration)
-
-	in := newInterpreter(input.TenantID, input.InstanceID, input.ContextJSON, collab, input.OverrideMap)
+	in := newInterpreter(input.TenantID, input.InstanceID, input.ContextJSON, &planOut.Collaboration, input.OverrideMap)
 
 	mainPlan := findPlan(in.collab, in.collab.MainPlan)
 	if mainPlan == nil {

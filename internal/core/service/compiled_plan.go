@@ -159,7 +159,7 @@ func decodeCollaboration(planJSON string) (*dsl.CompiledCollaboration, error) {
 		return nil, fmt.Errorf("unmarshal compiled plan: %w", err)
 	}
 	if collab.SchemaVersion != dsl.CurrentSchemaVersion {
-		return &collab, nil
+		return nil, fmt.Errorf("%w: compiled plan has schema version %d, this service reads %d", port.ErrVersionInvalid, collab.SchemaVersion, dsl.CurrentSchemaVersion)
 	}
 	expanded, err := dsl.ExpandCalls(&collab, domain.MaxPlanStages)
 	if err != nil {

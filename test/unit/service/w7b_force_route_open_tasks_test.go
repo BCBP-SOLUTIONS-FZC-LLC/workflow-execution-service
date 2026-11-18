@@ -82,7 +82,7 @@ func (r *w7bForceRig) forward(target string) error {
 }
 
 func TestForceForward_OpenTaskOnALaterPageOfTheTaskList_StillCountsAsOpen(t *testing.T) {
-	rig := w7bNewForceRig(t, frfixPlanJSON(t, 0, frfixParallelMain()))
+	rig := w7bNewForceRig(t, frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixParallelMain()))
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	// The open task is the oldest, so it is on the last of two pages (50 and 10).
 	rig.addTasks(1, "legal/review", domain.TaskStatusReady, start)
@@ -124,7 +124,7 @@ func TestForceForward_ListingTheInstancesTasksFails_ReturnsTheWrappedErrorAndSen
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rig := w7bNewForceRig(t, frfixPlanJSON(t, 0, frfixParallelMain()))
+			rig := w7bNewForceRig(t, frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixParallelMain()))
 			rig.addTasks(60, "legal/review", domain.TaskStatusReady, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 			rig.tasks.failAt, rig.tasks.err = tc.failAt, assert.AnError
 
@@ -142,7 +142,7 @@ func TestForceForward_ListingTheInstancesTasksFails_ReturnsTheWrappedErrorAndSen
 
 func TestForceForward_MainPlanNamesNoPlanOfTheCollaboration_RefusesTheTargetBeforeTheSignal(t *testing.T) {
 	other := &dsl.CompiledPlan{Name: "other", Departments: []dsl.DepartmentDef{frfixDept("legal", "review")}}
-	collab := dsl.CompiledCollaboration{MainPlan: "ghost", Plans: []*dsl.CompiledPlan{other}}
+	collab := dsl.CompiledCollaboration{SchemaVersion: dsl.CurrentSchemaVersion, MainPlan: "ghost", Plans: []*dsl.CompiledPlan{other}}
 	raw, err := json.Marshal(collab)
 	require.NoError(t, err)
 	rig := w7bNewForceRig(t, string(raw))

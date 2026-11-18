@@ -103,12 +103,10 @@ type hreIdentityCase struct {
 }
 
 // hreIdentityCases are the ways a handler can be reached without a usable
-// tenant and user id: a header the shared middleware lets through but that is
-// not a UUID, or no middleware at all.
+// tenant and user id: no middleware at all. A non-UUID id never reaches a
+// handler; the router refuses it with 401.
 func hreIdentityCases() []hreIdentityCase {
 	return []hreIdentityCase{
-		{name: "malformed tenant id", header: "x-tenant-id", bad: "not-a-uuid", wantDetail: "malformed tenant id in request context"},
-		{name: "malformed user id", header: "x-user-id", bad: "not-a-uuid", wantDetail: "malformed user id in request context"},
 		{name: "no request context", bare: true, wantDetail: "missing request context"},
 	}
 }

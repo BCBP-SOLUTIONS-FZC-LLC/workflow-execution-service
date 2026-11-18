@@ -217,14 +217,14 @@ func redactedPayload(eventType port.WorkflowEventType, data json.RawMessage) jso
 func withoutConnectorFields(data json.RawMessage) json.RawMessage {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
-		return data
+		return nil
 	}
 	for _, name := range connectorOnlyTaskCreatedFields {
 		delete(fields, name)
 	}
 	redacted, err := json.Marshal(fields)
 	if err != nil {
-		return data
+		return nil
 	}
 	return redacted
 }

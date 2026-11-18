@@ -61,8 +61,9 @@ func TestInstanceStart_InsertRejectedByTheDatabase_StartsNothingAndLeavesNoRows(
 	validator, err := eventbus.NewSchemaValidator()
 	require.NoError(t, err)
 	plan, err := json.Marshal(dsl.CompiledCollaboration{
-		MainPlan: "main",
-		Plans:    []*dsl.CompiledPlan{{Name: "main", TaskQueue: "wf-queue-default"}},
+		SchemaVersion: dsl.CurrentSchemaVersion,
+		MainPlan:      "main",
+		Plans:         []*dsl.CompiledPlan{{Name: "main", TaskQueue: "wf-queue-default"}},
 	})
 	require.NoError(t, err)
 	versionID := uuid.New()
