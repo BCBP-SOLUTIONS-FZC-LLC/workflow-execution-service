@@ -121,11 +121,11 @@ func TestTaskActions_StaleRecordVersion_CountsATaskConflict(t *testing.T) {
 	}
 }
 
-func TestTaskComplete_CompletionAlreadyReserved_CountsATaskConflict(t *testing.T) {
+func TestTaskComplete_CompletionAlreadyDelivered_CountsATaskConflict(t *testing.T) {
 	obstest.Init(t)
 	h := newTaHarness(t, "single")
 	cache := newFakeCacheStore()
-	cache.values["task-complete:"+h.task.ID.String()] = "reserved"
+	cache.values["task-complete:"+h.task.ID.String()] = "delivered"
 	h.svc.Cache = cache
 	before := conflictCount(t, "workflow_task")
 

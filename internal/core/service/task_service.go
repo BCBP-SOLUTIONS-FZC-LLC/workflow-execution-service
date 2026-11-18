@@ -257,12 +257,15 @@ func (s *TaskService) readCommitted(ctx context.Context, tenantID uuid.UUID, com
 }
 
 // presentedTask maps a task an action just acted on and adds its active assignee count. The action has
-// already taken effect, so a failed count leaves the count at zero instead of failing the answer.
+// already taken effect, so a failed count answers without the count instead of failing the answer or
+// reporting zero.
 func (s *TaskService) presentedTask(ctx context.Context, tenantID uuid.UUID, task *domain.Task) *port.Task {
 	counted, err := toPortTasksWithCounts(ctx, s.Assignments, tenantID, []*domain.Task{task})
 	if err != nil {
 		s.logger().Warn("assignee count after a task action failed", map[string]any{"task_id": task.ID, "error": err.Error()})
-		return toPortTask(task)
+		out := toPortTask(task)
+		out.AssigneeCountUnavailable = true
+		return out
 	}
 	return counted[0]
 }
@@ -292,17 +295,20 @@ func (s *TaskService) Complete(ctx context.Context, tenantID, taskID, userID uui
 	if inst.Status != domain.InstanceStatusRunning && inst.Status != domain.InstanceStatusDegraded {
 		return nil, port.ErrInvalidInstanceState
 	}
-	if !s.reserveCompletion(ctx, task.ID) {
-		return nil, staleTaskVersion()
+	if err := s.reserveCompletion(ctx, task.ID); err != nil {
+		return nil, err
 	}
 	deptID, nodeID := deptAndSuffix(task.NodeKey)
 	if err := s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, "stage-transition", stageTransitionWire{
 		DeptID: deptID, NodeID: nodeID, UserID: userID.String(), ResultJSON: string(resultJSON), RecordVersion: recordVersion,
 		VisitCount: task.VisitCount,
 	}); err != nil {
-		s.releaseCompletion(ctx, task.ID)
+		if !signalMayHaveBeenAccepted(err) {
+			s.releaseCompletion(ctx, task.ID)
+		}
 		return nil, fmt.Errorf("signal stage-transition: %w", err)
 	}
+	s.markCompletionDelivered(ctx, task.ID)
 	return s.presentedTask(ctx, tenantID, task), nil
 }
 

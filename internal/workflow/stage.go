@@ -69,10 +69,7 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 		VisitCount:      in.taskVisits[nodeKey],
 		IAMDepartmentID: iamDeptID,
 	})
-	if err != nil {
-		if abandonedMidActivity(ctx) {
-			return nodeKey, "", errStageAbandoned
-		}
+	if err := in.settleCreatedTask(ctx, out, err); err != nil {
 		return nodeKey, "", err
 	}
 	defer delete(in.taskAssignees, out.TaskID)
@@ -160,6 +157,7 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 			TaskID: out.TaskID, TenantID: in.tenantID, Status: domain.TaskStatusSuperseded,
 		}); err != nil {
 			if abandonedMidActivity(ctx) {
+				in.supersedeTask(ctx, out.TaskID)
 				return nodeKey, "", errStageAbandoned
 			}
 			return nodeKey, "", err
@@ -170,6 +168,19 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	return in.resolveTaskStage(ctx, nodeKey, out, sig)
 }
 
+// settleCreatedTask ends a stage cancelled while its task was being created.
+// A create that still returned a task is superseded here even during a
+// force-route: the route's audit only supersedes the tasks it knew about.
+func (in *interpreter) settleCreatedTask(ctx wf.Context, out port.CreateTaskOutput, err error) error {
+	if abandonedMidActivity(ctx) {
+		if err == nil && out.TaskID != "" {
+			in.supersedeTask(ctx, out.TaskID)
+		}
+		return errStageAbandoned
+	}
+	return err
+}
+
 func abandonedMidActivity(ctx wf.Context) bool {
 	return ctx.Err() != nil
 }
@@ -178,10 +189,18 @@ func (in *interpreter) supersedeAbandoned(ctx wf.Context, taskID string) {
 	if in.routing {
 		return
 	}
+	in.supersedeTask(ctx, taskID)
+}
+
+// supersedeTask marks the task SUPERSEDED on a context that outlives the
+// cancelled run. A refused write is logged: the stage is abandoned either way.
+func (in *interpreter) supersedeTask(ctx wf.Context, taskID string) {
 	dctx, _ := wf.NewDisconnectedContext(ctx)
-	_ = updateTaskStatus(dctx, port.UpdateTaskStatusInput{
+	if err := updateTaskStatus(dctx, port.UpdateTaskStatusInput{
 		TaskID: taskID, TenantID: in.tenantID, Status: domain.TaskStatusSuperseded,
-	})
+	}); err != nil {
+		wf.GetLogger(ctx).Warn("abandoned stage: superseding its task failed", "task_id", taskID, "error", err)
+	}
 }
 
 type stageFailedError struct {

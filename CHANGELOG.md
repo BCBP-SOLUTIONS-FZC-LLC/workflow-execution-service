@@ -24,6 +24,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- An admin force-back that arrives while a deferred task's return to the step before a fork is still running is carried out once that return ends, with its audit record; it used to be dropped with a warning although the admin had received 202.
+- A task whose creation finishes after a force-route or cancel has abandoned its stage is marked SUPERSEDED; it used to stay open for a step the instance had left.
+- A tenant state event with an unrecognised status is still not recorded, but its plan change is applied; it used to be acknowledged and ignored whole, so the Enterprise queue was never registered. A tenant event that carries no plan no longer stops routing to an Enterprise tenant's dedicated queue.
+- A task completion whose signal timed out or was cancelled keeps its reservation, so a retry answers 503 (retry later) instead of signalling a second time.
+- A connector complete or fail callback for a workflow that no longer exists is answered 204 and marked delivered; it used to answer 409, so the worker redelivered it until its cap.
+- The answer to a committed claim, complete, defer or reassign leaves out `assignee_count` when the count read fails; it used to report 0.
+- A repeated task completion whose first attempt has not sent its signal answers 503 (retry later); once the signal is out it answers 409 RECORD_VERSION_CONFLICT for 5 minutes, not just 30 s. It used to answer 409 in both cases.
+- A delegation start event whose scope names an object (department or tender) but carries no `scope_id` is refused 400 and dead-lettered; it used to be acknowledged and move nothing.
+- A delegation start lists the delegator's rows again under the lock before deciding which instances to resume, a delegation end resumes without filtering on a status read before the lock, and a retried move records its pause or resume once.
+- An eligibility answer of the wrong size counts in `upstream_dependency_errors_total{dependency="iam"}`.
+- Delegate impact with no delegation named counts only delegation-tagged assignments, as reassign and cancel move; it used to count every active assignment.
+- The per-activity duration histogram has buckets up to 60 s; activities running 10 to 30 s used to all land in the +Inf bucket.
+- A stored plan that cannot be expanded is reported by the compiled-plan activity as an invalid workflow version, like the service's own plan reader.
 - Starting an instance when the eligibility check answers with fewer or more entries than asked answers 503 UPSTREAM_UNAVAILABLE and creates nothing; a short answer used to count as eligible and a long one could panic.
 - Force-forward and force-back on an ended instance answer 409 INSTANCE_ALREADY_TERMINAL even with a stale record version, as pause, resume and cancel do; they used to answer RECORD_VERSION_CONFLICT.
 - Task detail and instance events no longer show extras or event data that cannot be read as a JSON object for redaction; the field is left out (task) or null (event) instead of returned as stored.

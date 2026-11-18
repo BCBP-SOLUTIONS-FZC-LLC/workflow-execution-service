@@ -404,8 +404,9 @@ components:
               nullable: true
               description: Instantiation-time non-default-assignee map; null if none was supplied at start.
 
-    TaskSummary:
+    TaskFields:
       type: object
+      description: The task fields shared by the read answers (TaskSummary) and the task-action answers (TaskActionResult).
       required:
         - id
         - workflow_instance_id
@@ -416,7 +417,6 @@ components:
         - status
         - record_version
         - assignee_mode
-        - assignee_count
         - created_at
       properties:
         id:
@@ -451,7 +451,10 @@ components:
           $ref: "#/components/schemas/AssigneeMode"
         assignee_count:
           type: integer
-          description: Expected number of active assignments for this task.
+          description: >
+            Expected number of active assignments for this task. Left out of the answer to a
+            claim, complete, defer or reassign whose count could not be read after the action
+            took effect; the action itself succeeded.
           example: 2
         due_at:
           type: string
@@ -470,6 +473,19 @@ components:
           type: string
           format: date-time
           nullable: true
+
+    TaskSummary:
+      description: A task as the list, detail and instance reads answer it; assignee_count is always present.
+      allOf:
+        - $ref: "#/components/schemas/TaskFields"
+        - type: object
+          required:
+            - assignee_count
+
+    TaskActionResult:
+      description: A task as a claim, complete, defer or reassign answers it; assignee_count is left out when its read failed after the action took effect.
+      allOf:
+        - $ref: "#/components/schemas/TaskFields"
 
     TaskDetail:
       allOf:
@@ -2377,7 +2393,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TaskSummary"
+                $ref: "#/components/schemas/TaskActionResult"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -2477,6 +2493,9 @@ paths:
         is read from Org & Membership before the signal: 422 ASSIGNEE_INELIGIBLE when the read
         answers ineligible (a suspended, removed or demoted member) or the node has no stage in
         the compiled plan, 503 UPSTREAM_UNAVAILABLE when the read or the compiled plan fails.
+        A repeat that arrives while an earlier attempt for the same task has not yet sent its
+        signal also answers 503 UPSTREAM_UNAVAILABLE (retry later, nothing was done); once the
+        signal has gone out, a repeat answers 409 RECORD_VERSION_CONFLICT.
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
         - $ref: "#/components/parameters/UserIdHeader"
@@ -2514,7 +2533,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TaskSummary"
+                $ref: "#/components/schemas/TaskActionResult"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -2628,7 +2647,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TaskSummary"
+                $ref: "#/components/schemas/TaskActionResult"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -2746,7 +2765,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TaskSummary"
+                $ref: "#/components/schemas/TaskActionResult"
         "400":
           description: >
             Malformed request body, or code field OVERRIDE_NO_OP — new_assignee_user_id is

@@ -362,7 +362,7 @@ func TestWorkflowClient_DelegateImpact_Errors(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: uuid.New()}
 			tasks.byID[task.ID] = task
-			assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegate, IsActive: true}
+			assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		}
 
 		result, err := svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: delegate, Page: port.Page{Limit: 2}})
@@ -381,8 +381,8 @@ func TestWorkflowClient_DelegateImpact(t *testing.T) {
 	taskB := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID}
 	tasks.byID[taskA.ID] = taskA
 	tasks.byID[taskB.ID] = taskB
-	assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: taskA.ID, UserID: delegate, IsActive: true}
-	assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: taskB.ID, UserID: delegate, IsActive: true}
+	assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: taskA.ID, UserID: delegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
+	assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: taskB.ID, UserID: delegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 
 	result, err := svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: delegate, Page: port.Page{Limit: 10}})
 	require.NoError(t, err)
@@ -400,7 +400,7 @@ func TestWorkflowClient_DelegateImpact_CountsWorkflowsAndAssignmentsAcrossPages(
 	for i, instanceID := range []uuid.UUID{instanceIDs[0], instanceIDs[0], instanceIDs[1]} {
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, CreatedAt: created.Add(time.Duration(i) * time.Second)}
 		tasks.byID[task.ID] = task
-		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegate, IsActive: true}
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 	}
 
 	result, err := svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: delegate, Page: port.Page{Limit: 1}})
@@ -420,7 +420,7 @@ func TestWorkflowClient_DelegateImpact_CursorReachesEveryWorkflow(t *testing.T) 
 		want[instanceID] = true
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, CreatedAt: created.Add(time.Duration(i) * time.Second)}
 		tasks.byID[task.ID] = task
-		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegate, IsActive: true}
+		assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 	}
 
 	got := map[uuid.UUID]bool{}

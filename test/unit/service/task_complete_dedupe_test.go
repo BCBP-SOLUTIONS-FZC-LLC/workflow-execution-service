@@ -167,17 +167,17 @@ func TestTaskService_Complete_ConcurrentCompletionsSignalOnce(t *testing.T) {
 	wg.Wait()
 
 	assert.Equal(t, 1, w.temporal.count(), "two concurrent completions of one task must send one signal")
-	succeeded, conflicted := 0, 0
+	succeeded, refused := 0, 0
 	for _, err := range errs {
 		switch {
 		case err == nil:
 			succeeded++
-		case errors.Is(err, port.ErrRecordVersionConflict):
-			conflicted++
+		case errors.Is(err, port.ErrRecordVersionConflict), errors.Is(err, port.ErrCallbackInFlight):
+			refused++
 		}
 	}
 	assert.Equal(t, 1, succeeded)
-	assert.Equal(t, 1, conflicted, "the loser is refused with a version conflict")
+	assert.Equal(t, 1, refused, "the loser is refused: a version conflict once the winner's signal is out, retry later before")
 }
 
 func TestTaskService_Complete_FailedSignalReleasesTheDedupeKey(t *testing.T) {

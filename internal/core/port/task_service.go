@@ -30,14 +30,16 @@ type Task struct {
 	RecordVersion      int64
 	AssigneeMode       string
 	AssigneeCount      int
-	ConnectorType      *string
-	ExtrasJSON         json.RawMessage
-	DeferredFromTaskID *uuid.UUID
-	DueAt              *time.Time
-	FollowUpAt         *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	CompletedAt        *time.Time
+	// AssigneeCountUnavailable marks an answer to a committed action whose count read failed; the count is not known, not zero.
+	AssigneeCountUnavailable bool
+	ConnectorType            *string
+	ExtrasJSON               json.RawMessage
+	DeferredFromTaskID       *uuid.UUID
+	DueAt                    *time.Time
+	FollowUpAt               *time.Time
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	CompletedAt              *time.Time
 }
 
 type TaskAssignment struct {

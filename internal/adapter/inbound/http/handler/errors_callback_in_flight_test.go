@@ -17,5 +17,5 @@ func TestMapErr_CallbackInFlightIsRetryableAndSaysWhy(t *testing.T) {
 
 	assert.Equal(t, http.StatusServiceUnavailable, status)
 	assert.Equal(t, CodeUpstreamUnavailable, code)
-	assert.Equal(t, "an earlier attempt of this callback is still in progress; retry later", detail)
+	assert.Equal(t, "an earlier attempt is still in progress; retry later", detail)
 }

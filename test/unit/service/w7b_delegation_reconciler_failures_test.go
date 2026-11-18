@@ -111,7 +111,7 @@ func TestDelegationReversed_RowHeldByTheDelegatorWithTheDelegationsHop_IsLeftAlo
 			assert.True(t, heldByDelegator.assignment.IsActive, "the delegator's own row is not vacated")
 			assert.Equal(t, hop, heldByDelegator.assignment.Reason, "and not rewritten")
 			assert.Len(t, h.outbox.enqueued, tc.wantRestored)
-			assert.Len(t, h.outbox.signals, tc.wantRestored)
+			assert.Len(t, h.outbox.signalsNamed(port.SignalInstanceReassign), tc.wantRestored)
 			assert.Empty(t, h.temporal.signals)
 			for _, s := range h.outbox.signals {
 				assert.NotEqual(t, heldByDelegator.instance.ID, s.InstanceID, "nothing is signalled for the delegator's own row")
@@ -164,20 +164,21 @@ func TestDelegationStarted_ReadsForTheLeadDecisionFail_RollBackTheMove(t *testin
 	cases := []struct {
 		name string
 		// breakIt wraps the failing read and returns the tenant ids that read was asked with.
-		breakIt func(h *dlgfixRecon) func() []uuid.UUID
+		breakIt   func(h *dlgfixRecon) func() []uuid.UUID
+		wantReads int
 	}{
 		{"the task cannot be read", func(h *dlgfixRecon) func() []uuid.UUID {
-			// the first read is the candidate read; the lead decision is the second
-			tasks := &w7bNthReadTasks{fakeTaskRepo: h.tasks, failAt: 2, err: assert.AnError}
+			// the first read is the candidate read, the second the re-list under the lock; the lead decision is the third
+			tasks := &w7bNthReadTasks{fakeTaskRepo: h.tasks, failAt: 3, err: assert.AnError}
 			h.svc.Tasks = tasks
 			return func() []uuid.UUID { return tasks.tenants }
-		}},
+		}, 3},
 		{"the task's active assignments cannot be re-read", func(h *dlgfixRecon) func() []uuid.UUID {
 			// the first read is the vacate's; the lead decision's is the second
 			lists := &w7bNthListAssignments{fakeAssignmentRepo: h.assignments, failAt: 2, err: assert.AnError}
 			h.svc.Assignments = lists
 			return func() []uuid.UUID { return lists.tenants }
-		}},
+		}, 2},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -198,7 +199,11 @@ func TestDelegationStarted_ReadsForTheLeadDecisionFail_RollBackTheMove(t *testin
 			assert.Equal(t, 1, tx.rollbacks)
 			assert.Zero(t, tx.commits)
 			assert.Equal(t, []string{h.tenantID.String()}, tx.tenants)
-			assert.Equal(t, []uuid.UUID{h.tenantID, h.tenantID}, askedTenants(), "both reads, the failing one included, name the event's tenant")
+			wantTenants := make([]uuid.UUID, tc.wantReads)
+			for i := range wantTenants {
+				wantTenants[i] = h.tenantID
+			}
+			assert.Equal(t, wantTenants, askedTenants(), "every read, the failing one included, names the event's tenant")
 			assert.Empty(t, h.outbox.enqueued)
 			assert.Empty(t, h.outbox.signals)
 			assert.Empty(t, h.temporal.signals)

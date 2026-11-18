@@ -50,8 +50,8 @@ var (
 
 	ErrNoAutomationPrincipal = errors.New("tenant has no automation principal")
 
-	// ErrCallbackInFlight: an earlier attempt of the same connector callback has not delivered its
-	// signal yet; the caller retries later.
+	// ErrCallbackInFlight: an earlier attempt of the same connector callback or task completion has
+	// not delivered its signal yet; the caller retries later.
 	ErrCallbackInFlight = errors.New("an earlier attempt of this callback is still in progress")
 
 	// ErrEligibilityAnswerCount: the eligibility answer has a different number of entries than the

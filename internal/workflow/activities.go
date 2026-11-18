@@ -38,6 +38,14 @@ func withDBWriteOptions(ctx wf.Context) wf.Context {
 	return wf.WithActivityOptions(ctx, dbWriteActivityOptions)
 }
 
+// createTaskActivityOptions waits for a cancelled create-task to finish so the
+// task it made is returned and can be superseded, not lost behind the cancel error.
+func createTaskActivityOptions() wf.ActivityOptions {
+	opts := dbWriteActivityOptions
+	opts.WaitForCancellation = true
+	return opts
+}
+
 func withExternalCallOptions(ctx wf.Context) wf.Context {
 	return wf.WithActivityOptions(ctx, externalCallActivityOptions)
 }
@@ -57,7 +65,7 @@ func getCompiledPlan(ctx wf.Context, in port.GetCompiledPlanInput) (port.GetComp
 
 func createTask(ctx wf.Context, in port.CreateTaskInput) (port.CreateTaskOutput, error) {
 	var out port.CreateTaskOutput
-	err := wf.ExecuteActivity(withDBWriteOptions(ctx), port.ActivityCreateTask, in).Get(ctx, &out)
+	err := wf.ExecuteActivity(wf.WithActivityOptions(ctx, createTaskActivityOptions()), port.ActivityCreateTask, in).Get(ctx, &out)
 	return out, wrapActivityErr(port.ActivityCreateTask, err)
 }
 

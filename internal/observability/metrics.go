@@ -17,7 +17,7 @@ var (
 	taskSignalBuckets        = []float64{.01, .025, .05, .1, .15, .2, .25, .3, .4, .5, .75, 1, 2.5}
 	instanceStartBuckets     = []float64{.05, .1, .25, .5, .75, 1, 1.5, 2, 3, 5, 10}
 	delegationRerouteBuckets = []float64{.25, .5, 1, 2, 3, 4, 5, 6, 8, 10, 15, 20}
-	activityBuckets          = prometheus.DefBuckets
+	activityBuckets          = []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 20, 30, 60}
 	entitlementsCallBuckets  = []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}
 )
 

@@ -629,10 +629,12 @@ paths:
       description: >
         Internal, service-to-service endpoint called by the Org & Membership Service (not routed through
         the gateway; no x-tenant-id / x-user-id headers). Returns how many active workflow
-        instances have at least one READY/IN_PROGRESS assignment currently held by
-        delegate_user_id, and one page of the affected workflow instance IDs. Used by Org &
-        Membership to refuse removing a user who still holds work, and to preview the impact
-        of ending or creating a delegation before committing to it.
+        instances have at least one READY/IN_PROGRESS assignment held by delegate_user_id
+        that a delegation created (an assignment carrying a delegation tag; assignments made
+        by hand or by other means are not counted), and one page of the affected workflow
+        instance IDs. With delegation_id, only that delegation's assignments count. Used by
+        Org & Membership to preview the impact of ending or creating a delegation before
+        committing to it.
       security:
         - InternalServiceAuth: []
       parameters:
@@ -930,7 +932,9 @@ paths:
             The callback was acted on (the stage-transition signal has been sent), or it was
             acknowledged and ignored with no assignment and no signal: the task is no longer
             open (COMPLETED, FAILED, SUPERSEDED or DEFERRED), the instance has ended, or an
-            identical callback, or the fail callback, already delivered its signal. A task
+            identical callback, or the fail callback, already delivered its signal. A callback
+            whose workflow execution no longer exists is acknowledged too, with nothing left to
+            signal, so the worker stops redelivering it. A task
             whose stored output mapping cannot be read is failed instead: the stage-fail
             signal is sent with error_class output_mapping_invalid and no connector output
             reaches the workflow.
@@ -1005,7 +1009,9 @@ paths:
             The callback was acted on (the stage-fail signal has been sent), or it was
             acknowledged and ignored with no assignment and no signal: the task is no longer
             open (COMPLETED, FAILED, SUPERSEDED or DEFERRED), the instance has ended, or an
-            identical callback, or the complete callback, already delivered its signal.
+            identical callback, or the complete callback, already delivered its signal. A callback
+            whose workflow execution no longer exists is acknowledged too, with nothing left to
+            signal, so the worker stops redelivering it.
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
