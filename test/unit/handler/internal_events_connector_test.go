@@ -234,8 +234,8 @@ func TestHandleWorkflowTaskCreated_InvalidDepartmentID_Returns400(t *testing.T) 
 }
 
 // A tenant IAM holds no automation principal for has no actor to record the
-// step under, so the job is not put on the stream; the answer is a retryable
-// failure, not a processed event, so a principal minted later is picked up.
+// step under, so the job is not put on the stream; the answer is a 422 the
+// consumer does not retry, and the event is not marked processed.
 func TestHandleWorkflowTaskCreated_NoAutomationPrincipal_DoesNotPublish(t *testing.T) {
 	fakes := newEventsFakes()
 	publisher := &fakeConnectorEventPublisher{}
@@ -244,6 +244,6 @@ func TestHandleWorkflowTaskCreated_NoAutomationPrincipal_DoesNotPublish(t *testi
 	connectorType := "storage"
 	w := postEvent(router, envelope("WorkflowTaskCreated", uuid.New(), testTenantID, time.Now(), connectorTaskCreatedPayload(&connectorType)))
 
-	assert.GreaterOrEqual(t, w.Code, http.StatusInternalServerError)
+	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
 	assert.Empty(t, publisher.published)
 }

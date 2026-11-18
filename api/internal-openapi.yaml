@@ -211,7 +211,7 @@ components:
             TASK_ALREADY_CLAIMED, CLAIM_NOT_APPLICABLE, INVALID_TASK_STATE,
             FORCE_BACK_NO_SAVED_BRANCH, NODE_ALREADY_RESOLVED, IDEMPOTENCY_KEY_REPLAY,
             ASSIGNEE_INELIGIBLE, OVERRIDE_MAP_INVALID, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE,
-            UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, INTERNAL_ERROR.
+            UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, NO_AUTOMATION_PRINCIPAL, INTERNAL_ERROR.
           example: "RECORD_VERSION_CONFLICT"
         trace_id:
           type: string
@@ -596,6 +596,10 @@ paths:
         while the task is still open (READY or IN_PROGRESS) on an instance that has
         not ended; otherwise the event is acknowledged with 200 and nothing is queued.
         A connector task whose department_id is the all-zero uuid is refused with 400.
+        A connector task for a tenant with no usable automation principal (none held,
+        or not active) is refused with 422 NO_AUTOMATION_PRINCIPAL; the event is not
+        marked processed and nothing is queued. The event consumer treats 422 as
+        permanent and dead-letters the message.
       security:
         - InternalServiceAuth: []
       requestBody:
@@ -617,6 +621,11 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          description: The tenant has no usable automation principal (code NO_AUTOMATION_PRINCIPAL), so a connector task cannot be queued. The event is left unprocessed; the event consumer treats 422 as permanent and dead-letters the message.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
         "500":
           description: Transient processing failure. The consumer redelivers with backoff until its receive threshold (MAX_RECEIVE_COUNT, four handling attempts) dead-letters the message on the fifth receive.
           content:

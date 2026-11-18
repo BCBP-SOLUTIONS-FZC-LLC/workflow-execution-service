@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -191,6 +192,10 @@ func (h *Handler) reconcilerError(c *gin.Context, eventType string, err error) {
 	h.logError("internal events: reconciler call failed", map[string]any{"event_type": eventType, "error": err.Error()})
 	if status, _, _ := mapErr(err); status == http.StatusServiceUnavailable {
 		errResponse(c, err)
+		return
+	}
+	if errors.Is(err, port.ErrNoAutomationPrincipal) {
+		writeProblem(c, http.StatusUnprocessableEntity, CodeNoAutomationPrincipal, port.ErrNoAutomationPrincipal.Error(), nil)
 		return
 	}
 	writeProblem(c, http.StatusInternalServerError, CodeInternal, "failed to process event", nil)
