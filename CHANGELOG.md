@@ -10,6 +10,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Tests
 
+- Route, handler and middleware tests through the production router (task actions, outside answers, public routes, idempotent replays, internal caller identity), configuration defaults, event payload strictness, connector-worker group recovery and instance list filters under tenant row-level security.
+- Server start, migration, readiness and shutdown tests against real Postgres and Temporal containers; port, cursor and activity-name tests; observability tests for telemetry warnings, metric labels and interceptors; workflow tests for parked branches abandoned or refused and for deterministic map order.
 - Service tests for error and branch paths of the connector callbacks, delegation moves and cancels, out-of-office availability, force-route open tasks, tenant lifecycle and pause at an unchanged record version.
 - Service and Postgres tests for retention sweeps, instance lifecycle and task claim and read failures, repository reads and creates under tenant row-level security, tenant purge failures, recency-guard locks, outbox signal marshalling and the version-checked defer under concurrency.
 
