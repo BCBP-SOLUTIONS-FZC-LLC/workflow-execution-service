@@ -59,7 +59,7 @@ func (d *w13aStartDefinitions) GetCompiledWorkflow(_ context.Context, tenantID, 
 	return d.compiled, nil
 }
 
-func TestStartInstance_AnUnparseablePlanAnswers500WhileAPlanThatCannotBeExpandedAnswersVersionInvalid(t *testing.T) {
+func TestStartInstance_AnUnparseablePlanAndAPlanThatCannotBeExpandedBothAnswerVersionInvalid(t *testing.T) {
 	staleSchema, err := json.Marshal(dsl.CompiledCollaboration{
 		SchemaVersion: dsl.CurrentSchemaVersion + 1, MainPlan: "main",
 		Plans: []*dsl.CompiledPlan{{Name: "main", TaskQueue: "wf-queue-default"}},
@@ -76,8 +76,8 @@ func TestStartInstance_AnUnparseablePlanAnswers500WhileAPlanThatCannotBeExpanded
 	}{
 		{
 			name: "a plan whose JSON does not parse", planJSON: "{",
-			wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_ERROR", wantTitle: "Internal Server Error",
-			wantType: "https://errors.bcbp.io/execution/internal-error", hidden: []string{"unmarshal", "unexpected end of JSON"},
+			wantStatus: http.StatusConflict, wantCode: "VERSION_INVALID", wantTitle: "Version Invalid",
+			wantType: "https://errors.bcbp.io/execution/version-invalid", hidden: []string{"unmarshal", "unexpected end of JSON"},
 		},
 		{
 			name: "control: a plan that cannot be used by this service version", planJSON: string(staleSchema),

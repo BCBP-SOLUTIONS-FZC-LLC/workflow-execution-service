@@ -253,7 +253,7 @@ func TestScopeMatches_DepartmentScopeSplitsTheTaskNodeKeyAtTheFirstSlash(t *test
 	}
 }
 
-func TestScopeMatches_TenderScopeIsExactStringEqualityWithTheSubjectID(t *testing.T) {
+func TestScopeMatches_TenderScopeNeedsUUIDsThatAgreeWithTheSubjectID(t *testing.T) {
 	upper := "3F2504E0-4F89-41D3-9A0C-0305E82C3301"
 	cases := []struct {
 		name      string
@@ -261,7 +261,7 @@ func TestScopeMatches_TenderScopeIsExactStringEqualityWithTheSubjectID(t *testin
 		scopeID   *string
 		want      bool
 	}{
-		{"the same text", "TND-001", w14aPtr("TND-001"), true},
+		{"the same text that is not a uuid matches nothing", "TND-001", w14aPtr("TND-001"), false},
 		{"another letter case", "TND-001", w14aPtr("tnd-001"), false},
 		{"a trailing space", "TND-001", w14aPtr("TND-001 "), false},
 		{"a leading space", "TND-001", w14aPtr(" TND-001"), false},

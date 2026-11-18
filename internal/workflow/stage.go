@@ -47,12 +47,37 @@ func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID s
 	}
 }
 
+// countOpenTaskStage marks a task stage as open until the returned release
+// runs (once). A stage releases before it hands over to a boundary path: that
+// path can wait on a receive that a cancel does not wake, and its own task
+// stages are counted by themselves.
+func (in *interpreter) countOpenTaskStage() (release func()) {
+	in.openTaskStages++
+	released := false
+	return func() {
+		if !released {
+			released = true
+			in.openTaskStages--
+		}
+	}
+}
+
+// awaitAbandonedStages holds a finishing run until every cancelled task stage
+// has returned, so its supersede write (including the repeat on a context that
+// outlives the cancel) is not cut off by the run completing. The caller has
+// cancelled the stages' context, so none of them waits for a person.
+func (in *interpreter) awaitAbandonedStages(ctx wf.Context) {
+	_ = wf.Await(ctx, func() bool { return in.openTaskStages == 0 })
+}
+
 func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID string, stage *dsl.StageDef, nodeKey domain.NodeKey) (domain.NodeKey, string, error) {
 	compiledNode, err := json.Marshal(stage)
 	if err != nil {
 		return nodeKey, "", fmt.Errorf("workflow: marshaling stage %q: %w", nodeKey, err)
 	}
 	in.taskVisits[nodeKey]++
+	releaseOpenStage := in.countOpenTaskStage()
+	defer releaseOpenStage()
 
 	var iamDeptID string
 	if dept := findDepartment(plan, deptID); dept != nil {
@@ -162,6 +187,7 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 			}
 			return nodeKey, "", err
 		}
+		releaseOpenStage()
 		return in.runFiredPath(ctx, plan, fired)
 	}
 

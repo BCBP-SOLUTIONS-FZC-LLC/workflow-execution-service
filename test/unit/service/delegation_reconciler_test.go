@@ -235,11 +235,11 @@ func TestDelegationReconciler_Reroute(t *testing.T) {
 	t.Run("a subject-scoped delegation matches on subject_id", func(t *testing.T) {
 		svc, instances, tasks, assignments, outbox, _, definitions, _ := newDelegationReconcilerHarness()
 		tenantID, delegatorID, delegateID, delegationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
-		_, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "tender-42", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+		inst, _, a := seedDelegationFixture(instances, tasks, assignments, definitions, tenantID, delegatorID, "tender-42", dsl.StageDef{Type: "userTask", NodeID: "review", Role: "reviewer"}, t)
+		inst.SubjectID = uuid.NewString()
 
-		subjectID := "subject-of-tender-42"
 		err := svc.Reroute(context.Background(), port.DelegationRerouteInput{
-			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, Scope: "tender", ScopeID: &subjectID,
+			TenantID: tenantID, DelegationID: delegationID, DelegatorID: delegatorID, DelegateID: delegateID, Scope: "tender", ScopeID: &inst.SubjectID,
 		})
 		require.NoError(t, err)
 		assert.False(t, assignments.byID[a.ID].IsActive)

@@ -50,7 +50,7 @@ func TestDelegationStarted_ScopesThatNameNoObjectOrNameOneAreAccepted(t *testing
 		scope   string
 		scopeID any
 	}{
-		{"tender", "TENDER-42"},
+		{"tender", "3f2504e0-4f89-41d3-9a0c-0305e82c3301"},
 		{"all", nil},
 	}
 	for _, tc := range cases {

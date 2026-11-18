@@ -140,7 +140,7 @@ func TestForceForward_ListingTheInstancesTasksFails_ReturnsTheWrappedErrorAndSen
 	}
 }
 
-func TestForceForward_MainPlanNamesNoPlanOfTheCollaboration_RefusesTheTargetBeforeTheSignal(t *testing.T) {
+func TestForceForward_MainPlanNamesNoPlanOfTheCollaboration_RefusesTheVersionBeforeTheSignal(t *testing.T) {
 	other := &dsl.CompiledPlan{Name: "other", Departments: []dsl.DepartmentDef{frfixDept("legal", "review")}}
 	collab := dsl.CompiledCollaboration{SchemaVersion: dsl.CurrentSchemaVersion, MainPlan: "ghost", Plans: []*dsl.CompiledPlan{other}}
 	raw, err := json.Marshal(collab)
@@ -150,7 +150,8 @@ func TestForceForward_MainPlanNamesNoPlanOfTheCollaboration_RefusesTheTargetBefo
 
 	err = rig.forward("legal/review")
 
-	require.ErrorIs(t, err, port.ErrTargetNodeNotFound, "a node of another plan is not a node of the main plan")
+	require.ErrorIs(t, err, port.ErrVersionInvalid, "a collaboration with no main plan is a broken version")
+	assert.NotErrorIs(t, err, port.ErrTargetNodeNotFound)
 	assert.Empty(t, rig.signalled())
 	assert.Empty(t, rig.tasks.pages, "the open tasks are not read once the plan has no main plan")
 }

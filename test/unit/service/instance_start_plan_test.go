@@ -14,14 +14,14 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-func TestInstanceService_Start_UnreadableStoredPlanIsAnInternalFailure(t *testing.T) {
+func TestInstanceService_Start_UnreadableStoredPlanIsAVersionInvalidRefusal(t *testing.T) {
 	cases := []struct {
 		name    string
 		plan    string
 		wantMsg string
 	}{
-		{"an empty plan", "", "unmarshal compiled plan"},
-		{"a plan that is not JSON", "{not json", "unmarshal compiled plan"},
+		{"an empty plan", "", "not valid JSON"},
+		{"a plan that is not JSON", "{not json", "not valid JSON"},
 		{
 			"a main plan name no plan carries",
 			fmt.Sprintf(`{"main_plan":"ghost","schema_version":%d,"plans":[{"name":"main","task_queue":"wf-queue-default","departments":[]}]}`, dsl.CurrentSchemaVersion),
@@ -46,8 +46,9 @@ func TestInstanceService_Start_UnreadableStoredPlanIsAnInternalFailure(t *testin
 			require.Error(t, err)
 			assert.Nil(t, got)
 			assert.ErrorContains(t, err, tc.wantMsg)
-			for _, domainErr := range []error{port.ErrVersionInvalid, port.ErrVersionNotPublished, port.ErrDuplicateBusinessKey} {
-				assert.NotErrorIs(t, err, domainErr, "a corrupt stored plan is an internal failure, not a refusal the caller can fix")
+			assert.ErrorIs(t, err, port.ErrVersionInvalid, "a corrupt stored plan is a broken version")
+			for _, domainErr := range []error{port.ErrVersionNotPublished, port.ErrDuplicateBusinessKey} {
+				assert.NotErrorIs(t, err, domainErr)
 			}
 			assert.Empty(t, instances.byID, "no instance is written")
 			assert.Empty(t, outbox.enqueued, "no started event is written")

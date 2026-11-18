@@ -111,6 +111,7 @@ func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin
 		abandonedNodes := in.currentPendingNodes()
 		in.routing = envelope.Kind != "" && !envelope.Signal.FromDefer
 		cancelRun()
+		in.awaitAbandonedStages(ctx)
 
 		if done {
 			return outcome, runErr

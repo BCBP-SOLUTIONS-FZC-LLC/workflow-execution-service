@@ -325,9 +325,19 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 		endsAt = &v
 	}
 
-	if scopeNamesObject(p.Scope) && (p.ScopeID == nil || *p.ScopeID == "") {
-		h.badPayload(c, eventType, "scope_id is required when scope is "+p.Scope)
+	if !knownDelegationScope(p.Scope) {
+		h.badPayload(c, eventType, "scope must be one of all, department, tender")
 		return
+	}
+	if scopeNamesObject(p.Scope) {
+		if p.ScopeID == nil || *p.ScopeID == "" {
+			h.badPayload(c, eventType, "scope_id is required when scope is "+p.Scope)
+			return
+		}
+		if _, err := uuid.Parse(*p.ScopeID); err != nil {
+			h.badPayload(c, eventType, "scope_id must be a UUID when scope is "+p.Scope)
+			return
+		}
 	}
 
 	if h.alreadyProcessed(c, eventID, port.ConsumerMembership, eventType) {
@@ -354,6 +364,10 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 	observeDelegationReroute(time.Since(start).Seconds())
 
 	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
+}
+
+func knownDelegationScope(scope string) bool {
+	return scope == "all" || scopeNamesObject(scope)
 }
 
 // scopeNamesObject reports the delegation scopes that point at one department or tender

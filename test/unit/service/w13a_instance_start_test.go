@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -271,8 +272,7 @@ func w13aRefusals() []w13aRefusal {
 			func(err error) bool { return errors.Is(err, port.ErrVersionInvalid) }},
 		{"the plan cannot be decoded", func(w *w13aStartWorld) { w.definitions.resp.CompiledPlanJSON = "{" },
 			func(err error) bool {
-				var syntax *json.SyntaxError
-				return errors.As(err, &syntax)
+				return errors.Is(err, port.ErrVersionInvalid) && strings.Contains(err.Error(), "not valid JSON")
 			}},
 		{"the override map names an unknown node", func(w *w13aStartWorld) {
 			w.input.OverrideMap = map[string]uuid.UUID{"finance/nowhere": uuid.New()}
@@ -365,14 +365,13 @@ func TestInstanceService_Start_TwoRefusalsAtOnceAnswerTheEarlierOneAndSkipTheLat
 	}
 }
 
-func TestInstanceService_Start_APlanWithUnparseableJSONIsAPlainError(t *testing.T) {
+func TestInstanceService_Start_APlanWithUnparseableJSONIsAVersionInvalidRefusal(t *testing.T) {
 	cases := []struct {
-		name       string
-		planJSON   string
-		wantSyntax bool
-		wantPlain  bool
+		name        string
+		planJSON    string
+		wantRefusal bool
 	}{
-		{name: "the plan JSON does not parse", planJSON: "{", wantSyntax: true, wantPlain: true},
+		{name: "the plan JSON does not parse", planJSON: "{", wantRefusal: true},
 		{name: "control: a plan that is complete starts", planJSON: compiledPlanJSON(t, assignedStage("review"))},
 	}
 	for _, tc := range cases {
@@ -383,20 +382,19 @@ func TestInstanceService_Start_APlanWithUnparseableJSONIsAPlainError(t *testing.
 			_, err := w.svc.Start(context.Background(), w.input)
 
 			assert.Equal(t, []w13aDefinitionCall{{w.tenantID, w.versionID}}, w.definitions.calls)
-			if !tc.wantPlain {
+			if !tc.wantRefusal {
 				require.NoError(t, err)
 				assert.Len(t, w.instances.byID, 1)
 				return
 			}
 			require.Error(t, err)
+			assert.ErrorIs(t, err, port.ErrVersionInvalid)
 			for _, sentinel := range []error{
-				port.ErrVersionInvalid, port.ErrVersionNotPublished, port.ErrVersionNotFound, port.ErrOverrideMapInvalid,
+				port.ErrVersionNotPublished, port.ErrVersionNotFound, port.ErrOverrideMapInvalid,
 				port.ErrDuplicateBusinessKey, port.ErrTenantNotActive, port.ErrAssigneeIneligible,
 			} {
-				assert.NotErrorIs(t, err, sentinel, "a broken plan is not a refusal the caller can fix")
+				assert.NotErrorIs(t, err, sentinel, "a broken plan is only a broken version")
 			}
-			var syntax *json.SyntaxError
-			assert.Equal(t, tc.wantSyntax, errors.As(err, &syntax))
 			assert.Empty(t, w.instances.byID, "nothing is written")
 			assert.Empty(t, w.instances.attempts)
 			assert.Empty(t, w.queues.names, "the queue is not looked up")

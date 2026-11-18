@@ -2,7 +2,6 @@ package service_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -59,20 +58,13 @@ func TestInstanceTerminate_TemporalDeadlineExceeded_ReturnsTheDeadlineErrorAndLe
 	assert.Len(t, logger.errorCalls, 1, "the failure is logged once")
 }
 
-func TestInstanceForceForward_CompiledPlanIsNotReadableJSON_ReturnsAnUnmappedErrorAndSendsNoSignal(t *testing.T) {
+func TestInstanceForceForward_CompiledPlanIsNotReadableJSON_RefusesTheVersionAndSendsNoSignal(t *testing.T) {
 	cases := []struct {
 		name string
 		plan string
-		as   func(t *testing.T, err error)
 	}{
-		{"truncated JSON", `{"main_plan":"main","plans":[`, func(t *testing.T, err error) {
-			var syntax *json.SyntaxError
-			require.ErrorAs(t, err, &syntax)
-		}},
-		{"JSON of the wrong shape", `"not a collaboration"`, func(t *testing.T, err error) {
-			var shape *json.UnmarshalTypeError
-			require.ErrorAs(t, err, &shape)
-		}},
+		{"truncated JSON", `{"main_plan":"main","plans":[`},
+		{"JSON of the wrong shape", `"not a collaboration"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,10 +75,9 @@ func TestInstanceForceForward_CompiledPlanIsNotReadableJSON_ReturnsAnUnmappedErr
 
 			err := h.svc.ForceForward(context.Background(), tenantID, inst.ID, uuid.New(), "finance/review", 4)
 
-			require.Error(t, err)
-			tc.as(t, err)
-			for _, mapped := range []error{port.ErrTargetNodeNotFound, port.ErrVersionInvalid, port.ErrRecordVersionConflict, port.ErrInvalidInstanceState, port.ErrInstanceNotFound} {
-				assert.NotErrorIs(t, err, mapped, "a stored plan that cannot be read is a server fault, not a refusal the caller can fix")
+			require.ErrorIs(t, err, port.ErrVersionInvalid, "a stored plan that cannot be read is a broken version")
+			for _, mapped := range []error{port.ErrTargetNodeNotFound, port.ErrRecordVersionConflict, port.ErrInvalidInstanceState, port.ErrInstanceNotFound} {
+				assert.NotErrorIs(t, err, mapped)
 			}
 			assert.Equal(t, []cscPlanRead{{TenantID: tenantID, VersionID: inst.WorkflowVersionID}}, h.definitions.reads)
 			assert.Empty(t, h.temporal.signals)

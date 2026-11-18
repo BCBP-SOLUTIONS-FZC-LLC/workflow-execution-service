@@ -53,6 +53,10 @@ type interpreter struct {
 	forkEntries []domain.NodeKey
 	routing     bool
 
+	// openTaskStages counts task stages that have not returned yet, so a run
+	// that ends can wait for the cleanup of the ones it abandoned.
+	openTaskStages int
+
 	external        map[string]bool
 	externalWaiting map[string]wf.Channel
 
