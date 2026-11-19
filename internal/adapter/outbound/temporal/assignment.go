@@ -98,7 +98,11 @@ func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, t
 	}
 	target := assignmentFor(active, userID)
 	if target == nil {
-		return port.CompleteAssignmentOutput{AllDone: len(active) == 0}, nil
+		vacated, err := d.vacatedUncompleted(ctx, tenantID, task.ID, userID)
+		if err != nil {
+			return port.CompleteAssignmentOutput{}, err
+		}
+		return port.CompleteAssignmentOutput{AllDone: len(active) == 0 && !vacated}, nil
 	}
 	completed, err := d.Assignments.Complete(ctx, tenantID, target.ID, []byte(resultJSON), task.RecordVersion)
 	if err != nil {
@@ -119,6 +123,21 @@ func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, t
 		return port.CompleteAssignmentOutput{}, err
 	}
 	return out, nil
+}
+
+// vacatedUncompleted reports whether the user's own assignment was closed without a result: another
+// assignee finished the task first, so this call is not the one that closes it. A user whose
+// assignment completed (a retry after a lost answer) or is not the one named by the plan is not
+// affected.
+func (d *Deps) vacatedUncompleted(ctx context.Context, tenantID, taskID, userID uuid.UUID) (bool, error) {
+	a, err := d.Assignments.GetByID(ctx, tenantID, deterministicAssignmentID(taskID, userID))
+	if errors.Is(err, domain.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("get own assignment: %w", err)
+	}
+	return a.CompletedAt == nil, nil
 }
 
 // vacateOthers closes the co-assignees' open assignments: the instance moves on
@@ -263,14 +282,16 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 // the task's record version. It runs only while the move is still pending, so a
 // retry after the move committed finds nothing to do.
 func (d *Deps) makeHolderLead(ctx context.Context, tenantID uuid.UUID, task *domain.Task, active []*domain.TaskAssignment, holder *domain.TaskAssignment, oldUserID uuid.UUID, recordVersion int64) error {
-	if err := vacateAssignmentsFor(ctx, d.Assignments, tenantID, active, oldUserID); err != nil {
-		return err
-	}
+	// The lead move locks the task row first, as every other task write does,
+	// so a completion running at the same time cannot deadlock with it.
 	if _, err := d.Assignments.SetLead(ctx, tenantID, task.ID, holder.ID, recordVersion); err != nil {
 		if errors.Is(err, domain.ErrRecordVersionConflict) {
 			return nonRetryable("VersionConflict", fmt.Errorf("reassign: lost the record_version race: %w", err))
 		}
 		return fmt.Errorf("set lead: %w", err)
+	}
+	if err := vacateAssignmentsFor(ctx, d.Assignments, tenantID, active, oldUserID); err != nil {
+		return err
 	}
 	core, err := d.instanceCore(ctx, tenantID, task.WorkflowInstanceID)
 	if err != nil {

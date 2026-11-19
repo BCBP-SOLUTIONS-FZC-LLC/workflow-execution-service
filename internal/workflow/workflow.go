@@ -14,10 +14,7 @@ import (
 func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 	planOut, err := getCompiledPlan(ctx, port.GetCompiledPlanInput{TenantID: input.TenantID, VersionID: input.VersionID})
 	if err != nil {
-		_ = updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
-			InstanceID: input.InstanceID, TenantID: input.TenantID, Status: domain.InstanceStatusFailed,
-		})
-		return ExecuteOutput{Status: domain.InstanceStatusFailed}, err
+		return failBeforeRun(ctx, input.TenantID, input.InstanceID, err)
 	}
 
 	in := newInterpreter(input.TenantID, input.InstanceID, input.ContextJSON, &planOut.Collaboration, input.OverrideMap)
@@ -25,24 +22,15 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 	mainPlan := findPlan(in.collab, in.collab.MainPlan)
 	if mainPlan == nil {
 		err := fmt.Errorf("workflow: main plan %q not found in compiled collaboration", in.collab.MainPlan)
-		_ = updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
-			InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusFailed,
-		})
-		return ExecuteOutput{Status: domain.InstanceStatusFailed}, err
+		return failBeforeRun(ctx, in.tenantID, in.instanceID, err)
 	}
 
 	if err := in.registerWaitingExternalQuery(ctx); err != nil {
-		_ = updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
-			InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusFailed,
-		})
-		return ExecuteOutput{Status: domain.InstanceStatusFailed}, err
+		return failBeforeRun(ctx, in.tenantID, in.instanceID, err)
 	}
 
 	if err := in.registerStatusQuery(ctx); err != nil {
-		_ = updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
-			InstanceID: in.instanceID, TenantID: in.tenantID, Status: domain.InstanceStatusFailed,
-		})
-		return ExecuteOutput{Status: domain.InstanceStatusFailed}, err
+		return failBeforeRun(ctx, in.tenantID, in.instanceID, err)
 	}
 
 	admin := wf.NewBufferedChannel(ctx, 8)
@@ -66,12 +54,35 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 		now := wf.Now(ctx)
 		if err := updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
 			InstanceID: in.instanceID, TenantID: in.tenantID, Status: finalStatus, CompletedAt: &now,
-		}); err != nil && runErr == nil {
-			runErr = err
+		}); err != nil {
+			runErr = joinStatusWriteErr(runErr, err)
 		}
 	}
 
 	return ExecuteOutput{Status: finalStatus}, runErr
+}
+
+// joinStatusWriteErr keeps the run's own error and the refused final status
+// write together: either alone would hide the other.
+func joinStatusWriteErr(runErr, writeErr error) error {
+	if runErr == nil {
+		return writeErr
+	}
+	return errors.Join(runErr, writeErr)
+}
+
+// failBeforeRun ends a run that failed before any step started. A refused
+// FAILED write leaves the instance row non-terminal, so it is logged; the run
+// still returns its own cause.
+func failBeforeRun(ctx wf.Context, tenantID, instanceID string, cause error) (ExecuteOutput, error) {
+	now := wf.Now(ctx)
+	if err := updateInstanceStatus(ctx, port.UpdateInstanceStatusInput{
+		InstanceID: instanceID, TenantID: tenantID, Status: domain.InstanceStatusFailed, CompletedAt: &now,
+	}); err != nil {
+		wf.GetLogger(ctx).Warn("marking the instance FAILED was refused",
+			"tenant_id", tenantID, "instance_id", instanceID, "cause", cause, "error", err)
+	}
+	return ExecuteOutput{Status: domain.InstanceStatusFailed}, cause
 }
 
 func (in *interpreter) runTopLevel(ctx wf.Context, plan *dsl.CompiledPlan, admin, baseAdmin wf.Channel) (stepOutcome, error) {
@@ -254,7 +265,9 @@ func subWorkflowPaths(sw *dsl.SubWorkflowStep) [][]dsl.ExecutionStep {
 func findRedirectTarget(steps []dsl.ExecutionStep, deptID string) ([]dsl.ExecutionStep, bool) {
 	for i := range steps {
 		if cont, ok := redirectWithinStep(&steps[i], deptID); ok {
-			return append(cont, steps[i+1:]...), true
+			// cont can be a branch's own steps: copy it so the append never
+			// writes into that branch's spare capacity.
+			return append(append([]dsl.ExecutionStep{}, cont...), steps[i+1:]...), true
 		}
 	}
 	return nil, false

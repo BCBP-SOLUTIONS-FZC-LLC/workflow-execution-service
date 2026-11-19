@@ -248,17 +248,23 @@ func (r *TaskAssignmentRepo) Complete(
 ) (*domain.TaskAssignment, error) {
 	ctx = withTenantGUC(ctx, tenantID)
 	var assignment *domain.TaskAssignment
-	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+	err := execTx(ctx, r.pool, func(dbtx db.DBTX) error {
 		q := db.New(dbtx)
+		current, err := q.GetWorkflowTaskAssignment(ctx, id)
+		if err != nil {
+			return mapErr(err)
+		}
+		// The task row is locked before any assignment row, so two assignees completing at once
+		// queue on the task and the later one loses on the version instead of deadlocking.
+		if err := bumpTaskRecordVersion(ctx, q, current.TaskID, taskRecordVersion); err != nil {
+			return err
+		}
 		row, err := q.CompleteWorkflowTaskAssignment(ctx, db.CompleteWorkflowTaskAssignmentParams{
 			ID:         id,
 			ResultJson: resultJSON,
 		})
 		if err != nil {
 			return mapErr(err)
-		}
-		if err := bumpTaskRecordVersion(ctx, q, row.TaskID, taskRecordVersion); err != nil {
-			return err
 		}
 		assignment = taskAssignmentFromDB(row)
 		return nil
@@ -282,7 +288,7 @@ func (r *TaskAssignmentRepo) moveLead(
 ) (*domain.TaskAssignment, error) {
 	ctx = withTenantGUC(ctx, tenantID)
 	var assignment *domain.TaskAssignment
-	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+	err := execTx(ctx, r.pool, func(dbtx db.DBTX) error {
 		q := db.New(dbtx)
 		if err := bumpTaskRecordVersion(ctx, q, taskID, taskRecordVersion); err != nil {
 			return err

@@ -66,7 +66,7 @@ func (in *interpreter) runSubWorkflow(ctx wf.Context, plan *dsl.CompiledPlan, sw
 			node, _, err := in.runFiredPath(ctx, plan, f)
 			return node, err
 		}
-		in.spawnFiredPath(ctx, plan, f)
+		in.spawnFiredPath(ctx, plan, f, sw.Name)
 	}
 }
 

@@ -58,17 +58,31 @@ func (in *interpreter) reportTerminated(ctx wf.Context, terminated bool, err err
 	}
 }
 
-func (in *interpreter) spawnFiredPath(ctx wf.Context, plan *dsl.CompiledPlan, f *boundaryFire) {
+// spawnFiredPath runs a non-interrupting boundary path beside its host. host
+// names the host node (or sub-workflow) for the warning a failed path logs.
+func (in *interpreter) spawnFiredPath(ctx wf.Context, plan *dsl.CompiledPlan, f *boundaryFire, host string) {
 	if len(f.Steps) > 0 {
 		wf.Go(ctx, func(gctx wf.Context) {
 			out, err := in.runSteps(gctx, plan, f.Steps, in.admin)
 			in.reportTerminated(gctx, out.Terminated, err)
+			in.warnBoundaryPathFailed(gctx, host, err)
 		})
 		return
 	}
 	if !endsPath(f) {
-		in.spawnNonInterruptingTarget(ctx, plan, f.TargetDept)
+		in.spawnNonInterruptingTarget(ctx, plan, f.TargetDept, host)
 	}
+}
+
+// warnBoundaryPathFailed makes a failed side path visible: it never fails its
+// host, so nothing else reports it. A path cut short by a cancel or an
+// instance termination did not fail.
+func (in *interpreter) warnBoundaryPathFailed(ctx wf.Context, host string, err error) {
+	if err == nil || ctx.Err() != nil || errors.Is(err, errStageAbandoned) || errors.Is(err, errInstanceTerminated) {
+		return
+	}
+	wf.GetLogger(ctx).Warn("non-interrupting boundary path failed",
+		"tenant_id", in.tenantID, "instance_id", in.instanceID, "node_key", host, "error", err)
 }
 
 func addTimerCase(ctx wf.Context, sel wf.Selector, duration string, interrupting bool, targetDept string, onFire func(boundaryFire)) (cancel func()) {

@@ -213,7 +213,7 @@ func (d *Deps) enqueueInstanceEvent(ctx context.Context, tenantID, instanceID uu
 func (d *Deps) enqueueInstanceEventWithID(ctx context.Context, tenantID, instanceID uuid.UUID, eventID, eventType string, payload any) error {
 	env, err := service.BuildEnvelope(ctx, d.Validator, eventType, tenantID.String(), "instances/"+instanceID.String(), "", payload)
 	if err != nil {
-		return fmt.Errorf("build %s envelope: %w", eventType, err)
+		return refusedEnvelope(eventType, err)
 	}
 	if eventID != "" {
 		env.ID = eventID

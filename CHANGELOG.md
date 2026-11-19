@@ -38,6 +38,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- Two force routes through the same parallel branch each run their own remaining steps; the second used to overwrite the first one's continuation.
+- A non-interrupting boundary path that fails logs a warning with tenant, instance and host node; it used to fail with no trace.
+- A refused FAILED status write is logged, and an instance that fails at start (plan read, missing main plan, query registration) gets a completion time. When a failed run's final FAILED write is also refused, the run returns both errors instead of dropping the write error.
+- A task created just as its stage was cancelled during a force route is marked SUPERSEDED; it used to stay READY forever.
+- Claiming a task or setting its lead, and completing an assignment, succeed or fail as a whole; a later failing step used to leave the task version bumped or the assignment completed.
+- Two assignees completing an all-assignee task at once, or a completion beside a reassignment to an existing holder, no longer deadlock: every task write locks the task row first, and the later one gets a version conflict.
+- The tenant purge due-list treats a limit of zero or less as the default page; a negative limit used to fail with a database error and zero returned nothing.
+- An Idempotency-Key claim expires after one minute; a pod that crashed mid-request used to leave every retry with that key answered 409 for 24 hours. The stored answer keeps the full lifetime.
+- An event payload the schema refuses ends the activity with a non-retryable ValidationError, and a task whose compiled node is JSON null is refused the same way; the first used to be retried until the activity timed out, and the second created a task with no assignees.
 - A refused request answers with the refusal's own fixed text (for example "workflow execution not found"), except a refused force-route target and an invalid override map, which still explain which node and why. It used to echo the wrapped error text, such as Temporal SDK text and signal channel names, on 404 and 409 answers.
 - A request refused with a wrapped cause logs that cause once, with request id, trace id, route and status, at Warn for 4xx and Error for 5xx.
 - Terminating an instance that another write changes at the same moment retries the transaction a few times and answers 409 RECORD_VERSION_CONFLICT only if the conflict persists. It used to retry under serializable isolation and answer 500 after the workflow was already terminated.

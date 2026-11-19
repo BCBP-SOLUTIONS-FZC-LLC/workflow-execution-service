@@ -6,6 +6,7 @@ import (
 	pgdomain "github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres/db"
@@ -17,6 +18,17 @@ func exec(ctx context.Context, pool *pgcommon.Pool, fn func(db.DBTX) error) erro
 	}
 	return pool.WithConn(ctx, func(_ context.Context, conn *pgxpool.Conn) error { //nolint:wrapcheck // the pool's error is the caller's to classify
 		return fn(conn)
+	})
+}
+
+// execTx is exec for a change of several statements that must stand or fall together: it joins the
+// caller's transaction, or opens its own when ctx carries none.
+func execTx(ctx context.Context, pool *pgcommon.Pool, fn func(db.DBTX) error) error {
+	if tx, ok := txFromContext(ctx); ok {
+		return fn(tx)
+	}
+	return pgcommon.RunInTx(ctx, pool, pgx.TxOptions{}, func(_ context.Context, tx pgx.Tx) error { //nolint:wrapcheck // the transaction helper's error is the caller's to classify
+		return fn(tx)
 	})
 }
 

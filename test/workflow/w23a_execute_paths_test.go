@@ -28,8 +28,9 @@ func w23aPlanReadFails() *wflFakes {
 }
 
 // A plan read the Definition Service rejects fails the start: the instance is
-// written FAILED once, for this tenant and instance and without a completion
-// time, no task is created, and the workflow's error is the wrapped plan error.
+// written FAILED once, for this tenant and instance with the workflow time as
+// its completion time, no task is created, and the workflow's error is the
+// wrapped plan error.
 func TestExecute_APlanReadRejectedAtStartWritesFailedAndReturnsTheWrappedError(t *testing.T) {
 	for _, name := range []string{"the status write succeeds"} {
 		t.Run(name, func(t *testing.T) {
@@ -46,10 +47,10 @@ func TestExecute_APlanReadRejectedAtStartWritesFailedAndReturnsTheWrappedError(t
 			assert.Equal(t, 1, fakes.attemptsOf(port.ActivityGetCompiledPlan), "a rejection is read once")
 			writes := wflInputs[port.UpdateInstanceStatusInput](fakes, port.ActivityUpdateInstanceStatus)
 			require.Len(t, writes, 1)
+			completedAt := w23bBase
 			assert.Equal(t, port.UpdateInstanceStatusInput{
-				InstanceID: wflInstance, TenantID: wflTenant, Status: domain.InstanceStatusFailed,
-			}, writes[0], "FAILED, no completion time, no failed branches")
-			assert.Nil(t, writes[0].CompletedAt)
+				InstanceID: wflInstance, TenantID: wflTenant, Status: domain.InstanceStatusFailed, CompletedAt: &completedAt,
+			}, writes[0], "FAILED with the workflow time, no failed branches")
 			assert.Empty(t, wflNodesCreated(fakes), "no task is created")
 		})
 	}

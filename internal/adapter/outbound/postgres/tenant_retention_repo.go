@@ -46,7 +46,7 @@ func (r *TenantRetentionRepo) RecordReturned(ctx context.Context, tenantID uuid.
 func (r *TenantRetentionRepo) ListDue(ctx context.Context, now time.Time, limit int) ([]port.TenantPurgeDue, error) {
 	var due []port.TenantPurgeDue
 	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
-		rows, err := db.New(dbtx).ListTenantsDueForPurge(ctx, db.ListTenantsDueForPurgeParams{HistoryPurgeAfter: timestamptz(now), Limit: clampInt32(limit)})
+		rows, err := db.New(dbtx).ListTenantsDueForPurge(ctx, db.ListTenantsDueForPurgeParams{HistoryPurgeAfter: timestamptz(now), Limit: clampInt32(clampLimit(limit))})
 		if err != nil {
 			return mapErr(err)
 		}

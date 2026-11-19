@@ -22,6 +22,12 @@ func nonRetryable(errType string, err error) error {
 	return temporal.NewNonRetryableApplicationError(err.Error(), errType, err) //nolint:wrapcheck // must stay *temporal.ApplicationError for NonRetryableErrorTypes matching
 }
 
+// refusedEnvelope ends the activity for an event the schema check refuses: the same payload is
+// refused on every attempt, so a retry only delays the failure.
+func refusedEnvelope(eventType string, err error) error {
+	return nonRetryable("ValidationError", fmt.Errorf("build %s envelope: %w", eventType, err))
+}
+
 // retryableOrNotFound lets an unknown row end the activity instead of retrying it
 // without limit; every other error is returned as it came.
 func retryableOrNotFound(err error) error {

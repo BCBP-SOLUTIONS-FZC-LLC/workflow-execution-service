@@ -94,10 +94,11 @@ func (in *interpreter) runDepartment(ctx wf.Context, plan *dsl.CompiledPlan, dep
 	return in.runDepartmentFrom(ctx, plan, deptID, 0)
 }
 
-func (in *interpreter) spawnNonInterruptingTarget(ctx wf.Context, plan *dsl.CompiledPlan, targetDept string) {
+func (in *interpreter) spawnNonInterruptingTarget(ctx wf.Context, plan *dsl.CompiledPlan, targetDept, host string) {
 	wf.Go(ctx, func(gctx wf.Context) {
 		_, _, err := in.runDepartment(gctx, plan, targetDept)
 		in.reportTerminated(gctx, false, err)
+		in.warnBoundaryPathFailed(gctx, host, err)
 	})
 }
 
