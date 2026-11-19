@@ -17,6 +17,10 @@ import (
 
 var _ port.TaskService = (*TaskService)(nil)
 
+// errEligibilityNotWired refuses a reassignment from a service built without the collaborators the
+// eligibility check needs, rather than letting the new assignee through unchecked.
+var errEligibilityNotWired = errors.New("task service has no eligibility checker or definitions client: refusing to reassign without the eligibility check")
+
 type TaskService struct {
 	Instances   port.InstanceRepository
 	Tasks       port.TaskRepository
@@ -443,7 +447,7 @@ func (s *TaskService) sendReassignSignal(ctx context.Context, inst *domain.Insta
 
 func (s *TaskService) checkEligible(ctx context.Context, inst *domain.Instance, task *domain.Task, userID uuid.UUID) error {
 	if s.Eligibility == nil || s.Definitions == nil {
-		return nil
+		return errEligibilityNotWired
 	}
 	plan, err := newCompiledPlanCache(s.Definitions, s.logger()).backedBy(s.Cache).mainPlan(ctx, inst.TenantID, inst.WorkflowVersionID)
 	if err != nil {

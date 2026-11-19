@@ -192,6 +192,7 @@ func TestTaskService_Reassign_OnlyAReadyOrInProgressTaskIsActionable(t *testing.
 	for _, tc := range cases {
 		t.Run(string(tc.status), func(t *testing.T) {
 			rig := newW14aTaskRig(tc.status)
+			fx9AllowEligibility(t, rig.svc, rig.departments)
 
 			err := rig.reassign()
 
@@ -206,7 +207,7 @@ func TestTaskService_Reassign_OnlyAReadyOrInProgressTaskIsActionable(t *testing.
 	}
 }
 
-func TestTaskService_Reassign_EligibilityCheckIsSkippedWhenNotFullyConfigured(t *testing.T) {
+func TestTaskService_Reassign_EligibilityCheckRefusesWhenNotFullyConfigured(t *testing.T) {
 	cases := []struct {
 		name        string
 		definitions bool
@@ -228,10 +229,10 @@ func TestTaskService_Reassign_EligibilityCheckIsSkippedWhenNotFullyConfigured(t 
 				rig.svc.Eligibility = eligibility
 			}
 
-			require.NoError(t, rig.reassign(), "an unconfigured check lets the reassignment through")
+			require.Error(t, rig.reassign(), "an unconfigured check refuses the reassignment")
 
-			rig.requireReassignSignal(t)
-			assert.Empty(t, plans.reads, "no plan is read for a check that is skipped")
+			assert.Empty(t, rig.temporal.signals, "nothing is signalled for an unchecked user")
+			assert.Empty(t, plans.reads, "no plan is read when the check cannot run")
 			assert.Empty(t, eligibility.asks, "nobody is asked about eligibility")
 		})
 	}

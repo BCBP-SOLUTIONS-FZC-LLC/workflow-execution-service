@@ -67,10 +67,10 @@ func TestReassignAssignment_ToACoAssigneeWhoIsNotLead_RetryChangesNothingMore(t 
 	assert.Len(t, world.eventsOfType(domain.EventWorkflowTaskReassigned), 1)
 }
 
-func TestReassignAssignment_ToTheUserWhoIsAlreadyLead_ChangesNothing(t *testing.T) {
+func TestReassignAssignment_ToTheUserWhoIsAlreadyLeadWithNobodyNamed_ChangesNothing(t *testing.T) {
 	t.Parallel()
 	world, _, _, lead, helper, in := wkrhSetup(t)
-	in.NewUserID, in.OldUserID = lead.UserID.String(), helper.UserID.String()
+	in.NewUserID, in.OldUserID = lead.UserID.String(), ""
 	deps, _ := wkactNewDeps(t, world)
 
 	require.NoError(t, deps.ReassignAssignment(context.Background(), in))

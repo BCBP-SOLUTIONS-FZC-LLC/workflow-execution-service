@@ -464,8 +464,11 @@ func TestOverrideNodeAssignee_CompiledPlanCannotBeServed_AnswersForTheCauseAndSt
 func TestOverrideNodeAssignee_TaskDeletedBeforeTheVersionBump_Returns404AndStoresNothing(t *testing.T) {
 	w := newW10aWorld()
 	w.tasks.vanishOnBump = true
+	w.definitions.resp = &port.CompiledWorkflow{
+		VersionID: w.instances.rows[0].WorkflowVersionID, Status: "PUBLISHED", IsValid: true, CompiledPlanJSON: w26aPlanJSON(t, uuid.Nil),
+	}
 
-	rec := do(w.router(false), asAdmin(req(http.MethodPost, overridePath(testInstID, "finance%2Freview"), map[string]any{
+	rec := do(w.router(true), asAdmin(req(http.MethodPost, overridePath(testInstID, "finance%2Freview"), map[string]any{
 		"new_user_id": uuid.New(), "record_version": w10aTaskVersion,
 	})))
 

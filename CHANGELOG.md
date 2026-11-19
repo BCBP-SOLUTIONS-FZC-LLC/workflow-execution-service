@@ -41,6 +41,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- A reassignment or node override on a task service built without its eligibility checker or definitions client is refused and nothing is signalled or stored; it used to skip the eligibility and plan checks.
+- Reassigning a task to a user who already holds it takes the named old assignee off the task and records a reassigned event in the same transaction; the old assignee used to stay active with no event.
+- Pausing or resuming an instance with a malformed admin id is refused as a non-retryable validation error; the event used to be published without an actor.
+- A revoked or otherwise non-active automation principal is answered as "no automation principal" even when the token service sends it without a principal id; it used to be reported as upstream unavailable and retried forever. An answer with no status at all is still treated as unavailable.
 - Force-back of a degraded instance with a target node key that is not in the workflow answers 409 TARGET_NODE_NOT_FOUND; it used to answer 202 and the workflow dropped the signal.
 - Cancelling an instance that has two or more failed parallel forks open records the cancellation once and ends the instance TERMINATED; it used to end the run without the cancel write, leaving the instance row DEGRADED.
 - A user who was reassigned a task and then lost the completion race to a co-assignee no longer gets "all done"; their reassigned assignment was not found before.

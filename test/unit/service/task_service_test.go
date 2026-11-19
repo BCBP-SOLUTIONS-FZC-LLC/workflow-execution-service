@@ -688,6 +688,7 @@ func TestTaskService_Defer(t *testing.T) {
 func TestTaskService_Reassign(t *testing.T) {
 	t.Run("success signals instance-reassign", func(t *testing.T) {
 		svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+		fx9AllowEligibility(t, svc, uuid.Nil)
 		tenantID, instanceID := uuid.New(), uuid.New()
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 		task := newReadyTask(tenantID, instanceID)
@@ -901,6 +902,7 @@ func TestTaskService_Reassign(t *testing.T) {
 func TestTaskService_OverrideAssignee(t *testing.T) {
 	t.Run("success persists the audit row and answers with the bumped record_version", func(t *testing.T) {
 		svc, instances, tasks, assignments, overrides, _ := newTaskServiceHarness()
+		fx9AllowEligibility(t, svc, uuid.Nil)
 		tenantID, instanceID := uuid.New(), uuid.New()
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 		task := newReadyTask(tenantID, instanceID)
@@ -999,6 +1001,7 @@ func TestTaskService_OverrideAssignee(t *testing.T) {
 
 	t.Run("no active assignee is given to the new user", func(t *testing.T) {
 		svc, instances, tasks, _, overrides, _ := newTaskServiceHarness()
+		fx9AllowEligibility(t, svc, uuid.Nil)
 		tenantID, instanceID := uuid.New(), uuid.New()
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 		task := newReadyTask(tenantID, instanceID)
@@ -1015,6 +1018,7 @@ func TestTaskService_OverrideAssignee(t *testing.T) {
 
 	t.Run("Overrides.Create error propagates", func(t *testing.T) {
 		svc, instances, tasks, assignments, overrides, _ := newTaskServiceHarness()
+		fx9AllowEligibility(t, svc, uuid.Nil)
 		tenantID, instanceID := uuid.New(), uuid.New()
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 		task := newReadyTask(tenantID, instanceID)

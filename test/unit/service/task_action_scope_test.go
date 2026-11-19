@@ -265,6 +265,7 @@ func TestTaskService_Reassign_AnAllModeTaskTakesTheLeadAsTheOldUser(t *testing.T
 
 	t.Run("a new user equal to a non-lead assignee replaces the lead", func(t *testing.T) {
 		w, nonLead, lead := setup()
+		fx9AllowEligibility(t, w.svc, w.task.DepartmentID)
 		admin := uuid.New()
 
 		_, err := w.svc.Reassign(context.Background(), w.tenant, w.task.ID, admin, nonLead, w.task.RecordVersion)
