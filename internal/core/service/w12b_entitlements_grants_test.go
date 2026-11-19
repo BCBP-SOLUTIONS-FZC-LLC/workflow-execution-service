@@ -139,9 +139,13 @@ func TestEntitlementsGrants_AFullCacheDropsAnEntryThatNeverHeldASetBeforeAnyHeld
 
 	assert.Len(t, g.entries, entitlementsCacheCap-1)
 	assert.NotContains(t, g.entries, neverHeld, "its zero fetch time makes it the oldest")
+	var dropped []uuid.UUID
 	for _, id := range held {
-		require.Contains(t, g.entries, id)
+		if _, ok := g.entries[id]; !ok {
+			dropped = append(dropped, id)
+		}
 	}
+	assert.Empty(t, dropped, "every entry that held a set is kept")
 }
 
 func TestNewEntitlementsGrants_NilClockLogAndRandFallBackToWorkingDefaults(t *testing.T) {

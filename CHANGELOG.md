@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Tests
 
+- The test targets run the Go version `go.mod` names, keep `.env` values out of the tests, regenerate stale sqlc output first and allow 30 minutes per package; the Postgres integration suite shares one container with a fresh database per test, which takes it from about seven minutes to under one. A cache-eviction test no longer spends a minute in reflection, and a degraded-park test no longer depends on the order of two signals sent at the same instant.
 - Stronger tests for task and instance read and write bodies and their edge cases, page-size clamps and subject filters against real Postgres, and the Temporal activities: input validation, assignment and lead moves, audit records and instance status writes.
 - Table-driven route tests through the production router for request validation, a 401 for an identity that is missing or not a UUID, and Idempotency-Key replay, changed-body and in-flight answers on seven routes, plus the department header on task reads.
 - Stronger tests for configuration loading, validation and defaults and the connector worker's configuration guards, and for instance terminate, force-forward and force-back through the real service and Temporal client, with a two-tenant Postgres test for the cross-tenant answers.

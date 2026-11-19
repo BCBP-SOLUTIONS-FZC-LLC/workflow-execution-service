@@ -93,8 +93,10 @@ func TestExecute_ParkAbandonedWhileAnotherParkIsOpenWritesDegradedForTheRemainin
 	fakes := wflNewFakes()
 	w9bRefuseCreates(fakes, "x2/X2", "y2/Y2")
 	wflRegisterAll(env, fakes, w9bTwoForksOneInsideACall())
+	// The two parks open one after the other: signals at the same instant are delivered in no
+	// fixed order, which made the second degraded write list one park or two.
 	wflSignalAt(env, 1*time.Second, "stage-transition", wflDone("x1", "X1", 1))
-	wflSignalAt(env, 1*time.Second, "stage-transition", wflDone("y1", "Y1", 1))
+	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("y1", "Y1", 1))
 	wflSignalAt(env, 5*time.Second, "stage-transition", wflDone("esc", "E1", 1))
 	wflSignalAt(env, 8*time.Second, "instance-force-forward", adminSignalWire{AdminUserID: "admin-7", TargetNodeKey: "x2/X2", RecordVersion: 9})
 
