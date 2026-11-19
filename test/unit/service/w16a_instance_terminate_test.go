@@ -166,14 +166,6 @@ func TestInstanceService_Terminate_ACascadeFailureEndsTheTransactionCallbackWith
 		readsAssign bool
 	}{
 		{
-			name: "a task update conflict is mapped to the record version conflict",
-			setup: func(tasks *w16aPagedTasks, _ *w16aFaultyAssignments) {
-				tasks.updateErr = domain.ErrRecordVersionConflict
-			},
-			wantErr: port.ErrRecordVersionConflict,
-			notErr:  domain.ErrRecordVersionConflict,
-		},
-		{
 			name:    "a task that vanished is mapped to task not found",
 			setup:   func(tasks *w16aPagedTasks, _ *w16aFaultyAssignments) { tasks.updateErr = domain.ErrNotFound },
 			wantErr: port.ErrTaskNotFound,

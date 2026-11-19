@@ -34,6 +34,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- A refused request answers with the refusal's own fixed text (for example "workflow execution not found"), except a refused force-route target and an invalid override map, which still explain which node and why. It used to echo the wrapped error text, such as Temporal SDK text and signal channel names, on 404 and 409 answers.
+- A request refused with a wrapped cause logs that cause once, with request id, trace id, route and status, at Warn for 4xx and Error for 5xx.
+- Terminating an instance that another write changes at the same moment retries the transaction a few times and answers 409 RECORD_VERSION_CONFLICT only if the conflict persists. It used to retry under serializable isolation and answer 500 after the workflow was already terminated.
+- Forwarding a failed branch that never completed a node records no old node key in the audit. It used to record one empty key.
+- After one of several failed branches is forwarded, or recovers after a force-back, the instance lists only the branches still failed. It used to keep listing that branch until the last one was resolved.
+- SLA warning and breach recording no longer treats a lost duplicate-insert race as success; the attempt fails and its retry finds the existing event, so one event is stored and counted once.
+- Retrying a reassignment after it already committed changes nothing. With no previous user named and no lead it used to fail with a non-retryable version conflict.
+- The task-superseded event omits `actor_user_id` when the system superseded the task. It used to carry an all-zero id; an admin force route still names the admin.
 - The workflow-task event route answers 422 NO_AUTOMATION_PRINCIPAL when the tenant has no usable automation principal (none held, or not active), so the event consumer dead-letters the event at once. It used to answer 500, and the consumer retried it until the queue's receive limit.
 - A repeated connector callback whose outcome, or the other outcome, was already delivered is acknowledged without asking the token service for the automation principal, and one still in flight is answered 503 without it. A repeat used to fail with the lookup error while the token service was down, so the connector worker kept retrying.
 - The internal active-instances, pause-tasks and delegate-impact calls refuse any all-zero id (tenant, user, delegate, delegation or department) with 400 BAD_REQUEST naming the field. Pause-tasks used to pause tasks for an all-zero user, and delegate-impact ran with all-zero ids.

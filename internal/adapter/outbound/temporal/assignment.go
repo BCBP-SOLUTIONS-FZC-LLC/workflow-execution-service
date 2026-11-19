@@ -208,10 +208,18 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 	}
 
 	ctx = withTenantGUC(ctx, tenantID)
+	newAssignmentID := reassignedAssignmentID(taskID, newUserID, in.RecordVersion)
 	return retryableOrNotFound(d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
 		task, err := d.Tasks.GetByID(ctx, tenantID, taskID)
 		if err != nil {
 			return fmt.Errorf("get task: %w", err)
+		}
+		done, err := d.assignmentExists(ctx, tenantID, newAssignmentID)
+		if err != nil {
+			return err
+		}
+		if done {
+			return nil
 		}
 		active, err := d.Assignments.ListActiveByTask(ctx, tenantID, taskID)
 		if err != nil {
@@ -233,7 +241,7 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 			return err
 		}
 		assignment := &domain.TaskAssignment{
-			ID: uuid.New(), TenantID: tenantID, TaskID: taskID, UserID: newUserID,
+			ID: newAssignmentID, TenantID: tenantID, TaskID: taskID, UserID: newUserID,
 			AssignedBy: &adminUserID, IsLead: leadHeldBy(active, oldUserID),
 		}
 		if err := d.Assignments.Create(ctx, assignment); err != nil {

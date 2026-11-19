@@ -69,6 +69,7 @@ func NewRouter(cfg RouterConfig) *Router {
 	for _, mw := range gincommon.ObservabilityMiddlewares(cfg.GinConfig) {
 		r.Use(mw)
 	}
+	r.Use(middleware.LogRequestErrors(cfg.GinConfig.Logger))
 
 	r.GET("/healthz", gincommon.HealthHandler())
 	r.GET("/readyz", readyzHandler(cfg.DB, cfg.Cache, cfg.Temporal, cfg.ShuttingDown))

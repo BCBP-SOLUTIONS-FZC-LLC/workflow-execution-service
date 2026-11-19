@@ -263,11 +263,12 @@ func OptionalUserID(id uuid.UUID) *uuid.UUID {
 type WorkflowTaskSupersededPayload struct {
 	CommonCore
 	TaskScopedCore
-	ActorUserID uuid.UUID `json:"actor_user_id"`
+	ActorUserID *uuid.UUID `json:"actor_user_id,omitempty"`
 }
 
+// NewWorkflowTaskSupersededPayload leaves the actor out when actorUserID is the all-zero id, as when the system superseded the task.
 func NewWorkflowTaskSupersededPayload(core CommonCore, task TaskScopedCore, actorUserID uuid.UUID) WorkflowTaskSupersededPayload {
-	return WorkflowTaskSupersededPayload{CommonCore: core, TaskScopedCore: task, ActorUserID: actorUserID}
+	return WorkflowTaskSupersededPayload{CommonCore: core, TaskScopedCore: task, ActorUserID: OptionalUserID(actorUserID)}
 }
 
 type WorkflowTaskFailedPayload struct {

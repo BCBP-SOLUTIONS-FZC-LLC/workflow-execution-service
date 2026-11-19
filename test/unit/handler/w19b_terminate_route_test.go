@@ -26,7 +26,8 @@ func TestTerminateRoute_TemporalReportsTheWorkflowGone_StillMarksTheInstanceTerm
 	assert.Equal(t, domain.InstanceStatusTerminated, rig.instances.rows[inst.ID].Status)
 	assert.Equal(t, []w19bTaskWrite{{testTenantID, task.ID, domain.TaskStatusFailed, 1}}, rig.tasks.statusWrites)
 	assert.Equal(t, []w19bIDs{{testTenantID, task.ID}}, rig.assignments.lookups, "the task's assignments are read for the caller's tenant")
-	assert.Equal(t, 1, rig.transactor.retried, "the writes run in one retried transaction")
+	assert.Equal(t, 1, rig.transactor.plain, "the writes run in one transaction")
+	assert.Zero(t, rig.transactor.retried, "a version conflict is answered, not retried")
 	assert.Equal(t, []w19bEvent{
 		{string(domain.EventWorkflowTaskFailed), testTenantID.String(), "instances/" + inst.ID.String()},
 		{string(domain.EventWorkflowInstanceTerminated), testTenantID.String(), "instances/" + inst.ID.String()},

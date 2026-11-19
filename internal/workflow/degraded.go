@@ -326,7 +326,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, gw 
 
 	for len(failed) > 0 || respawning > 0 || p.rerunning {
 		sel := wf.NewSelector(ctx)
-		var terminated, abandoned bool
+		var terminated, abandoned, listShrank bool
 		var cancelErr, fatal error
 
 		sel.AddReceive(p.ch, func(c wf.ReceiveChannel, more bool) {
@@ -348,6 +348,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, gw 
 				failed, cb, ok, fatal = in.handleDegradedForceForward(ctx, failed, sig)
 				if ok {
 					completed = append(completed, cb)
+					listShrank = true
 				}
 
 			case SignalInstanceForceBack:
@@ -377,6 +378,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, gw 
 				p.depts[fb.DeptID] = true
 			} else {
 				completed = append(completed, completedBranch{DeptID: out.DeptID, LastNode: out.LastNode})
+				listShrank = true
 			}
 		})
 
@@ -407,6 +409,12 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, gw 
 			return stepOutcome{Terminated: true}, cancelErr
 		}
 		p.branches = parkedBranches(plan, failed)
+		if listShrank && (len(failed) > 0 || respawning > 0 || p.rerunning) {
+			if err := in.writeDegraded(ctx); err != nil {
+				in.closePark(p)
+				return stepOutcome{}, err
+			}
+		}
 	}
 
 	p.ended = true
@@ -727,7 +735,7 @@ func (in *interpreter) handleDegradedForceForward(ctx wf.Context, failed []faile
 		return failed, completedBranch{}, false, nil
 	}
 	fb := failed[idx]
-	if err := in.recordAndRedirect(ctx, []domain.NodeKey{fb.LastCompletedNode}, sig.TargetNodeKey, domain.ForceRouteDirectionForward, sig); err != nil {
+	if err := in.recordAndRedirect(ctx, completedNodeKeys(fb), sig.TargetNodeKey, domain.ForceRouteDirectionForward, sig); err != nil {
 		if droppedRoute(ctx, err, "target_node_key", string(sig.TargetNodeKey)) {
 			return failed, completedBranch{}, false, nil
 		}
@@ -737,6 +745,14 @@ func (in *interpreter) handleDegradedForceForward(ctx wf.Context, failed []faile
 		return failed, completedBranch{}, false, err
 	}
 	return removeFailedBranch(failed, idx), completedBranch{DeptID: fb.DeptID, LastNode: sig.TargetNodeKey}, true, nil
+}
+
+// completedNodeKeys is the node a failed branch last completed; a branch whose first task failed has none.
+func completedNodeKeys(fb failedBranch) []domain.NodeKey {
+	if fb.LastCompletedNode == "" {
+		return nil
+	}
+	return []domain.NodeKey{fb.LastCompletedNode}
 }
 
 // startParkRerun answers a defer inside a park: every respawned branch is

@@ -148,7 +148,10 @@ func TestForceBackRoute_TemporalReportsTheWorkflowGone_Returns409InvalidInstance
 			w := rig.forceBack(inst.ID, 4)
 
 			require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
-			assert.Equal(t, "INVALID_INSTANCE_STATE", w19bProblemOf(t, w).Code)
+			p := w19bProblemOf(t, w)
+			assert.Equal(t, "INVALID_INSTANCE_STATE", p.Code)
+			assert.Equal(t, port.ErrWorkflowNotFound.Error(), p.Detail)
+			assert.NotContains(t, w.Body.String(), port.SignalInstanceForceBack, "the signal channel is not echoed")
 			require.Len(t, rig.sdk.signals, 1, "the signal was tried once")
 			assert.Equal(t, inst.TemporalWorkflowID, rig.sdk.signals[0].workflowID)
 			assert.Equal(t, port.SignalInstanceForceBack+":"+inst.ID.String(), rig.sdk.signals[0].channel)

@@ -191,7 +191,7 @@ func (h *Handler) reconcilerError(c *gin.Context, eventType string, err error) {
 	incIngestTotal(eventType, "error")
 	h.logError("internal events: reconciler call failed", map[string]any{"event_type": eventType, "error": err.Error()})
 	if status, _, _ := mapErr(err); status == http.StatusServiceUnavailable {
-		errResponse(c, err)
+		writeMappedProblem(c, err)
 		return
 	}
 	if errors.Is(err, port.ErrNoAutomationPrincipal) {

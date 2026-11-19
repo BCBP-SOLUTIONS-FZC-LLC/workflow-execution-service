@@ -155,7 +155,7 @@ var allEvents = []eventCase{
 		payload: func() any {
 			return domain.NewWorkflowTaskSupersededPayload(testCore(), testTaskCore(), uuid.New())
 		},
-		dropField: "actor_user_id",
+		dropField: "node_key",
 	},
 	{
 		name:      "WorkflowTaskFailed",

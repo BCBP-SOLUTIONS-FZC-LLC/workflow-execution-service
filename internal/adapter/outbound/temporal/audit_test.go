@@ -233,13 +233,13 @@ func TestRecordSLAWarning_RetriedCall_NoOp(t *testing.T) {
 	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.sla-warning")
 }
 
-// TestRecordSLAEvent_ConcurrentEnqueue_TreatedAsNoOp is the regression test
-// for the SLA dedup race: two overlapping activity attempts can both pass
-// the ExistsForTask check under READ COMMITTED before either commits, so the
-// DB-level idx_outbox_events_sla_task_unique backstop (db/migrations/000003)
-// is the real guard — Enqueue then reports ErrAlreadyExists on the loser,
-// which must be swallowed as a no-op, not surfaced as a failed activity.
-func TestRecordSLAEvent_ConcurrentEnqueue_TreatedAsNoOp(t *testing.T) {
+// TestRecordSLAEvent_ConcurrentEnqueue_FailsTheAttempt covers the SLA dedup
+// race: two overlapping activity attempts can both pass the ExistsForTask
+// check under READ COMMITTED before either commits, so the DB-level
+// idx_outbox_events_sla_task_unique backstop (db/migrations/000003) is the
+// real guard. The loser's transaction is aborted by the failed insert, so the
+// attempt fails and Temporal retries it; the retry finds the event.
+func TestRecordSLAEvent_ConcurrentEnqueue_FailsTheAttempt(t *testing.T) {
 	taskID, instanceID := uuid.New(), uuid.New()
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady}
 	outbox := &fakeOutbox{enqueueErr: domain.ErrAlreadyExists}
@@ -251,7 +251,7 @@ func TestRecordSLAEvent_ConcurrentEnqueue_TreatedAsNoOp(t *testing.T) {
 	err := deps.RecordSLAWarning(context.Background(), port.RecordSLAWarningInput{
 		InstanceID: instanceID.String(), TenantID: uuid.New().String(), TaskID: taskID.String(), NodeKey: "sales/review",
 	})
-	require.NoError(t, err, "a unique-violation race loser must be a no-op, not an activity error")
+	require.ErrorIs(t, err, domain.ErrAlreadyExists, "a unique-violation race loser fails the attempt so it is retried")
 }
 
 // TestRecordSLAEvent_ExistsForTaskError forces the Outbox.ExistsForTask

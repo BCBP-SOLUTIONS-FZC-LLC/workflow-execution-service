@@ -2,7 +2,6 @@ package temporal
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -207,9 +206,6 @@ func (d *Deps) recordSLAEvent(
 		}
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
 		if err := d.enqueueInstanceEvent(ctx, tenantID, instanceID, eventType, buildPayload(core, taskCore, task)); err != nil {
-			if errors.Is(err, domain.ErrAlreadyExists) {
-				return nil
-			}
 			return err
 		}
 		recorded = true
