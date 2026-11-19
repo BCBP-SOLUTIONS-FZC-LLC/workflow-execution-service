@@ -28,6 +28,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - Service and Postgres tests for retention sweeps, instance lifecycle and task claim and read failures, repository reads and creates under tenant row-level security, tenant purge failures, recency-guard locks, outbox signal marshalling and the version-checked defer under concurrency.
 - Workflow interpreter tests for pure plan helpers, activity options, boundary timers and messages, exclusive and external waits, park routing, SLA timers, stage cancels and defers, dispatch failures, execute outcomes and the status query.
 - Postgres repository tests for error mapping, assignment and task writes, the recency lock, outbox records, keyset paging, task filters, tenant retention, missing tenant scope and tenant-scoped writes under row-level security, and the instance start queue choice.
+- Handler and middleware tests for idempotency, internal event envelopes and recency, problem documents, strict bodies, identity routes and task reads; Temporal activity tests for task creation, instance nodes, assignments, instance status and plan reads, with real-Postgres claim and complete races.
 
 ### Removed
 
