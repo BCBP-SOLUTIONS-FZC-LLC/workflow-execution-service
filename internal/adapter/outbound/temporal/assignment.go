@@ -12,50 +12,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-func (d *Deps) ClaimAssignment(ctx context.Context, in port.ClaimAssignmentInput) error {
-	tenantID, err := uuid.Parse(in.TenantID)
-	if err != nil {
-		return nonRetryable("ValidationError", fmt.Errorf("parse tenant_id: %w", err))
-	}
-	assignmentID, err := uuid.Parse(in.AssignmentID)
-	if err != nil {
-		return nonRetryable("ValidationError", fmt.Errorf("parse assignment_id: %w", err))
-	}
-
-	ctx = withTenantGUC(ctx, tenantID)
-	return retryableOrNotFound(d.Transactor.RunInTx(ctx, func(ctx context.Context) error {
-		existing, err := d.Assignments.GetByID(ctx, tenantID, assignmentID)
-		if err != nil {
-			return fmt.Errorf("get assignment: %w", err)
-		}
-		if existing.IsLead {
-			return nil
-		}
-		task, err := d.Tasks.GetByID(ctx, tenantID, existing.TaskID)
-		if err != nil {
-			return fmt.Errorf("get task: %w", err)
-		}
-		if _, err := d.Assignments.ClaimLead(ctx, tenantID, existing.TaskID, assignmentID, task.RecordVersion); err != nil {
-			return fmt.Errorf("set lead: %w", err)
-		}
-		core, err := d.instanceCore(ctx, tenantID, task.WorkflowInstanceID)
-		if err != nil {
-			return err
-		}
-		active, err := d.Assignments.ListActiveByTask(ctx, tenantID, task.ID)
-		if err != nil {
-			return fmt.Errorf("list active assignees: %w", err)
-		}
-		assignees := make([]uuid.UUID, len(active))
-		for i, a := range active {
-			assignees[i] = a.UserID
-		}
-		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assignees}
-		payload := domain.NewWorkflowTaskClaimedPayload(core, taskCore, existing.UserID)
-		return d.enqueueInstanceEvent(ctx, tenantID, task.WorkflowInstanceID, domain.EventWorkflowTaskClaimed, payload)
-	}))
-}
-
 func (d *Deps) CompleteAssignment(ctx context.Context, in port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {

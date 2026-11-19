@@ -40,38 +40,6 @@ func newAssignmentTestDeps(tasks *fakeTaskRepo, assignments *fakeAssignmentRepo)
 	return deps, outbox
 }
 
-func TestClaimAssignment_SetsLeadAndEnqueuesClaimed(t *testing.T) {
-	tenantID, taskID := uuid.New(), uuid.New()
-	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
-	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
-	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(assignment))
-
-	err := deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{
-		AssignmentID: assignment.ID.String(), TenantID: tenantID.String(), UserID: assignment.UserID.String(), RecordVersion: 1,
-	})
-	require.NoError(t, err)
-	assert.True(t, assignment.IsLead)
-	require.Len(t, outbox.enqueued, 1)
-	assert.Equal(t, domain.EventWorkflowTaskClaimed, outbox.enqueued[0].Type)
-}
-
-// TestClaimAssignment_AlreadyLead_NoOp is the idempotency no-op for a
-// retried ClaimAssignment: a prior attempt already made this assignment
-// lead, so the retry must skip SetLead/the event re-enqueue entirely rather
-// than reusing a stale task.RecordVersion.
-func TestClaimAssignment_AlreadyLead_NoOp(t *testing.T) {
-	tenantID, taskID := uuid.New(), uuid.New()
-	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
-	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New(), IsLead: true}
-	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(assignment))
-
-	err := deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{
-		AssignmentID: assignment.ID.String(), TenantID: tenantID.String(), UserID: assignment.UserID.String(), RecordVersion: 1,
-	})
-	require.NoError(t, err)
-	assert.Empty(t, outbox.enqueued, "already-lead retry must not re-enqueue workflow.task.claimed")
-}
-
 func TestCompleteAssignment_AllDoneWhenNoActiveAssignmentsRemain(t *testing.T) {
 	taskID := uuid.New()
 	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
@@ -494,25 +462,4 @@ func TestUpdateTaskStatus_RetriedCall_NoOp(t *testing.T) {
 	require.NoError(t, deps.UpdateTaskStatus(context.Background(), in))
 	require.NoError(t, deps.UpdateTaskStatus(context.Background(), in), "a retried UpdateTaskStatus must succeed idempotently, not error on the now-stale RecordVersion")
 	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.failed")
-}
-
-func TestClaimAssignment_NamesEveryActiveAssigneeAndTheClaimer(t *testing.T) {
-	tenantID, taskID := uuid.New(), uuid.New()
-	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
-	claimer := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
-	second := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
-	third := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
-	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(claimer, second, third))
-
-	err := deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{
-		AssignmentID: claimer.ID.String(), TenantID: tenantID.String(), UserID: claimer.UserID.String(), RecordVersion: 1,
-	})
-	require.NoError(t, err)
-
-	require.Len(t, outbox.enqueued, 1)
-	var payload domain.WorkflowTaskClaimedPayload
-	require.NoError(t, json.Unmarshal(outbox.enqueued[0].Payload, &payload))
-	assert.Equal(t, claimer.UserID, payload.ClaimedByUserID)
-	assert.ElementsMatch(t, []uuid.UUID{claimer.UserID, second.UserID, third.UserID}, payload.AssigneeUserIDs,
-		"every assignee learns that the task is taken")
 }

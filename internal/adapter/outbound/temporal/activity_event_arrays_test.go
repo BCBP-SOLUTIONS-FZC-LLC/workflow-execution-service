@@ -90,30 +90,6 @@ func TestEmitters_NoActiveAssignees_SendEmptyArraysNeverNull(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); wkactRunEmitterCase(t, tc) })
 	}
-
-	t.Run("claimed", func(t *testing.T) {
-		t.Parallel()
-		world := wkactNewWorld()
-		deps, _ := wkactNewDeps(t, world)
-		tenant := uuid.New()
-		inst := world.addInstance(tenant, domain.InstanceStatusRunning)
-		task := world.addTask(tenant, inst, "sales/review", domain.TaskStatusReady)
-		task.RecordVersion = 3
-		vacated := world.addAssignment(tenant, task, false)
-
-		require.NoError(t, deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{
-			AssignmentID: vacated.ID.String(), TenantID: tenant.String(),
-		}))
-
-		evs := world.eventsOfType(domain.EventWorkflowTaskClaimed)
-		require.Len(t, evs, 1)
-		assert.JSONEq(t, "[]", string(wkactPayloadFields(t, evs[0])["assignee_user_ids"]))
-		assert.Len(t, world.callsTo("Assignments.ClaimLead"), 1, "the assignee's claim is recorded as a claim")
-		leads := world.callsTo("Assignments.SetLead")
-		require.Len(t, leads, 1)
-		assert.Equal(t, int64(3), leads[0].Version, "the lead is set at the task version read in the transaction")
-		world.requireAllCallsForTenant(t, tenant)
-	})
 }
 
 func wkactRunEmitterCase(t *testing.T, tc wkactEmitterCase) {

@@ -38,6 +38,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Removed
 
+- The unused claim activity on the worker: the task claim is a direct write that emits its own event.
 - Workflow code kept for histories recorded by earlier interpreter versions: every workflow version marker, the older-history branches behind them, and the replay fixtures and tests that exercised them. Every run takes the current path; nothing is deployed yet, so no recorded history needs the old paths. The pull-request check that asked for a version marker on each interpreter change is removed with them.
 - The unused task lookup by node key in the task service, and the derived id and conflict-ignoring insert of a node override (the record-version bump in the same transaction already refuses a repeated override).
 

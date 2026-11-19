@@ -43,9 +43,6 @@ func TestActivities_AMissingRowIsANonRetryableNotFoundError(t *testing.T) {
 		{"CancelInstance", func(d *outboundtemporal.Deps, tenant string) error {
 			return d.CancelInstance(context.Background(), port.CancelInstanceInput{InstanceID: uuid.NewString(), TenantID: tenant, AdminUserID: uuid.NewString()})
 		}},
-		{"ClaimAssignment", func(d *outboundtemporal.Deps, tenant string) error {
-			return d.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{AssignmentID: uuid.NewString(), TenantID: tenant})
-		}},
 		{"CompleteAssignment", func(d *outboundtemporal.Deps, tenant string) error {
 			_, err := d.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{TaskID: uuid.NewString(), TenantID: tenant, UserID: uuid.NewString()})
 			return err

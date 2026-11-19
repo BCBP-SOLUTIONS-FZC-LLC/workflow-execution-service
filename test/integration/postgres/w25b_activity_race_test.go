@@ -166,52 +166,37 @@ func w25bRequireRetryable(t *testing.T, err error) {
 	require.False(t, errors.As(err, &appErr), "a plain error is retried by Temporal; got application error %v", err)
 }
 
-func TestClaimAssignment_TwoAssigneesClaimTogether_TheLoserLosesTheVersionRaceThenRetriesAndTakesTheLead(t *testing.T) {
+func TestClaimLead_TwoAssigneesClaimTogether_TheLoserLosesTheVersionRaceThenRetriesAndTakesTheLead(t *testing.T) {
 	r := w25bNewRace(t)
-	claim := func(i int) func(ctx context.Context) error {
+	startVersion := r.task.RecordVersion
+	claim := func(i int, version int64) func(ctx context.Context) error {
 		return func(ctx context.Context) error {
-			return r.deps.ClaimAssignment(ctx, port.ClaimAssignmentInput{
-				TenantID: r.tenant.String(), AssignmentID: r.held[i].ID.String(), UserID: r.users[i].String(),
-			})
+			_, err := r.assignments.ClaimLead(ctx, r.tenant, r.task.ID, r.held[i].ID, version)
+			return err
 		}
 	}
-	startVersion := r.task.RecordVersion
 
-	results := r.runBoth(claim(0), claim(1))
+	results := r.runBoth(claim(0, startVersion), claim(1, startVersion))
 
 	winner, loser := w25bSettle(t, results)
-	w25bRequireRetryable(t, results[loser])
 	require.ErrorIs(t, results[loser], domain.ErrRecordVersionConflict)
 	ctx := context.Background()
 	active, err := r.assignments.ListActiveByTask(ctx, r.tenant, r.task.ID)
 	require.NoError(t, err)
-	leads := w25bLeadUsers(active)
-	assert.Equal(t, []uuid.UUID{r.users[winner]}, leads, "after the race only the winner leads")
-	assert.Equal(t, []uuid.UUID{r.users[winner]}, r.eventUsers(t, domain.EventWorkflowTaskClaimed, "claimed_by_user_id"), "the loser's attempt left no event")
+	assert.Equal(t, []uuid.UUID{r.users[winner]}, w25bLeadUsers(active), "after the race only the winner leads")
 
-	require.NoError(t, claim(loser)(ctx), "the retry reads the new version and goes through")
+	require.NoError(t, claim(loser, startVersion+1)(ctx), "the retry with the new version goes through")
 
 	active, err = r.assignments.ListActiveByTask(ctx, r.tenant, r.task.ID)
 	require.NoError(t, err)
 	assert.Len(t, active, 2, "neither assignee lost their assignment")
 	assert.Equal(t, []uuid.UUID{r.users[loser]}, w25bLeadUsers(active), "the retry cleared the first lead and took over")
-	assert.ElementsMatch(t, []uuid.UUID{r.users[0], r.users[1]}, r.eventUsers(t, domain.EventWorkflowTaskClaimed, "claimed_by_user_id"), "one claimed event per claim")
 	stored, err := r.tasks.GetByID(ctx, r.tenant, r.task.ID)
 	require.NoError(t, err)
 	assert.Equal(t, startVersion+2, stored.RecordVersion, "each successful claim moved the version once")
 
-	require.NoError(t, claim(loser)(ctx), "a repeat of the committed claim changes nothing")
-	assert.Len(t, r.eventUsers(t, domain.EventWorkflowTaskClaimed, "claimed_by_user_id"), 2)
-	stored, err = r.tasks.GetByID(ctx, r.tenant, r.task.ID)
-	require.NoError(t, err)
-	assert.Equal(t, startVersion+2, stored.RecordVersion)
-
-	otherTenant := uuid.New()
-	err = r.deps.ClaimAssignment(ctx, port.ClaimAssignmentInput{TenantID: otherTenant.String(), AssignmentID: r.held[loser].ID.String()})
-	var appErr *temporal.ApplicationError
-	require.ErrorAs(t, err, &appErr, "another tenant cannot see the assignment")
-	assert.Equal(t, "NotFoundError", appErr.Type())
-	assert.True(t, appErr.NonRetryable())
+	_, err = r.assignments.ClaimLead(ctx, uuid.New(), r.task.ID, r.held[loser].ID, stored.RecordVersion)
+	require.ErrorIs(t, err, domain.ErrNotFound, "another tenant cannot see the assignment")
 }
 
 func w25bLeadUsers(active []*domain.TaskAssignment) []uuid.UUID {

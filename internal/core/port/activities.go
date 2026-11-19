@@ -12,7 +12,6 @@ const (
 	ActivityGetCompiledPlan      = "GetCompiledPlanActivity"
 	ActivityCreateTask           = "CreateTaskActivity"
 	ActivityUpdateInstanceNodes  = "UpdateInstanceNodesActivity"
-	ActivityClaimAssignment      = "ClaimAssignmentActivity"
 	ActivityCompleteAssignment   = "CompleteAssignmentActivity"
 	ActivityDeferTask            = "DeferTaskActivity"
 	ActivityUpdateInstanceStatus = "UpdateInstanceStatusActivity"
@@ -54,13 +53,6 @@ type UpdateInstanceNodesInput struct {
 	InstanceID string
 	TenantID   string
 	NodeKeys   []domain.NodeKey
-}
-
-type ClaimAssignmentInput struct {
-	AssignmentID  string
-	TenantID      string
-	UserID        string
-	RecordVersion int64
 }
 
 type CompleteAssignmentInput struct {
