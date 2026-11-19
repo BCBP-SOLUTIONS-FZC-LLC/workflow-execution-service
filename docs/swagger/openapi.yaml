@@ -2594,7 +2594,7 @@ paths:
         IN_PROGRESS can be completed with no claim first; in assignee_mode=all only the lead
         may complete. The request forwards the completion to the workflow as a signal and
         answers 202 with the task as it stood when the signal was accepted. The workflow
-        applies it afterwards: it records claimed_at, completed_at and result_json on the
+        applies it afterwards: it records completed_at and result_json on the
         assignment, closes the co-assignees' open assignments and moves the task to COMPLETED
         as the instance moves on, so a client that needs the outcome reads the task again.
         The calling user's eligibility for the task's department and its stage's required level
