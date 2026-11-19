@@ -119,7 +119,7 @@ func TestDelegationEvent_UpstreamUnavailable_Answers503AndTheRedeliveryIsHandled
 	}
 }
 
-func TestDelegationEvent_InboxLookupFails_ProceedsAndLogsAWarning(t *testing.T) {
+func TestDelegationEvent_InboxLookupFails_Answers503AndAppliesNothing(t *testing.T) {
 	obstest.Init(t)
 	for _, ev := range w17aDelegationEventCases() {
 		t.Run(ev.name, func(t *testing.T) {
@@ -127,29 +127,23 @@ func TestDelegationEvent_InboxLookupFails_ProceedsAndLogsAWarning(t *testing.T) 
 			rig.inbox.lookupErr = errW17aInboxDown
 			tenantID, delegationID, delegatorID, delegateID, eventID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 			at := time.Now().UTC().Truncate(time.Second)
-			succeeded := map[string]string{"event_type": ev.eventType, "result": "ok"}
-			okBefore := obstest.Sum(t, w17aIngestMetric, succeeded)
 
 			w := rig.postEnvelope(w17aDelegationRoute, envelope(ev.eventType, eventID, tenantID, at, ev.data(delegationID, delegatorID, delegateID)))
 
-			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-			assert.Empty(t, w.Body.String())
-			assert.Equal(t, []w17aDelegationCall{ev.want(tenantID, delegationID, delegatorID, delegateID, at)}, rig.delegation.calls,
-				"a lookup that cannot be answered does not block the event")
+			require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+			assert.Empty(t, rig.delegation.calls, "a lookup that cannot be answered blocks the event until it is redelivered")
 			assert.Equal(t, []w17aInboxKey{{eventID, port.ConsumerMembership}}, rig.inbox.lookups)
-			assert.Equal(t, []w17aInboxKey{{eventID, port.ConsumerMembership}}, rig.inbox.marks)
-			warnings := rig.log.at("warn")
-			require.Len(t, warnings, 1)
-			assert.Equal(t, "internal events: IsProcessed check failed, proceeding", warnings[0].msg)
-			assert.Equal(t, ev.eventType, warnings[0].fields["event_type"])
-			assert.Equal(t, eventID, warnings[0].fields["event_id"])
-			assert.Equal(t, errW17aInboxDown.Error(), warnings[0].fields["error"])
-			assert.Equal(t, okBefore+1, obstest.Sum(t, w17aIngestMetric, succeeded))
+			assert.Empty(t, rig.inbox.marks)
+			errs := rig.log.at("error")
+			require.Len(t, errs, 1)
+			assert.Equal(t, "internal events: IsProcessed check failed", errs[0].msg)
+			assert.Equal(t, eventID, errs[0].fields["event_id"])
+			assert.Equal(t, errW17aInboxDown.Error(), errs[0].fields["error"])
 		})
 	}
 }
 
-func TestDelegationEvent_MarkProcessedFails_StillAnswers200AndLogsAWarning(t *testing.T) {
+func TestDelegationEvent_MarkProcessedFails_Answers503AndLogsAnError(t *testing.T) {
 	obstest.Init(t)
 	for _, ev := range w17aDelegationEventCases() {
 		t.Run(ev.name, func(t *testing.T) {
@@ -163,18 +157,17 @@ func TestDelegationEvent_MarkProcessedFails_StillAnswers200AndLogsAWarning(t *te
 
 			w := rig.postEnvelope(w17aDelegationRoute, envelope(ev.eventType, eventID, tenantID, at, ev.data(delegationID, delegatorID, delegateID)))
 
-			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-			assert.Empty(t, w.Body.String(), "the committed work is acknowledged without a body")
+			require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
 			assert.Equal(t, []w17aDelegationCall{ev.want(tenantID, delegationID, delegatorID, delegateID, at)}, rig.delegation.calls)
 			assert.Equal(t, []w17aInboxKey{{eventID, port.ConsumerMembership}}, rig.inbox.marks, "the mark was attempted for this event")
-			warnings := rig.log.at("warn")
-			require.Len(t, warnings, 1)
-			assert.Equal(t, "internal events: MarkProcessed failed after side effects committed", warnings[0].msg)
-			assert.Equal(t, ev.eventType, warnings[0].fields["event_type"])
-			assert.Equal(t, eventID, warnings[0].fields["event_id"])
-			assert.Equal(t, errW17aInboxDown.Error(), warnings[0].fields["error"])
-			assert.Equal(t, okBefore+1, obstest.Sum(t, w17aIngestMetric, succeeded))
-			assert.Equal(t, failedBefore, obstest.Sum(t, w17aIngestMetric, failed))
+			errs := rig.log.at("error")
+			require.Len(t, errs, 1)
+			assert.Equal(t, "internal events: MarkProcessed failed after side effects committed", errs[0].msg)
+			assert.Equal(t, ev.eventType, errs[0].fields["event_type"])
+			assert.Equal(t, eventID, errs[0].fields["event_id"])
+			assert.Equal(t, errW17aInboxDown.Error(), errs[0].fields["error"])
+			assert.Equal(t, okBefore, obstest.Sum(t, w17aIngestMetric, succeeded))
+			assert.Equal(t, failedBefore+1, obstest.Sum(t, w17aIngestMetric, failed))
 		})
 	}
 }

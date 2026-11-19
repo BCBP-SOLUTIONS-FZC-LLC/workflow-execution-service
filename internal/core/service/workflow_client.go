@@ -302,9 +302,17 @@ func (s *WorkflowClient) readDelegateRows(ctx context.Context, tenantID uuid.UUI
 		if err != nil {
 			return nil, fmt.Errorf("cancel by delegate: read instance of task %s: %w", task.ID, err)
 		}
+		if isClosedTaskStatus(task.Status) {
+			continue
+		}
 		rows = append(rows, delegateRow{assignment: a, task: task, instance: inst})
 	}
 	return rows, nil
+}
+
+func isClosedTaskStatus(status domain.TaskStatus) bool {
+	return status == domain.TaskStatusCompleted || status == domain.TaskStatusFailed ||
+		status == domain.TaskStatusSuperseded
 }
 
 func (s *WorkflowClient) DelegateImpact(ctx context.Context, in port.DelegateImpactInput) (port.DelegateImpactResult, error) {

@@ -910,6 +910,9 @@ func failedBranchFor(failed []failedBranch, sig adminSignal) int {
 	if sig.TargetDeptID == "" && len(failed) == 1 {
 		return 0
 	}
+	if sig.TargetDeptID == "" {
+		return -1
+	}
 	if idx := indexOfFailedBranch(failed, sig.TargetDeptID); idx >= 0 {
 		return idx
 	}

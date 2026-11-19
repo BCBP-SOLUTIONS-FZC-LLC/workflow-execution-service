@@ -64,10 +64,11 @@ func TestStopServers_OneExpiredDeadlineReachesEveryPoolDrainAndTheLaterStepsStil
 		assert.NotEmpty(t, r.fields["error"], "each warning carries the drain error")
 	}
 	assert.Equal(t, []string{
+		"background loops still running at the shutdown deadline",
 		"app db pool drain timed out",
 		"relay db pool drain timed out",
 		"lock db pool drain timed out",
-	}, warned, "every pool was drained under the same, already expired, deadline and in this order")
+	}, warned, "the loop wait and every pool drain ran under the same, already expired, deadline and in this order")
 	assert.Empty(t, log.at("error"), "the idle HTTP and metrics servers and the relay stop cleanly")
 	require.Equal(t, []string{"valkey close", "temporal close", "tracing shutdown"}, order.all(), "the steps after the timed-out drains still ran, in order")
 }

@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -104,7 +105,11 @@ func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, t
 		}
 		return port.CompleteAssignmentOutput{AllDone: len(active) == 0 && !vacated}, nil
 	}
-	completed, err := d.Assignments.Complete(ctx, tenantID, target.ID, []byte(resultJSON), task.RecordVersion)
+	var result json.RawMessage
+	if resultJSON != "" {
+		result = json.RawMessage(resultJSON)
+	}
+	completed, err := d.Assignments.Complete(ctx, tenantID, target.ID, result, task.RecordVersion)
 	if err != nil {
 		return port.CompleteAssignmentOutput{}, fmt.Errorf("complete assignment: %w", err)
 	}

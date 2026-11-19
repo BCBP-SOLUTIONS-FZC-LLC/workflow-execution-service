@@ -42,6 +42,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- Cancelling a COMPLETED or FAILED instance leaves it as it is and emits no cancelled event; it used to be rewritten as TERMINATED.
+- Completing a task without a result stores no result; an empty value used to be refused by the database, so the completion was retried without end.
+- Vacating an assignment that is already closed is not found and changes nothing, and setting or claiming the lead with an assignment of another task is not found; both used to rewrite the row.
+- Cancel-by-delegate leaves assignments on finished tasks alone, and the active-tasks-by-user listing returns only READY and IN_PROGRESS tasks; both used to include finished tasks.
+- Inbound event delivery answers 503 when the dedup check or record fails, so the sender retries; it used to proceed, or answer 200 with the delivery unrecorded. The four event routes are exempt from the 30-second request timeout, which used to answer 503 after the effects had committed.
+- Shutdown waits for the background loops before closing the database pools; a loop in the middle of a tick used to hit a closed pool.
+- A force-route with no target while two or more branches are failed targets none, and a boundary timer with a zero or negative duration is disabled; the first used to pick a branch that had never completed a node, the second fired at once.
 - Every task action that checks eligibility (claim, complete, defer, reassign, node override, a delegate's reassignment and the return to the delegator on cancel) is refused, with nothing signalled or stored, when the service has no eligibility checker or definitions client; these used to skip the eligibility and plan checks.
 - The connector worker's reclaim of stale stream entries fails and retries on the next tick when the delivery count cannot be read; it used to hand the entry over as a first delivery, so a poison entry never reached the delivery cap.
 - Reassigning a task to a user who already holds it takes the named old assignee off the task and records a reassigned event in the same transaction; the old assignee used to stay active with no event.

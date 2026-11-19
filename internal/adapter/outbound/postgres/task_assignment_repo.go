@@ -297,18 +297,22 @@ func (r *TaskAssignmentRepo) Complete(
 }
 
 func (r *TaskAssignmentRepo) SetLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {
-	return r.moveLead(ctx, tenantID, taskID, id, taskRecordVersion, (*db.Queries).SetTaskAssignmentLead)
+	return r.moveLead(ctx, tenantID, taskID, id, taskRecordVersion, func(q *db.Queries, ctx context.Context) (db.WorkflowTaskAssignment, error) {
+		return q.SetTaskAssignmentLead(ctx, db.SetTaskAssignmentLeadParams{ID: id, TaskID: taskID})
+	})
 }
 
 func (r *TaskAssignmentRepo) ClaimLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {
-	return r.moveLead(ctx, tenantID, taskID, id, taskRecordVersion, (*db.Queries).ClaimTaskAssignmentLead)
+	return r.moveLead(ctx, tenantID, taskID, id, taskRecordVersion, func(q *db.Queries, ctx context.Context) (db.WorkflowTaskAssignment, error) {
+		return q.ClaimTaskAssignmentLead(ctx, db.ClaimTaskAssignmentLeadParams{ID: id, TaskID: taskID})
+	})
 }
 
 func (r *TaskAssignmentRepo) moveLead(
 	ctx context.Context,
 	tenantID, taskID, id uuid.UUID,
 	taskRecordVersion int64,
-	promote func(*db.Queries, context.Context, uuid.UUID) (db.WorkflowTaskAssignment, error),
+	promote func(*db.Queries, context.Context) (db.WorkflowTaskAssignment, error),
 ) (*domain.TaskAssignment, error) {
 	ctx = withTenantGUC(ctx, tenantID)
 	var assignment *domain.TaskAssignment
@@ -323,7 +327,7 @@ func (r *TaskAssignmentRepo) moveLead(
 		}); err != nil {
 			return mapErr(err)
 		}
-		row, err := promote(q, ctx, id)
+		row, err := promote(q, ctx)
 		if err != nil {
 			return mapErr(err)
 		}

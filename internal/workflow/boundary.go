@@ -97,6 +97,10 @@ func addTimerCase(ctx wf.Context, sel wf.Selector, duration string, interrupting
 		wf.GetLogger(ctx).Warn("boundary timer has an unparseable duration, disabling it", "duration", duration, "error", err)
 		return func() {}
 	}
+	if dur <= 0 {
+		wf.GetLogger(ctx).Warn("boundary timer has a non-positive duration, disabling it", "duration", duration)
+		return func() {}
+	}
 	timerCtx, cancelTimer := wf.WithCancel(ctx)
 	future := wf.NewTimer(timerCtx, dur)
 	sel.AddFuture(future, func(f wf.Future) {

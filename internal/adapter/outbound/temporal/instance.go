@@ -120,7 +120,8 @@ func (d *Deps) CancelInstance(ctx context.Context, in port.CancelInstanceInput) 
 		if err != nil {
 			return fmt.Errorf("get instance: %w", err)
 		}
-		if inst.Status == domain.InstanceStatusTerminated {
+		if inst.Status == domain.InstanceStatusTerminated || inst.Status == domain.InstanceStatusCompleted ||
+			inst.Status == domain.InstanceStatusFailed {
 			return nil
 		}
 		if err := d.failActiveTasks(ctx, tenantID, instanceID, "instance_cancel"); err != nil {

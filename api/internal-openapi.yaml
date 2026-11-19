@@ -827,8 +827,9 @@ paths:
       description: >
         Internal, service-to-service endpoint called by the Org & Membership Service (not routed through
         the gateway; no x-tenant-id / x-user-id headers) when a delegation ends without a
-        replacement delegate. Vacates delegate_user_id's active READY/IN_PROGRESS assignments
-        for the given tenant that a delegation created (optionally a single delegation_id).
+        replacement delegate. Vacates delegate_user_id's active assignments on open
+        (READY, IN_PROGRESS or DEFERRED) tasks for the given tenant that a delegation created
+        (optionally a single delegation_id); assignments on completed, failed or superseded tasks are left as they are.
         Each vacated assignment returns to the assignee the delegation took it from, the
         original assignee of the work, when that assignee is eligible for the task; otherwise
         the task is left without an active assignee. The delegate's own tasks, which no

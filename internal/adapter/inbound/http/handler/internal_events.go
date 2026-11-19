@@ -227,33 +227,44 @@ func (h *Handler) decodeSchemaRegistryPayload(c *gin.Context, env events.Envelop
 }
 
 func (h *Handler) respondOK(c *gin.Context, eventID uuid.UUID, consumer, eventType string) {
-	if err := h.processedEvents.MarkProcessed(c.Request.Context(), eventID, consumer); err != nil {
-		h.logWarn("internal events: MarkProcessed failed after side effects committed", map[string]any{
-			"event_type": eventType, "event_id": eventID, "error": err.Error(),
-		})
+	if !h.recordProcessed(c, eventID, consumer, eventType) {
+		return
 	}
 	h.markOK(eventType)
 	c.Status(http.StatusOK)
 }
 
 func (h *Handler) respondIgnored(c *gin.Context, eventID uuid.UUID, consumer, eventType string) {
-	if err := h.processedEvents.MarkProcessed(c.Request.Context(), eventID, consumer); err != nil {
-		h.logWarn("internal events: MarkProcessed failed for an ignored event", map[string]any{
-			"event_type": eventType, "event_id": eventID, "error": err.Error(),
-		})
+	if !h.recordProcessed(c, eventID, consumer, eventType) {
+		return
 	}
 	incIngestTotal(eventType, resultIgnored)
 	markLastReceived(eventType)
 	c.Status(http.StatusOK)
 }
 
+func (h *Handler) recordProcessed(c *gin.Context, eventID uuid.UUID, consumer, eventType string) bool {
+	err := h.processedEvents.MarkProcessed(c.Request.Context(), eventID, consumer)
+	if err == nil {
+		return true
+	}
+	h.dedupUnavailable(c, eventType, eventID, "MarkProcessed failed after side effects committed", err)
+	return false
+}
+
+func (h *Handler) dedupUnavailable(c *gin.Context, eventType string, eventID uuid.UUID, msg string, err error) {
+	incIngestTotal(eventType, "error")
+	h.logError("internal events: "+msg, map[string]any{
+		"event_type": eventType, "event_id": eventID, "error": err.Error(),
+	})
+	writeProblem(c, http.StatusServiceUnavailable, CodeUpstreamUnavailable, "the event could not be recorded; retry the delivery", nil)
+}
+
 func (h *Handler) alreadyProcessed(c *gin.Context, eventID uuid.UUID, consumer, eventType string) bool {
 	processed, err := h.processedEvents.IsProcessed(c.Request.Context(), eventID, consumer)
 	if err != nil {
-		h.logWarn("internal events: IsProcessed check failed, proceeding", map[string]any{
-			"event_type": eventType, "event_id": eventID, "error": err.Error(),
-		})
-		return false
+		h.dedupUnavailable(c, eventType, eventID, "IsProcessed check failed", err)
+		return true
 	}
 	if !processed {
 		return false

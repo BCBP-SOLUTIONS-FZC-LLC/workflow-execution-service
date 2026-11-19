@@ -235,10 +235,10 @@ func (l *w17bLog) Error(msg string, fields map[string]any) {
 
 var _ port.Logger = (*w17bLog)(nil)
 
-func (l *w17bLog) warnWith(eventID uuid.UUID, contains string) (w17bLogLine, bool) {
+func (l *w17bLog) errorWith(eventID uuid.UUID, contains string) (w17bLogLine, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for _, line := range l.warns {
+	for _, line := range l.errs {
 		if id, ok := line.Fields["event_id"].(uuid.UUID); ok && id == eventID && strings.Contains(line.Message, contains) {
 			return line, true
 		}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -40,6 +41,7 @@ type app struct {
 	retentionSweeper *service.RetentionSweeper
 	tenantPurger     *service.TenantPurger
 	cancelExporters  context.CancelFunc
+	loops            sync.WaitGroup
 
 	sdkClient client.Client
 
@@ -95,11 +97,11 @@ func (a *app) listen(name string, srv *http.Server, serveErrs chan<- error) {
 func (a *app) startServers() <-chan error {
 	exportCtx, cancelExporters := context.WithCancel(context.Background())
 	a.cancelExporters = cancelExporters
-	go a.rlsExporter.Run(exportCtx)
-	go a.statsSampler.Run(exportCtx)
-	go a.retentionSweeper.Run(exportCtx)
+	a.goLoop(exportCtx, a.rlsExporter.Run)
+	a.goLoop(exportCtx, a.statsSampler.Run)
+	a.goLoop(exportCtx, a.retentionSweeper.Run)
 	if a.tenantPurger != nil {
-		go a.tenantPurger.Run(exportCtx)
+		a.goLoop(exportCtx, a.tenantPurger.Run)
 	}
 
 	serveErrs := make(chan error, 2)
@@ -118,6 +120,27 @@ func (a *app) startServers() <-chan error {
 	return serveErrs
 }
 
+func (a *app) goLoop(ctx context.Context, run func(context.Context)) {
+	a.loops.Add(1)
+	go func() {
+		defer a.loops.Done()
+		run(ctx)
+	}()
+}
+
+func (a *app) awaitLoops(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		a.loops.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		a.log.Warn("background loops still running at the shutdown deadline", map[string]any{"error": ctx.Err().Error()})
+	}
+}
+
 func (a *app) stopServers(ctx context.Context) {
 	a.cancelExporters()
 	if err := a.httpServer.Shutdown(ctx); err != nil {
@@ -130,6 +153,7 @@ func (a *app) stopServers(ctx context.Context) {
 	if err := a.outboxRelay.Stop(); err != nil {
 		a.log.Error("outbox relay stop error", map[string]any{"error": err.Error()})
 	}
+	a.awaitLoops(ctx)
 
 	if err := a.appPool.DrainAndClose(ctx); err != nil {
 		a.log.Warn("app db pool drain timed out", map[string]any{"error": err.Error()})
