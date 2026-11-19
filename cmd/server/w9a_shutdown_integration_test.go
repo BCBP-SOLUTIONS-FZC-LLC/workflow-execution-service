@@ -75,6 +75,8 @@ func w9aShutdownApp(t *testing.T, pgDSN, appName string, cacheErr error) (*app, 
 	}
 	appPool, err := newAppPool(ctx, cfg, log)
 	require.NoError(t, err)
+	inboxPool, err := newInboxPool(ctx, cfg, log)
+	require.NoError(t, err)
 	relayPool, err := newRelayPool(ctx, cfg, log)
 	require.NoError(t, err)
 	lockPool, err := newLockPool(ctx, cfg, log)
@@ -90,7 +92,7 @@ func w9aShutdownApp(t *testing.T, pgDSN, appName string, cacheErr error) (*app, 
 	_, cancel := context.WithCancel(context.Background())
 	a := &app{
 		cfg: cfg, log: log,
-		appPool: appPool, relayPool: relayPool, lockPool: lockPool,
+		appPool: appPool, inboxPool: inboxPool, relayPool: relayPool, lockPool: lockPool,
 		cache:           w9aCache{order: order, err: cacheErr},
 		httpServer:      &http.Server{ReadHeaderTimeout: time.Second},
 		metricsServer:   &http.Server{ReadHeaderTimeout: time.Second},
@@ -102,6 +104,7 @@ func w9aShutdownApp(t *testing.T, pgDSN, appName string, cacheErr error) (*app, 
 	t.Cleanup(func() {
 		_ = relay.Stop()
 		appPool.Close()
+		inboxPool.Close()
 		relayPool.Close()
 		lockPool.Close()
 	})
@@ -191,10 +194,13 @@ func TestPoolBuilders_GiveEachPoolItsOwnDatabaseSettingsAndTenantInjection(t *te
 		LockDatabaseURL:        w9aWithApplicationName(t, pgDSN, "w9a_pool_lock"),
 		PGMaxConns:             6, PGMinConns: 1, PGSlowQueryThresholdMS: 1, OTELServiceName: "w9a",
 	}
-	appLog, relayLog, lockLog := &w9aLogger{}, &w9aLogger{}, &w9aLogger{}
+	appLog, inboxLog, relayLog, lockLog := &w9aLogger{}, &w9aLogger{}, &w9aLogger{}, &w9aLogger{}
 	appPool, err := newAppPool(ctx, cfg, appLog)
 	require.NoError(t, err)
 	t.Cleanup(appPool.Close)
+	inboxPool, err := newInboxPool(ctx, cfg, inboxLog)
+	require.NoError(t, err)
+	t.Cleanup(inboxPool.Close)
 	relayPool, err := newRelayPool(ctx, cfg, relayLog)
 	require.NoError(t, err)
 	t.Cleanup(relayPool.Close)
@@ -212,6 +218,7 @@ func TestPoolBuilders_GiveEachPoolItsOwnDatabaseSettingsAndTenantInjection(t *te
 		wantSlowLog  bool
 	}{
 		{name: "app pool", pool: appPool, log: appLog, sessionName: "w9a_pool_app", wantMaxConns: 6, wantTenant: true, wantSlowLog: true},
+		{name: "inbox pool", pool: inboxPool, log: inboxLog, sessionName: "w9a_pool_app", wantMaxConns: inboxPoolMaxConns, wantTenant: true, wantSlowLog: true},
 		{name: "relay pool", pool: relayPool, log: relayLog, sessionName: "w9a_pool_relay", wantMaxConns: 6},
 		{name: "lock pool", pool: lockPool, log: lockLog, sessionName: "w9a_pool_lock", wantMaxConns: 4},
 	}

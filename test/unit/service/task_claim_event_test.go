@@ -72,6 +72,7 @@ func TestTaskServiceClaim_EnqueuesTheClaimedEventWithTheLeadInTheSameTransaction
 	assert.Equal(t, domain.EventWorkflowTaskClaimed, env.Type)
 	assert.Equal(t, h.tenantID.String(), env.TenantID)
 	assert.Equal(t, "instances/"+h.instanceID.String(), env.Subject)
+	assert.Equal(t, h.callerID.String(), env.Actor)
 	var payload domain.WorkflowTaskClaimedPayload
 	require.NoError(t, json.Unmarshal(env.Payload, &payload))
 	assert.Equal(t, h.callerID, payload.ClaimedByUserID)

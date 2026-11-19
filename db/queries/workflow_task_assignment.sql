@@ -88,7 +88,7 @@ WHERE task_id = $1 AND id != $2 AND is_lead;
 -- claim keeps the first claim time.
 UPDATE workflow_task_assignment
 SET is_lead = true, claimed_at = COALESCE(claimed_at, now()), updated_at = now()
-WHERE id = $1 AND task_id = $2
+WHERE id = $1 AND task_id = $2 AND is_active
 RETURNING *;
 
 -- name: SetTaskAssignmentLead :one

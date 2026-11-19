@@ -28,6 +28,7 @@ type app struct {
 	log port.Logger
 
 	appPool   *pgcommon.Pool
+	inboxPool *pgcommon.Pool
 	relayPool *pgcommon.Pool
 	lockPool  *pgcommon.Pool
 	cache     io.Closer
@@ -155,6 +156,9 @@ func (a *app) stopServers(ctx context.Context) {
 	}
 	a.awaitLoops(ctx)
 
+	if err := a.inboxPool.DrainAndClose(ctx); err != nil {
+		a.log.Warn("inbox db pool drain timed out", map[string]any{"error": err.Error()})
+	}
 	if err := a.appPool.DrainAndClose(ctx); err != nil {
 		a.log.Warn("app db pool drain timed out", map[string]any{"error": err.Error()})
 	}

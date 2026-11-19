@@ -59,7 +59,14 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 	cleanups = append(cleanups, appPool.Close)
 
-	processedEvents, err := eventbus.NewInbox(appPool, port.EventConsumers...)
+	inboxPool, err := newInboxPool(ctx, cfg, log)
+	if err != nil {
+		unwind()
+		return nil, err
+	}
+	cleanups = append(cleanups, inboxPool.Close)
+
+	processedEvents, err := eventbus.NewInbox(inboxPool, port.EventConsumers...)
 	if err != nil {
 		unwind()
 		return nil, err
@@ -272,6 +279,7 @@ func newApp(cfg *config.Config) (*app, error) {
 		cfg:              cfg,
 		log:              log,
 		appPool:          appPool,
+		inboxPool:        inboxPool,
 		relayPool:        relayPool,
 		lockPool:         lockPool,
 		cache:            cacheClient,

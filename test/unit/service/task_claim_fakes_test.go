@@ -108,6 +108,9 @@ func (r *csdAssignmentRepo) SetLead(_ context.Context, tenantID, taskID, id uuid
 
 func (r *csdAssignmentRepo) ClaimLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {
 	r.claims = append(r.claims, csdSetLeadCall{tenantID, taskID, id, taskRecordVersion})
+	if a, ok := r.byID[id]; ok && !a.IsActive {
+		return nil, domain.ErrNotFound
+	}
 	return r.SetLead(ctx, tenantID, taskID, id, taskRecordVersion)
 }
 

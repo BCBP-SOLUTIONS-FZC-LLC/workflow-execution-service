@@ -239,7 +239,7 @@ func (s *TaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.U
 
 	err = s.Transactor.RunInTx(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
 		if _, err := s.Assignments.ClaimLead(ctx, tenantID, taskID, target.ID, recordVersion); err != nil {
-			return wrapTaskErr(err)
+			return claimLeadErr(err)
 		}
 		return s.enqueueTaskClaimed(ctx, inst, task, assignments, userID)
 	})
@@ -258,11 +258,18 @@ func (s *TaskService) enqueueTaskClaimed(ctx context.Context, inst *domain.Insta
 	}
 	taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assignees}
 	payload := domain.NewWorkflowTaskClaimedPayload(instanceCore(inst), taskCore, claimedBy)
-	envelope, err := BuildEnvelope(ctx, s.Validator, domain.EventWorkflowTaskClaimed, inst.TenantID.String(), "instances/"+inst.ID.String(), "", payload)
+	envelope, err := BuildEnvelope(ctx, s.Validator, domain.EventWorkflowTaskClaimed, inst.TenantID.String(), "instances/"+inst.ID.String(), claimedBy.String(), payload)
 	if err != nil {
 		return err
 	}
 	return s.Outbox.Enqueue(ctx, envelope)
+}
+
+func claimLeadErr(err error) error {
+	if errors.Is(err, domain.ErrNotFound) {
+		return port.ErrNotAssignee
+	}
+	return wrapTaskErr(err)
 }
 
 // readCommitted answers with the task as stored now. A read-back that fails twice does not undo a change

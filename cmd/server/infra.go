@@ -21,23 +21,38 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
 
-const lockPoolMaxConns = 4
+const (
+	lockPoolMaxConns  = 4
+	inboxPoolMaxConns = 16
+)
 
 func newAppPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgcommon.Pool, error) {
-	pool, err := pgcommon.NewPool(ctx, pgcommon.Config{
+	pool, err := pgcommon.NewPool(ctx, appPoolConfig(cfg, log, cfg.PGMaxConns, cfg.PGMinConns))
+	if err != nil {
+		return nil, fmt.Errorf("app db pool: %w", err)
+	}
+	return pool, nil
+}
+
+func newInboxPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgcommon.Pool, error) {
+	pool, err := pgcommon.NewPool(ctx, appPoolConfig(cfg, log, inboxPoolMaxConns, 0))
+	if err != nil {
+		return nil, fmt.Errorf("inbox db pool: %w", err)
+	}
+	return pool, nil
+}
+
+func appPoolConfig(cfg *config.Config, log port.Logger, maxConns, minConns int32) pgcommon.Config {
+	return pgcommon.Config{
 		DSN:                cfg.DatabaseURL,
-		MaxConns:           cfg.PGMaxConns,
-		MinConns:           cfg.PGMinConns,
+		MaxConns:           maxConns,
+		MinConns:           minConns,
 		PGBouncerMode:      cfg.PGBouncerMode,
 		SlowQueryThreshold: time.Duration(cfg.PGSlowQueryThresholdMS) * time.Millisecond,
 		GUCProvider:        pgcommon.GUCSetFromContext,
 		Logger:             pglogger.New(log),
 		Tracer:             gincommon.NewSpanTracer(cfg.OTELServiceName),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("app db pool: %w", err)
 	}
-	return pool, nil
 }
 
 func newRelayPool(ctx context.Context, cfg *config.Config, log port.Logger) (*pgcommon.Pool, error) {

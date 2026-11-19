@@ -39,7 +39,7 @@ func w29aHoldConnection(t *testing.T, pool *pgcommon.Pool, release <-chan struct
 }
 
 // One context bounds the whole stop. Once it has run out, the first step to
-// need time (here, three pools with a busy connection each) reports it, and
+// need time (here, four pools with a busy connection each) reports it, and
 // no step after a timed-out one is skipped.
 func TestStopServers_OneExpiredDeadlineReachesEveryPoolDrainAndTheLaterStepsStillRun(t *testing.T) {
 	_, pgDSN := fixtures.NewTestPoolAndDSN(t)
@@ -50,7 +50,7 @@ func TestStopServers_OneExpiredDeadlineReachesEveryPoolDrainAndTheLaterStepsStil
 		close(release)
 		finished.Wait()
 	})
-	for _, pool := range []*pgcommon.Pool{a.appPool, a.relayPool, a.lockPool} {
+	for _, pool := range []*pgcommon.Pool{a.inboxPool, a.appPool, a.relayPool, a.lockPool} {
 		w29aHoldConnection(t, pool, release, &finished)
 	}
 	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
@@ -65,6 +65,7 @@ func TestStopServers_OneExpiredDeadlineReachesEveryPoolDrainAndTheLaterStepsStil
 	}
 	assert.Equal(t, []string{
 		"background loops still running at the shutdown deadline",
+		"inbox db pool drain timed out",
 		"app db pool drain timed out",
 		"relay db pool drain timed out",
 		"lock db pool drain timed out",

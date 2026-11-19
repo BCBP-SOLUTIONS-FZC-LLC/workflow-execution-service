@@ -42,7 +42,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
-- Claiming a multi-assignee task now emits `WorkflowTaskClaimed`, naming the claimer and every active assignee; the event is stored in the same transaction as the lead, so the lead and the event stand or fall together. A claim used to change the lead and tell nobody.
+- Claiming a multi-assignee task now emits `WorkflowTaskClaimed`, naming the claimer (also as the event's actor) and every active assignee; the event is stored in the same transaction as the lead, so the lead and the event stand or fall together. A claim used to change the lead and tell nobody.
+- A claim by a user whose assignment was closed a moment earlier (membership revoked, user deleted) is now refused as "not the task's active assignee" and changes nothing; it used to mark the closed assignment lead and announce a claim by someone who no longer held the task.
+- Handling inbound events no longer competes with their own effects for database connections: the event inbox has its own small connection pool, so a burst of deliveries cannot use up the application pool and stall user requests.
 - Two simultaneous deliveries of the same inbound event (delegation, user, membership, tenant and connector-task events) now apply once: the event's id is claimed before it is applied, and the second delivery waits and is acknowledged as a duplicate. Both used to pass the duplicate check and apply. A delivery whose claim cannot be written is still answered 503.
 - Start-up refuses a zero or negative `GLUE_SCHEMA_CACHE_TTL` and a `DEFINITION_SERVICE_URL` that is not an absolute http or https URL with a host, instead of silently using 5 minutes or failing on the first call.
 - The connector worker closes its Valkey connection when the first ping fails, and exits with status 1 when its health listener cannot start or stops, instead of running on without a health endpoint.
