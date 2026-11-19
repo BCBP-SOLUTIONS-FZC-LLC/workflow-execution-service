@@ -145,6 +145,7 @@ func w11aNewReassign() *w11aReassign {
 		Outbox: h.outbox, Signals: h.outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(),
 		Locks: &fakeLocker{}, Log: &fakeLogger{},
 	}
+	fx10AllowClientEligibility(h.svc, h.department)
 	return h
 }
 

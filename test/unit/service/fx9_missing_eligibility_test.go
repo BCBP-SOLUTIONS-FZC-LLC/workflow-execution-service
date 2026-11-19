@@ -67,8 +67,12 @@ func TestTaskService_OverrideAssignee_BuiltWithoutWhatTheEligibilityCheckNeeds_R
 			svc, instances, tasks, assignments, overrides, _ := newTaskServiceHarness()
 			outbox := &fakeOutbox{}
 			svc.Signals = outbox
+			svc.Eligibility, svc.Definitions = nil, nil
 			if w.withEligibility {
 				svc.Eligibility = &csdEligibility{}
+			}
+			if w.withDefinitions {
+				svc.Definitions = &fakeDefinitionClient{}
 			}
 			tenantID, instanceID := uuid.New(), uuid.New()
 			instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}

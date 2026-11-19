@@ -301,6 +301,8 @@ func (r *w26aRig) router() *gin.Engine {
 	if r.withPlanCheck {
 		svc.Definitions = r.definitions
 		svc.Eligibility = r.eligibility
+	} else {
+		fx10AllowEligibility(svc, r.task.DepartmentID)
 	}
 	return newRouter(handler.New(handler.Services{Tasks: svc}))
 }

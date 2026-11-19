@@ -114,6 +114,7 @@ func dlrNewRace(t *testing.T) *dlrRace {
 		Instances: w.svc.Instances, Tasks: w.svc.Tasks, Assignments: r.gate, Transactor: w.svc.Transactor,
 		Outbox: w.svc.Outbox, Signals: w.svc.Signals, Validator: w.svc.Validator, Ended: w.ended, Locks: r.locker,
 	}
+	fx10AllowClientEligibility(r.client, w.task.DepartmentID)
 	return r
 }
 

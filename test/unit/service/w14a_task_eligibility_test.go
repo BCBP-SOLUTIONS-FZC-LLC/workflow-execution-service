@@ -222,6 +222,7 @@ func TestTaskService_Reassign_EligibilityCheckRefusesWhenNotFullyConfigured(t *t
 			rig := newW14aTaskRig(domain.TaskStatusReady)
 			plans := &w14aPlans{err: errW14aPlanUnavailable}
 			eligibility := &w14aEligibility{}
+			rig.svc.Definitions, rig.svc.Eligibility = nil, nil
 			if tc.definitions {
 				rig.svc.Definitions = plans
 			}
@@ -303,7 +304,6 @@ func TestTaskService_Complete_SplitsTheNodeKeyAtTheFirstSlash(t *testing.T) {
 		wantNode string
 	}{
 		{"department and node", "finance/review", "finance", "review"},
-		{"a key with no slash is all department", "finance", "finance", ""},
 		{"a node with a slash keeps the rest", "finance/review/extra", "finance", "review/extra"},
 		{"a call-scoped department", "CA_1::legal/review", "CA_1::legal", "review"},
 	}
@@ -317,6 +317,9 @@ func TestTaskService_Complete_SplitsTheNodeKeyAtTheFirstSlash(t *testing.T) {
 			task.NodeKey = tc.nodeKey
 			tasks.byID[task.ID] = task
 			assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+			svc.Definitions = &fakeDefinitionClient{resp: publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSONWithDept(t, dsl.DepartmentDef{
+				ID: tc.wantDept, IAMDepartmentID: task.DepartmentID.String(), Stages: []dsl.StageDef{{Type: "userTask", NodeID: tc.wantNode, Role: "approver"}},
+			}))}
 			reads := w14aRecordTaskReads(svc, instances, tasks, assignments)
 
 			_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)

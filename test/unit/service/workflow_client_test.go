@@ -20,7 +20,9 @@ func newWorkflowClientHarness() (*service.WorkflowClient, *fakeInstanceRepo, *fa
 	tasks := newFakeTaskRepo()
 	assignments := newFakeAssignmentRepo()
 	outbox := &fakeOutbox{}
-	return &service.WorkflowClient{Instances: instances, Tasks: tasks, Assignments: assignments, Transactor: fakeTransactor{}, Outbox: outbox, Signals: outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(), Locks: &fakeLocker{}}, instances, tasks, assignments, outbox
+	svc := &service.WorkflowClient{Instances: instances, Tasks: tasks, Assignments: assignments, Transactor: fakeTransactor{}, Outbox: outbox, Signals: outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(), Locks: &fakeLocker{}}
+	fx10AllowClientEligibility(svc, uuid.Nil)
+	return svc, instances, tasks, assignments, outbox
 }
 
 func TestWorkflowClient_ReassignDelegate(t *testing.T) {
@@ -29,7 +31,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
 		instanceID := uuid.New()
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
-		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, RecordVersion: 1}
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: fx10ReviewNode, RecordVersion: 1}
 		tasks.byID[task.ID] = task
 		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
@@ -57,12 +59,12 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 
 		taggedInstanceID := uuid.New()
 		instances.byID[taggedInstanceID] = &domain.Instance{ID: taggedInstanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:tagged"}
-		taggedTask := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: taggedInstanceID, RecordVersion: 1}
+		taggedTask := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: taggedInstanceID, NodeKey: fx10ReviewNode, RecordVersion: 1}
 		tasks.byID[taggedTask.ID] = taggedTask
 		tagged := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: taggedTask.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + delegationID.String()}
 		assignments.byID[tagged.ID] = tagged
 
-		untaggedTask := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
+		untaggedTask := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: uuid.New(), NodeKey: fx10ReviewNode, RecordVersion: 1}
 		tasks.byID[untaggedTask.ID] = untaggedTask
 		untagged := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: untaggedTask.ID, UserID: oldDelegate, IsActive: true, Reason: "manual-assign"}
 		assignments.byID[untagged.ID] = untagged
@@ -109,7 +111,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
 		instanceID := uuid.New()
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
-		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, RecordVersion: 1}
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: fx10ReviewNode, RecordVersion: 1}
 		tasks.byID[task.ID] = task
 		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
@@ -125,7 +127,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
 		instanceID := uuid.New()
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
-		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, RecordVersion: 1}
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: fx10ReviewNode, RecordVersion: 1}
 		tasks.byID[task.ID] = task
 		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a
@@ -142,7 +144,7 @@ func TestWorkflowClient_ReassignDelegate(t *testing.T) {
 		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
 		instanceID := uuid.New()
 		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz"}
-		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, RecordVersion: 1}
+		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: fx10ReviewNode, RecordVersion: 1}
 		tasks.byID[task.ID] = task
 		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: oldDelegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		assignments.byID[a.ID] = a

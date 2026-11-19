@@ -42,7 +42,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
-- A reassignment or node override on a task service built without its eligibility checker or definitions client is refused and nothing is signalled or stored; it used to skip the eligibility and plan checks.
+- Every task action that checks eligibility (claim, complete, defer, reassign, node override, a delegate's reassignment and the return to the delegator on cancel) is refused, with nothing signalled or stored, when the service has no eligibility checker or definitions client; these used to skip the eligibility and plan checks.
+- The connector worker's reclaim of stale stream entries fails and retries on the next tick when the delivery count cannot be read; it used to hand the entry over as a first delivery, so a poison entry never reached the delivery cap.
 - Reassigning a task to a user who already holds it takes the named old assignee off the task and records a reassigned event in the same transaction; the old assignee used to stay active with no event.
 - Pausing or resuming an instance with a malformed admin id is refused as a non-retryable validation error; the event used to be published without an actor.
 - A revoked or otherwise non-active automation principal is answered as "no automation principal" even when the token service sends it without a principal id; it used to be reported as upstream unavailable and retried forever. An answer with no status at all is still treated as unavailable.

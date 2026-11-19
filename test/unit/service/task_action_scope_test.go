@@ -175,7 +175,7 @@ func TestTaskService_Defer_AnUnavailableDefinitionServiceIsReturnedAsUnavailable
 	cseRequireNoWorkflowCalls(t, w.temporal)
 }
 
-func TestTaskService_Defer_WithoutAnEligibilityOrDefinitionsClientTheCheckIsSkipped(t *testing.T) {
+func TestTaskService_Defer_WithoutAnEligibilityOrDefinitionsClientIsRefused(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		setup func(t *testing.T, w *cseTaskWorld) (calls func() int)
@@ -198,13 +198,11 @@ func TestTaskService_Defer_WithoutAnEligibilityOrDefinitionsClientTheCheckIsSkip
 
 			got, err := w.svc.Defer(context.Background(), w.tenant, w.task.ID, w.user, "reason", w.task.RecordVersion)
 
-			require.NoError(t, err)
-			assert.Equal(t, w.task.ID, got.ID)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "eligibility checker", "the refusal names what is missing")
+			assert.Nil(t, got)
 			assert.Zero(t, collaboratorCalls(), "the remaining collaborator is not asked either")
-			require.Len(t, w.temporal.updates, 1)
-			assert.Equal(t, "stage-defer", w.temporal.updates[0].SignalName)
-			assert.Equal(t, w.instance.ID, w.temporal.updates[0].InstanceID)
-			assert.Equal(t, w.instance.TemporalWorkflowID, w.temporal.updates[0].TemporalWorkflowID)
+			cseRequireNoWorkflowCalls(t, w.temporal)
 		})
 	}
 }

@@ -212,6 +212,7 @@ func w29bNewDeferWorld() (*w29bDeferWorld, *gin.Engine) {
 		Assignments: w29bDeferAssignments{w.assignments}, Instances: w.instances, Temporal: temporalclient.New(w.sdk),
 		Cache: w.cache, Overrides: w.overrides, Transactor: w.tx, Signals: w.outbox,
 	}
+	fx10AllowEligibility(svc, w.task.DepartmentID)
 	return w, newRouter(handler.New(handler.Services{Tasks: svc}))
 }
 

@@ -17,9 +17,9 @@ import (
 
 var _ port.TaskService = (*TaskService)(nil)
 
-// errEligibilityNotWired refuses a reassignment from a service built without the collaborators the
-// eligibility check needs, rather than letting the new assignee through unchecked.
-var errEligibilityNotWired = errors.New("task service has no eligibility checker or definitions client: refusing to reassign without the eligibility check")
+// errEligibilityNotWired refuses an action from a service built without the collaborators the
+// eligibility check needs, rather than letting the user through unchecked.
+var errEligibilityNotWired = errors.New("service has no eligibility checker or definitions client: refusing to act without the eligibility check")
 
 type TaskService struct {
 	Instances   port.InstanceRepository
@@ -147,7 +147,7 @@ func (s *TaskService) ActiveByUser(ctx context.Context, tenantID, userID uuid.UU
 
 func (s *TaskService) checkActorEligible(ctx context.Context, tenantID uuid.UUID, task *domain.Task, userID uuid.UUID) error {
 	if s.Eligibility == nil || s.Definitions == nil {
-		return nil
+		return errEligibilityNotWired
 	}
 	inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
 	if err != nil {

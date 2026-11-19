@@ -380,6 +380,25 @@ func TestConsumer_ServerRefusals_KeepTheServerErrorReachable(t *testing.T) {
 		var serverErr redis.Error
 		assert.ErrorAs(t, err, &serverErr)
 	})
+
+	t.Run("reclaim stale when the delivery count cannot be read", func(t *testing.T) {
+		stream := w30bStream(t)
+		require.NoError(t, consumer.EnsureGroup(ctx, stream, w30bGroup))
+		w30bPublish(t, client, stream, 1)
+		read, err := consumer.ReadGroup(ctx, stream, w30bGroup, w30bReaderA, 1, time.Second)
+		require.NoError(t, err)
+		require.Len(t, read, 1)
+		require.NoError(t, client.Do(ctx, "XCLAIM", stream, w30bGroup, w30bReaderA, 0, read[0].ID, "IDLE", time.Hour.Milliseconds(), "JUSTID").Err())
+		cause := errors.New("w30b xpending unavailable")
+		failing := w30bSameServer(t, client)
+		failing.AddHook(w30bFailCommand{name: "xpending", err: cause})
+
+		entries, err := valkeystream.NewConsumer(failing).ReclaimStale(ctx, stream, w30bGroup, w30bReaderB, 30*time.Minute, 10)
+
+		require.ErrorIs(t, err, cause)
+		assert.Contains(t, err.Error(), "valkeystream reclaim stale: pending count: ")
+		assert.Nil(t, entries, "an entry with an unknown delivery count is not handed to the worker as a first delivery")
+	})
 }
 
 func TestConsumer_Ack_ServerUnreachable_EntryStaysPendingAndIsReclaimedAsSecondDelivery(t *testing.T) {

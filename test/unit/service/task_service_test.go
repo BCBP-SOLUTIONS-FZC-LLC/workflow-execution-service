@@ -32,6 +32,7 @@ func newTaskServiceHarness() (*service.TaskService, *fakeInstanceRepo, *fakeTask
 		Signals:     &fakeOutbox{},
 		Temporal:    temporal,
 	}
+	fx10AllowTaskEligibility(svc, uuid.Nil)
 	return svc, instances, tasks, assignments, overrides, temporal
 }
 

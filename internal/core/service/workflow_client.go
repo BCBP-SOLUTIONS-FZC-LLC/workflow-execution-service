@@ -376,7 +376,7 @@ func pageAffectedWorkflows(affected []affectedWorkflow, page port.Page) ([]uuid.
 
 func (s *WorkflowClient) checkAssigneeEligible(ctx context.Context, plans *compiledPlanCache, answered map[eligibilityPair]bool, tenantID uuid.UUID, task *domain.Task, inst *domain.Instance, newUserID uuid.UUID) (bool, error) {
 	if s.Eligibility == nil || s.Definitions == nil {
-		return true, nil
+		return false, errEligibilityNotWired
 	}
 	plan, err := plans.mainPlan(ctx, tenantID, inst.WorkflowVersionID)
 	if err != nil {

@@ -62,7 +62,10 @@ func (c *Consumer) ReclaimStale(ctx context.Context, streamKey, group, consumerN
 		pending, err := c.client.XPendingExt(ctx, &redis.XPendingExtArgs{
 			Stream: streamKey, Group: group, Start: entries[i].ID, End: entries[i].ID, Count: 1,
 		}).Result()
-		if err == nil && len(pending) == 1 {
+		if err != nil {
+			return nil, fmt.Errorf("valkeystream reclaim stale: pending count: %w", err)
+		}
+		if len(pending) == 1 {
 			entries[i].Deliveries = pending[0].RetryCount
 		}
 	}
