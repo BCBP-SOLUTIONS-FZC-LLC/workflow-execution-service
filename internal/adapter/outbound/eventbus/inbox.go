@@ -2,10 +2,12 @@ package eventbus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/inbox"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 	"github.com/google/uuid"
@@ -50,6 +52,20 @@ func (i *Inbox) MarkProcessed(ctx context.Context, eventID uuid.UUID, consumer s
 		return err
 	}
 	if err := store.MarkProcessed(ctx, eventID); err != nil {
+		return fmt.Errorf("consumer %q: %w", consumer, err)
+	}
+	return nil
+}
+
+func (i *Inbox) Process(ctx context.Context, env events.Envelope[json.RawMessage], consumer string, apply func(ctx context.Context) error) error {
+	store, err := i.store(consumer)
+	if err != nil {
+		return err
+	}
+	err = store.Process(ctx, env, func(ctx context.Context, _ pgcommon.Tx) error {
+		return apply(ctx)
+	})
+	if err != nil {
 		return fmt.Errorf("consumer %q: %w", consumer, err)
 	}
 	return nil

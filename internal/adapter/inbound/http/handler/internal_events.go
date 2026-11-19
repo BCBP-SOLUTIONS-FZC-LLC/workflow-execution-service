@@ -104,7 +104,10 @@ func (h *Handler) decodeEnvelope(c *gin.Context) (events.Envelope[json.RawMessag
 // the type is request-controlled text, so it must not become a label value.
 const unknownEventType = "unknown"
 
-const resultIgnored = "ignored"
+const (
+	resultOK      = "ok"
+	resultIgnored = "ignored"
+)
 
 func (h *Handler) unhandledType(c *gin.Context, eventType string) {
 	h.logWarn("internal events: ignoring unhandled type", map[string]any{"event_type": eventType})
@@ -226,41 +229,40 @@ func (h *Handler) decodeSchemaRegistryPayload(c *gin.Context, env events.Envelop
 	return decoded, true
 }
 
-func (h *Handler) respondOK(c *gin.Context, eventID uuid.UUID, consumer, eventType string) {
-	if err := h.processedEvents.MarkProcessed(c.Request.Context(), eventID, consumer); err != nil {
-		h.logWarn("internal events: MarkProcessed failed after side effects committed", map[string]any{
-			"event_type": eventType, "event_id": eventID, "error": err.Error(),
-		})
+// processOnce applies an event under the claim of its id, so of two deliveries made at the same
+// time only one applies and the other is acknowledged as a duplicate. The apply function answers
+// resultOK or resultIgnored for the metric.
+func (h *Handler) processOnce(
+	c *gin.Context, env events.Envelope[json.RawMessage], eventID uuid.UUID, consumer, eventType string,
+	apply func(ctx context.Context) (string, error),
+) {
+	var applyErr error
+	result := resultOK
+	err := h.processedEvents.Process(c.Request.Context(), env, consumer, func(ctx context.Context) error {
+		result, applyErr = apply(ctx)
+		return applyErr
+	})
+	switch {
+	case applyErr != nil:
+		h.reconcilerError(c, eventType, applyErr)
+	case err != nil:
+		h.dedupUnavailable(c, eventType, eventID, err)
+	case result == resultIgnored:
+		incIngestTotal(eventType, resultIgnored)
+		markLastReceived(eventType)
+		c.Status(http.StatusOK)
+	default:
+		h.markOK(eventType)
+		c.Status(http.StatusOK)
 	}
-	h.markOK(eventType)
-	c.Status(http.StatusOK)
 }
 
-func (h *Handler) respondIgnored(c *gin.Context, eventID uuid.UUID, consumer, eventType string) {
-	if err := h.processedEvents.MarkProcessed(c.Request.Context(), eventID, consumer); err != nil {
-		h.logWarn("internal events: MarkProcessed failed for an ignored event", map[string]any{
-			"event_type": eventType, "event_id": eventID, "error": err.Error(),
-		})
-	}
-	incIngestTotal(eventType, resultIgnored)
-	markLastReceived(eventType)
-	c.Status(http.StatusOK)
-}
-
-func (h *Handler) alreadyProcessed(c *gin.Context, eventID uuid.UUID, consumer, eventType string) bool {
-	processed, err := h.processedEvents.IsProcessed(c.Request.Context(), eventID, consumer)
-	if err != nil {
-		h.logWarn("internal events: IsProcessed check failed, proceeding", map[string]any{
-			"event_type": eventType, "event_id": eventID, "error": err.Error(),
-		})
-		return false
-	}
-	if !processed {
-		return false
-	}
-	h.markOK(eventType)
-	c.Status(http.StatusOK)
-	return true
+func (h *Handler) dedupUnavailable(c *gin.Context, eventType string, eventID uuid.UUID, err error) {
+	incIngestTotal(eventType, "error")
+	h.logError("internal events: claiming or recording the event failed", map[string]any{
+		"event_type": eventType, "event_id": eventID, "error": err.Error(),
+	})
+	writeProblem(c, http.StatusServiceUnavailable, CodeUpstreamUnavailable, "the event could not be recorded; retry the delivery", nil)
 }
 
 const eventHandlingTimeout = 10 * time.Minute
@@ -345,30 +347,24 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 		}
 	}
 
-	if h.alreadyProcessed(c, eventID, port.ConsumerMembership, eventType) {
-		return
-	}
-
-	ctx := guCtx(c.Request.Context(), tenantID)
-	start := env.Timestamp
-	err = h.delegation.Reroute(ctx, port.DelegationRerouteInput{
-		TenantID:     tenantID,
-		DelegationID: delegationID,
-		DelegatorID:  delegatorID,
-		DelegateID:   delegateID,
-		Scope:        p.Scope,
-		ScopeID:      p.ScopeID,
-		StartsAt:     startsAt,
-		EmittedAt:    env.Timestamp,
-		EndsAt:       endsAt,
+	h.processOnce(c, env, eventID, port.ConsumerMembership, eventType, func(ctx context.Context) (string, error) {
+		err := h.delegation.Reroute(guCtx(ctx, tenantID), port.DelegationRerouteInput{
+			TenantID:     tenantID,
+			DelegationID: delegationID,
+			DelegatorID:  delegatorID,
+			DelegateID:   delegateID,
+			Scope:        p.Scope,
+			ScopeID:      p.ScopeID,
+			StartsAt:     startsAt,
+			EmittedAt:    env.Timestamp,
+			EndsAt:       endsAt,
+		})
+		if err != nil {
+			return "", err
+		}
+		observeDelegationReroute(time.Since(env.Timestamp).Seconds())
+		return resultOK, nil
 	})
-	if err != nil {
-		h.reconcilerError(c, eventType, err)
-		return
-	}
-	observeDelegationReroute(time.Since(start).Seconds())
-
-	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
 }
 
 func knownDelegationScope(scope string) bool {
@@ -419,29 +415,21 @@ func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json
 		return
 	}
 
-	if h.alreadyProcessed(c, eventID, port.ConsumerMembership, eventType) {
-		return
-	}
-
-	if !knownEndedReason(p.EndedReason) {
-		h.logInfo("internal events: unknown DelegationEnded ended_reason, treating as generic end", map[string]any{
-			"ended_reason": p.EndedReason,
+	h.processOnce(c, env, eventID, port.ConsumerMembership, eventType, func(ctx context.Context) (string, error) {
+		if !knownEndedReason(p.EndedReason) {
+			h.logInfo("internal events: unknown DelegationEnded ended_reason, treating as generic end", map[string]any{
+				"ended_reason": p.EndedReason,
+			})
+		}
+		err := h.delegation.Reverse(guCtx(ctx, tenantID), port.DelegationReversalInput{
+			TenantID:     tenantID,
+			DelegationID: delegationID,
+			DelegatorID:  delegatorID,
+			DelegateID:   delegateID,
+			EndedReason:  p.EndedReason,
 		})
-	}
-
-	ctx := guCtx(c.Request.Context(), tenantID)
-	if err := h.delegation.Reverse(ctx, port.DelegationReversalInput{
-		TenantID:     tenantID,
-		DelegationID: delegationID,
-		DelegatorID:  delegatorID,
-		DelegateID:   delegateID,
-		EndedReason:  p.EndedReason,
-	}); err != nil {
-		h.reconcilerError(c, eventType, err)
-		return
-	}
-
-	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
+		return resultOK, err
+	})
 }
 
 func knownEndedReason(reason string) bool {
@@ -485,21 +473,14 @@ func (h *Handler) handleUserDeleted(c *gin.Context, env events.Envelope[json.Raw
 		return
 	}
 
-	if h.alreadyProcessed(c, eventID, port.ConsumerUser, eventType) {
-		return
-	}
-
-	ctx := guCtx(c.Request.Context(), tenantID)
-	if err := h.userSafetyNet.VacateAssignments(ctx, port.UserDeletedInput{
-		TenantID:  tenantID,
-		UserID:    userID,
-		DeletedAt: deletedAt,
-	}); err != nil {
-		h.reconcilerError(c, eventType, err)
-		return
-	}
-
-	h.respondOK(c, eventID, port.ConsumerUser, eventType)
+	h.processOnce(c, env, eventID, port.ConsumerUser, eventType, func(ctx context.Context) (string, error) {
+		err := h.userSafetyNet.VacateAssignments(guCtx(ctx, tenantID), port.UserDeletedInput{
+			TenantID:  tenantID,
+			UserID:    userID,
+			DeletedAt: deletedAt,
+		})
+		return resultOK, err
+	})
 }
 
 type userAvailabilityChangedPayload struct {
@@ -548,27 +529,18 @@ func (h *Handler) handleUserAvailabilityChanged(c *gin.Context, env events.Envel
 		delegateUserID = &v
 	}
 
-	if h.alreadyProcessed(c, eventID, port.ConsumerUser, eventType) {
-		return
-	}
-
-	if !isKnownAvailability(p.Status) {
-		h.logWarn("internal events: ignoring unrecognised availability status", map[string]any{"event_type": eventType, "event_id": eventID})
-		h.respondIgnored(c, eventID, port.ConsumerUser, eventType)
-		return
-	}
-
-	scopeKey := port.UserAvailabilityScope(tenantID, userID)
-	input := port.UserAvailabilityInput{
-		TenantID: tenantID, UserID: userID, Status: p.Status,
-		OOOFrom: oooFrom, OOOUntil: oooUntil, DelegateUserID: delegateUserID, ChangedAt: env.Timestamp,
-	}
-	if err := h.applyUserAvailabilityLocked(c, env, input, scopeKey); err != nil {
-		h.reconcilerError(c, eventType, err)
-		return
-	}
-
-	h.respondOK(c, eventID, port.ConsumerUser, eventType)
+	h.processOnce(c, env, eventID, port.ConsumerUser, eventType, func(ctx context.Context) (string, error) {
+		if !isKnownAvailability(p.Status) {
+			h.logWarn("internal events: ignoring unrecognised availability status", map[string]any{"event_type": eventType, "event_id": eventID})
+			return resultIgnored, nil
+		}
+		scopeKey := port.UserAvailabilityScope(tenantID, userID)
+		input := port.UserAvailabilityInput{
+			TenantID: tenantID, UserID: userID, Status: p.Status,
+			OOOFrom: oooFrom, OOOUntil: oooUntil, DelegateUserID: delegateUserID, ChangedAt: env.Timestamp,
+		}
+		return resultOK, h.applyUserAvailabilityLocked(ctx, env, input, scopeKey)
+	})
 }
 
 func isKnownAvailability(status string) bool {
@@ -581,9 +553,9 @@ func isKnownAvailability(status string) bool {
 }
 
 func (h *Handler) applyUserAvailabilityLocked(
-	c *gin.Context, env events.Envelope[json.RawMessage], input port.UserAvailabilityInput, scopeKey string,
+	ctx context.Context, env events.Envelope[json.RawMessage], input port.UserAvailabilityInput, scopeKey string,
 ) error {
-	return h.recency.WithLock(c.Request.Context(), scopeKey, func(ctx context.Context) error {
+	return h.recency.WithLock(ctx, scopeKey, func(ctx context.Context) error {
 		shouldApply, err := h.recency.ShouldApply(ctx, scopeKey, env.Timestamp)
 		if err != nil {
 			return err
@@ -653,21 +625,14 @@ func (h *Handler) handleMembershipRevoked(c *gin.Context, env events.Envelope[js
 		return
 	}
 
-	if h.alreadyProcessed(c, eventID, port.ConsumerMembership, eventType) {
-		return
-	}
-
-	ctx := guCtx(c.Request.Context(), tenantID)
-	if err := h.userSafetyNet.VacateAssignments(ctx, port.UserDeletedInput{
-		TenantID:  tenantID,
-		UserID:    userID,
-		DeletedAt: env.Timestamp,
-	}); err != nil {
-		h.reconcilerError(c, eventType, err)
-		return
-	}
-
-	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
+	h.processOnce(c, env, eventID, port.ConsumerMembership, eventType, func(ctx context.Context) (string, error) {
+		err := h.userSafetyNet.VacateAssignments(guCtx(ctx, tenantID), port.UserDeletedInput{
+			TenantID:  tenantID,
+			UserID:    userID,
+			DeletedAt: env.Timestamp,
+		})
+		return resultOK, err
+	})
 }
 
 type tenantMembershipsPurgedPayload struct {
@@ -695,21 +660,14 @@ func (h *Handler) handleTenantMembershipsPurged(c *gin.Context, env events.Envel
 		return
 	}
 
-	if h.alreadyProcessed(c, eventID, port.ConsumerMembership, eventType) {
-		return
-	}
-
-	if err := h.applyTenantLifecycleLocked(c, eventType, true, port.TenantLifecycleInput{
-		TenantID:       tenantID,
-		Status:         domain.TenantStatusOffboarded,
-		PreviousStatus: "active",
-		ChangedAt:      env.Timestamp,
-	}); err != nil {
-		h.reconcilerError(c, eventType, err)
-		return
-	}
-
-	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
+	h.processOnce(c, env, eventID, port.ConsumerMembership, eventType, func(ctx context.Context) (string, error) {
+		return resultOK, h.applyTenantLifecycleLocked(ctx, eventType, true, port.TenantLifecycleInput{
+			TenantID:       tenantID,
+			Status:         domain.TenantStatusOffboarded,
+			PreviousStatus: "active",
+			ChangedAt:      env.Timestamp,
+		})
+	})
 }
 
 func hasPayload(raw json.RawMessage) bool {
@@ -754,35 +712,27 @@ func (h *Handler) handleTenantStateChanged(c *gin.Context, env events.Envelope[j
 		return
 	}
 
-	if h.alreadyProcessed(c, eventID, port.ConsumerMembership, eventType) {
-		return
-	}
-
-	knownStatus := domain.IsKnownTenantStatus(p.Status)
-	if !knownStatus {
-		h.logWarn("internal events: ignoring unrecognised tenant status", map[string]any{"event_type": eventType, "event_id": eventID})
-		if p.Plan == "" || p.Plan == p.PreviousPlan {
-			h.respondIgnored(c, eventID, port.ConsumerMembership, eventType)
-			return
+	h.processOnce(c, env, eventID, port.ConsumerMembership, eventType, func(ctx context.Context) (string, error) {
+		knownStatus := domain.IsKnownTenantStatus(p.Status)
+		if !knownStatus {
+			h.logWarn("internal events: ignoring unrecognised tenant status", map[string]any{"event_type": eventType, "event_id": eventID})
+			if p.Plan == "" || p.Plan == p.PreviousPlan {
+				return resultIgnored, nil
+			}
 		}
-	}
 
-	// An unrecognised status is not kept, so it commits no recency: the plan change applies and an
-	// earlier valid status event still does.
-	if err := h.applyTenantLifecycleLocked(c, eventType, knownStatus, port.TenantLifecycleInput{
-		TenantID:       tenantID,
-		Status:         p.Status,
-		PreviousStatus: p.PreviousStatus,
-		Plan:           p.Plan,
-		PreviousPlan:   p.PreviousPlan,
-		ChangedAt:      changedAt,
-		Cause:          p.Cause,
-	}); err != nil {
-		h.reconcilerError(c, eventType, err)
-		return
-	}
-
-	h.respondOK(c, eventID, port.ConsumerMembership, eventType)
+		// An unrecognised status is not kept, so it commits no recency: the plan change applies and an
+		// earlier valid status event still does.
+		return resultOK, h.applyTenantLifecycleLocked(ctx, eventType, knownStatus, port.TenantLifecycleInput{
+			TenantID:       tenantID,
+			Status:         p.Status,
+			PreviousStatus: p.PreviousStatus,
+			Plan:           p.Plan,
+			PreviousPlan:   p.PreviousPlan,
+			ChangedAt:      changedAt,
+			Cause:          p.Cause,
+		})
+	})
 }
 
 func (h *Handler) shouldApplyTenantChange(ctx context.Context, scopeKey string, in port.TenantLifecycleInput) (bool, error) {
@@ -792,9 +742,9 @@ func (h *Handler) shouldApplyTenantChange(ctx context.Context, scopeKey string, 
 	return h.recency.ShouldApply(ctx, scopeKey, in.ChangedAt)
 }
 
-func (h *Handler) applyTenantLifecycleLocked(c *gin.Context, eventType string, commitRecency bool, in port.TenantLifecycleInput) error {
+func (h *Handler) applyTenantLifecycleLocked(ctx context.Context, eventType string, commitRecency bool, in port.TenantLifecycleInput) error {
 	scopeKey := "tenant:" + in.TenantID.String()
-	return h.recency.WithLock(c.Request.Context(), scopeKey, func(ctx context.Context) error {
+	return h.recency.WithLock(ctx, scopeKey, func(ctx context.Context) error {
 		shouldApply, err := h.shouldApplyTenantChange(ctx, scopeKey, in)
 		if err != nil {
 			return err

@@ -212,6 +212,7 @@ func w9aAppConfig(t *testing.T, pgDSN, temporalAddr string, env map[string]strin
 func w9aCloseApp(a *app) {
 	a.relayPool.Close()
 	a.appPool.Close()
+	a.inboxPool.Close()
 	a.lockPool.Close()
 	_ = a.cache.Close()
 	a.sdkClient.Close()

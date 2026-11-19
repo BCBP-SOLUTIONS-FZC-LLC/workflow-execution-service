@@ -96,11 +96,14 @@ func (c *Codec) Encode(ctx context.Context, schemaName string, payload json.RawM
 }
 
 func (c *Codec) Decode(_ context.Context, _ string, encoded []byte) (json.RawMessage, error) {
-	if len(encoded) < glueHeaderSize {
-		return nil, fmt.Errorf("glue codec: encoded payload is %d bytes — shorter than the %d-byte Glue header", len(encoded), glueHeaderSize)
+	if len(encoded) <= glueHeaderSize {
+		return nil, fmt.Errorf("glue codec: encoded payload is %d bytes — no payload after the %d-byte Glue header", len(encoded), glueHeaderSize)
 	}
 	if encoded[0] != glueHeaderVersion {
 		return nil, fmt.Errorf("glue codec: unexpected header version byte 0x%02x — want 0x%02x", encoded[0], glueHeaderVersion)
+	}
+	if encoded[1] != glueNoCompression {
+		return nil, fmt.Errorf("glue codec: unsupported compression byte 0x%02x — want 0x%02x", encoded[1], glueNoCompression)
 	}
 	return json.RawMessage(encoded[glueHeaderSize:]), nil
 }
@@ -266,7 +269,18 @@ func (c *Codec) lookup(ctx context.Context, schemaName string) (string, error) {
 	if _, err := uuid.Parse(*result.SchemaVersionId); err != nil {
 		return "", fmt.Errorf("glue returned schema version id %q that is not a UUID: %w", *result.SchemaVersionId, err)
 	}
+	if result.Status != types.SchemaVersionStatusAvailable {
+		return "", markUnavailable(schemaName, result.Status)
+	}
 	return *result.SchemaVersionId, nil
+}
+
+func markUnavailable(schemaName string, status types.SchemaVersionStatus) error {
+	err := fmt.Errorf("glue schema %q latest version is %q, not AVAILABLE", schemaName, status)
+	if status == types.SchemaVersionStatusPending {
+		return fmt.Errorf("%w: %w", events.ErrRetryable, err)
+	}
+	return err
 }
 
 func markTransient(err error) error {

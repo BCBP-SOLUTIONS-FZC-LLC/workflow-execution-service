@@ -258,7 +258,7 @@ func TestWorkflowClient_ReassignDelegate_AnEligibilityErrorFailsTheCallAndIsNotR
 	isolation.require(t, h)
 }
 
-func TestWorkflowClient_ReassignDelegate_WithoutAnEligibilityOrDefinitionsClientEveryTaskMovesWithoutARead(t *testing.T) {
+func TestWorkflowClient_ReassignDelegate_WithoutAnEligibilityOrDefinitionsClientRefusesWithoutARead(t *testing.T) {
 	cases := []struct {
 		name  string
 		build func(h *dlgfixClient, definitions *w12bDefinitionsRecorder, eligibility *w12bEligibility)
@@ -281,12 +281,12 @@ func TestWorkflowClient_ReassignDelegate_WithoutAnEligibilityOrDefinitionsClient
 
 			count, err := h.reassign()
 
-			require.NoError(t, err)
-			assert.Equal(t, 2, count)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "eligibility checker", "the refusal names what is missing")
+			assert.Zero(t, count)
 			assert.Empty(t, eligibility.calls, "nothing asks eligibility")
 			assert.Empty(t, definitions.calls, "and no plan is read")
-			assert.True(t, h.holdsActive(first.task.ID, h.newDelegate))
-			assert.True(t, h.holdsActive(second.task.ID, h.newDelegate))
+			h.requireUntouched(t, first, second)
 			isolation.require(t, h)
 		})
 	}

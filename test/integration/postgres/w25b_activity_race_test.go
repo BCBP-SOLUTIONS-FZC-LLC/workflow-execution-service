@@ -106,6 +106,7 @@ func w25bNewRace(t *testing.T) *w25bRace {
 	require.NoError(t, r.tasks.Create(withGUC(ctx, r.tenant), r.task))
 	for i, user := range r.users {
 		r.held[i] = newTaskAssignment(r.tenant, r.task.ID, user)
+		r.held[i].ID = domain.DeterministicAssignmentID(r.task.ID, user)
 		require.NoError(t, r.assignments.Create(withGUC(ctx, r.tenant), r.held[i]))
 	}
 	return r

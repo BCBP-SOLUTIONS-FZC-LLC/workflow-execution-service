@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"html"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
@@ -142,9 +142,11 @@ func flattenTypeNode(n *yaml.Node) string {
 	}
 }
 
-var AsyncAPIHandler = asyncAPIHandlerFor(api.AsyncAPI)
+func AsyncAPIHandler(env string) gin.HandlerFunc {
+	return asyncAPIHandlerFor(api.AsyncAPI, env)
+}
 
-func asyncAPIHandlerFor(document []byte) gin.HandlerFunc {
+func asyncAPIHandlerFor(document []byte, env string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var spec asyncSpec
 		if err := yaml.Unmarshal(document, &spec); err != nil {
@@ -158,7 +160,7 @@ func asyncAPIHandlerFor(document []byte) gin.HandlerFunc {
 		}
 
 		var buf bytes.Buffer
-		renderPage(&buf, &spec, os.Getenv("ENV"))
+		renderPage(&buf, &spec, env)
 
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, buf.String())
@@ -210,12 +212,12 @@ func renderPage(w *bytes.Buffer, s *asyncSpec, env string) {
 	w.WriteString(`<a href="#info">Info</a><a href="#servers">Servers</a></div>`)
 	w.WriteString(`<div class="sidebar-group"><div class="sidebar-label">Messages</div>`)
 	for _, name := range sortedKeys(s.Comps.Messages) {
-		fmt.Fprintf(w, `<a href="#msg-%s">%s</a>`, name, html.EscapeString(name))
+		fmt.Fprintf(w, `<a href="#msg-%s">%s</a>`, html.EscapeString(name), html.EscapeString(name))
 	}
 	w.WriteString(`</div>`)
 	w.WriteString(`<div class="sidebar-group"><div class="sidebar-label">Schemas</div>`)
 	for _, name := range sortedKeys(s.Comps.Schemas) {
-		fmt.Fprintf(w, `<a href="#schema-%s">%s</a>`, name, html.EscapeString(name))
+		fmt.Fprintf(w, `<a href="#schema-%s">%s</a>`, html.EscapeString(name), html.EscapeString(name))
 	}
 	w.WriteString(`</div></nav>`)
 
@@ -224,9 +226,9 @@ func renderPage(w *bytes.Buffer, s *asyncSpec, env string) {
 	w.WriteString(`<div class="section" id="info">`)
 	w.WriteString(`<div class="section-title">Info</div>`)
 	if s.Info.Desc != "" {
-		short := s.Info.Desc
-		if len(short) > 800 {
-			short = short[:800] + "\n\n[truncated — see api/asyncapi.yaml for full description]"
+		short, cut := cutAtRune(s.Info.Desc, 800)
+		if cut {
+			short += "\n\n[truncated — see api/asyncapi.yaml for full description]"
 		}
 		fmt.Fprintf(w, `<div class="info-desc">%s</div>`, html.EscapeString(short))
 	}
@@ -283,10 +285,7 @@ func renderServers(w *bytes.Buffer, node *yaml.Node) {
 				case "protocol":
 					proto = val.Content[j+1].Value
 				case "description":
-					desc = val.Content[j+1].Value
-					if len(desc) > 200 {
-						desc = desc[:200] + "…"
-					}
+					desc = shortDescription(val.Content[j+1].Value)
 				}
 			}
 			fmt.Fprintf(w, `<div class="server-item">
@@ -329,7 +328,7 @@ func renderMessage(w *bytes.Buffer, name string, msg *asyncMessage, comps *async
   <button class="toggle-btn" type="button" tabindex="-1" aria-hidden="true">▸</button>
 </div>
 <div class="card-body" style="display:none">
-`, name, badgeClass, badgeLabel, html.EscapeString(title),
+`, html.EscapeString(name), badgeClass, badgeLabel, html.EscapeString(title),
 		func() string {
 			if eventType != "" {
 				return fmt.Sprintf(`<span class="sns-attr">event_type: %s</span>`, html.EscapeString(eventType))
@@ -341,11 +340,16 @@ func renderMessage(w *bytes.Buffer, name string, msg *asyncMessage, comps *async
 		fmt.Fprintf(w, `<p class="card-summary" style="margin-bottom:.75rem">%s</p>`, html.EscapeString(summary))
 	}
 
-	payloadRef := strings.TrimPrefix(msg.Payload.Ref, "#/components/schemas/")
+	payloadRef := strings.TrimPrefix(msg.Payload.Ref, schemaRefPrefix)
 	if payloadRef != "" {
-		if sc, ok := comps.Schemas[payloadRef]; ok {
-			fmt.Fprintf(w, `<div style="font-size:.78rem;color:var(--muted);margin-bottom:.5rem">Payload: <span style="color:var(--code);font-family:monospace">%s</span></div>`, html.EscapeString(payloadRef))
-			renderPropsTable(w, resolveSchema(&sc, comps), payloadRef)
+		sc, found := comps.Schemas[payloadRef]
+		notFound := ""
+		if !found {
+			notFound = " (not found)"
+		}
+		fmt.Fprintf(w, `<div style="font-size:.78rem;color:var(--muted);margin-bottom:.5rem">Payload: <span style="color:var(--code);font-family:monospace">%s</span>%s</div>`, html.EscapeString(payloadRef), notFound)
+		if found {
+			renderPropsTable(w, resolveSchema(&sc, comps), name+"--"+payloadRef)
 		}
 	}
 
@@ -355,7 +359,7 @@ func renderMessage(w *bytes.Buffer, name string, msg *asyncMessage, comps *async
 func renderSchema(w *bytes.Buffer, name string, sc *asyncSchema, comps *asyncComponents) {
 	fmt.Fprintf(w, `<div class="card" id="schema-%s">
 <div class="card-header"><span class="card-title" style="font-family:monospace">%s</span><button class="toggle-btn" type="button" tabindex="-1" aria-hidden="true">▸</button></div>
-<div class="card-body" style="display:none">`, name, html.EscapeString(name))
+<div class="card-body" style="display:none">`, html.EscapeString(name), html.EscapeString(name))
 	renderPropsTable(w, resolveSchema(sc, comps), name)
 	w.WriteString(`</div></div>`)
 }
@@ -397,10 +401,7 @@ func renderPropsTable(w *bytes.Buffer, sc *asyncSchema, schemaID string) {
 		if reqSet[k] {
 			req = `<span class="prop-req">required</span>`
 		}
-		desc := strings.TrimSpace(v.Desc)
-		if len(desc) > 200 {
-			desc = desc[:200] + "…"
-		}
+		desc := shortDescription(strings.TrimSpace(v.Desc))
 		descHTML := html.EscapeString(desc)
 
 		enumHTML := ""
@@ -441,14 +442,43 @@ func renderPropsTable(w *bytes.Buffer, sc *asyncSchema, schemaID string) {
 			rowID = fmt.Sprintf(` id="field--%s--%s"`, html.EscapeString(schemaID), html.EscapeString(k))
 		}
 		fmt.Fprintf(w, `<tr%s>
-<td onclick="copyText('%s')" title="Click to copy" style="cursor:pointer"><span class="prop-name">%s</span></td>
+<td onclick="copyText(%s)" title="Click to copy" style="cursor:pointer"><span class="prop-name">%s</span></td>
 <td>%s</td>
 <td>%s</td>
 <td><span class="prop-desc">%s</span>%s%s%s</td>
-</tr>`, rowID, html.EscapeString(k), html.EscapeString(k), typeStr, req, descHTML, enumHTML, itemEnumHTML, exampleHTML)
+</tr>`, rowID, html.EscapeString(copyArgument(k)), html.EscapeString(k), typeStr, req, descHTML, enumHTML, itemEnumHTML, exampleHTML)
 	}
 
 	w.WriteString(`</tbody></table>`)
+}
+
+func copyArgument(text string) string {
+	quoted, err := json.Marshal(text)
+	if err != nil {
+		return `""`
+	}
+	return string(quoted)
+}
+
+// cutAtRune shortens s to at most limit bytes without splitting a multi-byte
+// character; a string within the limit is returned whole.
+func cutAtRune(s string, limit int) (string, bool) {
+	if len(s) <= limit {
+		return s, false
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut], true
+}
+
+func shortDescription(desc string) string {
+	short, cut := cutAtRune(desc, 200)
+	if cut {
+		short += "…"
+	}
+	return short
 }
 
 func sortedKeys[T any](m map[string]T) []string {

@@ -5,6 +5,12 @@ SELECT * FROM workflow_task_assignment WHERE id = $1;
 SELECT * FROM workflow_task_assignment
 WHERE task_id = $1 AND is_active;
 
+-- name: ListAssignmentsByTaskAndUser :many
+-- Backs TaskAssignmentRepo.ListByTaskAndUser -- every row the user holds or held
+-- on the task, closed ones included, whichever id scheme made the row.
+SELECT * FROM workflow_task_assignment
+WHERE tenant_id = $1 AND task_id = $2 AND user_id = $3;
+
 -- name: ListActiveAssignmentsByUser :many
 SELECT * FROM workflow_task_assignment
 WHERE tenant_id = $1 AND user_id = $2 AND is_active;
@@ -26,6 +32,7 @@ SELECT t.id AS task_id, t.workflow_instance_id, t.node_key, a.user_id, t.departm
 FROM workflow_task_assignment a
 JOIN workflow_task t ON t.id = a.task_id
 WHERE a.tenant_id = $1 AND a.user_id = $2 AND a.is_active
+  AND t.status IN ('READY', 'IN_PROGRESS')
   AND (
     sqlc.narg('cursor_created_at')::timestamptz IS NULL
     OR (t.created_at, t.id) < (sqlc.narg('cursor_created_at')::timestamptz, sqlc.narg('cursor_id')::uuid)
@@ -53,7 +60,7 @@ RETURNING *;
 -- name: VacateWorkflowTaskAssignment :one
 UPDATE workflow_task_assignment
 SET is_active = false, vacated_at = now(), updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND is_active
 RETURNING *;
 
 -- name: VacateActiveWorkflowTaskAssignment :one
@@ -81,11 +88,11 @@ WHERE task_id = $1 AND id != $2 AND is_lead;
 -- claim keeps the first claim time.
 UPDATE workflow_task_assignment
 SET is_lead = true, claimed_at = COALESCE(claimed_at, now()), updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND task_id = $2 AND is_active
 RETURNING *;
 
 -- name: SetTaskAssignmentLead :one
 UPDATE workflow_task_assignment
 SET is_lead = true, updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND task_id = $2
 RETURNING *;

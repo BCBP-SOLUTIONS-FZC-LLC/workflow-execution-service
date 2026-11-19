@@ -830,10 +830,12 @@ func TestInstanceService_LifecycleSignals(t *testing.T) {
 	})
 
 	t.Run("force-back of a degraded instance needs no completed step and passes the node key", func(t *testing.T) {
-		svc, instances, _, _, _, temporal, _, _ := newInstanceServiceHarness()
+		svc, instances, _, _, _, temporal, definitions, _ := newInstanceServiceHarness()
 		tenantID := uuid.New()
 		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusDegraded, RecordVersion: 3, TemporalWorkflowID: "tenant:biz"}
 		instances.byID[inst.ID] = inst
+		billing := &dsl.CompiledPlan{Name: "main", Departments: []dsl.DepartmentDef{frfixDept("billing", "prep")}}
+		definitions.resp = publishedCompiledWorkflow(uuid.New(), uuid.New(), frfixPlanJSON(t, dsl.CurrentSchemaVersion, billing))
 
 		require.NoError(t, svc.ForceBack(context.Background(), tenantID, inst.ID, uuid.New(), "billing/prep", 3))
 		require.Len(t, temporal.signals, 1)

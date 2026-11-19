@@ -168,16 +168,16 @@ func TestReassignAssignment_StaleRecordVersion_NonRetryableVersionConflictAndRol
 	}
 }
 
-// When the version check lost the race the vacate of the old lead had already
-// run on the holder path: only the rollback puts the lead back.
-func TestReassignAssignment_HolderPathLosesVersionRace_UndoesTheVacate(t *testing.T) {
+// On the holder path the lead move runs before the vacate, so a lost version
+// race refuses the reassignment before the old lead is touched.
+func TestReassignAssignment_HolderPathLosesVersionRace_VacatesNothing(t *testing.T) {
 	t.Parallel()
 	s := w22aNewReassignScenario(true)
 
 	err := w22aNewDeps(t, s.rig).ReassignAssignment(context.Background(), s.in)
 
 	w22aRequireNonRetryable(t, err, "VersionConflict")
-	assert.Equal(t, []uuid.UUID{s.oldLead.ID}, s.rig.idsOf("Assignments.Vacate"), "the old lead was vacated before the version check failed")
+	assert.Empty(t, s.rig.idsOf("Assignments.Vacate"), "the version check runs before any vacate")
 	assert.True(t, s.oldLead.IsActive, "the vacate must not survive the failed attempt")
 	assert.False(t, s.newHolder.IsLead)
 }

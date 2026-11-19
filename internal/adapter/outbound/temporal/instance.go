@@ -79,16 +79,24 @@ func (d *Deps) UpdateInstanceStatus(ctx context.Context, in port.UpdateInstanceS
 }
 
 func (d *Deps) PauseInstance(ctx context.Context, in port.PauseInstanceInput) error {
+	adminUserID, err := parseOptionalAdminUserID(in.AdminUserID)
+	if err != nil {
+		return err
+	}
 	return d.instanceLifecycleEvent(ctx, in.InstanceID, in.TenantID, in.RecordVersion, domain.InstanceStatusPaused,
 		func(core domain.CommonCore, startedByUserID uuid.UUID) any {
-			return domain.NewWorkflowInstancePausedPayload(core, startedByUserID, in.Initiator, adminUserIDPtr(in.AdminUserID))
+			return domain.NewWorkflowInstancePausedPayload(core, startedByUserID, in.Initiator, adminUserID)
 		}, domain.EventWorkflowInstancePaused)
 }
 
 func (d *Deps) ResumeInstance(ctx context.Context, in port.ResumeInstanceInput) error {
+	adminUserID, err := parseOptionalAdminUserID(in.AdminUserID)
+	if err != nil {
+		return err
+	}
 	return d.instanceLifecycleEvent(ctx, in.InstanceID, in.TenantID, in.RecordVersion, domain.InstanceStatusRunning,
 		func(core domain.CommonCore, startedByUserID uuid.UUID) any {
-			return domain.NewWorkflowInstanceResumedPayload(core, startedByUserID, in.Initiator, adminUserIDPtr(in.AdminUserID))
+			return domain.NewWorkflowInstanceResumedPayload(core, startedByUserID, in.Initiator, adminUserID)
 		}, domain.EventWorkflowInstanceResumed)
 }
 
@@ -112,7 +120,8 @@ func (d *Deps) CancelInstance(ctx context.Context, in port.CancelInstanceInput) 
 		if err != nil {
 			return fmt.Errorf("get instance: %w", err)
 		}
-		if inst.Status == domain.InstanceStatusTerminated {
+		if inst.Status == domain.InstanceStatusTerminated || inst.Status == domain.InstanceStatusCompleted ||
+			inst.Status == domain.InstanceStatusFailed {
 			return nil
 		}
 		if err := d.failActiveTasks(ctx, tenantID, instanceID, "instance_cancel"); err != nil {
@@ -213,7 +222,7 @@ func (d *Deps) enqueueInstanceEvent(ctx context.Context, tenantID, instanceID uu
 func (d *Deps) enqueueInstanceEventWithID(ctx context.Context, tenantID, instanceID uuid.UUID, eventID, eventType string, payload any) error {
 	env, err := service.BuildEnvelope(ctx, d.Validator, eventType, tenantID.String(), "instances/"+instanceID.String(), "", payload)
 	if err != nil {
-		return fmt.Errorf("build %s envelope: %w", eventType, err)
+		return refusedEnvelope(eventType, err)
 	}
 	if eventID != "" {
 		env.ID = eventID
@@ -224,10 +233,15 @@ func (d *Deps) enqueueInstanceEventWithID(ctx context.Context, tenantID, instanc
 	return nil
 }
 
-func adminUserIDPtr(s string) *uuid.UUID {
+// parseOptionalAdminUserID reads the acting administrator of a pause or resume. A pause the system starts
+// (a tenant state change) carries none, so an empty id is the absence of an actor; a malformed one is refused.
+func parseOptionalAdminUserID(s string) (*uuid.UUID, error) {
+	if s == "" {
+		return nil, nil
+	}
 	id, err := uuid.Parse(s)
 	if err != nil {
-		return nil
+		return nil, nonRetryable("ValidationError", fmt.Errorf("parse admin_user_id: %w", err))
 	}
-	return &id
+	return &id, nil
 }

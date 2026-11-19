@@ -927,37 +927,6 @@ func TestHandleInternalEvent_TenantStateChanged_ApplyError_500_RecencyNotCommitt
 
 // --- respondOK / alreadyProcessed error paths ---
 
-func TestHandleInternalEvent_MarkProcessedError_StillReturns200(t *testing.T) {
-	fakes := newEventsFakes()
-	fakes.userSafetyNet.vacateAssignments = func(context.Context, port.UserDeletedInput) error { return nil }
-	h := newEventsHandlerWithProcessedEvents(fakes, &erroringProcessedEventRepository{recordErr: errors.New("db down")})
-	router := newInternalRouter(h)
-
-	w := postEvent(router, envelope("UserDeleted", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"user_id": testUserID.String(), "deleted_at": time.Now().Format(time.RFC3339),
-	}))
-
-	assert.Equal(t, http.StatusOK, w.Code, "a dedup-record failure after successful side effects must not surface as an error to the caller")
-}
-
-func TestHandleInternalEvent_IsProcessedError_ProceedsAnyway(t *testing.T) {
-	fakes := newEventsFakes()
-	called := false
-	fakes.userSafetyNet.vacateAssignments = func(context.Context, port.UserDeletedInput) error {
-		called = true
-		return nil
-	}
-	h := newEventsHandlerWithProcessedEvents(fakes, &erroringProcessedEventRepository{isProcessedErr: errors.New("db down")})
-	router := newInternalRouter(h)
-
-	w := postEvent(router, envelope("UserDeleted", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"user_id": testUserID.String(), "deleted_at": time.Now().Format(time.RFC3339),
-	}))
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.True(t, called, "an IsProcessed check failure must not block processing")
-}
-
 // --- alreadyProcessed short-circuit, one per handler (each is its own
 // function body / coverage line, not shared across handlers) ---
 

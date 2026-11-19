@@ -1,6 +1,7 @@
 package temporal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,9 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 	var stage dsl.StageDef
 	if err := json.Unmarshal(in.CompiledNode, &stage); err != nil {
 		return port.CreateTaskOutput{}, nonRetryable("ValidationError", fmt.Errorf("unmarshal compiled node: %w", err))
+	}
+	if bytes.Equal(bytes.TrimSpace(in.CompiledNode), []byte("null")) {
+		return port.CreateTaskOutput{}, nonRetryable("ValidationError", errors.New("compiled node is null"))
 	}
 
 	departmentID, err := deptUUID(in.IAMDepartmentID)
@@ -118,7 +122,7 @@ func (d *Deps) CreateTask(ctx context.Context, in port.CreateTaskInput) (port.Cr
 		payload := domain.NewWorkflowTaskCreatedPayload(core, taskCore, stage.Type, task.DueAt, task.FollowUpAt, connectorType, resolvedInputs, outputMapping)
 		env, err := service.BuildEnvelope(ctx, d.Validator, domain.EventWorkflowTaskCreated, tenantID.String(), "instances/"+instanceID.String()+"/tasks/"+task.ID.String(), "", payload)
 		if err != nil {
-			return fmt.Errorf("build workflow.task.created envelope: %w", err)
+			return refusedEnvelope("workflow.task.created", err)
 		}
 		return d.Outbox.Enqueue(ctx, env)
 	})

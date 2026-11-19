@@ -90,7 +90,7 @@ func w15aServe(t *testing.T, r *gin.Engine, method, target string, body map[stri
 func w15aHoldDelegated(instances *fakeInstanceRepo, tasks *fakeTaskRepo, assignments *fakeAssignmentRepo, tenant, delegate uuid.UUID) (*domain.Task, *domain.TaskAssignment) {
 	inst := &domain.Instance{ID: uuid.New(), TenantID: tenant, TemporalWorkflowID: tenant.String() + ":" + uuid.NewString()}
 	instances.byID[inst.ID] = inst
-	task := &domain.Task{ID: uuid.New(), TenantID: tenant, WorkflowInstanceID: inst.ID, RecordVersion: 1}
+	task := &domain.Task{ID: uuid.New(), TenantID: tenant, WorkflowInstanceID: inst.ID, NodeKey: fx10ReviewNode, RecordVersion: 1}
 	tasks.byID[task.ID] = task
 	a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenant, TaskID: task.ID, UserID: delegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 	assignments.add(a)

@@ -131,31 +131,22 @@ func TestResumeInstanceRoute_InstanceReadFailsOrTheExecutionIsMissing_AnswersWit
 	}
 }
 
-// What the caller is told when Temporal no longer has the workflow of a cancelled instance is an open owner
-// decision, so the test pins only that the call fails, nothing leaks and no state is written.
-func TestCancelInstanceRoute_TheWorkflowIsGone_FailsAndWritesNothing(t *testing.T) {
+func TestCancelInstanceRoute_TheWorkflowIsGone_AnswersAcceptedAndEndsTheInstanceRow(t *testing.T) {
 	for _, status := range []domain.InstanceStatus{domain.InstanceStatusRunning, domain.InstanceStatusPaused} {
 		t.Run(string(status), func(t *testing.T) {
-			world := w26aNewLifecycleWorld(status, nil, serviceerror.NewNotFound("workflow w26a-secret-run not found"))
+			rig := w19bNewRig(t)
+			inst := rig.seed(status, 4)
+			rig.sdk.signalErr = serviceerror.NewNotFound("workflow w26a-secret-run not found")
 
-			rec := do(world.router, asAdmin(req(http.MethodPost, instancePath(testInstID)+"/cancel",
-				map[string]any{"record_version": 4, "reason": "requested by the owner"})))
+			rec := rig.post(instancePath(inst.ID)+"/cancel", map[string]any{"record_version": 4, "reason": "requested by the owner"})
 
-			assert.GreaterOrEqual(t, rec.Code, http.StatusBadRequest, rec.Body.String())
+			assert.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
 			assert.NotContains(t, rec.Body.String(), "w26a-secret-run", "the Temporal text is not echoed")
-			assert.NotContains(t, rec.Body.String(), "instance-cancel", "the signal channel is not echoed")
-			assert.Equal(t, []w26aLookup{{testTenantID, testInstID}}, world.repo.reads, "the instance is read once, in the caller's tenant")
-			require.Len(t, world.sdk.signals, 1, "the signal was tried once")
-			sent := world.sdk.signals[0]
-			assert.Equal(t, "tenant:subject:w26a", sent.workflowID)
-			assert.Equal(t, "instance-cancel:"+testInstID.String(), sent.channel)
-			var wire w26aAdminWire
-			w26aDecodePayload(t, sent.payload, &wire)
-			assert.Equal(t, testUserID.String(), wire.AdminUserID)
-			assert.EqualValues(t, 4, wire.RecordVersion)
-			assert.Equal(t, "requested by the owner", wire.Reason)
-			assert.Equal(t, status, world.inst.Status, "the instance row is left as it was")
-			assert.EqualValues(t, 4, world.inst.RecordVersion)
+			require.Len(t, rig.sdk.signals, 1, "the signal was tried once")
+			assert.Equal(t, "instance-cancel:"+inst.ID.String(), rig.sdk.signals[0].channel)
+			require.Len(t, rig.instances.writes, 1, "the row is ended through the status write terminate uses")
+			assert.Equal(t, domain.InstanceStatusTerminated, rig.instances.writes[0].status)
+			assert.Equal(t, domain.InstanceStatusTerminated, rig.instances.rows[inst.ID].Status)
 		})
 	}
 }

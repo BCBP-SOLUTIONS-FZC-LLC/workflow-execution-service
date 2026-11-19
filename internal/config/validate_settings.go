@@ -21,6 +21,7 @@ func (c *Config) validatePositiveSettings() error {
 		{"VALKEY_READ_TIMEOUT", c.ValkeyReadTimeout},
 		{"VALKEY_WRITE_TIMEOUT", c.ValkeyWriteTimeout},
 		{"IDEMPOTENCY_TTL", c.IdempotencyTTL},
+		{"GLUE_SCHEMA_CACHE_TTL", c.GlueSchemaCacheTTL},
 		{"OPENBAO_TIMEOUT", c.OpenBaoTimeout},
 		{"CONNECTOR_ALIAS_FETCH_TIMEOUT", c.ConnectorAliasFetchTimeout},
 		{"CONNECTOR_ALIAS_REFRESH_INTERVAL", c.ConnectorAliasRefreshInterval},

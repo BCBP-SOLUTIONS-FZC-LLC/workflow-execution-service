@@ -202,8 +202,8 @@ func TestWorkflowTaskEvents_SchemaIDWithUndecodablePayload_Returns502(t *testing
 	}
 }
 
-// A failing inbox read does not stop the event: it is still queued, with a warning naming the event.
-func TestWorkflowTaskEvents_InboxReadFails_StillQueuesTheEntry(t *testing.T) {
+// A failing inbox read stops the event: nothing is queued, and an error names the event.
+func TestWorkflowTaskEvents_InboxReadFails_Answers503AndQueuesNothing(t *testing.T) {
 	rig := newW17bConnectorRig(true, nil)
 	rig.inbox.isErr = errW17bInboxReadConnector
 	tenantID, eventID := uuid.New(), uuid.New()
@@ -211,21 +211,17 @@ func TestWorkflowTaskEvents_InboxReadFails_StillQueuesTheEntry(t *testing.T) {
 
 	w := w17bPost(rig.router, w17bWorkflowTaskPath, w17bTaskEnvelope(eventID, tenantID, payload))
 
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Len(t, rig.publisher.events, 1, "the event is queued anyway")
-	assert.Equal(t, eventID, rig.publisher.events[0].EventID)
-	assert.Equal(t, tenantID, rig.publisher.events[0].TenantID)
-	assert.Equal(t, payload["task_id"], rig.publisher.events[0].TaskID.String())
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+	assert.Empty(t, rig.publisher.events, "the event waits for a redelivery")
 	assert.Equal(t, []w17bInboxCall{{eventID, w17bConnectorConsumer}}, rig.inbox.checked)
-	assert.Equal(t, []w17bInboxCall{{eventID, w17bConnectorConsumer}}, rig.inbox.marked)
-	line, ok := rig.log.warnWith(eventID, "IsProcessed")
-	require.True(t, ok, "a warning names the event whose inbox read failed: %v", rig.log.warns)
+	assert.Empty(t, rig.inbox.marked)
+	line, ok := rig.log.errorWith(eventID, "claiming or recording")
+	require.True(t, ok, "an error names the event whose inbox read failed: %v", rig.log.errs)
 	assert.Equal(t, errW17bInboxReadConnector.Error(), line.Fields["error"])
-	assert.Zero(t, w.Body.Len(), "the answer carries no body")
 }
 
-// A failing inbox write after the stream write still answers 200, with a warning naming the event.
-func TestWorkflowTaskEvents_InboxWriteFails_Answers200AfterTheStreamWrite(t *testing.T) {
+// A failing inbox write after the stream write answers 503, with an error naming the event.
+func TestWorkflowTaskEvents_InboxWriteFails_Answers503AfterTheStreamWrite(t *testing.T) {
 	rig := newW17bConnectorRig(true, nil)
 	rig.inbox.markErr = errW17bInboxWriteConnector
 	tenantID, eventID := uuid.New(), uuid.New()
@@ -233,16 +229,15 @@ func TestWorkflowTaskEvents_InboxWriteFails_Answers200AfterTheStreamWrite(t *tes
 
 	w := w17bPost(rig.router, w17bWorkflowTaskPath, w17bTaskEnvelope(eventID, tenantID, payload))
 
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
 	require.Len(t, rig.publisher.events, 1)
 	assert.Equal(t, eventID, rig.publisher.events[0].EventID)
 	assert.Equal(t, payload["task_id"], rig.publisher.events[0].TaskID.String())
 	assert.Equal(t, []w17bInboxCall{{eventID, w17bConnectorConsumer}}, rig.inbox.marked, "the write was attempted")
 	assert.Equal(t, []string{"publish", "mark"}, rig.order.events, "the inbox row is written after the stream entry")
-	line, ok := rig.log.warnWith(eventID, "MarkProcessed")
-	require.True(t, ok, "a warning names the event whose inbox write failed: %v", rig.log.warns)
+	line, ok := rig.log.errorWith(eventID, "claiming or recording")
+	require.True(t, ok, "an error names the event whose inbox write failed: %v", rig.log.errs)
 	assert.Equal(t, errW17bInboxWriteConnector.Error(), line.Fields["error"])
-	assert.Zero(t, w.Body.Len(), "the answer carries no body")
 }
 
 // The envelope tenant is the tenant of the dispatch check, of the principal lookup and of the stream entry,

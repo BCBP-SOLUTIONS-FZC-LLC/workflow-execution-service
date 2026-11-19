@@ -367,6 +367,7 @@ func buildExecution(t *testing.T, pool *pgcommon.Pool, sdk client.Client, rdb *r
 		},
 		Tasks: &service.TaskService{
 			Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides,
+			Transactor: transactor, Outbox: outboxRepo, Validator: validator,
 			Temporal: temporal, Eligibility: eligibility, Definitions: definitions,
 		},
 		Eligibility: eligibility, Cache: cache, ProcessedEvents: processedEvents, Recency: recency,

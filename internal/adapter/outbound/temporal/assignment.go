@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -98,9 +99,17 @@ func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, t
 	}
 	target := assignmentFor(active, userID)
 	if target == nil {
-		return port.CompleteAssignmentOutput{AllDone: len(active) == 0}, nil
+		vacated, err := d.vacatedUncompleted(ctx, tenantID, task.ID, userID)
+		if err != nil {
+			return port.CompleteAssignmentOutput{}, err
+		}
+		return port.CompleteAssignmentOutput{AllDone: len(active) == 0 && !vacated}, nil
 	}
-	completed, err := d.Assignments.Complete(ctx, tenantID, target.ID, []byte(resultJSON), task.RecordVersion)
+	var result json.RawMessage
+	if resultJSON != "" {
+		result = json.RawMessage(resultJSON)
+	}
+	completed, err := d.Assignments.Complete(ctx, tenantID, target.ID, result, task.RecordVersion)
 	if err != nil {
 		return port.CompleteAssignmentOutput{}, fmt.Errorf("complete assignment: %w", err)
 	}
@@ -119,6 +128,23 @@ func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, t
 		return port.CompleteAssignmentOutput{}, err
 	}
 	return out, nil
+}
+
+// vacatedUncompleted reports whether the user's own assignments were closed without a result:
+// another assignee finished the task first, so this call is not the one that closes it. The rows
+// are found by task and user, so one made by a reassignment counts like the one the plan made. A
+// user who completed (a retry after a lost answer) or never held the task is not affected.
+func (d *Deps) vacatedUncompleted(ctx context.Context, tenantID, taskID, userID uuid.UUID) (bool, error) {
+	rows, err := d.Assignments.ListByTaskAndUser(ctx, tenantID, taskID, userID)
+	if err != nil {
+		return false, fmt.Errorf("list own assignments: %w", err)
+	}
+	for _, a := range rows {
+		if a.CompletedAt != nil {
+			return false, nil
+		}
+	}
+	return len(rows) > 0, nil
 }
 
 // vacateOthers closes the co-assignees' open assignments: the instance moves on
@@ -226,10 +252,7 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 			return fmt.Errorf("list active assignments: %w", err)
 		}
 		if holder := assignmentFor(active, newUserID); holder != nil {
-			if !movesLeadTo(active, holder, oldUserID) {
-				return nil
-			}
-			return d.makeHolderLead(ctx, tenantID, task, active, holder, oldUserID, in.RecordVersion)
+			return d.reassignToHolder(ctx, tenantID, task, active, holder, oldUserID, in.RecordVersion)
 		}
 		if _, err := d.Tasks.BumpRecordVersion(ctx, tenantID, taskID, in.RecordVersion); err != nil {
 			if errors.Is(err, domain.ErrRecordVersionConflict) {
@@ -258,19 +281,54 @@ func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmen
 	}))
 }
 
+// reassignToHolder reassigns to a user who already holds the task: it moves the lead to them when the
+// named lead hands over, and vacates the named old user's assignment. It runs only while a change is
+// still pending, so a retry after the change committed finds nothing to do.
+func (d *Deps) reassignToHolder(ctx context.Context, tenantID uuid.UUID, task *domain.Task, active []*domain.TaskAssignment, holder *domain.TaskAssignment, oldUserID uuid.UUID, recordVersion int64) error {
+	switch {
+	case movesLeadTo(active, holder, oldUserID):
+		return d.makeHolderLead(ctx, tenantID, task, active, holder, oldUserID, recordVersion)
+	case vacatesOldAssignee(active, holder, oldUserID):
+		return d.vacateOldAssignee(ctx, tenantID, task, active, holder, oldUserID, recordVersion)
+	}
+	return nil
+}
+
+// vacatesOldAssignee reports whether a named old user, other than the holder, still holds the task.
+func vacatesOldAssignee(active []*domain.TaskAssignment, holder *domain.TaskAssignment, oldUserID uuid.UUID) bool {
+	return oldUserID != uuid.Nil && oldUserID != holder.UserID && assignmentFor(active, oldUserID) != nil
+}
+
+// vacateOldAssignee takes a co-assignee off the task when the holder keeps their place. The version
+// bump locks the task row first, as every other task write does.
+func (d *Deps) vacateOldAssignee(ctx context.Context, tenantID uuid.UUID, task *domain.Task, active []*domain.TaskAssignment, holder *domain.TaskAssignment, oldUserID uuid.UUID, recordVersion int64) error {
+	if _, err := d.Tasks.BumpRecordVersion(ctx, tenantID, task.ID, recordVersion); err != nil {
+		if errors.Is(err, domain.ErrRecordVersionConflict) {
+			return nonRetryable("VersionConflict", fmt.Errorf("reassign: lost the record_version race: %w", err))
+		}
+		return fmt.Errorf("bump task record version: %w", err)
+	}
+	return d.vacateAndRecordMove(ctx, tenantID, task, active, holder, oldUserID)
+}
+
 // makeHolderLead moves the lead to a user who already holds the task without it,
 // and vacates the replaced lead's assignment, if one was named. SetLead also bumps
-// the task's record version. It runs only while the move is still pending, so a
-// retry after the move committed finds nothing to do.
+// the task's record version.
 func (d *Deps) makeHolderLead(ctx context.Context, tenantID uuid.UUID, task *domain.Task, active []*domain.TaskAssignment, holder *domain.TaskAssignment, oldUserID uuid.UUID, recordVersion int64) error {
-	if err := vacateAssignmentsFor(ctx, d.Assignments, tenantID, active, oldUserID); err != nil {
-		return err
-	}
+	// The lead move locks the task row first, as every other task write does,
+	// so a completion running at the same time cannot deadlock with it.
 	if _, err := d.Assignments.SetLead(ctx, tenantID, task.ID, holder.ID, recordVersion); err != nil {
 		if errors.Is(err, domain.ErrRecordVersionConflict) {
 			return nonRetryable("VersionConflict", fmt.Errorf("reassign: lost the record_version race: %w", err))
 		}
 		return fmt.Errorf("set lead: %w", err)
+	}
+	return d.vacateAndRecordMove(ctx, tenantID, task, active, holder, oldUserID)
+}
+
+func (d *Deps) vacateAndRecordMove(ctx context.Context, tenantID uuid.UUID, task *domain.Task, active []*domain.TaskAssignment, holder *domain.TaskAssignment, oldUserID uuid.UUID) error {
+	if err := vacateAssignmentsFor(ctx, d.Assignments, tenantID, active, oldUserID); err != nil {
+		return err
 	}
 	core, err := d.instanceCore(ctx, tenantID, task.WorkflowInstanceID)
 	if err != nil {

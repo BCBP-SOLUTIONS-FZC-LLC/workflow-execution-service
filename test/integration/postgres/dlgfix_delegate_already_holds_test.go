@@ -4,10 +4,12 @@ package postgres_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
@@ -65,6 +67,21 @@ func TestReassignDelegate_ADelegateWhoAlreadyHoldsTheTaskKeepsOneActiveRow(t *te
 	require.NoError(t, instanceRepo.Create(ctx, inst))
 	task := newTask(tenantID, inst.ID)
 	require.NoError(t, taskRepo.Create(ctx, task))
+	planJSON, err := json.Marshal(dsl.CompiledCollaboration{
+		SchemaVersion: dsl.CurrentSchemaVersion, MainPlan: "main",
+		Plans: []*dsl.CompiledPlan{{
+			Name: "main", TaskQueue: "wf-queue-default",
+			Departments: []dsl.DepartmentDef{{
+				ID: "finance", IAMDepartmentID: task.DepartmentID.String(),
+				Stages: []dsl.StageDef{{Type: "userTask", NodeID: "review", Role: "reviewer"}},
+			}},
+		}},
+	})
+	require.NoError(t, err)
+	client.Eligibility = &w17aEligible{}
+	client.Definitions = &w17aPlans{resp: &port.CompiledWorkflow{
+		WorkflowID: uuid.New(), VersionID: inst.WorkflowVersionID, Status: "PUBLISHED", IsValid: true, CompiledPlanJSON: string(planJSON),
+	}}
 	old := newTaskAssignment(tenantID, task.ID, oldDelegate)
 	old.Reason = "delegation:" + uuid.NewString()
 	require.NoError(t, assignmentRepo.Create(ctx, old))

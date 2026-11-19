@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -20,9 +21,15 @@ import (
 var version = "dev"
 
 func main() {
+	if run() != 0 {
+		os.Exit(1)
+	}
+}
+
+func run() int {
 	if config.VersionRequested() {
 		fmt.Println(version)
-		return
+		return 0
 	}
 
 	cfg, err := config.Load()
@@ -70,15 +77,12 @@ func main() {
 	go runMaintenanceLoop(ctx, deps, cfg, wlog)
 
 	healthSrv := newHealthServer(fmt.Sprintf(":%d", cfg.WorkerHealthPort), deps)
-	go func() {
-		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			wlog.Error("health server exited", map[string]any{"error": err.Error()})
-		}
-	}()
+	serveErrs := make(chan error, 1)
+	serveHealth(healthSrv, serveErrs)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
+	stopCause := awaitStop(sigCh, serveErrs, wlog)
 
 	cancel()
 
@@ -95,9 +99,32 @@ func main() {
 	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-	if err := healthSrv.Shutdown(shutdownCtx); err != nil {
+	err = healthSrv.Shutdown(shutdownCtx)
+	shutdownCancel()
+	if err != nil {
 		wlog.Warn("health server shutdown error", map[string]any{"error": err.Error()})
+	}
+	if stopCause != nil {
+		return 1
+	}
+	return 0
+}
+
+func serveHealth(srv *http.Server, serveErrs chan<- error) {
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErrs <- fmt.Errorf("health server: %w", err)
+		}
+	}()
+}
+
+func awaitStop(sigCh <-chan os.Signal, serveErrs <-chan error, wlog port.Logger) error {
+	select {
+	case <-sigCh:
+		return nil
+	case err := <-serveErrs:
+		wlog.Error("health server failed; shutting down", map[string]any{"error": err.Error()})
+		return err
 	}
 }
 

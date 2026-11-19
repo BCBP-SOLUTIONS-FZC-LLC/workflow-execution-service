@@ -143,6 +143,9 @@ func (c *w26aCache) SetNX(_ context.Context, key, value string, _ time.Duration)
 }
 
 func (c *w26aCache) Get(_ context.Context, key string) (string, error) {
+	if fx10IsPlanKey(key) {
+		return "", nil
+	}
 	c.gets = append(c.gets, key)
 	if c.getErr != nil {
 		return "", c.getErr
@@ -151,6 +154,9 @@ func (c *w26aCache) Get(_ context.Context, key string) (string, error) {
 }
 
 func (c *w26aCache) Set(_ context.Context, key, value string, _ time.Duration) error {
+	if fx10IsPlanKey(key) {
+		return nil
+	}
 	c.sets = append(c.sets, w26aCacheSet{key, value})
 	if c.setErr != nil {
 		return c.setErr
@@ -213,6 +219,7 @@ func w26aNewWorld() *w26aWorld {
 	w.svc = &service.TaskService{
 		Instances: w.instances, Tasks: w.tasks, Assignments: w.assignments, Temporal: w.temporal, Log: w.log,
 	}
+	fx10AllowTaskEligibility(w.svc, w.task.DepartmentID)
 	return w
 }
 

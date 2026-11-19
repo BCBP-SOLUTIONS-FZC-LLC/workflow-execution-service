@@ -108,6 +108,9 @@ func (r *csdAssignmentRepo) SetLead(_ context.Context, tenantID, taskID, id uuid
 
 func (r *csdAssignmentRepo) ClaimLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {
 	r.claims = append(r.claims, csdSetLeadCall{tenantID, taskID, id, taskRecordVersion})
+	if a, ok := r.byID[id]; ok && !a.IsActive {
+		return nil, domain.ErrNotFound
+	}
 	return r.SetLead(ctx, tenantID, taskID, id, taskRecordVersion)
 }
 
@@ -216,6 +219,7 @@ type csdTaskHarness struct {
 	definitions *csdDefinitions
 	cache       *csdCache
 	temporal    *csdTemporal
+	outbox      *fakeOutbox
 
 	tenantID, instanceID, versionID, deptID uuid.UUID
 	callerID, otherID                       uuid.UUID
@@ -252,8 +256,10 @@ func csdNewTaskHarness(t *testing.T, assigneeMode string, stages ...dsl.StageDef
 	h.definitions = &csdDefinitions{resp: publishedCompiledWorkflow(uuid.New(), h.versionID, plan)}
 	h.cache = &csdCache{values: map[string]string{}}
 	h.temporal = &csdTemporal{}
+	h.outbox = &fakeOutbox{}
 	h.svc = &service.TaskService{
 		Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments,
+		Transactor: fakeTransactor{}, Outbox: h.outbox, Validator: realValidator(),
 		Temporal: h.temporal, Eligibility: h.eligibility, Definitions: h.definitions, Cache: h.cache,
 	}
 	return h

@@ -192,6 +192,7 @@ func TestTaskService_Reassign_OnlyAReadyOrInProgressTaskIsActionable(t *testing.
 	for _, tc := range cases {
 		t.Run(string(tc.status), func(t *testing.T) {
 			rig := newW14aTaskRig(tc.status)
+			fx9AllowEligibility(t, rig.svc, rig.departments)
 
 			err := rig.reassign()
 
@@ -206,7 +207,7 @@ func TestTaskService_Reassign_OnlyAReadyOrInProgressTaskIsActionable(t *testing.
 	}
 }
 
-func TestTaskService_Reassign_EligibilityCheckIsSkippedWhenNotFullyConfigured(t *testing.T) {
+func TestTaskService_Reassign_EligibilityCheckRefusesWhenNotFullyConfigured(t *testing.T) {
 	cases := []struct {
 		name        string
 		definitions bool
@@ -221,6 +222,7 @@ func TestTaskService_Reassign_EligibilityCheckIsSkippedWhenNotFullyConfigured(t 
 			rig := newW14aTaskRig(domain.TaskStatusReady)
 			plans := &w14aPlans{err: errW14aPlanUnavailable}
 			eligibility := &w14aEligibility{}
+			rig.svc.Definitions, rig.svc.Eligibility = nil, nil
 			if tc.definitions {
 				rig.svc.Definitions = plans
 			}
@@ -228,10 +230,10 @@ func TestTaskService_Reassign_EligibilityCheckIsSkippedWhenNotFullyConfigured(t 
 				rig.svc.Eligibility = eligibility
 			}
 
-			require.NoError(t, rig.reassign(), "an unconfigured check lets the reassignment through")
+			require.Error(t, rig.reassign(), "an unconfigured check refuses the reassignment")
 
-			rig.requireReassignSignal(t)
-			assert.Empty(t, plans.reads, "no plan is read for a check that is skipped")
+			assert.Empty(t, rig.temporal.signals, "nothing is signalled for an unchecked user")
+			assert.Empty(t, plans.reads, "no plan is read when the check cannot run")
 			assert.Empty(t, eligibility.asks, "nobody is asked about eligibility")
 		})
 	}
@@ -302,7 +304,6 @@ func TestTaskService_Complete_SplitsTheNodeKeyAtTheFirstSlash(t *testing.T) {
 		wantNode string
 	}{
 		{"department and node", "finance/review", "finance", "review"},
-		{"a key with no slash is all department", "finance", "finance", ""},
 		{"a node with a slash keeps the rest", "finance/review/extra", "finance", "review/extra"},
 		{"a call-scoped department", "CA_1::legal/review", "CA_1::legal", "review"},
 	}
@@ -316,6 +317,9 @@ func TestTaskService_Complete_SplitsTheNodeKeyAtTheFirstSlash(t *testing.T) {
 			task.NodeKey = tc.nodeKey
 			tasks.byID[task.ID] = task
 			assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+			svc.Definitions = &fakeDefinitionClient{resp: publishedCompiledWorkflow(uuid.New(), uuid.New(), compiledPlanJSONWithDept(t, dsl.DepartmentDef{
+				ID: tc.wantDept, IAMDepartmentID: task.DepartmentID.String(), Stages: []dsl.StageDef{{Type: "userTask", NodeID: tc.wantNode, Role: "approver"}},
+			}))}
 			reads := w14aRecordTaskReads(svc, instances, tasks, assignments)
 
 			_, err := svc.Complete(context.Background(), tenantID, task.ID, userID, json.RawMessage(`{}`), task.RecordVersion)

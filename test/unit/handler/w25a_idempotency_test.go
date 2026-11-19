@@ -74,9 +74,10 @@ func TestIdempotency_FirstKeyedCall_ClaimsScopedKeyThenStoresAnswer(t *testing.T
 			wantKey := w25aClaimCacheKey("key-1")
 			assert.Equal(t, []string{wantKey}, cache.setNXKeys)
 			assert.Equal(t, []string{"CLAIMED"}, cache.setNXVals)
-			assert.Equal(t, []time.Duration{tc.wantTTL}, cache.setNXTTLs)
+			assert.Equal(t, []time.Duration{time.Minute}, cache.setNXTTLs, "the claim is short whatever the answer lifetime")
 
 			require.Equal(t, []string{wantKey}, cache.setKeys, "the answer replaces the claim under the same key")
+			assert.Equal(t, []time.Duration{tc.wantTTL}, cache.setTTLs, "the stored answer takes the configured lifetime")
 			assert.Empty(t, cache.delKeys, "a stored answer releases nothing")
 			var stored w25aStoredAnswer
 			require.NoError(t, json.Unmarshal([]byte(cache.setVals[0]), &stored))

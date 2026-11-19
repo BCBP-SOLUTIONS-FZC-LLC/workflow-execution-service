@@ -276,9 +276,9 @@ func (failXPending) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	}
 }
 
-// XAUTOCLAIM has already claimed and counted the entries by the time their
-// counts are read, so failing to read a count must not drop them.
-func TestConsumerGroup_ReclaimStale_KeepsClaimedEntriesWhenCountUnavailable(t *testing.T) {
+// An entry whose count cannot be read is not handed to the worker as a first delivery: the call fails, and
+// the entry stays pending with the count its claim already gave it, for the next reclaim to read.
+func TestConsumerGroup_ReclaimStale_FailsWhenCountUnavailableAndTheEntryStaysPending(t *testing.T) {
 	client := newTestClient(t).(*redis.Client)
 	ctx := context.Background()
 	stream := newStreamName(t)
@@ -295,7 +295,14 @@ func TestConsumerGroup_ReclaimStale_KeepsClaimedEntriesWhenCountUnavailable(t *t
 	client.AddHook(failXPending{})
 	reclaimed, err := consumer.ReclaimStale(ctx, stream, testGroup, "consumer-b", 10*time.Millisecond, 10)
 
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "valkeystream reclaim stale: pending count: ")
+	assert.Nil(t, reclaimed, "no entry is returned with an unknown count")
+
+	healthy := redis.NewClient(&redis.Options{Addr: client.Options().Addr})
+	t.Cleanup(func() { _ = healthy.Close() })
+	pending, err := healthy.XPendingExt(ctx, &redis.XPendingExtArgs{Stream: stream, Group: testGroup, Start: "-", End: "+", Count: 10}).Result()
 	require.NoError(t, err)
-	require.Len(t, reclaimed, 1, "claimed entries were dropped")
-	assert.Zero(t, reclaimed[0].Deliveries, "an unknown count must not be reported as a real one")
+	require.Len(t, pending, 1, "the entry is still pending, not lost")
+	assert.EqualValues(t, 2, pending[0].RetryCount, "the claim counted as a second delivery")
 }

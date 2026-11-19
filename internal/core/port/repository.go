@@ -110,6 +110,9 @@ type TaskAssignmentRepository interface {
 	Create(ctx context.Context, assignment *domain.TaskAssignment) error
 	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.TaskAssignment, error)
 	ListActiveByTask(ctx context.Context, tenantID, taskID uuid.UUID) ([]*domain.TaskAssignment, error)
+	// ListByTaskAndUser returns every assignment the user holds or held on the task, closed rows
+	// included, whichever way the row was created; none is an empty list.
+	ListByTaskAndUser(ctx context.Context, tenantID, taskID, userID uuid.UUID) ([]*domain.TaskAssignment, error)
 	ListActiveByUser(ctx context.Context, tenantID, userID uuid.UUID) ([]*domain.TaskAssignment, error)
 	// ListActiveByReasonTag returns the tenant's active assignments whose reason contains the
 	// tag, whoever holds them; the caller checks that the tag stands on its own in the reason.

@@ -124,31 +124,27 @@ func TestTenantEvents_TenantStateChanged_SchemaRegistryFrame_IsReconciledLikeAPl
 	assert.Equal(t, []w17bInboxCall{{eventID, w17bMembershipConsumer}}, framed.inbox.marked)
 }
 
-// A failing inbox read does not stop the event: it is applied, a warning names the event, and it is recorded.
-func TestTenantEvents_TenantStateChanged_InboxReadFails_AppliesAnyway(t *testing.T) {
+// A failing inbox read stops the event: it answers 503, applies nothing, and an error names the event.
+func TestTenantEvents_TenantStateChanged_InboxReadFails_Answers503AndAppliesNothing(t *testing.T) {
 	rig := newW17bTenantRig()
 	rig.inbox.isErr = errW17bInboxRead
 	tenantID, eventID := uuid.New(), uuid.New()
 
 	w := w17bPost(rig.router, w17bTenantPath, envelope("TenantStateChanged", eventID, tenantID, w17bEventTime, w17bTenantStatePayload(tenantID, "suspended", w17bEventTime)))
 
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Len(t, rig.lifecycle.inputs, 1, "the event is processed anyway")
-	assert.Equal(t, tenantID, rig.lifecycle.inputs[0].TenantID)
-	assert.Equal(t, "suspended", rig.lifecycle.inputs[0].Status)
-	assert.Equal(t, []string{tenantID.String()}, rig.lifecycle.ctxTenants)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+	assert.Empty(t, rig.lifecycle.inputs, "the event waits for a redelivery")
 	assert.Equal(t, []w17bInboxCall{{eventID, w17bMembershipConsumer}}, rig.inbox.checked)
-	assert.Equal(t, []w17bInboxCall{{eventID, w17bMembershipConsumer}}, rig.inbox.marked)
-	line, ok := rig.log.warnWith(eventID, "IsProcessed")
-	require.True(t, ok, "a warning names the event whose inbox read failed: %v", rig.log.warns)
+	assert.Empty(t, rig.inbox.marked)
+	line, ok := rig.log.errorWith(eventID, "claiming or recording")
+	require.True(t, ok, "an error names the event whose inbox read failed: %v", rig.log.errs)
 	assert.Equal(t, "TenantStateChanged", line.Fields["event_type"])
 	assert.Equal(t, errW17bInboxRead.Error(), line.Fields["error"], "the cause goes to the log")
-	assert.Zero(t, w.Body.Len(), "the answer carries no body")
 }
 
-// A failing inbox write after the change was applied still answers 200 with a warning. The next delivery is
-// not deduplicated by the inbox, but the recency value committed by the first delivery skips it.
-func TestTenantEvents_TenantStateChanged_InboxWriteFails_Answers200AndARedeliveryIsSkippedByRecency(t *testing.T) {
+// A failing inbox write after the change was applied answers 503 with an error, so the delivery is retried.
+// The retry is not deduplicated by the inbox, but the recency value committed by the first delivery skips it.
+func TestTenantEvents_TenantStateChanged_InboxWriteFails_Answers503AndARedeliveryIsSkippedByRecency(t *testing.T) {
 	rig := newW17bTenantRig()
 	rig.inbox.markErr = errW17bInboxWrite
 	tenantID, eventID := uuid.New(), uuid.New()
@@ -157,11 +153,10 @@ func TestTenantEvents_TenantStateChanged_InboxWriteFails_Answers200AndARedeliver
 	first := w17bPost(rig.router, w17bTenantPath, body)
 	second := w17bPost(rig.router, w17bTenantPath, body)
 
-	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
-	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
-	assert.Zero(t, first.Body.Len(), "the answer carries no body")
-	line, ok := rig.log.warnWith(eventID, "MarkProcessed")
-	require.True(t, ok, "a warning names the event whose inbox write failed: %v", rig.log.warns)
+	require.Equal(t, http.StatusServiceUnavailable, first.Code, first.Body.String())
+	require.Equal(t, http.StatusServiceUnavailable, second.Code, second.Body.String())
+	line, ok := rig.log.errorWith(eventID, "claiming or recording")
+	require.True(t, ok, "an error names the event whose inbox write failed: %v", rig.log.errs)
 	assert.Equal(t, errW17bInboxWrite.Error(), line.Fields["error"])
 	want := []w17bInboxCall{{eventID, w17bMembershipConsumer}, {eventID, w17bMembershipConsumer}}
 	assert.Equal(t, want, rig.inbox.checked, "the inbox did not hold the event, so both deliveries were looked up")

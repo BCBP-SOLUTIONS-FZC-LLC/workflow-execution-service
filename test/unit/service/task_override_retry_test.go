@@ -19,8 +19,9 @@ type tskfixOverrideWorld struct {
 	run       func(port.AssigneeOverrideInput) (*port.AssigneeOverride, error)
 }
 
-func newTskfixOverrideWorld() *tskfixOverrideWorld {
+func newTskfixOverrideWorld(t *testing.T) *tskfixOverrideWorld {
 	svc, instances, tasks, assignments, overrides, _ := newTaskServiceHarness()
+	fx9AllowEligibility(t, svc, uuid.Nil)
 	outbox := &fakeOutbox{}
 	svc.Signals = outbox
 	tenantID, instanceID := uuid.New(), uuid.New()
@@ -43,7 +44,7 @@ func newTskfixOverrideWorld() *tskfixOverrideWorld {
 }
 
 func TestTaskService_OverrideAssignee_RetryOnTheOldVersionAfterTheCommit_AnswersConflictAndStoresNoSecondRow(t *testing.T) {
-	w := newTskfixOverrideWorld()
+	w := newTskfixOverrideWorld(t)
 
 	_, err := w.run(w.in)
 	require.NoError(t, err)

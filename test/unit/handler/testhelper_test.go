@@ -18,6 +18,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 )
 
@@ -358,6 +359,30 @@ func (f *fakeProcessedEventRepository) MarkProcessed(_ context.Context, eventID 
 	return nil
 }
 
+// processedLedger is the check-and-record half of a handler test's fake inbox.
+type processedLedger interface {
+	IsProcessed(ctx context.Context, eventID uuid.UUID, consumer string) (bool, error)
+	MarkProcessed(ctx context.Context, eventID uuid.UUID, consumer string) error
+}
+
+// processThrough plays Process over a ledger: a recorded id is skipped, a failed apply records
+// nothing, and a successful one records the id.
+func processThrough(ctx context.Context, ledger processedLedger, env events.Envelope[json.RawMessage], consumer string, apply func(context.Context) error) error {
+	eventID := uuid.MustParse(env.ID)
+	seen, err := ledger.IsProcessed(ctx, eventID, consumer)
+	if err != nil || seen {
+		return err
+	}
+	if err := apply(ctx); err != nil {
+		return err
+	}
+	return ledger.MarkProcessed(ctx, eventID, consumer)
+}
+
+func (f *fakeProcessedEventRepository) Process(ctx context.Context, env events.Envelope[json.RawMessage], consumer string, apply func(context.Context) error) error {
+	return processThrough(ctx, f, env, consumer, apply)
+}
+
 func (f *fakeProcessedEventRepository) Prune(context.Context, time.Duration) (int64, error) {
 	return 0, nil
 }
@@ -558,6 +583,16 @@ func (e *erroringProcessedEventRepository) IsProcessed(context.Context, uuid.UUI
 }
 
 func (e *erroringProcessedEventRepository) MarkProcessed(context.Context, uuid.UUID, string) error {
+	return e.recordErr
+}
+
+func (e *erroringProcessedEventRepository) Process(ctx context.Context, _ events.Envelope[json.RawMessage], _ string, apply func(context.Context) error) error {
+	if e.isProcessedErr != nil {
+		return e.isProcessedErr
+	}
+	if err := apply(ctx); err != nil {
+		return err
+	}
 	return e.recordErr
 }
 

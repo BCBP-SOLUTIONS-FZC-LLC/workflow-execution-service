@@ -147,8 +147,8 @@ func TestTenantRetentionRepo_ListDue_SelectsByDateAndOrdersByPurgeDateThenTenant
 			"a purge date or retry time equal to now is due; one microsecond later is not; a tenant waiting on a retry is skipped until then")
 	})
 
-	t.Run("limit 0 returns nothing", func(t *testing.T) {
-		assert.Empty(t, w24bDueTenants(t, repo, now, 0))
+	t.Run("limit 0 takes the default page, the same as the other list repos", func(t *testing.T) {
+		assert.Len(t, w24bDueTenants(t, repo, now, 0), 5)
 	})
 
 	t.Run("limit 1 returns the first in order", func(t *testing.T) {

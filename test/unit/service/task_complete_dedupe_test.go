@@ -90,6 +90,9 @@ func (c *tskfixSafeCache) Get(_ context.Context, key string) (string, error) {
 }
 
 func (c *tskfixSafeCache) Set(_ context.Context, key, value string, _ time.Duration) error {
+	if fx10IsPlanKey(key) {
+		return nil
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.values[key] = value

@@ -135,6 +135,7 @@ func csaNewClientHarness() *csaClientHarness {
 		outbox:      &fakeOutbox{},
 	}
 	h.svc = &service.WorkflowClient{Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments, Transactor: fakeTransactor{}, Outbox: h.outbox, Signals: h.outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(), Locks: &fakeLocker{}}
+	fx10AllowClientEligibility(h.svc, uuid.Nil)
 	return h
 }
 
@@ -156,7 +157,7 @@ func (h *csaClientHarness) seedOnInstance(tenantID, userID, instanceID uuid.UUID
 		inst = &domain.Instance{ID: instanceID, TenantID: tenantID, Status: instanceStatus, TemporalWorkflowID: tenantID.String() + ":" + instanceID.String(), RecordVersion: 1}
 		h.instances.byID[instanceID] = inst
 	}
-	task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, Status: taskStatus, RecordVersion: 3}
+	task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, NodeKey: fx10ReviewNode, Status: taskStatus, RecordVersion: 3}
 	h.tasks.byID[task.ID] = task
 	a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true, Reason: reason}
 	h.assignments.add(a)

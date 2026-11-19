@@ -68,7 +68,7 @@ func newFVWorld(instances *fakeInstanceRepo, tasks *fakeTaskRepo, assignments *f
 	w := &fvWorld{tenantID: tenantID, from: uuid.New(), to: uuid.New()}
 	inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, TemporalWorkflowID: tenantID.String() + ":biz", RecordVersion: 1}
 	instances.byID[inst.ID] = inst
-	w.task = &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, RecordVersion: 3}
+	w.task = &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, NodeKey: fx10ReviewNode, RecordVersion: 3}
 	tasks.byID[w.task.ID] = w.task
 	w.lead = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: w.task.ID, UserID: w.from, IsActive: true, IsLead: true, Reason: reason}
 	w.holder = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: w.task.ID, UserID: w.to, IsActive: true}
@@ -92,6 +92,7 @@ func TestDelegationMoves_ReReadTheTaskInsideTheTransactionBeforeHandingTheLeadOv
 		instances, tasks, assignments, outbox := newFakeInstanceRepo(), newFakeTaskRepo(), newFakeAssignmentRepo(), &fakeOutbox{}
 		w := newFVWorld(instances, tasks, assignments, uuid.New(), "delegation:"+uuid.NewString())
 		svc := &service.WorkflowClient{Instances: instances, Tasks: w.tasks, Assignments: w.assignments, Transactor: fakeTransactor{}, Outbox: outbox, Signals: outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(), Locks: &fakeLocker{}}
+		fx10AllowClientEligibility(svc, uuid.Nil)
 
 		count, err := svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: w.tenantID, OldDelegateID: w.from, NewDelegateID: w.to})
 
@@ -104,6 +105,7 @@ func TestDelegationMoves_ReReadTheTaskInsideTheTransactionBeforeHandingTheLeadOv
 		w := newFVWorld(instances, tasks, assignments, uuid.New(), "")
 		w.lead.Reason = dcrHop(uuid.New(), w.to)
 		svc := &service.WorkflowClient{Instances: instances, Tasks: w.tasks, Assignments: w.assignments, Transactor: fakeTransactor{}, Outbox: outbox, Signals: outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(), Locks: &fakeLocker{}}
+		fx10AllowClientEligibility(svc, uuid.Nil)
 
 		count, err := svc.CancelByDelegate(context.Background(), port.CancelByDelegateInput{TenantID: w.tenantID, DelegateUserID: w.from})
 

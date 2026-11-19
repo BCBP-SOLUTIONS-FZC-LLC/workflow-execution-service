@@ -76,8 +76,9 @@ func TestUserAvailabilityRepo_Record_AnEqualTimestampOverwritesAndEveryWriteMove
 	}{
 		{name: "the first change inserts the row at version 1", status: "available", changedAt: at, wantWritten: true, wantStatus: "available", wantVersion: 1},
 		{name: "an older change is not written and the version stays", status: "ooo", changedAt: at.Add(-time.Second), wantWritten: false, wantStatus: "available", wantVersion: 1},
-		{name: "a newer change writes and moves the version", status: "busy", changedAt: at.Add(time.Minute), wantWritten: true, wantStatus: "busy", wantVersion: 2},
-		{name: "an older change after that still changes nothing", status: "available", changedAt: at, wantWritten: false, wantStatus: "busy", wantVersion: 2},
+		{name: "a redelivered change at the same timestamp is written again, so its signal is re-sent", status: "available", changedAt: at, wantWritten: true, wantStatus: "available", wantVersion: 2},
+		{name: "a newer change writes and moves the version", status: "busy", changedAt: at.Add(time.Minute), wantWritten: true, wantStatus: "busy", wantVersion: 3},
+		{name: "an older change after that still changes nothing", status: "available", changedAt: at, wantWritten: false, wantStatus: "busy", wantVersion: 3},
 	}
 	for _, step := range steps {
 		written, err := repo.Record(ctx, tenant, user, step.status, step.changedAt)

@@ -64,17 +64,25 @@ func TestSchemaValidator_ListFieldsThatMarshalAsNull_AreRefused(t *testing.T) {
 		{
 			name:      "a created task with no human assignees",
 			eventType: domain.EventWorkflowTaskCreated,
-			payload: domain.NewWorkflowTaskCreatedPayload(w10aCore(),
-				domain.TaskScopedCore{TaskID: uuid.New(), NodeKey: "finance/review", DepartmentID: uuid.New(), AssigneeUserIDs: nil},
-				"userTask", nil, nil, nil, nil, nil),
+			payload: func() any {
+				p := domain.NewWorkflowTaskCreatedPayload(w10aCore(),
+					domain.TaskScopedCore{TaskID: uuid.New(), NodeKey: "finance/review", DepartmentID: uuid.New()},
+					"userTask", nil, nil, nil, nil, nil)
+				p.AssigneeUserIDs = nil
+				return p
+			}(),
 			wantNull: `"assignee_user_ids":null`,
 			wantPath: "assignee_user_ids",
 		},
 		{
 			name:      "a force route with no source nodes",
 			eventType: domain.EventWorkflowInstanceForceRouted,
-			payload: domain.NewWorkflowInstanceForceRoutedPayload(w10aCore(), uuid.New(), nil, "finance/review",
-				domain.ForceRouteDirectionForward),
+			payload: func() any {
+				p := domain.NewWorkflowInstanceForceRoutedPayload(w10aCore(), uuid.New(), nil, "finance/review",
+					domain.ForceRouteDirectionForward)
+				p.FromNodeKeys = nil
+				return p
+			}(),
 			wantNull: `"from_node_keys":null`,
 			wantPath: "from_node_keys",
 		},

@@ -41,6 +41,11 @@ func hashBody(b []byte) string {
 
 const idempotencyClaim = "CLAIMED"
 
+// idempotencyClaimTTL bounds how long an unanswered claim blocks retries: twice the router's
+// request timeout, so a pod that dies mid-request frees its key soon, while a live request
+// keeps it. Storing the answer extends the key to the full lifetime.
+const idempotencyClaimTTL = time.Minute
+
 func (h *Handler) Idempotent(fn gin.HandlerFunc) gin.HandlerFunc {
 	return WithIdempotency(h.cache, h.idempotencyTTL, h.log, fn)
 }
@@ -62,7 +67,7 @@ func WithIdempotency(cache port.CacheStore, ttl time.Duration, log port.Logger, 
 
 		cacheKey := "idem:" + idempotencyScopePrefix(c, bodyBytes) + c.Request.Method + ":" + c.Request.URL.Path + ":" + key
 
-		claimed, err := cache.SetNX(c.Request.Context(), cacheKey, idempotencyClaim, ttl)
+		claimed, err := cache.SetNX(c.Request.Context(), cacheKey, idempotencyClaim, min(ttl, idempotencyClaimTTL))
 		if err != nil {
 			idempotencyLogWarn(log, "idempotency: cache claim failed, proceeding without idempotency enforcement", map[string]any{
 				"cache_key": cacheKey, "error": err.Error(),
