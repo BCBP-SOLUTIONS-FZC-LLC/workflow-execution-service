@@ -116,6 +116,9 @@ func (c *Client) UpdateWorkflow(ctx context.Context, temporalWorkflowID string, 
 	if errors.As(err, &appErr) && appErr.Type() == port.UpdateRefusedErrorType {
 		return fmt.Errorf("%w: %s", port.ErrUpdateRefused, appErr.Message())
 	}
+	if errors.As(err, &appErr) && appErr.Type() == port.VersionConflictErrorType {
+		return fmt.Errorf("update workflow %q: %w: %w", name, port.ErrRecordVersionConflict, err)
+	}
 	if errors.As(err, &appErr) {
 		return fmt.Errorf("update workflow %q: %w", name, err)
 	}

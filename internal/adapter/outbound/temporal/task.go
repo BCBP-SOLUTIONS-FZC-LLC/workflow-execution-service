@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -148,7 +149,9 @@ func (d *Deps) taskAlreadyCreated(ctx context.Context, tenantID, taskID uuid.UUI
 func resolveConnectorInputs(contextJSON string, m *dsl.IOMapping) (map[string]any, error) {
 	vars := map[string]any{}
 	if contextJSON != "" {
-		if err := json.Unmarshal([]byte(contextJSON), &vars); err != nil {
+		dec := json.NewDecoder(strings.NewReader(contextJSON))
+		dec.UseNumber()
+		if err := dec.Decode(&vars); err != nil {
 			return nil, fmt.Errorf("parsing context_json for connector io_mapping: %w", err)
 		}
 	}

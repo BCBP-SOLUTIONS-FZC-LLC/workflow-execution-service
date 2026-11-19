@@ -72,6 +72,9 @@ func (c *Consumer) ReclaimStale(
 			entries[i].Deliveries = pending[0].RetryCount
 		}
 	}
+	if next == "" {
+		next = "0-0"
+	}
 	return entries, next, nil
 }
 

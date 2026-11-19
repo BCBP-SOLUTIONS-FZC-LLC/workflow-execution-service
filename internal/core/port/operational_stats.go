@@ -7,8 +7,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 )
 
-const RLSViolationExporterScope = "rls_violation_exporter"
-
 type RLSViolationLog interface {
 	Horizon(ctx context.Context, lag time.Duration) (time.Time, error)
 	CountsBetween(ctx context.Context, after, upTo time.Time) ([]domain.RLSViolationCount, error)

@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -219,7 +221,7 @@ func TestApplyIOMapping_UnparseableContextWithInputs_ReturnsTheWrappedParseError
 			assert.ErrorContains(t, err, "workflow: parsing context_json for io_mapping: ")
 			var syntaxErr *json.SyntaxError
 			var typeErr *json.UnmarshalTypeError
-			assert.True(t, errorsAs(err, &syntaxErr) || errorsAs(err, &typeErr), "the JSON error is wrapped, not replaced")
+			assert.True(t, errorsAs(err, &syntaxErr) || errorsAs(err, &typeErr) || errors.Is(err, io.ErrUnexpectedEOF), "the JSON error is wrapped, not replaced")
 		})
 	}
 }

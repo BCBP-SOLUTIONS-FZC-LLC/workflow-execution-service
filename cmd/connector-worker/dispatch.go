@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -79,6 +80,7 @@ func reclaimLoop(ctx context.Context, d *deps, wg *sync.WaitGroup, wlog port.Log
 			)
 			if err != nil {
 				wlog.Warn("connector-worker: reclaim stale failed", map[string]any{"error": err.Error()})
+				cursor = "0"
 				continue
 			}
 			cursor = next
@@ -114,7 +116,9 @@ func parseDispatchJob(entry valkeystream.Entry) (dispatchJob, error) {
 	}
 	var resolvedInputs map[string]any
 	if raw := entry.Fields["resolved_inputs"]; raw != "" {
-		if err := json.Unmarshal([]byte(raw), &resolvedInputs); err != nil {
+		dec := json.NewDecoder(strings.NewReader(raw))
+		dec.UseNumber()
+		if err := dec.Decode(&resolvedInputs); err != nil {
 			return dispatchJob{}, fmt.Errorf("parse resolved_inputs: %w", err)
 		}
 	}

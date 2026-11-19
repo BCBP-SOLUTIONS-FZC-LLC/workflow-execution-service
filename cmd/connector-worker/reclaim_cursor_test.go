@@ -72,7 +72,7 @@ func TestReclaimLoop_EachTickResumesWhereTheLastOneStoppedAndWrapsAtTheEnd(t *te
 		<-done
 		wg.Wait()
 
-		assert.Equal(t, []string{"0", "1700-1", "1700-1", "0-0", "1800-4"}, stream.startsSeen(),
-			"the first tick starts at 0, a failed tick keeps the cursor, and the end of the list starts over")
+		assert.Equal(t, []string{"0", "1700-1", "0", "0-0", "1800-4"}, stream.startsSeen(),
+			"the first tick starts at 0, a failed tick starts over, and the end of the list starts over")
 	})
 }

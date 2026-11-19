@@ -13,7 +13,6 @@ const rlsViolationCommitLag = time.Minute
 type RLSViolationExporterDeps struct {
 	Log       port.RLSViolationLog
 	Record    func(violationType string, n float64)
-	Leader    port.ScopeTryLocker
 	Interval  time.Duration
 	Retention time.Duration
 	Logger    port.Logger
@@ -71,34 +70,6 @@ func (e *RLSViolationExporter) countWindow(ctx context.Context) error {
 func (e *RLSViolationExporter) Run(ctx context.Context) {
 	ticker := time.NewTicker(e.deps.Interval)
 	defer ticker.Stop()
-	for ctx.Err() == nil {
-		e.cycle(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-}
-
-func (e *RLSViolationExporter) cycle(ctx context.Context) {
-	if e.deps.Leader == nil {
-		_ = e.lead(ctx)
-		return
-	}
-	led, err := e.deps.Leader.TryWithLock(ctx, port.RLSViolationExporterScope, e.lead)
-	if err != nil {
-		e.deps.Logger.Error("rls violation exporter lock failed", map[string]any{"error": err.Error()})
-		return
-	}
-	if !led {
-		e.follow(ctx)
-	}
-}
-
-func (e *RLSViolationExporter) lead(ctx context.Context) error {
-	ticker := time.NewTicker(e.deps.Interval)
-	defer ticker.Stop()
 	for {
 		if !e.started {
 			e.tryStart(ctx)
@@ -107,20 +78,9 @@ func (e *RLSViolationExporter) lead(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
-			return nil
+			return
 		case <-ticker.C:
 		}
-	}
-}
-
-func (e *RLSViolationExporter) follow(ctx context.Context) {
-	horizon, err := e.deps.Log.Horizon(ctx, rlsViolationCommitLag)
-	if err != nil {
-		e.deps.Logger.Error("rls violation follower position failed", map[string]any{"error": err.Error()})
-		return
-	}
-	if horizon.After(e.position) {
-		e.position = horizon
 	}
 }
 

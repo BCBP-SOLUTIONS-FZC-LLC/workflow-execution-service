@@ -20,7 +20,6 @@ import (
 var (
 	_ port.RecencyGuard   = (*RecencyGuardRepo)(nil)
 	_ port.ScopeSetLocker = (*RecencyGuardRepo)(nil)
-	_ port.ScopeTryLocker = (*RecencyGuardRepo)(nil)
 )
 
 type RecencyGuardRepo struct {
@@ -120,14 +119,6 @@ func (r *RecencyGuardRepo) WithLocks(ctx context.Context, scopeKeys []string, fn
 		case <-time.After(lockRetryInterval):
 		}
 	}
-}
-
-func (r *RecencyGuardRepo) TryWithLock(ctx context.Context, scopeKey string, fn func(context.Context) error) (bool, error) {
-	acquired, err := r.withLocksOnce(ctx, []string{scopeKey}, fn)
-	if err != nil {
-		return false, fmt.Errorf("recency guard: try lock %q: %w", scopeKey, err)
-	}
-	return acquired, nil
 }
 
 func sortedUnique(keys []string) []string {
