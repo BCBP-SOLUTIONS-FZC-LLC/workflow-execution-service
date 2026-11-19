@@ -187,7 +187,8 @@ func TestConsumer_Calls_FailureWrapsStepPrefixAndCause(t *testing.T) {
 			return nil, c.Ack(ctx, "w30b-stream", "w30b-group", "1-0")
 		}},
 		{"reclaim stale", "valkeystream reclaim stale: ", func(c *valkeystream.Consumer, ctx context.Context) ([]valkeystream.Entry, error) {
-			return c.ReclaimStale(ctx, "w30b-stream", "w30b-group", "w30b-consumer", time.Second, 10)
+			entries, _, err := c.ReclaimStale(ctx, "w30b-stream", "w30b-group", "w30b-consumer", "0", time.Second, 10)
+			return entries, err
 		}},
 	}
 	causes := []struct {

@@ -35,6 +35,17 @@ func w27aAssertNotFoundProblem(t *testing.T, w *httptest.ResponseRecorder, body 
 	assert.Equal(t, "NOT_FOUND", body["code"])
 }
 
+func w27aAssertMethodNotAllowedProblem(t *testing.T, w *httptest.ResponseRecorder, body map[string]any, path string) {
+	t.Helper()
+	assert.Equal(t, "application/problem+json", w.Header().Get("Content-Type"))
+	assert.Equal(t, "https://errors.bcbp.io/execution/method-not-allowed", body["type"])
+	assert.Equal(t, "Method Not Allowed", body["title"])
+	assert.EqualValues(t, http.StatusMethodNotAllowed, body["status"])
+	assert.Equal(t, "the method is not allowed for this path", body["detail"])
+	assert.Equal(t, path, body["instance"])
+	assert.Equal(t, "METHOD_NOT_ALLOWED", body["code"])
+}
+
 func TestRouter_UnroutedPath_AnswersTheCompleteNotFoundProblemWhateverTheCaller(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -58,19 +69,20 @@ func TestRouter_UnroutedPath_AnswersTheCompleteNotFoundProblemWhateverTheCaller(
 	}
 }
 
-func TestRouter_KnownPathWithAnotherMethod_Answers404NotFoundNeverMethodNotAllowed(t *testing.T) {
+func TestRouter_KnownPathWithAnotherMethod_Answers405WithTheAllowedMethods(t *testing.T) {
 	obstest.Init(t)
 	cases := []struct {
-		name   string
-		method string
-		path   string
+		name      string
+		method    string
+		path      string
+		wantAllow string
 	}{
-		{name: "get on a post route", method: http.MethodGet, path: "/api/v1/tasks/" + w27aTask + "/claim"},
-		{name: "post on a get route", method: http.MethodPost, path: "/api/v1/tasks"},
-		{name: "delete on a task", method: http.MethodDelete, path: "/api/v1/tasks/" + w27aTask},
-		{name: "get on an internal post route", method: http.MethodGet, path: "/api/v1/internal/events/tenant"},
-		{name: "post on an internal get route", method: http.MethodPost, path: "/api/v1/internal/workflows/delegate-impact"},
-		{name: "put on an instance action", method: http.MethodPut, path: "/api/v1/instances/" + w27aInstance + "/pause"},
+		{name: "get on a post route", method: http.MethodGet, path: "/api/v1/tasks/" + w27aTask + "/claim", wantAllow: "POST"},
+		{name: "post on a get route", method: http.MethodPost, path: "/api/v1/tasks", wantAllow: "GET"},
+		{name: "delete on a task", method: http.MethodDelete, path: "/api/v1/tasks/" + w27aTask, wantAllow: "GET"},
+		{name: "get on an internal post route", method: http.MethodGet, path: "/api/v1/internal/events/tenant", wantAllow: "POST"},
+		{name: "post on an internal get route", method: http.MethodPost, path: "/api/v1/internal/workflows/delegate-impact", wantAllow: "GET"},
+		{name: "put on an instance action", method: http.MethodPut, path: "/api/v1/instances/" + w27aInstance + "/pause", wantAllow: "POST"},
 	}
 	identities := []struct {
 		name    string
@@ -88,9 +100,9 @@ func TestRouter_KnownPathWithAnotherMethod_Answers404NotFoundNeverMethodNotAllow
 
 				w := rig.send(w27aRequest{method: tc.method, path: tc.path, headers: who.headers, body: `{}`})
 
-				require.Equal(t, http.StatusNotFound, w.Code, "404, not 405 and not 401: "+w.Body.String())
-				w27aAssertNotFoundProblem(t, w, w27aBody(t, w), tc.path)
-				assert.Empty(t, w.Header().Get("Allow"), "the router does not advertise the methods the path does accept")
+				require.Equal(t, http.StatusMethodNotAllowed, w.Code, "405, not 404 and not 401: "+w.Body.String())
+				w27aAssertMethodNotAllowedProblem(t, w, w27aBody(t, w), tc.path)
+				assert.Equal(t, tc.wantAllow, w.Header().Get("Allow"))
 				assert.Empty(t, rig.recorded(), "no handler ran")
 				assert.Zero(t, rig.cache.claims(), "no idempotency claim")
 				assert.Equal(t, rejectedBefore, w27aRejected(t), "no identity check ran, so nothing is counted as an internal auth rejection")

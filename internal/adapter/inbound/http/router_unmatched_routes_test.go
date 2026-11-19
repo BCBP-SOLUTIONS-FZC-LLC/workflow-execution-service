@@ -41,26 +41,41 @@ func TestRouter_TrailingSlashOnPostRoute_Answers404BeforeAuthAndHandler(t *testi
 	assert.Equal(t, claimsBefore, rig.cache.claimCount(), "the idempotency wrapper and handler must not run")
 }
 
-func TestRouter_MethodNotRegisteredForPath_Returns404NotAFallbackToGet(t *testing.T) {
-	cases := []struct {
-		name   string
-		method string
-	}{
-		{name: "head", method: http.MethodHead},
-		{name: "options", method: http.MethodOptions},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+func TestRouter_OptionsOnProbePath_Returns405WithTheAllowedMethods(t *testing.T) {
+	for _, path := range []string{"/healthz", "/readyz"} {
+		t.Run(path, func(t *testing.T) {
 			rig := hrfNewRig(t, "test")
 
-			w := rig.do(tc.method, "/healthz", nil)
+			w := rig.do(http.MethodOptions, path, nil)
 
-			require.Equal(t, http.StatusNotFound, w.Code)
+			require.Equal(t, http.StatusMethodNotAllowed, w.Code)
+			assert.Equal(t, "GET, HEAD", w.Header().Get("Allow"))
 			body := hrfBody(t, w)
-			assert.Equal(t, "NOT_FOUND", body["code"])
-			assert.NotEqual(t, "ok", body["status"], "the health handler must not have answered")
+			assert.Equal(t, "METHOD_NOT_ALLOWED", body["code"])
+			assert.Equal(t, path, body["instance"])
+			assert.Equal(t, "application/problem+json", w.Header().Get("Content-Type"))
 		})
 	}
+}
+
+func TestRouter_HeadOnProbePaths_AnswersLikeGet(t *testing.T) {
+	for _, path := range []string{"/healthz", "/readyz"} {
+		t.Run(path, func(t *testing.T) {
+			rig := hrfNewRig(t, "test")
+
+			w := rig.do(http.MethodHead, path, nil)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
+	}
+}
+
+func TestRouter_DevHeadOnAsyncAPI_AnswersLikeGet(t *testing.T) {
+	rig := hrfNewRig(t, "dev")
+
+	w := rig.do(http.MethodHead, "/asyncapi", nil)
+
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestRouter_ScannerPath_UsesUnknownRouteLabelInMetricsAndAccessLog(t *testing.T) {

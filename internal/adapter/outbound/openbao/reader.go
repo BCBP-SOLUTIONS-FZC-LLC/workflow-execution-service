@@ -29,7 +29,7 @@ func NewReader(addr, token, mount string, timeout time.Duration) *Reader {
 
 type openBaoReadResponse struct {
 	Data struct {
-		Data map[string]string `json:"data"`
+		Data map[string]json.RawMessage `json:"data"`
 	} `json:"data"`
 }
 
@@ -71,9 +71,15 @@ func (r *Reader) extractField(body io.Reader, path, fieldName string) (string, e
 	if err := json.NewDecoder(body).Decode(&parsed); err != nil {
 		return "", fmt.Errorf("%w: openbao read %q: decode response: %s", ErrUpstreamUnavailable, path, err)
 	}
-	value, ok := parsed.Data.Data[fieldName]
+	raw, ok := parsed.Data.Data[fieldName]
 	if !ok {
 		return "", fmt.Errorf("%w: %q has no field %q", ErrSecretNotFound, path, fieldName)
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", fmt.Errorf(
+			"%w: openbao read %q field %q: decode value: %s", ErrUpstreamUnavailable, path, fieldName, err,
+		)
 	}
 	return value, nil
 }

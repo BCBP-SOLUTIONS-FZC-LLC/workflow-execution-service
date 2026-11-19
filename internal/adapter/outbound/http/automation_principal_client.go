@@ -55,7 +55,7 @@ func (c *AutomationPrincipalClient) AutomationPrincipal(ctx context.Context, ten
 	url := fmt.Sprintf("%s/api/v1/internal/tenants/%s/service-accounts/platform-automation", c.baseURL, tenantID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return port.AutomationPrincipal{}, fmt.Errorf("%w: build token service request: %w", ErrUpstreamUnavailable, err)
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: build token service request: %w", ErrTokenServiceUnavailable, err)
 	}
 	req.Header.Set("x-user-id", iamSystemUserID)
 	req.Header.Set("x-tenant-id", tenantID.String())
@@ -63,7 +63,7 @@ func (c *AutomationPrincipalClient) AutomationPrincipal(ctx context.Context, ten
 	gincommon.InjectTraceContext(ctx, req.Header)
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service: %v", ErrUpstreamUnavailable, err)
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service: %v", ErrTokenServiceUnavailable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -71,7 +71,7 @@ func (c *AutomationPrincipalClient) AutomationPrincipal(ctx context.Context, ten
 	case resp.StatusCode == http.StatusNotFound:
 		return port.AutomationPrincipal{}, port.ErrNoAutomationPrincipal
 	case resp.StatusCode != http.StatusOK:
-		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered %d", ErrUpstreamUnavailable, resp.StatusCode)
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered %d", ErrTokenServiceUnavailable, resp.StatusCode)
 	}
 
 	var body struct {
@@ -80,19 +80,19 @@ func (c *AutomationPrincipalClient) AutomationPrincipal(ctx context.Context, ten
 		Status       string    `json:"status"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
-		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered an unreadable principal: %v", ErrUpstreamUnavailable, err)
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered an unreadable principal: %v", ErrTokenServiceUnavailable, err)
 	}
 	if body.Status == "" {
-		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered without a status", ErrUpstreamUnavailable)
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered without a status", ErrTokenServiceUnavailable)
 	}
 	if body.Status != "active" {
 		return port.AutomationPrincipal{}, port.ErrNoAutomationPrincipal
 	}
 	if body.PrincipalID == uuid.Nil {
-		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered without a principal_id", ErrUpstreamUnavailable)
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered without a principal_id", ErrTokenServiceUnavailable)
 	}
 	if body.PrincipalSub == "" {
-		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered without a principal_sub", ErrUpstreamUnavailable)
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered without a principal_sub", ErrTokenServiceUnavailable)
 	}
 
 	principal := port.AutomationPrincipal{ID: body.PrincipalID, Subject: body.PrincipalSub}

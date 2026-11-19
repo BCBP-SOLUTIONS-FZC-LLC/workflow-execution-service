@@ -42,6 +42,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- The connector failure callback now refuses an `error_class` that is only whitespace with a 400, as it already did for an empty one; a blank class used to reach the workflow as the failure reason.
+- A request body is accepted only with the media type `application/json` (with or without parameters such as a charset); a type that merely begins with it, such as `application/jsonfoo`, now gets the 415 answer. A request with no `Content-Type` header is still accepted.
+- A failed call to the token service is now counted under the `token_service` dependency of the upstream error metric and no longer as `iam`; the runbook names the new label.
+- A request with a method that a path does not serve now answers 405 `METHOD_NOT_ALLOWED` with an `Allow` header listing the methods it does serve, instead of 404. `HEAD` now works on `/healthz`, `/readyz` and, in `dev` and `local`, `/asyncapi`.
+- The public reassign body is documented with its real field `new_user_id` and no `reason`, the cancel and terminate reasons are documented as carried in the lifecycle event only, and the internal specs now list the 413 and 415 answers of the connector callbacks and the 503 answer of the active-instances count.
+- The connector worker no longer holds back an empty alias answer for two cycles when the registry it holds has only SQL query aliases, and a skipped alias row is logged under the field that was refused (method, base URL or path) whatever the alias is named.
+- The connector worker's stale-entry reclaim now resumes from where the previous pass stopped and starts over at the end of the list, so a stale task behind a long run of busy ones is eventually picked up; it used to rescan the same first entries on every pass.
+- A secret read from OpenBao no longer fails because another field of the same secret holds a number or an object; only the requested field has to be a string.
+- Building the processed-event ledger now fails at start-up when given no consumers or the same consumer twice, instead of pruning nothing or twice.
 - Claiming a multi-assignee task now emits `WorkflowTaskClaimed`, naming the claimer (also as the event's actor) and every active assignee; the event is stored in the same transaction as the lead, so the lead and the event stand or fall together. A claim used to change the lead and tell nobody.
 - A claim by a user whose assignment was closed a moment earlier (membership revoked, user deleted) is now refused as "not the task's active assignee" and changes nothing; it used to mark the closed assignment lead and announce a claim by someone who no longer held the task.
 - Handling inbound events no longer competes with their own effects for database connections: the event inbox has its own small connection pool, so a burst of deliveries cannot use up the application pool and stall user requests.

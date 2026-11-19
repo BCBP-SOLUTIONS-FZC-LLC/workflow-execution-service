@@ -200,9 +200,9 @@ Fix the cause first. A task whose entry was lost is not redispatched by itself.
 
 `runbook: workflow-execution-service/upstream-dependency`
 
-**Meaning.** Calls to the named dependency (`definition_service` or `iam`) fail at a sustained rate, apart from the API's own 5xx rate.
+**Meaning.** Calls to the named dependency (`definition_service`, `iam` or `token_service`) fail at a sustained rate, apart from the API's own 5xx rate.
 
-**Triage.** Check that dependency's health. A plan-read failure fails the request that needed the plan with a 503; an IAM failure does the same for the operation that needed the eligibility answer.
+**Triage.** Check that dependency's health. A plan-read failure fails the request that needed the plan with a 503; an IAM failure does the same for the operation that needed the eligibility answer; a token-service failure does the same for the call that needed the tenant's automation principal.
 
 ### CompiledPlanCacheMissRatioHigh
 

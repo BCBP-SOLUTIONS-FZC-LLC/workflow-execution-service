@@ -148,15 +148,16 @@ func (c *cwcliConsumer) Ack(_ context.Context, stream, group, entryID string) er
 	return c.ackErr
 }
 
-func (c *cwcliConsumer) ReclaimStale(ctx context.Context, _, _, _ string, _ time.Duration, _ int64) ([]valkeystream.Entry, error) {
+func (c *cwcliConsumer) ReclaimStale(ctx context.Context, _, _, _, _ string, _ time.Duration, _ int64) ([]valkeystream.Entry, string, error) {
 	c.mu.Lock()
 	c.reclaims++
 	fn := c.onReclaim
 	c.mu.Unlock()
 	if fn != nil {
-		return fn(ctx)
+		entries, err := fn(ctx)
+		return entries, "0-0", err
 	}
-	return nil, nil
+	return nil, "0-0", nil
 }
 
 func (c *cwcliConsumer) DeadLetter(context.Context, string, string, string, valkeystream.Entry, string) error {

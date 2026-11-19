@@ -44,7 +44,9 @@ import (
 type streamConsumer interface {
 	ReadGroup(ctx context.Context, streamKey, group, consumerName string, count int64, block time.Duration) ([]valkeystream.Entry, error)
 	Ack(ctx context.Context, streamKey, group, entryID string) error
-	ReclaimStale(ctx context.Context, streamKey, group, consumerName string, minIdle time.Duration, count int64) ([]valkeystream.Entry, error)
+	ReclaimStale(
+		ctx context.Context, streamKey, group, consumerName, start string, minIdle time.Duration, count int64,
+	) ([]valkeystream.Entry, string, error)
 	DeadLetter(ctx context.Context, streamKey, group, deadLetterKey string, entry valkeystream.Entry, reason string) error
 	Touch(ctx context.Context, streamKey, group, consumerName string, ids []string) error
 }

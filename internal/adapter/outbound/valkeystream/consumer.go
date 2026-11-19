@@ -50,12 +50,15 @@ func (c *Consumer) Ack(ctx context.Context, streamKey, group, entryID string) er
 	return nil
 }
 
-func (c *Consumer) ReclaimStale(ctx context.Context, streamKey, group, consumerName string, minIdle time.Duration, count int64) ([]Entry, error) {
-	messages, _, err := c.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
-		Stream: streamKey, Group: group, Consumer: consumerName, MinIdle: minIdle, Start: "0", Count: count,
+func (c *Consumer) ReclaimStale(
+	ctx context.Context, streamKey, group, consumerName, start string, minIdle time.Duration, count int64,
+) ([]Entry, string, error) {
+	messages, next, err := c.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+		Stream: streamKey, Group: group, Consumer: consumerName, MinIdle: minIdle,
+		Start: start, Count: count,
 	}).Result()
 	if err != nil {
-		return nil, fmt.Errorf("valkeystream reclaim stale: %w", err)
+		return nil, start, fmt.Errorf("valkeystream reclaim stale: %w", err)
 	}
 	entries := toEntriesFromMessages(messages)
 	for i := range entries {
@@ -63,13 +66,13 @@ func (c *Consumer) ReclaimStale(ctx context.Context, streamKey, group, consumerN
 			Stream: streamKey, Group: group, Start: entries[i].ID, End: entries[i].ID, Count: 1,
 		}).Result()
 		if err != nil {
-			return nil, fmt.Errorf("valkeystream reclaim stale: pending count: %w", err)
+			return nil, start, fmt.Errorf("valkeystream reclaim stale: pending count: %w", err)
 		}
 		if len(pending) == 1 {
 			entries[i].Deliveries = pending[0].RetryCount
 		}
 	}
-	return entries, nil
+	return entries, next, nil
 }
 
 func (c *Consumer) Touch(ctx context.Context, streamKey, group, consumerName string, ids []string) error {

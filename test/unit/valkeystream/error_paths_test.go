@@ -51,7 +51,7 @@ func TestConsumer_Ack_ConnectionError(t *testing.T) {
 
 func TestConsumer_ReclaimStale_ConnectionError(t *testing.T) {
 	consumer := valkeystream.NewConsumer(newUnreachableClient())
-	_, err := consumer.ReclaimStale(context.Background(), "stream", "group", "consumer", time.Second, 10)
+	_, _, err := consumer.ReclaimStale(context.Background(), "stream", "group", "consumer", "0", time.Second, 10)
 	assert.Error(t, err)
 }
 

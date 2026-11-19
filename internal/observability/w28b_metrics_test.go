@@ -143,7 +143,7 @@ func TestRegister_FreshProcess_ClosedLabelSetsAndSingleChildrenStartAtZero(t *te
 			{"reason": "transport"}, {"reason": "status"}, {"reason": "response"},
 		},
 		"workflow_execution_service_upstream_dependency_errors_total": {
-			{"dependency": "definition_service"}, {"dependency": "iam"},
+			{"dependency": "definition_service"}, {"dependency": "iam"}, {"dependency": "token_service"},
 		},
 	}
 	for family, sets := range zeroCounters {

@@ -216,7 +216,10 @@ components:
             TASK_ALREADY_CLAIMED, CLAIM_NOT_APPLICABLE, INVALID_TASK_STATE,
             FORCE_BACK_NO_SAVED_BRANCH, NODE_ALREADY_RESOLVED, IDEMPOTENCY_KEY_REPLAY,
             ASSIGNEE_INELIGIBLE, OVERRIDE_MAP_INVALID, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE,
-            UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, NO_AUTOMATION_PRINCIPAL, INTERNAL_ERROR.
+            UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, NO_AUTOMATION_PRINCIPAL,
+            METHOD_NOT_ALLOWED, INTERNAL_ERROR.
+            METHOD_NOT_ALLOWED is the 405 answer for a path that exists under other methods only;
+            the Allow header lists those methods.
           example: "RECORD_VERSION_CONFLICT"
         trace_id:
           type: string
@@ -1056,8 +1059,8 @@ paths:
                   type: string
                   description: >
                     Connector-defined error classification, a label the connector worker chooses
-                    from its fixed set (the error-class set of the failed-task event). Required and
-                    non-empty; carried unchanged onto the stage-fail signal and the task-failed
+                    from its fixed set (the error-class set of the failed-task event). Required, and it
+                    must contain text: a value of only whitespace is refused 400 BAD_REQUEST. It is carried unchanged onto the stage-fail signal and the task-failed
                     event. The endpoint does not check membership of the set.
                   example: "upstream_timeout"
                 output:

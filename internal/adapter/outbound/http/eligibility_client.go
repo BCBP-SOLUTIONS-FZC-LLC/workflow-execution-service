@@ -21,6 +21,14 @@ import (
 
 var ErrUpstreamUnavailable = errors.New("upstream service unavailable")
 
+type tokenServiceUnavailable struct{}
+
+func (tokenServiceUnavailable) Error() string { return ErrUpstreamUnavailable.Error() }
+
+func (tokenServiceUnavailable) Unwrap() error { return ErrUpstreamUnavailable }
+
+var ErrTokenServiceUnavailable error = tokenServiceUnavailable{}
+
 const maxEligibilityAttempts = 3
 
 const maxEligibilityBatchConcurrency = 20

@@ -95,16 +95,15 @@ func TestReadyz_DependencyProbe_GetsATwoSecondBoundedContext_AndItsFailureReturn
 	}
 }
 
-func TestReadyz_HeadRequest_Returns404WithoutPingingAnyDependency(t *testing.T) {
+func TestReadyz_HeadRequest_ChecksEveryDependencyLikeGet(t *testing.T) {
 	rig := hrfNewRig(t, "test")
 
 	w := rig.do(http.MethodHead, "/readyz", nil)
 
-	require.Equal(t, http.StatusNotFound, w.Code)
-	assert.Equal(t, "NOT_FOUND", hrfBody(t, w)["code"])
-	assert.Zero(t, rig.db.calls)
-	assert.Zero(t, rig.cacheP.calls)
-	assert.Zero(t, rig.temporal.calls)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, rig.db.calls)
+	assert.Equal(t, 1, rig.cacheP.calls)
+	assert.Equal(t, 1, rig.temporal.calls)
 }
 
 func TestReadyz_CachePing_GetsATwoSecondBoundedContext_AndItsFailureOnlyDegrades(t *testing.T) {

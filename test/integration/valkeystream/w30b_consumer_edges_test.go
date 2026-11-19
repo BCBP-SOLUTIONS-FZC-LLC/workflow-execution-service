@@ -371,7 +371,7 @@ func TestConsumer_ServerRefusals_KeepTheServerErrorReachable(t *testing.T) {
 		stream := w30bStream(t)
 		w30bPublish(t, client, stream, 1)
 
-		entries, err := consumer.ReclaimStale(ctx, stream, w30bGroup, w30bReaderB, time.Millisecond, 10)
+		entries, _, err := consumer.ReclaimStale(ctx, stream, w30bGroup, w30bReaderB, "0", time.Millisecond, 10)
 
 		require.Error(t, err)
 		assert.Nil(t, entries)
@@ -393,7 +393,7 @@ func TestConsumer_ServerRefusals_KeepTheServerErrorReachable(t *testing.T) {
 		failing := w30bSameServer(t, client)
 		failing.AddHook(w30bFailCommand{name: "xpending", err: cause})
 
-		entries, err := valkeystream.NewConsumer(failing).ReclaimStale(ctx, stream, w30bGroup, w30bReaderB, 30*time.Minute, 10)
+		entries, _, err := valkeystream.NewConsumer(failing).ReclaimStale(ctx, stream, w30bGroup, w30bReaderB, "0", 30*time.Minute, 10)
 
 		require.ErrorIs(t, err, cause)
 		assert.Contains(t, err.Error(), "valkeystream reclaim stale: pending count: ")
@@ -425,7 +425,7 @@ func TestConsumer_Ack_ServerUnreachable_EntryStaysPendingAndIsReclaimedAsSecondD
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, summary.Count, "an ack that never reached Valkey leaves the entry pending")
 	require.NoError(t, client.Do(ctx, "XCLAIM", stream, w30bGroup, w30bReaderA, 0, entries[0].ID, "IDLE", time.Hour.Milliseconds(), "JUSTID").Err())
-	reclaimed, err := consumer.ReclaimStale(ctx, stream, w30bGroup, w30bReaderB, 30*time.Minute, 10)
+	reclaimed, _, err := consumer.ReclaimStale(ctx, stream, w30bGroup, w30bReaderB, "0", 30*time.Minute, 10)
 	require.NoError(t, err)
 	require.Len(t, reclaimed, 1)
 	assert.Equal(t, entries[0].ID, reclaimed[0].ID)

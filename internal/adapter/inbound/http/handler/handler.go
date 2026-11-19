@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -179,8 +180,16 @@ func bindInternalJSON(c *gin.Context, req any) bool {
 	return bindBody(c, req, bindInternalStrictJSON)
 }
 
+func isJSONContentType(header string) bool {
+	if header == "" {
+		return true
+	}
+	mediaType, _, err := mime.ParseMediaType(header)
+	return err == nil && mediaType == "application/json"
+}
+
 func bindBody(c *gin.Context, req any, bind func(*gin.Context, any) error) bool {
-	if ct := c.GetHeader("Content-Type"); ct != "" && !strings.HasPrefix(ct, "application/json") {
+	if !isJSONContentType(c.GetHeader("Content-Type")) {
 		writeProblem(c, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "request body must be application/json", nil)
 		return false
 	}

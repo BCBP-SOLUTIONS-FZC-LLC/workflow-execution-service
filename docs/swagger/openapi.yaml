@@ -307,7 +307,7 @@ components:
         payload_json:
           type: object
           additionalProperties: true
-          description: Event-specific context (e.g. reason, new_assignee_user_id).
+          description: Event-specific context (e.g. reason, new_user_id).
         occurred_at:
           type: string
           format: date-time
@@ -721,7 +721,9 @@ components:
             TASK_ALREADY_CLAIMED, CLAIM_NOT_APPLICABLE, INVALID_TASK_STATE,
             FORCE_BACK_NO_SAVED_BRANCH, NODE_ALREADY_RESOLVED, IDEMPOTENCY_KEY_REPLAY,
             ASSIGNEE_INELIGIBLE, OVERRIDE_MAP_INVALID, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE,
-            UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, INTERNAL_ERROR.
+            UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, METHOD_NOT_ALLOWED, INTERNAL_ERROR.
+            METHOD_NOT_ALLOWED is the 405 answer for a path that exists under other methods only;
+            the Allow header lists those methods.
           example: "RECORD_VERSION_CONFLICT"
         trace_id:
           type: string
@@ -908,6 +910,14 @@ paths:
                   status:
                     type: string
                     example: "ok"
+    head:
+      tags: [Ops]
+      summary: Liveness probe, status only
+      description: Answers the same status as GET; the response has no body.
+      security: []
+      responses:
+        "200":
+          description: Process is alive.
 
   /readyz:
     get:
@@ -970,6 +980,16 @@ paths:
               example:
                 status: unavailable
                 temporal: unreachable
+    head:
+      tags: [Ops]
+      summary: Readiness probe, status only
+      description: Runs the same checks as GET and answers the same status; the response has no body.
+      security: []
+      responses:
+        "200":
+          description: Service is ready.
+        "503":
+          description: A dependency is unreachable, or the process is shutting down.
 
   /api/v1/instances:
     post:
@@ -2910,6 +2930,9 @@ paths:
                     detail: "request body has missing or invalid fields"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
                     code: "BAD_REQUEST"
+                    invalid_params:
+                      - name: "new_user_id"
+                        reason: "is required"
                 OverrideNoOp:
                   value:
                     type: "https://errors.bcbp.io/execution/override-no-op"

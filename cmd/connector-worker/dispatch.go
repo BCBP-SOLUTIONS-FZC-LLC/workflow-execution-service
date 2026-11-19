@@ -68,16 +68,20 @@ func dispatchBatch(ctx context.Context, d *deps, wg *sync.WaitGroup, entries []v
 func reclaimLoop(ctx context.Context, d *deps, wg *sync.WaitGroup, wlog port.Logger) {
 	ticker := time.NewTicker(d.claimMinIdle)
 	defer ticker.Stop()
+	cursor := "0"
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			entries, err := d.consumer.ReclaimStale(ctx, d.streamKey, d.streamGroup, d.consumerName, d.claimMinIdle, d.batchSize)
+			entries, next, err := d.consumer.ReclaimStale(
+				ctx, d.streamKey, d.streamGroup, d.consumerName, cursor, d.claimMinIdle, d.batchSize,
+			)
 			if err != nil {
 				wlog.Warn("connector-worker: reclaim stale failed", map[string]any{"error": err.Error()})
 				continue
 			}
+			cursor = next
 			dispatchBatch(ctx, d, wg, entries, wlog)
 		}
 	}

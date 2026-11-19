@@ -143,7 +143,7 @@ func TestConsumer_ReclaimStale_PendingEntryDeletedFromStream_IsNotReturned(t *te
 	require.NoError(t, client.XDel(ctx, stream, deleted.ID).Err())
 	vsxMakeIdle(t, client, stream, vsxClaimerA, []string{deleted.ID, kept.ID}, vsxLongIdle)
 
-	reclaimed, err := consumer.ReclaimStale(ctx, stream, vsxGroup, vsxClaimerB, vsxMinIdle, vsxReadBatch)
+	reclaimed, _, err := consumer.ReclaimStale(ctx, stream, vsxGroup, vsxClaimerB, "0", vsxMinIdle, vsxReadBatch)
 
 	require.NoError(t, err)
 	require.Len(t, reclaimed, 1, "only the entry that still exists in the stream comes back")
@@ -255,7 +255,7 @@ func TestConsumer_ReclaimStale_ConcurrentCallers_EachEntryGoesToExactlyOneCaller
 			ready.Done()
 			<-start
 			for {
-				batch, err := consumer.ReclaimStale(ctx, stream, vsxGroup, name, vsxMinIdle, 4)
+				batch, _, err := consumer.ReclaimStale(ctx, stream, vsxGroup, name, "0", vsxMinIdle, 4)
 				if err != nil {
 					errs[i] = err
 					return

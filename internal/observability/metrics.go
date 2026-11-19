@@ -210,7 +210,7 @@ func preInitializeClosedLabelSets() {
 	for _, reason := range []string{"transport", "status", "response"} {
 		EntitlementsCallErrorsTotal.WithLabelValues(reason)
 	}
-	for _, dep := range []string{"definition_service", "iam"} {
+	for _, dep := range []string{"definition_service", "iam", "token_service"} {
 		UpstreamDependencyErrorsTotal.WithLabelValues(dep)
 	}
 	WorkflowReplayFailuresTotal.WithLabelValues(executeWorkflowType)
