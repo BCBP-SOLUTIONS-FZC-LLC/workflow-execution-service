@@ -703,7 +703,7 @@ components:
         detail:
           type: string
           description: Human-readable explanation of this specific occurrence.
-          example: "task record_version mismatch; refresh and retry"
+          example: "record version conflict"
         instance:
           type: string
           format: uri-reference
@@ -766,7 +766,7 @@ components:
             type: "https://errors.bcbp.io/execution/bad-request"
             title: "Bad Request"
             status: 400
-            detail: "field 'version' is required"
+            detail: "request body has missing or invalid fields"
             instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
             code: "BAD_REQUEST"
 
@@ -783,7 +783,7 @@ components:
             type: "https://errors.bcbp.io/execution/unauthorized"
             title: "Unauthorized"
             status: 401
-            detail: "x-tenant-id header is not a valid UUID"
+            detail: "missing or invalid authentication headers"
             instance: "/api/v1/instances"
             code: "UNAUTHORIZED"
         application/json:
@@ -800,7 +800,7 @@ components:
             type: "https://errors.bcbp.io/execution/not-assignee"
             title: "Not Assigned"
             status: 403
-            detail: "caller does not have an active assignment for this task"
+            detail: "caller is not the task's active assignee"
             instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
             code: "NOT_ASSIGNEE"
 
@@ -814,7 +814,7 @@ components:
             type: "https://errors.bcbp.io/execution/instance-not-found"
             title: "Instance Not Found"
             status: 404
-            detail: "workflow instance not found"
+            detail: "instance not found"
             instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6"
             code: "INSTANCE_NOT_FOUND"
 
@@ -828,7 +828,7 @@ components:
             type: "https://errors.bcbp.io/execution/task-not-found"
             title: "Task Not Found"
             status: 404
-            detail: "workflow task not found"
+            detail: "task not found"
             instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6"
             code: "TASK_NOT_FOUND"
 
@@ -842,7 +842,7 @@ components:
             type: "https://errors.bcbp.io/execution/payload-too-large"
             title: "Payload Too Large"
             status: 413
-            detail: "request body exceeds 10 MB limit"
+            detail: "request body exceeds the 10 MB limit"
             instance: "/api/v1/instances"
             code: "PAYLOAD_TOO_LARGE"
 
@@ -989,8 +989,7 @@ paths:
         started after the service's retries, are 503 UPSTREAM_UNAVAILABLE with a fixed detail
         that carries no error text of the failed call; the instance row stays committed and
         the same request sent again completes the start. A published, valid version whose plan
-        cannot be expanded is 409 VERSION_INVALID; one whose plan cannot be decoded is 500
-        INTERNAL_ERROR. A start whose execution is held by an open execution of a different
+        cannot be expanded, cannot be decoded or names no main plan is 409 VERSION_INVALID. A start whose execution is held by an open execution of a different
         instance is 409 DUPLICATE_BUSINESS_KEY.
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
@@ -1086,7 +1085,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/duplicate-business-key"
                     title: "Duplicate Business Key"
                     status: 409
-                    detail: "an active instance for business_key 'tender-abc-001' already exists"
+                    detail: "business key already active for this subject"
                     instance: "/api/v1/instances"
                     code: "DUPLICATE_BUSINESS_KEY"
                 TenantNotActive:
@@ -1102,7 +1101,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/version-not-published"
                     title: "Version Not Published"
                     status: 409
-                    detail: "workflow version is not PUBLISHED"
+                    detail: "workflow version is not published"
                     instance: "/api/v1/instances"
                     code: "VERSION_NOT_PUBLISHED"
                 VersionInvalid:
@@ -1110,7 +1109,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/version-invalid"
                     title: "Version Invalid"
                     status: 409
-                    detail: "workflow version is_valid=false; default assignee eligibility was revoked"
+                    detail: "workflow version is not valid"
                     instance: "/api/v1/instances"
                     code: "VERSION_INVALID"
                 IdempotencyReplay:
@@ -1139,7 +1138,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/override-map-invalid"
                     title: "Override Map Invalid"
                     status: 422
-                    detail: "node key 'unknown_stage' does not exist in the compiled plan"
+                    detail: "override_map references an unknown node key or invalid value: node key \"unknown_stage\""
                     instance: "/api/v1/instances"
                     code: "OVERRIDE_MAP_INVALID"
                 AssigneeIneligible:
@@ -1287,7 +1286,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/not-authorized-for-resource"
                 title: "Not Authorized For Resource"
                 status: 403
-                detail: "caller is not an assignee, department member, or admin for this instance"
+                detail: "caller is not authorized to read this resource"
                 instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6"
                 code: "NOT_AUTHORIZED_FOR_RESOURCE"
         "404":
@@ -1368,7 +1367,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/invalid-instance-state"
                     title: "Invalid Instance State"
                     status: 409
-                    detail: "instance is not RUNNING"
+                    detail: "action not valid for instance's current status"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/pause"
                     code: "INVALID_INSTANCE_STATE"
                 RecordVersionConflict:
@@ -1376,7 +1375,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "the instance has been modified since record_version=3 was read"
+                    detail: "record version conflict"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/pause"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -1464,7 +1463,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/invalid-instance-state"
                     title: "Invalid Instance State"
                     status: 409
-                    detail: "instance is not PAUSED"
+                    detail: "action not valid for instance's current status"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/resume"
                     code: "INVALID_INSTANCE_STATE"
                 RecordVersionConflict:
@@ -1472,7 +1471,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "the instance has been modified since record_version=4 was read"
+                    detail: "record version conflict"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/resume"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -1526,7 +1525,8 @@ paths:
                   minLength: 1
                   maxLength: 500
                   description: >
-                    Human-readable reason for the cancellation; stored on the instance record.
+                    Human-readable reason for the cancellation; carried in the
+                    WorkflowInstanceCancelled event, not stored on the instance.
                     It must contain text: a reason of only whitespace is refused 400 BAD_REQUEST.
                   example: "Superseded by a corrected instance"
                 record_version:
@@ -1569,7 +1569,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/instance-already-terminal"
                     title: "Instance Already Terminal"
                     status: 409
-                    detail: "instance is already COMPLETED"
+                    detail: "instance is already in a terminal state"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/cancel"
                     code: "INSTANCE_ALREADY_TERMINAL"
                 RecordVersionConflict:
@@ -1577,7 +1577,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "the instance has been modified since record_version=2 was read"
+                    detail: "record version conflict"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/cancel"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -1630,7 +1630,8 @@ paths:
                   minLength: 1
                   maxLength: 500
                   description: >
-                    Human-readable reason for termination; stored on the instance record.
+                    Human-readable reason for termination; carried in the
+                    WorkflowInstanceTerminated event, not stored on the instance.
                     It must contain text: a reason of only whitespace is refused 400 BAD_REQUEST.
                   example: "Duplicate instance created in error"
       responses:
@@ -1666,7 +1667,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/instance-already-terminal"
                     title: "Instance Already Terminal"
                     status: 409
-                    detail: "instance is already TERMINATED"
+                    detail: "instance is already in a terminal state"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/terminate"
                     code: "INSTANCE_ALREADY_TERMINAL"
                 IdempotencyReplay:
@@ -1929,7 +1930,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/invalid-instance-state"
                     title: "Invalid Instance State"
                     status: 409
-                    detail: "instance is not RUNNING"
+                    detail: "action not valid for instance's current status"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-forward"
                     code: "INVALID_INSTANCE_STATE"
                 TargetNodeNotFound:
@@ -1945,7 +1946,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "the instance has been modified since record_version=5 was read"
+                    detail: "record version conflict"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-forward"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -2047,7 +2048,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/force-back-no-saved-branch"
                     title: "Force Back No Saved Branch"
                     status: 409
-                    detail: "no completed steps to revert to"
+                    detail: "no completed step to go back to"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-back"
                     code: "FORCE_BACK_NO_SAVED_BRANCH"
                 RecordVersionConflict:
@@ -2055,7 +2056,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "the instance has been modified since record_version=6 was read"
+                    detail: "record version conflict"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-back"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -2160,7 +2161,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/bad-request"
                     title: "Bad Request"
                     status: 400
-                    detail: "field 'new_user_id' is required"
+                    detail: "request body has missing or invalid fields"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
                     code: "BAD_REQUEST"
                 OverrideNoOp:
@@ -2168,7 +2169,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/override-no-op"
                     title: "Override No-Op"
                     status: 400
-                    detail: "new_user_id is already the effective assignee for node 'review_stage_1'"
+                    detail: "new assignee is already the current assignee"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
                     code: "OVERRIDE_NO_OP"
         "401":
@@ -2190,8 +2191,9 @@ paths:
             connector-typed; NODE_ALREADY_RESOLVED — the node has already
             completed or advanced past; INVALID_INSTANCE_STATE — the instance is not RUNNING or
             DEGRADED; RECORD_VERSION_CONFLICT — record_version is stale, including the losing
-            admin of two concurrent overrides; IDEMPOTENCY_KEY_REPLAY — same key reused with a
-            different request body.
+            admin of two concurrent overrides; VERSION_INVALID — the eligibility check reads the
+            compiled plan, and its schema version is not one this service reads;
+            IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:
             application/problem+json:
               schema:
@@ -2202,7 +2204,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/node-already-resolved"
                     title: "Node Already Resolved"
                     status: 409
-                    detail: "node 'review_stage_1' has already been completed or advanced past"
+                    detail: "node has already progressed"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
                     code: "NODE_ALREADY_RESOLVED"
                 RecordVersionConflict:
@@ -2210,7 +2212,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "a concurrent change was applied to this node; refresh and retry"
+                    detail: "record version conflict"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -2233,7 +2235,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/assignee-ineligible"
                 title: "Assignee Ineligible"
                 status: 422
-                detail: "new_user_id is not eligible to be assigned to node 'review_stage_1'"
+                detail: "the user does not satisfy the task's department and role level"
                 instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
                 code: "ASSIGNEE_INELIGIBLE"
         "413":
@@ -2303,7 +2305,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/not-authorized-for-resource"
                 title: "Not Authorized For Resource"
                 status: 403
-                detail: "caller is not an assignee, department member, or admin for this instance"
+                detail: "caller is not authorized to read this resource"
                 instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/events"
                 code: "NOT_AUTHORIZED_FOR_RESOURCE"
         "404":
@@ -2428,7 +2430,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/not-authorized-for-resource"
                 title: "Not Authorized For Resource"
                 status: 403
-                detail: "caller is not the assignee, department member, or admin for this task"
+                detail: "caller is not authorized to read this resource"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6"
                 code: "NOT_AUTHORIZED_FOR_RESOURCE"
         "404":
@@ -2509,7 +2511,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/not-assignee"
                 title: "Not Assigned"
                 status: 403
-                detail: "caller does not have an active assignment for this task"
+                detail: "caller is not the task's active assignee"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
                 code: "NOT_ASSIGNEE"
         "404":
@@ -2520,7 +2522,8 @@ paths:
             TASK_ALREADY_CLAIMED — another assignee already holds the lead and the supplied version is current;
             RECORD_VERSION_CONFLICT — the supplied version is not the task's current one (another claim beat you, or this claim already succeeded);
             INVALID_TASK_STATE — the task is not in READY or IN_PROGRESS status;
-            CLAIM_NOT_APPLICABLE — the task's assignee_mode is single, so claim does not apply.
+            CLAIM_NOT_APPLICABLE — the task's assignee_mode is single, so claim does not apply;
+            VERSION_INVALID — the eligibility check reads the compiled plan, and its schema version is not one this service reads.
           content:
             application/problem+json:
               schema:
@@ -2531,7 +2534,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/task-already-claimed"
                     title: "Task Already Claimed"
                     status: 409
-                    detail: "this task already has a lead"
+                    detail: "task already claimed by another assignee"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
                     code: "TASK_ALREADY_CLAIMED"
                 ClaimNotApplicable:
@@ -2539,7 +2542,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/claim-not-applicable"
                     title: "Claim Not Applicable"
                     status: 409
-                    detail: "claim only applies to tasks with assignee_mode=all"
+                    detail: "claim only applies to multi-assignee tasks"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
                     code: "CLAIM_NOT_APPLICABLE"
                 ConcurrencyViolation:
@@ -2547,7 +2550,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "task record_version mismatch; refresh and retry"
+                    detail: "record version conflict"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -2568,7 +2571,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/assignee-ineligible"
                 title: "Assignee Ineligible"
                 status: 422
-                detail: "assignee is not eligible for this node"
+                detail: "the user does not satisfy the task's department and role level"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
                 code: "ASSIGNEE_INELIGIBLE"
         "413":
@@ -2659,7 +2662,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/not-assignee"
                 title: "Not Assigned"
                 status: 403
-                detail: "caller does not have an active assignment that may complete this task"
+                detail: "caller is not the task's active assignee"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/complete"
                 code: "NOT_ASSIGNEE"
         "404":
@@ -2670,6 +2673,7 @@ paths:
             RECORD_VERSION_CONFLICT — version mismatch;
             INVALID_TASK_STATE — the task is not READY or IN_PROGRESS;
             INVALID_INSTANCE_STATE — the instance is not RUNNING or DEGRADED (for example paused), so the workflow would drop the completion;
+            VERSION_INVALID — the eligibility check reads the compiled plan, and its schema version is not one this service reads;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:
             application/problem+json:
@@ -2694,7 +2698,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/assignee-ineligible"
                 title: "Assignee Ineligible"
                 status: 422
-                detail: "assignee is not eligible for this node"
+                detail: "the user does not satisfy the task's department and role level"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/complete"
                 code: "ASSIGNEE_INELIGIBLE"
         "413":
@@ -2780,7 +2784,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/not-assignee"
                 title: "Not Assigned"
                 status: 403
-                detail: "caller does not have an active assignment that may defer this task"
+                detail: "caller is not the task's active assignee"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/defer"
                 code: "NOT_ASSIGNEE"
         "404":
@@ -2790,6 +2794,7 @@ paths:
             RECORD_VERSION_CONFLICT — version mismatch;
             INVALID_TASK_STATE — the task is not READY or IN_PROGRESS, or the instance has no completed step to defer to;
             INVALID_INSTANCE_STATE — the instance is not RUNNING or DEGRADED;
+            VERSION_INVALID — the eligibility check reads the compiled plan, and its schema version is not one this service reads;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:
             application/problem+json:
@@ -2814,7 +2819,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/assignee-ineligible"
                 title: "Assignee Ineligible"
                 status: 422
-                detail: "assignee is not eligible for this node"
+                detail: "the user does not satisfy the task's department and role level"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/defer"
                 code: "ASSIGNEE_INELIGIBLE"
         "413":
@@ -2900,7 +2905,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/bad-request"
                     title: "Bad Request"
                     status: 400
-                    detail: "field 'new_user_id' is required"
+                    detail: "request body has missing or invalid fields"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
                     code: "BAD_REQUEST"
                 OverrideNoOp:
@@ -2908,7 +2913,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/override-no-op"
                     title: "Override No-Op"
                     status: 400
-                    detail: "new_user_id is already the current assignee"
+                    detail: "new assignee is already the current assignee"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
                     code: "OVERRIDE_NO_OP"
         "401":
@@ -2936,7 +2941,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "the task has been modified since record_version=2 was read"
+                    detail: "record version conflict"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -2957,7 +2962,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/assignee-ineligible"
                 title: "Assignee Ineligible"
                 status: 422
-                detail: "assignee is not eligible for this node"
+                detail: "the user does not satisfy the task's department and role level"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
                 code: "ASSIGNEE_INELIGIBLE"
         "413":
@@ -3013,18 +3018,11 @@ paths:
                     nullable: true
                     description: Opaque cursor for the next page; omitted/null on the final page.
         "400":
-          description: Missing or invalid user_id query parameter.
+          description: Missing or invalid user_id query parameter; the detail is "invalid user_id query parameter".
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ProblemDetails"
-              example:
-                type: "https://errors.bcbp.io/execution/bad-request"
-                title: "Bad Request"
-                status: 400
-                detail: "user_id query parameter is required"
-                instance: "/api/v1/workflows/active-by-user"
-                code: "BAD_REQUEST"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

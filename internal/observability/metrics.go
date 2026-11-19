@@ -104,7 +104,7 @@ func registerServiceMetrics() {
 		"Envelope-time to reroute-commit latency for DelegationStarted handling (LLD §6.7 SLO, p99 <= 4s).", delegationRerouteBuckets)).WithLabelValues()
 	TaskSignalDurationSeconds = must(gincommon.NewHistogramVec(nil,
 		"workflow_execution_service_task_signal_duration_seconds",
-		"HTTP-request-received to 202-returned latency for task claim/complete/defer (LLD §7.6 SLO, p99 <= 300ms).", taskSignalBuckets, "operation"))
+		"HTTP-request-received to response-returned latency (202 for claim/complete, 200 for defer) for task claim/complete/defer (LLD §7.6 SLO, p99 <= 300ms).", taskSignalBuckets, "operation"))
 	InstanceStartDurationSeconds = must(gincommon.NewHistogramVec(nil,
 		"workflow_execution_service_instance_start_duration_seconds",
 		"POST /instances received to 201-returned latency (LLD §7.6 SLO, p99 <= 1s).", instanceStartBuckets)).WithLabelValues()

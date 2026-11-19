@@ -275,7 +275,7 @@ components:
             type: "https://errors.bcbp.io/execution/bad-request"
             title: "Bad Request"
             status: 400
-            detail: "field 'version' is required"
+            detail: "request body has missing or invalid fields"
             instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
             code: "BAD_REQUEST"
 
@@ -330,7 +330,7 @@ components:
             type: "https://errors.bcbp.io/execution/payload-too-large"
             title: "Payload Too Large"
             status: 413
-            detail: "request body exceeds 10 MB limit"
+            detail: "request body exceeds the 10 MB limit"
             instance: "/api/v1/instances"
             code: "PAYLOAD_TOO_LARGE"
 
@@ -404,6 +404,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /api/v1/internal/users/{user_id}/pause-tasks:
     post:
@@ -731,7 +733,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/tenant-mismatch"
                 title: "Tenant Mismatch"
                 status: 403
-                detail: "the delegation belongs to a different tenant than the tenant_id parameter"
+                detail: "delegation_id belongs to a different tenant than tenant_id"
                 instance: "/api/v1/internal/workflows/delegate-impact"
                 code: "TENANT_MISMATCH"
         "500":
@@ -810,7 +812,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/tenant-mismatch"
                 title: "Tenant Mismatch"
                 status: 403
-                detail: "the delegation belongs to a different tenant than the tenant_id parameter"
+                detail: "delegation_id belongs to a different tenant than tenant_id"
                 instance: "/api/v1/internal/workflows/reassign-delegate"
                 code: "TENANT_MISMATCH"
         "409":
@@ -901,7 +903,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/tenant-mismatch"
                 title: "Tenant Mismatch"
                 status: 403
-                detail: "the delegation belongs to a different tenant than the tenant_id parameter"
+                detail: "delegation_id belongs to a different tenant than tenant_id"
                 instance: "/api/v1/internal/workflows/cancel-by-delegate"
                 code: "TENANT_MISMATCH"
         "409":
