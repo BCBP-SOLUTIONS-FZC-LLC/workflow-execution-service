@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"time"
 
@@ -235,7 +236,12 @@ func decodeContext(raw []byte) (any, bool) {
 		return map[string]any{}, true
 	}
 	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&v); err != nil {
+		return nil, false
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, false
 	}
 	if v == nil {

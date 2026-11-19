@@ -33,6 +33,10 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 		return failBeforeRun(ctx, in.tenantID, in.instanceID, err)
 	}
 
+	if err := in.registerStageDeferUpdate(ctx); err != nil {
+		return failBeforeRun(ctx, in.tenantID, in.instanceID, err)
+	}
+
 	admin := wf.NewBufferedChannel(ctx, 8)
 	in.admin = admin
 	baseAdmin := wf.NewBufferedChannel(ctx, 8)

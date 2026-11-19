@@ -61,7 +61,7 @@ func (s *w25bScene) complete() error {
 func (s *w25bScene) deferTask() error {
 	return s.deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TenantID: s.tenant.String(), TaskID: s.task.ID.String(), UserID: s.leadUser.String(), AssignmentID: s.lead.ID.String(),
-		Reason: "needs rework", DeferredToNodeKey: "sales/draft",
+		Reason: "needs rework", DeferredToNodeKey: "sales/draft", RecordVersion: s.task.RecordVersion,
 	})
 }
 

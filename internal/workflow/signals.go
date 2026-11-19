@@ -110,6 +110,15 @@ type adminSignal struct {
 	DeferredTaskID string
 }
 
+func (in *interpreter) registerStageDeferUpdate(ctx wf.Context) error {
+	err := wf.SetUpdateHandlerWithOptions(ctx, SignalStageDefer+":"+in.instanceID, in.applyStageDefer,
+		wf.UpdateHandlerOptions{Validator: in.validateStageDefer})
+	if err != nil {
+		return fmt.Errorf("workflow: registering %s update handler: %w", SignalStageDefer, err)
+	}
+	return nil
+}
+
 func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Channel) {
 	in.admin, in.baseAdmin = admin, baseAdmin
 	logger := wf.GetLogger(ctx)
@@ -121,11 +130,6 @@ func (in *interpreter) runSignalRouter(ctx wf.Context, admin, baseAdmin wf.Chann
 		c.Receive(ctx, &sig)
 		in.handleStageTransition(ctx, sig)
 	})
-
-	if err := wf.SetUpdateHandlerWithOptions(ctx, SignalStageDefer+":"+in.instanceID, in.applyStageDefer,
-		wf.UpdateHandlerOptions{Validator: in.validateStageDefer}); err != nil {
-		logger.Error("stage-defer update handler not registered", "error", err)
-	}
 
 	failCh := wf.GetSignalChannel(ctx, SignalStageFail+":"+in.instanceID)
 	sel.AddReceive(failCh, func(c wf.ReceiveChannel, more bool) {

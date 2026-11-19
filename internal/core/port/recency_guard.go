@@ -9,6 +9,12 @@ type ScopeLocker interface {
 	WithLock(ctx context.Context, scopeKey string, fn func(ctx context.Context) error) error
 }
 
+// ScopeTryLocker runs fn only when the scope is free right now, and reports
+// whether it ran. It never waits for a scope another process holds.
+type ScopeTryLocker interface {
+	TryWithLock(ctx context.Context, scopeKey string, fn func(ctx context.Context) error) (bool, error)
+}
+
 // ScopeSetLocker takes several scopes at once on one connection, in a fixed
 // order, so callers that need more than one lock neither hold several pooled
 // connections nor risk taking them in opposite orders.

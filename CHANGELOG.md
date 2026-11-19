@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Tests
 
+- The metric test helper `obstest.Sum` now fails the test when a requested label name is carried by no metric of the family, instead of returning zero.
 - The test targets run the Go version `go.mod` names, keep `.env` values out of the tests, regenerate stale sqlc output first and allow 30 minutes per package; the Postgres integration suite shares one container with a fresh database per test, which takes it from about seven minutes to under one. A cache-eviction test no longer spends a minute in reflection, and a degraded-park test no longer depends on the order of two signals sent at the same instant.
 - Stronger tests for task and instance read and write bodies and their edge cases, page-size clamps and subject filters against real Postgres, and the Temporal activities: input validation, assignment and lead moves, audit records and instance status writes.
 - Table-driven route tests through the production router for request validation, a 401 for an identity that is missing or not a UUID, and Idempotency-Key replay, changed-body and in-flight answers on seven routes, plus the department header on task reads.
@@ -51,6 +52,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - The connector worker's stale-entry reclaim now resumes from where the previous pass stopped and starts over at the end of the list, so a stale task behind a long run of busy ones is eventually picked up; it used to rescan the same first entries on every pass.
 - A secret read from OpenBao no longer fails because another field of the same secret holds a number or an object; only the requested field has to be a string.
 - Building the processed-event ledger now fails at start-up when given no consumers or the same consumer twice, instead of pruning nothing or twice.
+- Deferring a task now uses the record version the caller sent: a defer that names an out-of-date version is refused as a version conflict and changes nothing, instead of silently applying to the newer task.
+- A delegation that starts after its end date has passed no longer moves any work to the delegate.
+- Starting an instance with a context that holds integers above 2^53 now compares them by their exact digits, so two requests one apart are no longer treated as the same request; outside answers and step results write such integers back unchanged instead of rounding them.
+- Starting an instance whose plan names a department id that is not a UUID is now refused as an invalid workflow version before any eligibility check, instead of checking eligibility against an empty department.
+- A workflow that cannot register its stage-defer handler now fails before it runs, instead of running without one.
+- With several replicas, one replica at a time exports and prunes the row-level-security violation counts; the others keep their position and take over when it stops.
 - Claiming a multi-assignee task now emits `WorkflowTaskClaimed`, naming the claimer (also as the event's actor) and every active assignee; the event is stored in the same transaction as the lead, so the lead and the event stand or fall together. A claim used to change the lead and tell nobody.
 - A claim by a user whose assignment was closed a moment earlier (membership revoked, user deleted) is now refused as "not the task's active assignee" and changes nothing; it used to mark the closed assignment lead and announce a claim by someone who no longer held the task.
 - Handling inbound events no longer competes with their own effects for database connections: the event inbox has its own small connection pool, so a burst of deliveries cannot use up the application pool and stall user requests.

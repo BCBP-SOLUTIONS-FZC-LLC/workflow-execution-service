@@ -136,6 +136,7 @@ func newApp(cfg *config.Config) (*app, error) {
 	rlsExporter := service.NewRLSViolationExporter(service.RLSViolationExporterDeps{
 		Log:       postgres.NewRLSViolationRepo(relayPool),
 		Record:    observability.AddRLSViolations,
+		Leader:    postgres.NewRecencyGuardRepo(appPool, lockPool),
 		Interval:  cfg.RLSViolationExportInterval,
 		Retention: cfg.RLSViolationRetention,
 		Logger:    log,

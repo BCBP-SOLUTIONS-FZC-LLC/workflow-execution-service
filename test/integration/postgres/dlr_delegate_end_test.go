@@ -159,6 +159,43 @@ func TestRecencyGuardRepo_WithLocks_TakesEveryScopeOnOneConnection(t *testing.T)
 	assert.Zero(t, advisoryLocksHeld(t, single), "every scope was released")
 }
 
+func TestRecencyGuardRepo_TryWithLock_RunsOnlyWhenTheScopeIsFreeAndNeverWaits(t *testing.T) {
+	pool := fixtures.NewTestPool(t)
+	repo := postgres.NewRecencyGuardRepo(pool, pool)
+	scope := "try:" + uuid.NewString()
+	ctx := context.Background()
+
+	inside := make(chan struct{})
+	release := make(chan struct{})
+	holderDone := make(chan error, 1)
+	go func() {
+		ran, err := repo.TryWithLock(ctx, scope, func(context.Context) error {
+			close(inside)
+			<-release
+			return nil
+		})
+		if err == nil && !ran {
+			err = assert.AnError
+		}
+		holderDone <- err
+	}()
+	<-inside
+
+	ran, err := repo.TryWithLock(ctx, scope, func(context.Context) error {
+		t.Error("a scope held by someone else must not run the callback")
+		return nil
+	})
+	require.NoError(t, err)
+	assert.False(t, ran)
+
+	close(release)
+	require.NoError(t, <-holderDone)
+
+	ran, err = repo.TryWithLock(ctx, scope, func(context.Context) error { return nil })
+	require.NoError(t, err)
+	assert.True(t, ran, "the scope is free again once the holder returned")
+}
+
 func TestRecencyGuardRepo_WithLocks_WaitsForAnyScopeAndLeavesTheOthersFree(t *testing.T) {
 	pool := fixtures.NewTestPool(t)
 	repo := postgres.NewRecencyGuardRepo(pool, pool)

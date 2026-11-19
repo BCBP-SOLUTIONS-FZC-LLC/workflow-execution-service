@@ -154,7 +154,7 @@ func TestEmitters_SingleAssigneeEvents_SendOneElementArray(t *testing.T) {
 		{"deferred", domain.EventWorkflowTaskDeferred, func(d *outboundtemporal.Deps, tenant uuid.UUID, _ *domain.Instance, task *domain.Task, a *domain.TaskAssignment) error {
 			return d.DeferTask(context.Background(), port.DeferTaskInput{
 				TaskID: task.ID.String(), TenantID: tenant.String(), UserID: a.UserID.String(), AssignmentID: a.ID.String(),
-				Reason: "waiting", DeferredToNodeKey: "sales/later",
+				Reason: "waiting", DeferredToNodeKey: "sales/later", RecordVersion: task.RecordVersion,
 			})
 		}},
 		{"reassigned", domain.EventWorkflowTaskReassigned, func(d *outboundtemporal.Deps, tenant uuid.UUID, _ *domain.Instance, task *domain.Task, a *domain.TaskAssignment) error {

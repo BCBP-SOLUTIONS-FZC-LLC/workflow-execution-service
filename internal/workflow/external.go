@@ -15,7 +15,7 @@ const SignalInstanceExternalAnswer = "instance-external-answer"
 
 type externalAnswerSignal struct {
 	Key       string
-	Variables map[string]any
+	Variables map[string]json.RawMessage
 }
 
 func externalWaitKeys(collab *dsl.CompiledCollaboration) map[string]bool {
@@ -58,18 +58,18 @@ func (in *interpreter) handleExternalAnswer(ctx wf.Context, sig externalAnswerSi
 	ch.Send(ctx, domain.NodeKey(sig.Key))
 }
 
-func (in *interpreter) mergeVariables(vars map[string]any) error {
+func (in *interpreter) mergeVariables(vars map[string]json.RawMessage) error {
 	if len(vars) == 0 {
 		return nil
 	}
-	current := map[string]any{}
+	current := map[string]json.RawMessage{}
 	if in.contextJSON != "" {
 		if err := json.Unmarshal([]byte(in.contextJSON), &current); err != nil {
 			return fmt.Errorf("workflow: parsing context_json: %w", err)
 		}
 	}
 	if current == nil {
-		current = map[string]any{}
+		current = map[string]json.RawMessage{}
 	}
 	for k, v := range vars {
 		current[k] = v
@@ -86,7 +86,7 @@ func (in *interpreter) mergeResult(resultJSON string) error {
 	if resultJSON == "" {
 		return nil
 	}
-	var vars map[string]any
+	var vars map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(resultJSON), &vars); err != nil {
 		return nil //nolint:nilerr // a result that is not a JSON object adds no variables
 	}

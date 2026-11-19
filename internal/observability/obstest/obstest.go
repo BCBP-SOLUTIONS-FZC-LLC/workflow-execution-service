@@ -1,6 +1,7 @@
 package obstest
 
 import (
+	"slices"
 	"testing"
 
 	dto "github.com/prometheus/client_model/go"
@@ -32,6 +33,7 @@ func Sum(tb testing.TB, name string, labels map[string]string) float64 {
 		if f.GetName() != name {
 			continue
 		}
+		requireKnownLabelKeys(tb, f, labels)
 		for _, m := range f.GetMetric() {
 			if matches(m, labels) {
 				total += value(tb, f.GetName(), f.GetType(), m)
@@ -39,6 +41,21 @@ func Sum(tb testing.TB, name string, labels map[string]string) float64 {
 		}
 	}
 	return total
+}
+
+func requireKnownLabelKeys(tb testing.TB, f *dto.MetricFamily, labels map[string]string) {
+	tb.Helper()
+	if len(f.GetMetric()) == 0 {
+		return
+	}
+	for k := range labels {
+		known := slices.ContainsFunc(f.GetMetric(), func(m *dto.Metric) bool {
+			return slices.ContainsFunc(m.GetLabel(), func(lp *dto.LabelPair) bool { return lp.GetName() == k })
+		})
+		if !known {
+			tb.Fatalf("obstest: no metric of %s carries the label %q", f.GetName(), k)
+		}
+	}
 }
 
 func matches(m *dto.Metric, labels map[string]string) bool {

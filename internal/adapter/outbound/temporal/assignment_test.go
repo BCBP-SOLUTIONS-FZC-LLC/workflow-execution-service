@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.temporal.io/sdk/temporal"
 
 	outboundtemporal "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
@@ -127,7 +128,7 @@ func TestDeferTask_ClosesTheTaskAndNamesWhereTheInstanceGoes(t *testing.T) {
 
 	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: assignment.ID.String(), Reason: "not ready yet", DeferredToNodeKey: "sales/prepare",
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet", DeferredToNodeKey: "sales/prepare", RecordVersion: 1,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, domain.TaskStatusDeferred, task.Status)
@@ -173,13 +174,33 @@ func TestDeferTask_RetriedCall_IsIdempotent(t *testing.T) {
 
 	in := port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: assignment.ID.String(), Reason: "not ready yet", DeferredToNodeKey: "sales/prepare",
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet", DeferredToNodeKey: "sales/prepare", RecordVersion: 1,
 	}
 
 	require.NoError(t, deps.DeferTask(context.Background(), in))
 	require.NoError(t, deps.DeferTask(context.Background(), in), "a retried DeferTask must succeed idempotently, not error")
 
 	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.deferred")
+}
+
+func TestDeferTask_StaleRecordVersion_ConflictsAndChangesNothing(t *testing.T) {
+	tenantID, deferrerID := uuid.New(), uuid.New()
+	taskID := uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), NodeKey: "sales/review", RecordVersion: 3}
+	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: deferrerID, IsActive: true}
+	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(assignment))
+
+	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
+		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet", RecordVersion: 2,
+	})
+	require.ErrorIs(t, err, domain.ErrRecordVersionConflict)
+	var appErr *temporal.ApplicationError
+	require.ErrorAs(t, err, &appErr)
+	assert.True(t, appErr.NonRetryable())
+	assert.NotEqual(t, domain.TaskStatusDeferred, task.Status)
+	assert.True(t, assignment.IsActive)
+	assert.Empty(t, outbox.enqueued)
 }
 
 // TestDeferTask_GetAssignmentError forces Assignments.GetByID to fail.
@@ -193,7 +214,7 @@ func TestDeferTask_GetAssignmentError(t *testing.T) {
 
 	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: uuid.New().String(), Reason: "not ready yet",
+		AssignmentID: uuid.New().String(), Reason: "not ready yet", RecordVersion: 1,
 	})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "get assignment")
@@ -212,7 +233,7 @@ func TestDeferTask_MarkDeferredError(t *testing.T) {
 
 	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: assignment.ID.String(), Reason: "not ready yet",
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet", RecordVersion: 1,
 	})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "mark task deferred")
@@ -231,7 +252,7 @@ func TestDeferTask_CompleteDeferringAssignmentError(t *testing.T) {
 
 	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: assignment.ID.String(), Reason: "not ready yet",
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet", RecordVersion: 1,
 	})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "complete deferring assignment")

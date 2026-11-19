@@ -192,7 +192,10 @@ func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) error {
 		if existing.CompletedAt != nil {
 			return nil
 		}
-		updatedTask, err := d.Tasks.UpdateStatus(ctx, tenantID, taskID, domain.TaskStatusDeferred, task.RecordVersion)
+		updatedTask, err := d.Tasks.UpdateStatus(ctx, tenantID, taskID, domain.TaskStatusDeferred, in.RecordVersion)
+		if errors.Is(err, domain.ErrRecordVersionConflict) {
+			return nonRetryable("VersionConflict", fmt.Errorf("defer: lost the record_version race: %w", err))
+		}
 		if err != nil {
 			return fmt.Errorf("mark task deferred: %w", err)
 		}
