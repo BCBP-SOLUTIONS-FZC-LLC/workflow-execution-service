@@ -26,6 +26,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - Server start, migration, readiness and shutdown tests against real Postgres and Temporal containers; port, cursor and activity-name tests; observability tests for telemetry warnings, metric labels and interceptors; workflow tests for parked branches abandoned or refused and for deterministic map order.
 - Service tests for error and branch paths of the connector callbacks, delegation moves and cancels, out-of-office availability, force-route open tasks, tenant lifecycle and pause at an unchanged record version.
 - Service and Postgres tests for retention sweeps, instance lifecycle and task claim and read failures, repository reads and creates under tenant row-level security, tenant purge failures, recency-guard locks, outbox signal marshalling and the version-checked defer under concurrency.
+- Workflow interpreter tests for pure plan helpers, activity options, boundary timers and messages, exclusive and external waits, park routing, SLA timers, stage cancels and defers, dispatch failures, execute outcomes and the status query.
 
 ### Removed
 
