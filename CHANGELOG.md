@@ -31,6 +31,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - Handler and middleware tests for idempotency, internal event envelopes and recency, problem documents, strict bodies, identity routes and task reads; Temporal activity tests for task creation, instance nodes, assignments, instance status and plan reads, with real-Postgres claim and complete races.
 - Route tests for task claim, complete, defer and reassign, instance pause, resume and cancel, force routes, node overrides, outside answers and active tasks by user, run through the real services; event schema registry and validation tests; Postgres tests for inbox failures and a blank override reason.
 - Router tests for routing, readiness, route groups, replayed idempotent routes and the AsyncAPI page; logger level and slow-query argument redaction tests; connector-worker tests for configuration, document references, the alias registry, dispatch and its background loops on a fake clock; worker configuration, topology polling and OpenBao reader validation tests.
+- Interpreter tests for pause signals, reassign stamps, message boundaries, fork reruns, respawned branches, status restore and wind-down; port value tests; observability tests for metric registration, telemetry, Temporal interceptors and the metric registry document; service tests for node overrides and repeated outside answers.
 
 ### Removed
 
