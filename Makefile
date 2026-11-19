@@ -7,6 +7,26 @@ ifneq ($(wildcard .env),)
   export
 endif
 
+# Every go command runs the Go version go.mod names, whatever Go is installed (CI's setup-go
+# reads the same line), so local runs and CI build with one toolchain.
+GO_VERSION   := $(shell sed -n 's/^go //p' go.mod)
+export GOTOOLCHAIN := go$(GO_VERSION)
+
+# Tests never see the .env values loaded above: they are local run settings, and a test that
+# checks a default would otherwise read them. TEST_ENV clears exactly the keys .env defines.
+DOTENV_KEYS  := $(if $(wildcard .env),$(shell sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' .env))
+TEST_ENV     := env $(addprefix -u ,$(DOTENV_KEYS))
+
+# Per-package test deadline. The Postgres integration package passes Go's 10-minute default
+# on a busy machine.
+GO_TEST_TIMEOUT ?= 30m
+
+# The sqlc output is gitignored. Test targets depend on this stamp, so the queries are
+# regenerated whenever a query, migration or the sqlc config is newer than the last run.
+SQLC_OUT     := internal/adapter/outbound/postgres/db
+SQLC_STAMP   := $(SQLC_OUT)/.generated
+SQLC_INPUTS  := sqlc.yaml $(wildcard db/queries/*.sql db/migrations/*.sql db/sqlc_schema_ref/*)
+
 SQLC_VERSION         := v1.31.1
 OASDIFF_VERSION      := v1.32.1
 MOCKGEN_VERSION      := v0.6.0
@@ -137,7 +157,11 @@ generate: generate-sqlc
 generate-sqlc:
 	@echo "→ sqlc generate"
 	$(SQLC) generate
-	@echo "sqlc output written to internal/adapter/outbound/postgres/db/"
+	@touch $(SQLC_STAMP)
+	@echo "sqlc output written to $(SQLC_OUT)/"
+
+$(SQLC_STAMP): $(SQLC_INPUTS)
+	@$(MAKE) --no-print-directory generate-sqlc
 
 ## mock: Regenerate GoMock stubs for all core/port interfaces
 mock:
@@ -169,9 +193,9 @@ dev:
 	go run ./cmd/server
 
 ## test: Run unit tests with race detector and coverage (internal + cmd + test/unit + test/workflow + test/contract)
-test:
+test: $(SQLC_STAMP)
 	@mkdir -p $(COVERAGE_DIR)
-	go test -race -count=1 \
+	$(TEST_ENV) go test -race -count=1 -timeout $(GO_TEST_TIMEOUT) \
 	    -coverpkg=$$(go list ./internal/... ./cmd/... | grep -v '$(COVER_EXCLUDE_PKG)' | tr '\n' ',' | sed 's/,$$//') \
 	    -coverprofile=$(COVERAGE_DIR)/unit.out -covermode=atomic \
 	    ./internal/... ./cmd/... ./test/unit/... ./test/workflow/... ./test/contract/...
@@ -179,13 +203,14 @@ test:
 	@go tool cover -func=$(COVERAGE_DIR)/unit.out | awk '/^total:/{print "total:", $$NF}'
 
 ## test-integration: Run integration tests — spins up containers via testcontainers-go (no make docker-up needed)
-test-integration:
+test-integration: $(SQLC_STAMP)
 	@mkdir -p $(COVERAGE_DIR)
+	$(TEST_ENV) \
 	AWS_ACCESS_KEY_ID=test \
 	AWS_SECRET_ACCESS_KEY=test \
 	AWS_EC2_METADATA_DISABLED=true \
 	TESTCONTAINERS_RYUK_DISABLED=true \
-	go test -race -count=1 -tags integration \
+	go test -race -count=1 -timeout $(GO_TEST_TIMEOUT) -tags integration \
 	    -coverpkg=$$(go list ./internal/... | grep -v '$(COVER_EXCLUDE_PKG)' | tr '\n' ',' | sed 's/,$$//') \
 	    -coverprofile=$(COVERAGE_DIR)/integration.out \
 	    -covermode=atomic \
@@ -194,7 +219,8 @@ test-integration:
 	@go tool cover -func=$(COVERAGE_DIR)/integration.out | tail -1
 
 ## test-e2e: Run the real instantiate -> dispatch -> complete round trip against live Temporal + Postgres + HTTP, plus cmd/connector-worker's own real dispatch/completion round trip against live Valkey too (needs the Temporal image too — slower than test-integration, kept separate)
-test-e2e:
+test-e2e: $(SQLC_STAMP)
+	$(TEST_ENV) \
 	AWS_ACCESS_KEY_ID=test \
 	AWS_SECRET_ACCESS_KEY=test \
 	AWS_EC2_METADATA_DISABLED=true \
@@ -202,7 +228,8 @@ test-e2e:
 	go test -race -count=1 -tags e2e -timeout 5m ./test/e2e/... ./cmd/connector-worker/...
 
 ## test-compat: Run the Definition Service (DEFINITION_SERVICE_DIR, default ../definition_service), this repository's connector worker and the Workflow-Events Consumer (EVENT_CONSUMER_DIR, default ../event_consumer) as real binaries against this service's real API, worker and stores
-test-compat:
+test-compat: $(SQLC_STAMP)
+	$(TEST_ENV) \
 	AWS_EC2_METADATA_DISABLED=true \
 	TESTCONTAINERS_RYUK_DISABLED=true \
 	DEFINITION_SERVICE_DIR="$(DEFINITION_SERVICE_DIR)" \

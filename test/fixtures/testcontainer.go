@@ -34,22 +34,12 @@ func NewTestPoolAndDSN(t *testing.T) (*pgcommon.Pool, string) {
 		t.Skip("skipping integration test: -short flag set (Docker required)")
 	}
 
-	ctx := context.Background()
-
-	req := testcontainers.ContainerRequest{
-		Image:        "postgres:18-alpine",
-		ExposedPorts: []string{"5432/tcp"},
-		Env: map[string]string{
-			"POSTGRES_USER":     "postgres",
-			"POSTGRES_PASSWORD": "postgres",
-			"POSTGRES_DB":       "testdb",
-		},
-		WaitingFor: wait.ForLog("database system is ready to accept connections").
-			WithOccurrence(2).
-			WithStartupTimeout(120 * time.Second),
+	if shared != nil {
+		return shared.newDatabase(t)
 	}
 
-	container, host, port, err := startWithMappedPort(ctx, req, func(ctx context.Context, c testcontainers.Container) (string, error) {
+	ctx := context.Background()
+	container, host, port, err := startWithMappedPort(ctx, postgresRequest(), func(ctx context.Context, c testcontainersContainer) (string, error) {
 		p, err := c.MappedPort(ctx, "5432")
 		return p.Port(), err
 	})
@@ -71,21 +61,42 @@ func NewTestPoolAndDSN(t *testing.T) (*pgcommon.Pool, string) {
 	return pool, dsn
 }
 
+type testcontainersContainer = testcontainers.Container
+
+func postgresRequest() testcontainers.ContainerRequest {
+	return testcontainers.ContainerRequest{
+		Image:        "postgres:18-alpine",
+		ExposedPorts: []string{"5432/tcp"},
+		Env: map[string]string{
+			"POSTGRES_USER":     "postgres",
+			"POSTGRES_PASSWORD": "postgres",
+			"POSTGRES_DB":       "testdb",
+		},
+		WaitingFor: wait.ForLog("database system is ready to accept connections").
+			WithOccurrence(2).
+			WithStartupTimeout(120 * time.Second),
+	}
+}
+
 func applyMigrations(t *testing.T, dsn string) {
 	t.Helper()
+	if err := applyMigrationsTo(context.Background(), dsn); err != nil {
+		t.Fatalf("fixtures: %v", err)
+	}
+}
 
-	ctx := context.Background()
+func applyMigrationsTo(ctx context.Context, dsn string) error {
 	if err := outbox.ApplySchema(ctx, &migrate.Runner{DSN: dsn}); err != nil {
-		t.Fatalf("fixtures: outbox ApplySchema: %v", err)
+		return fmt.Errorf("outbox ApplySchema: %w", err)
 	}
 	if err := inbox.ApplySchema(ctx, &migrate.Runner{DSN: dsn}); err != nil {
-		t.Fatalf("fixtures: inbox ApplySchema: %v", err)
+		return fmt.Errorf("inbox ApplySchema: %w", err)
 	}
 	if err := documentsql.ApplySchema(ctx, &migrate.Runner{DSN: dsn}); err != nil {
-		t.Fatalf("fixtures: connector documents ApplySchema: %v", err)
+		return fmt.Errorf("connector documents ApplySchema: %w", err)
 	}
 	if err := intentsql.ApplySchema(ctx, &migrate.Runner{DSN: dsn}); err != nil {
-		t.Fatalf("fixtures: connector send intents ApplySchema: %v", err)
+		return fmt.Errorf("connector send intents ApplySchema: %w", err)
 	}
 	domainRunner := &migrate.Runner{
 		FS:              migrations.FS,
@@ -93,8 +104,9 @@ func applyMigrations(t *testing.T, dsn string) {
 		MigrationsTable: serviceMigrationsTable,
 	}
 	if err := domainRunner.Up(ctx); err != nil {
-		t.Fatalf("fixtures: domain migrations: %v", err)
+		return fmt.Errorf("domain migrations: %w", err)
 	}
+	return nil
 }
 
 const (

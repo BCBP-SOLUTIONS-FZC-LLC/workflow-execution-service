@@ -197,6 +197,8 @@ Logs, metrics and traces go through `platform-gincommon`; every binary calls the
 | `test/e2e/` | The API and worker against real Temporal, Postgres and Valkey, driven over HTTP | `make test-e2e` |
 | `test/compat/` | The Definition Service (`DEFINITION_SERVICE_DIR`, default `../definition_service`), this repository's connector worker and the Workflow-Events Consumer (`EVENT_CONSUMER_DIR`, default `../event_consumer`) as real binaries against this service's real API, worker and stores, with LocalStack SNS and SQS | `make test-compat` |
 
+Every test target runs the Go version `go.mod` names (`GOTOOLCHAIN`), clears the variables `.env` sets so tests see their own defaults, regenerates the sqlc output when a query, migration or `sqlc.yaml` changed, and gives each package 30 minutes (`GO_TEST_TIMEOUT`). The Postgres integration suite shares one Postgres container and gives each test its own copy of a migrated template database.
+
 `make check` runs formatting, lint (build tags `integration`, `e2e` and `compat` included), vet, arch-lint, metrics-lint, the breaking-change gate, the design-sync script's test and the merged-coverage gate.
 
 | Command | What it does |
