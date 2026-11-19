@@ -32,6 +32,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - Route tests for task claim, complete, defer and reassign, instance pause, resume and cancel, force routes, node overrides, outside answers and active tasks by user, run through the real services; event schema registry and validation tests; Postgres tests for inbox failures and a blank override reason.
 - Router tests for routing, readiness, route groups, replayed idempotent routes and the AsyncAPI page; logger level and slow-query argument redaction tests; connector-worker tests for configuration, document references, the alias registry, dispatch and its background loops on a fake clock; worker configuration, topology polling and OpenBao reader validation tests.
 - Interpreter tests for pause signals, reassign stamps, message boundaries, fork reruns, respawned branches, status restore and wind-down; port value tests; observability tests for metric registration, telemetry, Temporal interceptors and the metric registry document; service tests for node overrides and repeated outside answers.
+- Temporal adapter tests for own-assignment lookups, plan reads and instance events; server configuration tests through the real binary; middleware error-log tests; Temporal client tests and route chains through the real client; Valkey cache error and delete tests; event schema enum tests; force-back plan-read and signal failure tests.
 
 ### Removed
 
