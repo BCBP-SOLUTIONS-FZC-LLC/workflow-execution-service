@@ -52,7 +52,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - The event encoder refuses a schema version that is not AVAILABLE in the registry, and the decoder refuses a message with no payload after the header or with a compressed payload.
 - A task without a due date or follow-up date no longer produces an SLA breach or warning event with a zero date; the activity fails without retry.
 - The `/asyncapi` page shows the environment the service is configured for instead of the `ENV` variable, escapes message and schema names in links and ids, copies field names that contain an apostrophe, no longer repeats element ids, and shows "(not found)" for a payload schema that does not exist.
-- Cancelling an instance whose Temporal workflow no longer exists ends the instance (TERMINATED, active tasks failed) and answers 202, as terminate does, instead of 409 INVALID_INSTANCE_STATE.
+- Cancelling an instance whose Temporal workflow no longer exists ends the instance (TERMINATED, active tasks failed) and answers 202, as terminate does, instead of 409 INVALID_INSTANCE_STATE; the event emitted is `WorkflowInstanceTerminated`, not `WorkflowInstanceCancelled`.
 - The tenant purge stops quietly when the service shuts down: it no longer counts a failure or delays the tenant's next attempt.
 - Degraded and force-route events, and every task event, carry empty lists instead of null when they name no failed branches, source nodes or assignees.
 - Cancelling a COMPLETED or FAILED instance leaves it as it is and emits no cancelled event; it used to be rewritten as TERMINATED.

@@ -1497,10 +1497,11 @@ paths:
       tags: [Instances]
       summary: Cancel a workflow instance (admin)
       description: >
-        Sends a cancel signal to the Temporal workflow. Valid from RUNNING or PAUSED status.
+        Sends a cancel signal to the Temporal workflow. Valid from RUNNING, PAUSED or DEGRADED status.
         The workflow function cleans up active tasks and transitions to TERMINATED. When the
         Temporal workflow execution no longer exists, the instance is marked TERMINATED directly,
-        its active tasks are failed, and the request is still answered 202.
+        its active tasks are failed, WorkflowInstanceTerminated is emitted instead of
+        WorkflowInstanceCancelled, and the request is still answered 202.
       security:
         - GatewayTenantContext: []
           UserContext: []
@@ -1526,7 +1527,8 @@ paths:
                   maxLength: 500
                   description: >
                     Human-readable reason for the cancellation; carried in the
-                    WorkflowInstanceCancelled event, not stored on the instance.
+                    WorkflowInstanceCancelled event (WorkflowInstanceTerminated when the
+                    workflow execution no longer exists), not stored on the instance.
                     It must contain text: a reason of only whitespace is refused 400 BAD_REQUEST.
                   example: "Superseded by a corrected instance"
                 record_version:

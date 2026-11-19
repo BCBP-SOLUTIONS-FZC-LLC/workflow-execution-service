@@ -513,7 +513,10 @@ paths:
         "502":
           $ref: "#/components/responses/EventDecodeFailed"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: The claim on the event id could not be recorded, or an upstream dependency could not serve the event. The sender retries the delivery.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
 
   /api/v1/internal/events/user-profile:
     post:
@@ -554,7 +557,10 @@ paths:
         "502":
           $ref: "#/components/responses/EventDecodeFailed"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: The claim on the event id could not be recorded, or an upstream dependency could not serve the event. The sender retries the delivery.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
 
   /api/v1/internal/events/tenant:
     post:
@@ -594,7 +600,10 @@ paths:
         "502":
           $ref: "#/components/responses/EventDecodeFailed"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: The claim on the event id could not be recorded, or an upstream dependency could not serve the event. The sender retries the delivery.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
 
   /api/v1/internal/events/workflow-task:
     post:
@@ -646,7 +655,10 @@ paths:
         "502":
           $ref: "#/components/responses/EventDecodeFailed"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: The claim on the event id could not be recorded, or an upstream dependency could not serve the event. The sender retries the delivery.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
 
   /api/v1/internal/workflows/delegate-impact:
     get:

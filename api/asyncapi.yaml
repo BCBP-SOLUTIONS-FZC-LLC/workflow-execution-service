@@ -150,18 +150,22 @@ operations:
     channel: { $ref: '#/channels/iam~1membership~1events' }
     description: >
       The TenantStateChanged tenant-lifecycle relay, MembershipRevoked and
-      TenantMembershipsPurged. Dedup after side effects (processed_events,
-      consumer `membership-execution`).
+      TenantMembershipsPurged. The event id is claimed before the effects and
+      committed after them (processed_events, consumer `membership-execution`).
   receiveDelegationEvents:
     action: receive
     channel: { $ref: '#/channels/iam~1delegation~1events' }
     description: >
       Delegation reroute (≤4s p99 SLO for DelegationStarted, LLD §6.7) and its
-      reversal on DelegationEnded.
+      reversal on DelegationEnded. The event id is claimed before the effects and
+      committed after them (processed_events, consumer `membership-execution`).
   receiveUserEvents:
     action: receive
     channel: { $ref: '#/channels/iam~1user~1events' }
-    description: UserDeleted safety-net vacate + UserAvailabilityChanged OOO pause/resume.
+    description: >
+      UserDeleted safety-net vacate + UserAvailabilityChanged OOO pause/resume. The event
+      id is claimed before the effects and committed after them (processed_events,
+      consumer `user-execution`).
   receiveSelfTaskDispatch:
     action: receive
     channel: { $ref: '#/channels/self~1task-dispatch' }
@@ -169,7 +173,9 @@ operations:
       Connector/automation-typed task dispatch: for stage.ConnectorType != ""
       nodes, this service's own WorkflowTaskCreated publish is what triggers
       the connector-worker handoff, delivered back to it as an ordinary
-      inbound event rather than acted on directly at publish time.
+      inbound event rather than acted on directly at publish time. The event id is
+      claimed before the effects and committed after them (processed_events,
+      consumer `connector-stream-execution`).
 
 components:
   securitySchemes:
@@ -188,7 +194,7 @@ components:
               header ([0x03][0x00][16-byte schema-version UUID]) to the plain-JSON payload at
               SNS publish time, after the plain-JSON envelope is stored in the outbox. The
               latest registered schema version of the event type is resolved first, and a
-              missing schema fails the publish. The SNS message attributes below carry the
+              missing schema, or a latest version that is not AVAILABLE, fails the publish. The SNS message attributes below carry the
               routing keys consumer filter policies match on.
             properties:
               EventType:  { type: string, description: 'PascalCase wire type, e.g. WorkflowInstanceStarted' }
@@ -248,10 +254,11 @@ components:
       name: WorkflowInstanceTerminated
       title: Workflow instance terminated (WorkflowInstanceTerminated)
       description: >
-        Fires alongside instance-terminate's direct TerminateWorkflow call — a service-layer
-        transaction marks the instance TERMINATED and its open tasks FAILED before Temporal
-        is asked to stop the execution. Consumed by Audit, Notification, and the Dashboard
-        Stream Gateway.
+        Fires alongside instance-terminate's direct TerminateWorkflow call — once Temporal has
+        stopped the execution, a service-layer transaction marks the instance TERMINATED and
+        its open tasks FAILED. Also fires, with initiator admin, when an admin cancel
+        finds that the instance's workflow execution no longer exists. Consumed by Audit,
+        Notification, and the Dashboard Stream Gateway.
       x-lifecycle: { status: active }
       x-owner: { team: platform-engineers, slack: "#workflow-engine" }
       traits: [ { $ref: '#/components/messageTraits/glueWireFormat' } ]
