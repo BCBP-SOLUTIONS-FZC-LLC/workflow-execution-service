@@ -267,7 +267,7 @@ func (in *interpreter) closePark(p *park) {
 }
 
 func (in *interpreter) writeDegraded(ctx wf.Context) error {
-	var branches []domain.FailedBranch
+	branches := []domain.FailedBranch{}
 	for _, p := range in.parks {
 		branches = append(branches, p.branches...)
 	}

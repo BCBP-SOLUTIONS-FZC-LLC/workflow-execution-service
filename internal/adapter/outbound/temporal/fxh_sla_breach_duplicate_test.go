@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -32,7 +33,8 @@ func (o *fxhAttemptedOutbox) Enqueue(ctx context.Context, env events.Envelope[js
 
 func TestRecordSLABreach_AnOutboxInsertThatLosesTheUniqueRaceFailsTheAttemptSoItIsRetried(t *testing.T) {
 	taskID, instanceID, tenantID := uuid.New(), uuid.New(), uuid.New()
-	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady}
+	due := time.Date(2026, 4, 2, 10, 30, 0, 0, time.UTC)
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady, DueAt: &due}
 	outbox := &fxhAttemptedOutbox{fakeOutbox: &fakeOutbox{enqueueErr: domain.ErrAlreadyExists}}
 	deps := &outboundtemporal.Deps{
 		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(), Instances: seededInstances(task),

@@ -189,6 +189,7 @@ func TestValidate(t *testing.T) {
 				ValkeyReadTimeout:                  time.Second,
 				ValkeyWriteTimeout:                 time.Second,
 				IdempotencyTTL:                     time.Hour,
+				GlueSchemaCacheTTL:                 5 * time.Minute,
 				OpenBaoTimeout:                     time.Second,
 				ConnectorAliasFetchTimeout:         time.Second,
 				ConnectorAliasRefreshInterval:      time.Minute,

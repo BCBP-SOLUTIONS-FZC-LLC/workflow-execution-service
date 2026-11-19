@@ -40,6 +40,8 @@ func TestRecordSLABreach_TwoSequentialBreachesForTheSameTaskWriteOneEventInPostg
 	inst := newInstance(tenantID, time.Now().UTC())
 	require.NoError(t, instanceRepo.Create(ctx, inst))
 	task := newTask(tenantID, inst.ID)
+	dueAt := time.Now().UTC().Add(-time.Minute)
+	task.DueAt = &dueAt
 	require.NoError(t, taskRepo.Create(ctx, task))
 	in := port.RecordSLABreachInput{InstanceID: inst.ID.String(), TenantID: tenantID.String(), TaskID: task.ID.String(), NodeKey: domain.NodeKey(task.NodeKey)}
 	obstest.Init(t)

@@ -81,6 +81,12 @@ func TestSettleStatusAfterAbandonedPark_WritesWhatTheOpenParksCallFor(t *testing
 			wantBranches: []domain.FailedBranch{{DepartmentID: dept, LastNodeKey: "billing/B1"}},
 		},
 		{
+			name: "degraded with a park that holds no branch writes an empty list, not null", status: domain.InstanceStatusDegraded,
+			parks: []*park{{}}, wantStatus: domain.InstanceStatusDegraded,
+			wantWrites:   []domain.InstanceStatus{domain.InstanceStatusDegraded},
+			wantBranches: []domain.FailedBranch{},
+		},
+		{
 			name: "degraded with no park left writes RUNNING", status: domain.InstanceStatusDegraded,
 			wantStatus: domain.InstanceStatusRunning, wantWrites: []domain.InstanceStatus{domain.InstanceStatusRunning},
 		},

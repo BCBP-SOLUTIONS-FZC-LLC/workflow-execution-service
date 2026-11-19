@@ -110,9 +110,10 @@ func (r *w25bRig) addInstance(tenant uuid.UUID, status domain.InstanceStatus) *d
 }
 
 func (r *w25bRig) addTask(tenant uuid.UUID, inst *domain.Instance, nodeKey string, status domain.TaskStatus) *domain.Task {
+	slaDate := time.Date(2026, 4, 2, 10, 30, 0, 0, time.UTC)
 	task := &domain.Task{
 		ID: uuid.New(), TenantID: tenant, WorkflowInstanceID: inst.ID, NodeKey: nodeKey, DepartmentID: uuid.New(),
-		Status: status, RecordVersion: 7,
+		Status: status, RecordVersion: 7, DueAt: &slaDate, FollowUpAt: &slaDate,
 	}
 	r.tasks[task.ID] = task
 	r.taskOrder = append(r.taskOrder, task.ID)

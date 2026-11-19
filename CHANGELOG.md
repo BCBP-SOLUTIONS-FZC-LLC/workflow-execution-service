@@ -44,6 +44,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 - Claiming a multi-assignee task now emits `WorkflowTaskClaimed`, naming the claimer and every active assignee; the event is stored in the same transaction as the lead, so the lead and the event stand or fall together. A claim used to change the lead and tell nobody.
 - Two simultaneous deliveries of the same inbound event (delegation, user, membership, tenant and connector-task events) now apply once: the event's id is claimed before it is applied, and the second delivery waits and is acknowledged as a duplicate. Both used to pass the duplicate check and apply. A delivery whose claim cannot be written is still answered 503.
+- Start-up refuses a zero or negative `GLUE_SCHEMA_CACHE_TTL` and a `DEFINITION_SERVICE_URL` that is not an absolute http or https URL with a host, instead of silently using 5 minutes or failing on the first call.
+- The connector worker closes its Valkey connection when the first ping fails, and exits with status 1 when its health listener cannot start or stops, instead of running on without a health endpoint.
+- The worker lets a second SIGTERM or Ctrl+C end a stuck shutdown, drains correctly when a signal arrives during start-up, and logs a failed database pool drain.
+- The event encoder refuses a schema version that is not AVAILABLE in the registry, and the decoder refuses a message with no payload after the header or with a compressed payload.
+- A task without a due date or follow-up date no longer produces an SLA breach or warning event with a zero date; the activity fails without retry.
+- The `/asyncapi` page shows the environment the service is configured for instead of the `ENV` variable, escapes message and schema names in links and ids, copies field names that contain an apostrophe, no longer repeats element ids, and shows "(not found)" for a payload schema that does not exist.
+- Cancelling an instance whose Temporal workflow no longer exists ends the instance (TERMINATED, active tasks failed) and answers 202, as terminate does, instead of 409 INVALID_INSTANCE_STATE.
+- The tenant purge stops quietly when the service shuts down: it no longer counts a failure or delays the tenant's next attempt.
+- Degraded and force-route events, and every task event, carry empty lists instead of null when they name no failed branches, source nodes or assignees.
 - Cancelling a COMPLETED or FAILED instance leaves it as it is and emits no cancelled event; it used to be rewritten as TERMINATED.
 - Completing a task without a result stores no result; an empty value used to be refused by the database, so the completion was retried without end.
 - Vacating an assignment that is already closed is not found and changes nothing, and setting or claiming the lead with an assignment of another task is not found; both used to rewrite the row.

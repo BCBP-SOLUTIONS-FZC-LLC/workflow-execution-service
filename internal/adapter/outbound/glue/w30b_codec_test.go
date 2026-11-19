@@ -72,7 +72,7 @@ func (s *w30bGlueServer) handler(versionID string) http.Handler {
 		s.requests = append(s.requests, w30bGlueRequest{target: r.Header.Get("X-Amz-Target"), body: string(body)})
 		s.mu.Unlock()
 		w.Header().Set("Content-Type", "application/x-amz-json-1.1")
-		_ = json.NewEncoder(w).Encode(map[string]string{"SchemaVersionId": versionID})
+		_ = json.NewEncoder(w).Encode(map[string]string{"SchemaVersionId": versionID, "Status": "AVAILABLE"})
 	})
 }
 

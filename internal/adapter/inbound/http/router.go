@@ -78,7 +78,7 @@ func NewRouter(cfg RouterConfig) *Router {
 	r.NoRoute(handler.NotFound)
 
 	if dev {
-		r.GET("/asyncapi", AsyncAPIHandler)
+		r.GET("/asyncapi", AsyncAPIHandler(cfg.AppEnv))
 	}
 
 	cfg.GinConfig.RequestTimeout = 0

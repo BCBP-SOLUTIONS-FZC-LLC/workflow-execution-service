@@ -39,7 +39,7 @@ func (g *scriptedGetter) GetSchemaVersion(_ context.Context, in *awsglue.GetSche
 
 func answer(versionID string) func(string) (*awsglue.GetSchemaVersionOutput, error) {
 	return func(string) (*awsglue.GetSchemaVersionOutput, error) {
-		return &awsglue.GetSchemaVersionOutput{SchemaVersionId: aws.String(versionID)}, nil
+		return &awsglue.GetSchemaVersionOutput{SchemaVersionId: aws.String(versionID), Status: types.SchemaVersionStatusAvailable}, nil
 	}
 }
 
@@ -128,7 +128,7 @@ func (g *blockingGetter) GetSchemaVersion(ctx context.Context, in *awsglue.GetSc
 	g.calls[name].Add(1)
 	select {
 	case <-g.release[name]:
-		return &awsglue.GetSchemaVersionOutput{SchemaVersionId: aws.String(goodVersionID)}, nil
+		return &awsglue.GetSchemaVersionOutput{SchemaVersionId: aws.String(goodVersionID), Status: types.SchemaVersionStatusAvailable}, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}

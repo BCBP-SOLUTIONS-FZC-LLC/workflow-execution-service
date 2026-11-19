@@ -81,7 +81,15 @@ func (s *InstanceService) Resume(ctx context.Context, tenantID, instanceID, acto
 }
 
 func (s *InstanceService) Cancel(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string, recordVersion int64) error {
-	return s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, signalAnnotation{reason: reason}, recordVersion, port.SignalInstanceCancel)
+	err := s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, signalAnnotation{reason: reason}, recordVersion, port.SignalInstanceCancel)
+	if !errors.Is(err, port.ErrWorkflowNotFound) {
+		return err
+	}
+	s.logger().Warn("cancel found no workflow execution, ending the instance row", map[string]any{
+		"instance_id": instanceID, "tenant_id": tenantID,
+	})
+	_, err = s.markTerminated(ctx, tenantID, instanceID, actorUserID, reason)
+	return err
 }
 
 func (s *InstanceService) ForceForward(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, targetNodeKey string, recordVersion int64) error {

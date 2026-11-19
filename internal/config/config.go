@@ -453,8 +453,8 @@ func (c *Config) RequireServer() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
 	}
-	if c.DefinitionServiceURL == "" {
-		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
+	if err := c.requireDefinitionServiceURL(); err != nil {
+		return err
 	}
 	if c.EligibilityBaseURL == "" {
 		return fmt.Errorf("ELIGIBILITY_BASE_URL is required")
@@ -500,6 +500,17 @@ func (c *Config) requireTemporal() error {
 	return nil
 }
 
+func (c *Config) requireDefinitionServiceURL() error {
+	if c.DefinitionServiceURL == "" {
+		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
+	}
+	u, err := url.Parse(c.DefinitionServiceURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("DEFINITION_SERVICE_URL must be an http or https URL with a host, got %q", c.DefinitionServiceURL)
+	}
+	return nil
+}
+
 func (c *Config) requireIdentityServiceAddress() error {
 	if c.TokenServiceBaseURL == "" {
 		return fmt.Errorf("TOKEN_SERVICE_BASE_URL is required: the API reads each tenant's automation principal from the identity service")
@@ -515,15 +526,15 @@ func (c *Config) RequireWorker() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
 	}
-	if c.DefinitionServiceURL == "" {
-		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
+	if err := c.requireDefinitionServiceURL(); err != nil {
+		return err
 	}
 	return c.requireTemporal()
 }
 
 func (c *Config) RequireConnectorWorker() error {
-	if c.DefinitionServiceURL == "" {
-		return fmt.Errorf("DEFINITION_SERVICE_URL is required")
+	if err := c.requireDefinitionServiceURL(); err != nil {
+		return err
 	}
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")

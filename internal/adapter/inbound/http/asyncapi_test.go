@@ -70,10 +70,9 @@ func TestAsyncAPIHandler(t *testing.T) {
 
 	t.Run("success renders the real spec as HTML", func(t *testing.T) {
 		t.Chdir(repoRoot(t))
-		t.Setenv("ENV", "staging")
 
 		r := gin.New()
-		r.GET("/asyncapi", AsyncAPIHandler)
+		r.GET("/asyncapi", AsyncAPIHandler("staging"))
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/asyncapi", nil))
 
@@ -100,7 +99,7 @@ func TestAsyncAPIHandler(t *testing.T) {
 
 	t.Run("unparseable spec file returns 500", func(t *testing.T) {
 		r := gin.New()
-		r.GET("/asyncapi", asyncAPIHandlerFor([]byte("asyncapi: [1, 2\n")))
+		r.GET("/asyncapi", asyncAPIHandlerFor([]byte("asyncapi: [1, 2\n"), "dev"))
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/asyncapi", nil))
 
@@ -783,13 +782,13 @@ func TestRenderMessage(t *testing.T) {
 		}
 	})
 
-	t.Run("payload $ref to a schema absent from components renders no payload section", func(t *testing.T) {
+	t.Run("payload $ref to a schema absent from components says the schema was not found", func(t *testing.T) {
 		msg := comps.Messages["DanglingPayloadMsg"]
 		var buf bytes.Buffer
 		renderMessage(&buf, "DanglingPayloadMsg", &msg, comps)
 		got := buf.String()
-		if strings.Contains(got, "Payload:") {
-			t.Errorf("expected no payload section for an unregistered schema, got %s", got)
+		if !strings.Contains(got, "(not found)") || strings.Contains(got, "prop-table") {
+			t.Errorf("expected a not-found payload line and no table for an unregistered schema, got %s", got)
 		}
 		if !strings.Contains(got, "Dangling Payload") {
 			t.Errorf("card should still render its title: %s", got)

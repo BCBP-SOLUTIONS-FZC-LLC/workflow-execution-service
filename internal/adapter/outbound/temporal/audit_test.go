@@ -241,7 +241,8 @@ func TestRecordSLAWarning_RetriedCall_NoOp(t *testing.T) {
 // attempt fails and Temporal retries it; the retry finds the event.
 func TestRecordSLAEvent_ConcurrentEnqueue_FailsTheAttempt(t *testing.T) {
 	taskID, instanceID := uuid.New(), uuid.New()
-	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady}
+	slaDate := time.Date(2026, 4, 2, 10, 30, 0, 0, time.UTC)
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: instanceID, Status: domain.TaskStatusReady, DueAt: &slaDate, FollowUpAt: &slaDate}
 	outbox := &fakeOutbox{enqueueErr: domain.ErrAlreadyExists}
 	deps := &outboundtemporal.Deps{
 		Tasks: newFakeTaskRepo(task), Assignments: newFakeAssignmentRepo(), Instances: seededInstances(task),

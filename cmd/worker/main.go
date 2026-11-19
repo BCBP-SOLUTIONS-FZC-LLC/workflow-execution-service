@@ -54,6 +54,9 @@ func main() {
 	}
 	defer tracingShutdown()
 
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
 	bound, err := bindListeners(context.Background(), fmt.Sprintf(":%d", cfg.WorkerHealthPort), fmt.Sprintf(":%d", cfg.WorkerMetricsPort))
 	if err != nil {
 		fatal(wlog, tracingShutdown, "startup failed", err)
@@ -100,9 +103,7 @@ func main() {
 	metricsSrv := newMetricsServer(bound.metrics.Addr().String())
 	serveOn("metrics", metricsSrv, bound.metrics, wlog)
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
+	waitForStop(sigCh)
 
 	cancelPoll()
 
@@ -154,11 +155,26 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*outboundtemporal.Deps, po
 	queueRepo := postgres.NewActiveTaskQueueRepo(pool)
 
 	cleanup := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = pool.DrainAndClose(ctx)
+		drainPool(pool, wlog)
 	}
 	return deps, queueRepo, pool, cleanup, nil
+}
+
+type poolDrainer interface {
+	DrainAndClose(ctx context.Context) error
+}
+
+func drainPool(pool poolDrainer, wlog port.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := pool.DrainAndClose(ctx); err != nil {
+		wlog.Warn("worker db pool drain failed", map[string]any{"error": err.Error()})
+	}
+}
+
+func waitForStop(sigCh chan os.Signal) {
+	<-sigCh
+	signal.Stop(sigCh)
 }
 
 func fatal(wlog port.Logger, flush func(), msg string, err error) {

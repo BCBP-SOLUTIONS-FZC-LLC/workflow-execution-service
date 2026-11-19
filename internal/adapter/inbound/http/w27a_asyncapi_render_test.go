@@ -78,14 +78,13 @@ func TestRenderPage_EnvBadge_TakesItsColourAndUpperCasedLabelFromTheEnvironmentN
 }
 
 func TestAsyncAPIHandler_RealSpecInDevEnvironment_ServesAFullPageListingEveryMessageAndSchema(t *testing.T) {
-	t.Setenv("ENV", "dev")
 	spec := loadRealSpec(t)
 	require.NotEmpty(t, spec.Info.Title)
 	require.NotEmpty(t, spec.Info.Version)
 	require.NotEmpty(t, spec.Comps.Messages)
 	require.NotEmpty(t, spec.Comps.Schemas)
 
-	w := w27aServe(t, AsyncAPIHandler)
+	w := w27aServe(t, AsyncAPIHandler("dev"))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "text/html; charset=utf-8", w.Header().Get("Content-Type"))

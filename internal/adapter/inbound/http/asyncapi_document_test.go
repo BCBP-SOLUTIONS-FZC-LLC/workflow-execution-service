@@ -59,7 +59,7 @@ func TestAsyncAPIHandler_ASchemaThatReferencesItselfAnswersTheProblemAndKeepsThe
 	}
 	for name, spec := range specs {
 		t.Run(name, func(t *testing.T) {
-			w := serveAsyncAPI(t, asyncAPIHandlerFor([]byte(spec)))
+			w := serveAsyncAPI(t, asyncAPIHandlerFor([]byte(spec), "dev"))
 
 			require.Equal(t, http.StatusInternalServerError, w.Code)
 			var problem map[string]any
@@ -82,7 +82,7 @@ func TestAsyncAPIHandler_AnAcyclicSpecWithSharedSchemasStillRenders(t *testing.T
       allOf:
         - $ref: "#/components/schemas/Base"
 `
-	w := serveAsyncAPI(t, asyncAPIHandlerFor([]byte(spec)))
+	w := serveAsyncAPI(t, asyncAPIHandlerFor([]byte(spec), "dev"))
 
 	require.Equal(t, http.StatusOK, w.Code)
 }
@@ -90,7 +90,7 @@ func TestAsyncAPIHandler_AnAcyclicSpecWithSharedSchemasStillRenders(t *testing.T
 func TestAsyncAPIHandler_TheServedDocumentDoesNotDependOnTheWorkingDirectory(t *testing.T) {
 	t.Chdir(t.TempDir())
 
-	w := serveAsyncAPI(t, AsyncAPIHandler)
+	w := serveAsyncAPI(t, AsyncAPIHandler("dev"))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "workflow-execution-service events")
