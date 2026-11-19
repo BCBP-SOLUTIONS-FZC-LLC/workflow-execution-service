@@ -40,6 +40,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- Force-back of a degraded instance with a target node key that is not in the workflow answers 409 TARGET_NODE_NOT_FOUND; it used to answer 202 and the workflow dropped the signal.
+- Cancelling an instance that has two or more failed parallel forks open records the cancellation once and ends the instance TERMINATED; it used to end the run without the cancel write, leaving the instance row DEGRADED.
+- A user who was reassigned a task and then lost the completion race to a co-assignee no longer gets "all done"; their reassigned assignment was not found before.
+- The connector worker skips and logs an alias row it cannot decode (for example a string timeout) and loads the rest; one such row used to fail the whole registry and stop start-up.
+- The AsyncAPI page shortens long descriptions at a character boundary; a multi-byte character at the cut used to be split, leaving invalid UTF-8.
 - Two force routes through the same parallel branch each run their own remaining steps; the second used to overwrite the first one's continuation.
 - A non-interrupting boundary path that fails logs a warning with tenant, instance and host node; it used to fail with no trace.
 - A refused FAILED status write is logged, and an instance that fails at start (plan read, missing main plan, query registration) gets a completion time. When a failed run's final FAILED write is also refused, the run returns both errors instead of dropping the write error.

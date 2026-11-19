@@ -1969,6 +1969,10 @@ paths:
             no completed step to go back to (it has not yet advanced past the first step);
             INVALID_INSTANCE_STATE — instance is neither RUNNING nor DEGRADED;
             INSTANCE_ALREADY_TERMINAL — instance is already in a terminal state;
+            TARGET_NODE_NOT_FOUND — a DEGRADED instance's target_node_key names no node of the
+            compiled plan the instance runs;
+            VERSION_INVALID — the stored compiled plan, read to check target_node_key, cannot be
+            decoded;
             RECORD_VERSION_CONFLICT — record_version is stale;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:

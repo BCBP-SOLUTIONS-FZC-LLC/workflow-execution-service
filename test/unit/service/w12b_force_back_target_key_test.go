@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
+
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
@@ -83,7 +85,9 @@ func TestInstanceService_ForceBack_TheTargetKeyDependsOnTheInstanceStatus(t *tes
 				tasks.tasks = append(tasks.tasks, &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: inst.ID, Status: status})
 			}
 			temporal := &w12bForceBackTemporal{}
-			svc := &service.InstanceService{Instances: instances, Tasks: tasks, Temporal: temporal}
+			billing := &dsl.CompiledPlan{Name: "main", Departments: []dsl.DepartmentDef{frfixDept("billing", "prep")}}
+			definitions := &fakeDefinitionClient{resp: publishedCompiledWorkflow(uuid.New(), uuid.New(), frfixPlanJSON(t, dsl.CurrentSchemaVersion, billing))}
+			svc := &service.InstanceService{Instances: instances, Tasks: tasks, Temporal: temporal, Definitions: definitions}
 
 			err := svc.ForceBack(context.Background(), tenantID, inst.ID, actorID, tc.callerKey, 3)
 

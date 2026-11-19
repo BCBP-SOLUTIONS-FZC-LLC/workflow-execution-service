@@ -80,6 +80,30 @@ func (r *TaskAssignmentRepo) ListActiveByTask(
 	return assignments, err
 }
 
+func (r *TaskAssignmentRepo) ListByTaskAndUser(
+	ctx context.Context,
+	tenantID, taskID, userID uuid.UUID,
+) ([]*domain.TaskAssignment, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var assignments []*domain.TaskAssignment
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		rows, err := db.New(dbtx).ListAssignmentsByTaskAndUser(ctx, db.ListAssignmentsByTaskAndUserParams{
+			TenantID: tenantID,
+			TaskID:   taskID,
+			UserID:   userID,
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		assignments = make([]*domain.TaskAssignment, len(rows))
+		for i, row := range rows {
+			assignments[i] = taskAssignmentFromDB(row)
+		}
+		return nil
+	})
+	return assignments, err
+}
+
 func (r *TaskAssignmentRepo) ListActiveByUser(
 	ctx context.Context,
 	tenantID, userID uuid.UUID,

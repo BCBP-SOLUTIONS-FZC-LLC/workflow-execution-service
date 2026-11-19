@@ -5,6 +5,12 @@ SELECT * FROM workflow_task_assignment WHERE id = $1;
 SELECT * FROM workflow_task_assignment
 WHERE task_id = $1 AND is_active;
 
+-- name: ListAssignmentsByTaskAndUser :many
+-- Backs TaskAssignmentRepo.ListByTaskAndUser -- every row the user holds or held
+-- on the task, closed ones included, whichever id scheme made the row.
+SELECT * FROM workflow_task_assignment
+WHERE tenant_id = $1 AND task_id = $2 AND user_id = $3;
+
 -- name: ListActiveAssignmentsByUser :many
 SELECT * FROM workflow_task_assignment
 WHERE tenant_id = $1 AND user_id = $2 AND is_active;

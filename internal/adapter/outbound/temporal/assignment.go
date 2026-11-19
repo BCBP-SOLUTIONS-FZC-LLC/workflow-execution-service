@@ -125,19 +125,21 @@ func (d *Deps) completeUserAssignment(ctx context.Context, tenantID uuid.UUID, t
 	return out, nil
 }
 
-// vacatedUncompleted reports whether the user's own assignment was closed without a result: another
-// assignee finished the task first, so this call is not the one that closes it. A user whose
-// assignment completed (a retry after a lost answer) or is not the one named by the plan is not
-// affected.
+// vacatedUncompleted reports whether the user's own assignments were closed without a result:
+// another assignee finished the task first, so this call is not the one that closes it. The rows
+// are found by task and user, so one made by a reassignment counts like the one the plan made. A
+// user who completed (a retry after a lost answer) or never held the task is not affected.
 func (d *Deps) vacatedUncompleted(ctx context.Context, tenantID, taskID, userID uuid.UUID) (bool, error) {
-	a, err := d.Assignments.GetByID(ctx, tenantID, deterministicAssignmentID(taskID, userID))
-	if errors.Is(err, domain.ErrNotFound) {
-		return false, nil
-	}
+	rows, err := d.Assignments.ListByTaskAndUser(ctx, tenantID, taskID, userID)
 	if err != nil {
-		return false, fmt.Errorf("get own assignment: %w", err)
+		return false, fmt.Errorf("list own assignments: %w", err)
 	}
-	return a.CompletedAt == nil, nil
+	for _, a := range rows {
+		if a.CompletedAt != nil {
+			return false, nil
+		}
+	}
+	return len(rows) > 0, nil
 }
 
 // vacateOthers closes the co-assignees' open assignments: the instance moves on

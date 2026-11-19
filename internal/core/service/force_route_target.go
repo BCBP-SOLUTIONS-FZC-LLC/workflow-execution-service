@@ -76,6 +76,23 @@ func (s *InstanceService) validateForwardTarget(ctx context.Context, tenantID uu
 	return nil
 }
 
+// validateBackTarget refuses, before the signal, a key that names no node of
+// the plan; the workflow would drop it. A RUNNING instance sends no key, and
+// an empty key is left to the workflow.
+func (s *InstanceService) validateBackTarget(ctx context.Context, tenantID uuid.UUID, inst *domain.Instance, targetNodeKey string) error {
+	if targetNodeKey == "" {
+		return nil
+	}
+	plan, err := s.mainPlanOf(ctx, tenantID, inst.WorkflowVersionID)
+	if err != nil {
+		return err
+	}
+	if !planHasNode(plan, targetNodeKey) {
+		return port.ErrTargetNodeNotFound
+	}
+	return nil
+}
+
 func planHasNode(plan *dsl.CompiledPlan, nodeKey string) bool {
 	for i := range plan.Departments {
 		dept := &plan.Departments[i]

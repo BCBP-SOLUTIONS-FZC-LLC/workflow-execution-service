@@ -132,6 +132,9 @@ func (s *InstanceService) ForceBack(ctx context.Context, tenantID, instanceID, a
 	if inst.Status == domain.InstanceStatusRunning {
 		targetNodeKey = ""
 	}
+	if err := s.validateBackTarget(ctx, tenantID, inst, targetNodeKey); err != nil {
+		return err
+	}
 	return s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, port.SignalInstanceForceBack, adminSignalWire{
 		AdminUserID: actorUserID.String(), TargetNodeKey: targetNodeKey, RecordVersion: recordVersion,
 	})

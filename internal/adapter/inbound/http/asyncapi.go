@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
@@ -224,9 +225,9 @@ func renderPage(w *bytes.Buffer, s *asyncSpec, env string) {
 	w.WriteString(`<div class="section" id="info">`)
 	w.WriteString(`<div class="section-title">Info</div>`)
 	if s.Info.Desc != "" {
-		short := s.Info.Desc
-		if len(short) > 800 {
-			short = short[:800] + "\n\n[truncated — see api/asyncapi.yaml for full description]"
+		short, cut := cutAtRune(s.Info.Desc, 800)
+		if cut {
+			short += "\n\n[truncated — see api/asyncapi.yaml for full description]"
 		}
 		fmt.Fprintf(w, `<div class="info-desc">%s</div>`, html.EscapeString(short))
 	}
@@ -283,10 +284,7 @@ func renderServers(w *bytes.Buffer, node *yaml.Node) {
 				case "protocol":
 					proto = val.Content[j+1].Value
 				case "description":
-					desc = val.Content[j+1].Value
-					if len(desc) > 200 {
-						desc = desc[:200] + "…"
-					}
+					desc = shortDescription(val.Content[j+1].Value)
 				}
 			}
 			fmt.Fprintf(w, `<div class="server-item">
@@ -397,10 +395,7 @@ func renderPropsTable(w *bytes.Buffer, sc *asyncSchema, schemaID string) {
 		if reqSet[k] {
 			req = `<span class="prop-req">required</span>`
 		}
-		desc := strings.TrimSpace(v.Desc)
-		if len(desc) > 200 {
-			desc = desc[:200] + "…"
-		}
+		desc := shortDescription(strings.TrimSpace(v.Desc))
 		descHTML := html.EscapeString(desc)
 
 		enumHTML := ""
@@ -449,6 +444,27 @@ func renderPropsTable(w *bytes.Buffer, sc *asyncSchema, schemaID string) {
 	}
 
 	w.WriteString(`</tbody></table>`)
+}
+
+// cutAtRune shortens s to at most limit bytes without splitting a multi-byte
+// character; a string within the limit is returned whole.
+func cutAtRune(s string, limit int) (string, bool) {
+	if len(s) <= limit {
+		return s, false
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut], true
+}
+
+func shortDescription(desc string) string {
+	short, cut := cutAtRune(desc, 200)
+	if cut {
+		short += "…"
+	}
+	return short
 }
 
 func sortedKeys[T any](m map[string]T) []string {
