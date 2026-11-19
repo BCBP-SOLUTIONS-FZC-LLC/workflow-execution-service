@@ -29,6 +29,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- The workflow-task event route answers 422 NO_AUTOMATION_PRINCIPAL when the tenant has no usable automation principal (none held, or not active), so the event consumer dead-letters the event at once. It used to answer 500, and the consumer retried it until the queue's receive limit.
 - A repeated connector callback whose outcome, or the other outcome, was already delivered is acknowledged without asking the token service for the automation principal, and one still in flight is answered 503 without it. A repeat used to fail with the lookup error while the token service was down, so the connector worker kept retrying.
 - The internal active-instances, pause-tasks and delegate-impact calls refuse any all-zero id (tenant, user, delegate, delegation or department) with 400 BAD_REQUEST naming the field. Pause-tasks used to pause tasks for an all-zero user, and delegate-impact ran with all-zero ids.
 - On those three calls an absent id gives `invalid_params` reason `is required` and a malformed or all-zero one gives `is not valid`; delegate-impact lists `invalid_params` too. The reasons used to differ from call to call.
