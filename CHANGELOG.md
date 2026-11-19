@@ -30,6 +30,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - Postgres repository tests for error mapping, assignment and task writes, the recency lock, outbox records, keyset paging, task filters, tenant retention, missing tenant scope and tenant-scoped writes under row-level security, and the instance start queue choice.
 - Handler and middleware tests for idempotency, internal event envelopes and recency, problem documents, strict bodies, identity routes and task reads; Temporal activity tests for task creation, instance nodes, assignments, instance status and plan reads, with real-Postgres claim and complete races.
 - Route tests for task claim, complete, defer and reassign, instance pause, resume and cancel, force routes, node overrides, outside answers and active tasks by user, run through the real services; event schema registry and validation tests; Postgres tests for inbox failures and a blank override reason.
+- Router tests for routing, readiness, route groups, replayed idempotent routes and the AsyncAPI page; logger level and slow-query argument redaction tests; connector-worker tests for configuration, document references, the alias registry, dispatch and its background loops on a fake clock; worker configuration, topology polling and OpenBao reader validation tests.
 
 ### Removed
 
