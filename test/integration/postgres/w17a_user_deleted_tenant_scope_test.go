@@ -4,6 +4,7 @@ package postgres_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
+
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/postgres"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
@@ -25,10 +28,11 @@ import (
 
 type w17aInbox struct{ marks []uuid.UUID }
 
-func (f *w17aInbox) IsProcessed(context.Context, uuid.UUID, string) (bool, error) { return false, nil }
-
-func (f *w17aInbox) MarkProcessed(_ context.Context, eventID uuid.UUID, _ string) error {
-	f.marks = append(f.marks, eventID)
+func (f *w17aInbox) Process(ctx context.Context, env events.Envelope[json.RawMessage], _ string, apply func(context.Context) error) error {
+	if err := apply(ctx); err != nil {
+		return err
+	}
+	f.marks = append(f.marks, uuid.MustParse(env.ID))
 	return nil
 }
 

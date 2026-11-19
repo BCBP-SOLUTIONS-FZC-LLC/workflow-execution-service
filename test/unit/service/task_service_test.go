@@ -22,6 +22,7 @@ func newTaskServiceHarness() (*service.TaskService, *fakeInstanceRepo, *fakeTask
 	assignments := newFakeAssignmentRepo()
 	overrides := &fakeAssigneeOverrideRepo{}
 	temporal := &fakeTemporalClient{}
+	outbox := &fakeOutbox{}
 
 	svc := &service.TaskService{
 		Instances:   instances,
@@ -29,7 +30,9 @@ func newTaskServiceHarness() (*service.TaskService, *fakeInstanceRepo, *fakeTask
 		Assignments: assignments,
 		Overrides:   overrides,
 		Transactor:  fakeTransactor{},
-		Signals:     &fakeOutbox{},
+		Outbox:      outbox,
+		Signals:     outbox,
+		Validator:   realValidator(),
 		Temporal:    temporal,
 	}
 	fx10AllowTaskEligibility(svc, uuid.Nil)

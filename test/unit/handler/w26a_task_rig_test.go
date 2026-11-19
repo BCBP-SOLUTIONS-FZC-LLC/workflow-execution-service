@@ -297,6 +297,7 @@ func (r *w26aRig) addCompletedStep() {
 func (r *w26aRig) router() *gin.Engine {
 	svc := &service.TaskService{
 		Tasks: r.tasks, Assignments: r.assignments, Instances: r.instances, Temporal: r.temporal,
+		Transactor: fxdTransactor{}, Outbox: fxdOutbox{}, Validator: fxdAcceptingValidator{},
 	}
 	if r.withPlanCheck {
 		svc.Definitions = r.definitions

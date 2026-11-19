@@ -215,7 +215,7 @@ func TestWorkflowTaskEvents_InboxReadFails_Answers503AndQueuesNothing(t *testing
 	assert.Empty(t, rig.publisher.events, "the event waits for a redelivery")
 	assert.Equal(t, []w17bInboxCall{{eventID, w17bConnectorConsumer}}, rig.inbox.checked)
 	assert.Empty(t, rig.inbox.marked)
-	line, ok := rig.log.errorWith(eventID, "IsProcessed")
+	line, ok := rig.log.errorWith(eventID, "claiming or recording")
 	require.True(t, ok, "an error names the event whose inbox read failed: %v", rig.log.errs)
 	assert.Equal(t, errW17bInboxReadConnector.Error(), line.Fields["error"])
 }
@@ -235,7 +235,7 @@ func TestWorkflowTaskEvents_InboxWriteFails_Answers503AfterTheStreamWrite(t *tes
 	assert.Equal(t, payload["task_id"], rig.publisher.events[0].TaskID.String())
 	assert.Equal(t, []w17bInboxCall{{eventID, w17bConnectorConsumer}}, rig.inbox.marked, "the write was attempted")
 	assert.Equal(t, []string{"publish", "mark"}, rig.order.events, "the inbox row is written after the stream entry")
-	line, ok := rig.log.errorWith(eventID, "MarkProcessed")
+	line, ok := rig.log.errorWith(eventID, "claiming or recording")
 	require.True(t, ok, "an error names the event whose inbox write failed: %v", rig.log.errs)
 	assert.Equal(t, errW17bInboxWriteConnector.Error(), line.Fields["error"])
 }

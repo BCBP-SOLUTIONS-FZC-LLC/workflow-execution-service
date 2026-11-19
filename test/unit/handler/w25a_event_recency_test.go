@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -11,6 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
+
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
@@ -56,6 +59,9 @@ func (i *w25aInbox) MarkProcessed(_ context.Context, id uuid.UUID, consumer stri
 	i.marks = append(i.marks, id)
 	i.consumers = append(i.consumers, consumer)
 	return nil
+}
+func (i *w25aInbox) Process(ctx context.Context, env events.Envelope[json.RawMessage], consumer string, apply func(context.Context) error) error {
+	return processThrough(ctx, i, env, consumer, apply)
 }
 func (i *w25aInbox) Prune(context.Context, time.Duration) (int64, error) { return 0, nil }
 

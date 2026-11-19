@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -65,60 +66,46 @@ func (h *Handler) handleWorkflowTaskCreated(c *gin.Context, env events.Envelope[
 		return
 	}
 
-	if h.alreadyProcessed(c, eventID, port.ConsumerConnector, eventType) {
-		return
-	}
-
-	if h.connectorEvents == nil {
-		h.logWarn("internal events: connector event publisher not configured, dropping", map[string]any{"task_id": taskID})
-		h.respondOK(c, eventID, port.ConsumerConnector, eventType)
-		return
-	}
-
-	ctx := guCtx(c.Request.Context(), tenantID)
-	if !h.connectorStillRuns(c, eventID, tenantID, taskID) {
-		return
-	}
-	var principal port.AutomationPrincipal
-	if h.principals != nil {
-		resolved, err := h.principals.AutomationPrincipal(ctx, tenantID)
-		if err != nil {
-			h.reconcilerError(c, eventType, err)
-			return
+	h.processOnce(c, env, eventID, port.ConsumerConnector, eventType, func(ctx context.Context) (string, error) {
+		if h.connectorEvents == nil {
+			h.logWarn("internal events: connector event publisher not configured, dropping", map[string]any{"task_id": taskID})
+			return resultOK, nil
 		}
-		principal = resolved
-	}
-	if err := h.connectorEvents.PublishTaskCreated(ctx, port.ConnectorTaskCreatedEvent{
-		EventID: eventID, TenantID: tenantID, InstanceID: instanceID, TaskID: taskID,
-		NodeKey: p.NodeKey, DepartmentID: departmentID, ConnectorType: *p.ConnectorType,
-		ResolvedInputs: orEmptyObject(p.ResolvedInputs), OutputMapping: orEmptyList(p.OutputMapping),
-		PrincipalID: principal.ID, PrincipalSub: principal.Subject,
-	}); err != nil {
-		h.reconcilerError(c, eventType, err)
-		return
-	}
-
-	h.respondOK(c, eventID, port.ConsumerConnector, eventType)
+		ctx = guCtx(ctx, tenantID)
+		if running, err := h.connectorStillRuns(ctx, tenantID, taskID); !running || err != nil {
+			return resultOK, err
+		}
+		var principal port.AutomationPrincipal
+		if h.principals != nil {
+			resolved, err := h.principals.AutomationPrincipal(ctx, tenantID)
+			if err != nil {
+				return "", err
+			}
+			principal = resolved
+		}
+		return resultOK, h.connectorEvents.PublishTaskCreated(ctx, port.ConnectorTaskCreatedEvent{
+			EventID: eventID, TenantID: tenantID, InstanceID: instanceID, TaskID: taskID,
+			NodeKey: p.NodeKey, DepartmentID: departmentID, ConnectorType: *p.ConnectorType,
+			ResolvedInputs: orEmptyObject(p.ResolvedInputs), OutputMapping: orEmptyList(p.OutputMapping),
+			PrincipalID: principal.ID, PrincipalSub: principal.Subject,
+		})
+	})
 }
 
-// connectorStillRuns answers false once it has replied: with 200 when the task
-// is finished or its instance has ended (the event is spent, not retried), with
-// 500 when the state could not be read (execution LLD §6.2).
-func (h *Handler) connectorStillRuns(c *gin.Context, eventID, tenantID, taskID uuid.UUID) bool {
+// connectorStillRuns answers false, without an error, when the task is finished or its instance has
+// ended: the event is spent, not retried (execution LLD §6.2).
+func (h *Handler) connectorStillRuns(ctx context.Context, tenantID, taskID uuid.UUID) (bool, error) {
 	if h.connectorGate == nil {
-		return true
+		return true, nil
 	}
-	dispatchable, err := h.connectorGate.Dispatchable(guCtx(c.Request.Context(), tenantID), tenantID, taskID)
+	dispatchable, err := h.connectorGate.Dispatchable(ctx, tenantID, taskID)
 	if err != nil {
-		h.reconcilerError(c, eventTypeWorkflowTaskCreated, err)
-		return false
+		return false, err
 	}
-	if dispatchable {
-		return true
+	if !dispatchable {
+		h.logInfo("internal events: connector task finished or instance ended, not queuing", map[string]any{"task_id": taskID, "tenant_id": tenantID})
 	}
-	h.logInfo("internal events: connector task finished or instance ended, not queuing", map[string]any{"task_id": taskID, "tenant_id": tenantID})
-	h.respondOK(c, eventID, port.ConsumerConnector, eventTypeWorkflowTaskCreated)
-	return false
+	return dispatchable, nil
 }
 
 func orEmptyObject(m map[string]any) map[string]any {

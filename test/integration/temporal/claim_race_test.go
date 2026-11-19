@@ -89,6 +89,7 @@ func TestClaim_SecondLeadAttemptRejectedAgainstLiveWorkflow(t *testing.T) {
 	}
 	taskService := &service.TaskService{
 		Instances: instances, Tasks: tasks, Assignments: assignments,
+		Transactor: transactor, Outbox: outboxRepo, Validator: validator,
 		Temporal: temporal, Eligibility: fakeEligibilityChecker{}, Definitions: definitions,
 	}
 

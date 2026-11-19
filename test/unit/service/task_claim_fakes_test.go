@@ -216,6 +216,7 @@ type csdTaskHarness struct {
 	definitions *csdDefinitions
 	cache       *csdCache
 	temporal    *csdTemporal
+	outbox      *fakeOutbox
 
 	tenantID, instanceID, versionID, deptID uuid.UUID
 	callerID, otherID                       uuid.UUID
@@ -252,8 +253,10 @@ func csdNewTaskHarness(t *testing.T, assigneeMode string, stages ...dsl.StageDef
 	h.definitions = &csdDefinitions{resp: publishedCompiledWorkflow(uuid.New(), h.versionID, plan)}
 	h.cache = &csdCache{values: map[string]string{}}
 	h.temporal = &csdTemporal{}
+	h.outbox = &fakeOutbox{}
 	h.svc = &service.TaskService{
 		Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments,
+		Transactor: fakeTransactor{}, Outbox: h.outbox, Validator: realValidator(),
 		Temporal: h.temporal, Eligibility: h.eligibility, Definitions: h.definitions, Cache: h.cache,
 	}
 	return h

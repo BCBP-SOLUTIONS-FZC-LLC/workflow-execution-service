@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
+
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability/obstest"
 )
@@ -30,6 +32,9 @@ func (i *w25aCountingInbox) IsProcessed(context.Context, uuid.UUID, string) (boo
 func (i *w25aCountingInbox) MarkProcessed(context.Context, uuid.UUID, string) error {
 	i.checks++
 	return nil
+}
+func (i *w25aCountingInbox) Process(ctx context.Context, env events.Envelope[json.RawMessage], consumer string, apply func(context.Context) error) error {
+	return processThrough(ctx, i, env, consumer, apply)
 }
 func (i *w25aCountingInbox) Prune(context.Context, time.Duration) (int64, error) { return 0, nil }
 

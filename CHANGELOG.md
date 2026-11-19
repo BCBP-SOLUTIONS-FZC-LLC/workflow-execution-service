@@ -42,6 +42,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- Claiming a multi-assignee task now emits `WorkflowTaskClaimed`, naming the claimer and every active assignee; the event is stored in the same transaction as the lead, so the lead and the event stand or fall together. A claim used to change the lead and tell nobody.
+- Two simultaneous deliveries of the same inbound event (delegation, user, membership, tenant and connector-task events) now apply once: the event's id is claimed before it is applied, and the second delivery waits and is acknowledged as a duplicate. Both used to pass the duplicate check and apply. A delivery whose claim cannot be written is still answered 503.
 - Cancelling a COMPLETED or FAILED instance leaves it as it is and emits no cancelled event; it used to be rewritten as TERMINATED.
 - Completing a task without a result stores no result; an empty value used to be refused by the database, so the completion was retried without end.
 - Vacating an assignment that is already closed is not found and changes nothing, and setting or claiming the lead with an assignment of another task is not found; both used to rewrite the row.

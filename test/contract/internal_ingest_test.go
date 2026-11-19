@@ -2,6 +2,7 @@ package contract_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/gincommon"
 
 	httpadapter "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http"
@@ -21,9 +23,9 @@ import (
 
 type fakeProcessed struct{}
 
-func (fakeProcessed) IsProcessed(context.Context, uuid.UUID, string) (bool, error) { return false, nil }
-
-func (fakeProcessed) MarkProcessed(context.Context, uuid.UUID, string) error { return nil }
+func (fakeProcessed) Process(ctx context.Context, _ events.Envelope[json.RawMessage], _ string, apply func(context.Context) error) error {
+	return apply(ctx)
+}
 
 func (fakeProcessed) Prune(context.Context, time.Duration) (int64, error) { return 0, nil }
 

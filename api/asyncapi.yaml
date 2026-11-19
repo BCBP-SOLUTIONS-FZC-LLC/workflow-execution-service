@@ -319,9 +319,10 @@ components:
       name: WorkflowTaskClaimed
       title: Task claimed by its lead assignee (WorkflowTaskClaimed)
       description: >
-        Fires when ClaimAssignmentActivity marks a multi-assignee task's claiming
-        assignment as lead (is_lead=true) — never fires for single-assignee tasks, since
-        claim is a no-op there. assignee_user_ids lists every active assignee of the task
+        Fires when the claim of a multi-assignee task makes the claiming assignment the
+        lead (is_lead=true), in the same transaction as the lead — never fires for
+        single-assignee tasks, since claim does not apply there, nor for a repeated claim
+        by the lead. assignee_user_ids lists every active assignee of the task
         at claim time, the claimer included. Consumed by Audit and the Dashboard Stream
         Gateway, so every assignee sees live that the task is already claimed.
       x-lifecycle: { status: active }

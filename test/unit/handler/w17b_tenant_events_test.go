@@ -136,7 +136,7 @@ func TestTenantEvents_TenantStateChanged_InboxReadFails_Answers503AndAppliesNoth
 	assert.Empty(t, rig.lifecycle.inputs, "the event waits for a redelivery")
 	assert.Equal(t, []w17bInboxCall{{eventID, w17bMembershipConsumer}}, rig.inbox.checked)
 	assert.Empty(t, rig.inbox.marked)
-	line, ok := rig.log.errorWith(eventID, "IsProcessed")
+	line, ok := rig.log.errorWith(eventID, "claiming or recording")
 	require.True(t, ok, "an error names the event whose inbox read failed: %v", rig.log.errs)
 	assert.Equal(t, "TenantStateChanged", line.Fields["event_type"])
 	assert.Equal(t, errW17bInboxRead.Error(), line.Fields["error"], "the cause goes to the log")
@@ -155,7 +155,7 @@ func TestTenantEvents_TenantStateChanged_InboxWriteFails_Answers503AndARedeliver
 
 	require.Equal(t, http.StatusServiceUnavailable, first.Code, first.Body.String())
 	require.Equal(t, http.StatusServiceUnavailable, second.Code, second.Body.String())
-	line, ok := rig.log.errorWith(eventID, "MarkProcessed")
+	line, ok := rig.log.errorWith(eventID, "claiming or recording")
 	require.True(t, ok, "an error names the event whose inbox write failed: %v", rig.log.errs)
 	assert.Equal(t, errW17bInboxWrite.Error(), line.Fields["error"])
 	want := []w17bInboxCall{{eventID, w17bMembershipConsumer}, {eventID, w17bMembershipConsumer}}
