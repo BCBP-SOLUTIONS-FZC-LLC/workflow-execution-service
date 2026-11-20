@@ -367,6 +367,16 @@ spec:
             summary: "A dedicated task queue worker keeps failing to start"
             description: "The dedicated poll timestamp stays fresh while any other dedicated queue is served, so a tenant whose queue cannot start waits with no worker and no other signal; the Worker log names the queue and tenant (LLD §3.2, §7.6)."
 
+        - alert: ReassignFailing
+          expr: rate(workflow_execution_service_reassign_failures_total[10m]) > 0
+          for: 10m
+          labels:
+            severity: ticket
+          annotations:
+            runbook: "workflow-execution-service/reassign-failing"
+            summary: "Admin reassignments keep failing for good"
+            description: "An admin reassignment ended for good, so the task keeps its previous assignee; retries of a transient error are unlimited and not counted (LLD §7.6)."
+
         - alert: UpstreamDependencyErrors
           expr: rate(workflow_execution_service_upstream_dependency_errors_total[5m]) > 0
           for: 5m

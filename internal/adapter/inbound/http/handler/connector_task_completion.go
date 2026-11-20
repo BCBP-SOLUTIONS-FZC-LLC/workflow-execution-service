@@ -17,7 +17,7 @@ type completeConnectorTaskReq struct {
 
 type failConnectorTaskReq struct {
 	TenantID   uuid.UUID      `json:"tenant_id" binding:"required"`
-	ErrorClass string         `json:"error_class" binding:"required,notblank"`
+	ErrorClass string         `json:"error_class" binding:"required,notblank,errorclass"`
 	Output     map[string]any `json:"output"`
 }
 

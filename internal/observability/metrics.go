@@ -40,6 +40,7 @@ var (
 	InstanceDegradedOldestAgeSeconds    prometheus.Gauge
 	WorkerQueueLastPollTimestamp        *prometheus.GaugeVec
 	WorkerQueueStartFailuresTotal       prometheus.Counter
+	ReassignFailuresTotal               prometheus.Counter
 	InstancesByQueue                    *prometheus.GaugeVec
 	SLABreachesTotal                    prometheus.Counter
 	DelegationScopeUnhandledTotal       *prometheus.CounterVec
@@ -139,6 +140,9 @@ func registerServiceMetrics() {
 	WorkerQueueStartFailuresTotal = must(gincommon.NewCounter(nil,
 		"workflow_execution_service_worker_queue_start_failures_total",
 		"Dedicated task queue workers that failed to start, counted on every failed attempt (retried on each topology poll). A tenant whose queue fails to start has instances waiting with no worker while the dedicated poll timestamp stays fresh for the other queues."))
+	ReassignFailuresTotal = must(gincommon.NewCounter(nil,
+		"workflow_execution_service_reassign_failures_total",
+		"Admin reassignments the reassign Activity ended for good (a malformed id, an unknown task or a stale record version), so the task keeps its previous assignee. Transient errors retry without limit and are not counted."))
 	InstancesByQueue = must(gincommon.NewGaugeVec(nil,
 		"workflow_execution_service_instances_by_queue",
 		"Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue class, default or dedicated, sampled by the API process. A class with none is absent.",

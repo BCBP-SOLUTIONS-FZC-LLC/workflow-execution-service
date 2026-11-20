@@ -72,11 +72,14 @@ WHERE id = $1;
 -- name: UpdateWorkflowInstanceStatus :one
 -- completed_at is set only when the new status is terminal (COMPLETED,
 -- TERMINATED, FAILED) — a non-terminal transition (e.g. RUNNING -> DEGRADED)
--- leaves the existing value (NULL) untouched.
+-- leaves the existing value (NULL) untouched. degraded_since is stamped on
+-- entering DEGRADED, kept while it stays there, and cleared on any other status.
 UPDATE workflow_instance
 SET status = $2,
     completed_at = CASE WHEN $2::workflow_instance_status IN ('COMPLETED', 'TERMINATED', 'FAILED')
                        THEN now() ELSE completed_at END,
+    degraded_since = CASE WHEN $2::workflow_instance_status = 'DEGRADED'
+                          THEN COALESCE(degraded_since, now()) ELSE NULL END,
     updated_at = now(), record_version = record_version + 1
 WHERE id = $1 AND record_version = $3
 RETURNING *;
