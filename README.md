@@ -148,7 +148,7 @@ Tests fail when a router operation is missing from its spec or the reverse, and 
 
 `TEMPORAL_TLS_CERT_PATH` and `TEMPORAL_TLS_KEY_PATH` are set together or not at all; with both, the API and worker present that client certificate to Temporal. `SHUTDOWN_DRAIN_DELAY` (default 5s, below 15s) is how long the API answers `/readyz` 503 before closing its listener on SIGTERM. `GLUE_SCHEMA_MAX_STALENESS` (default 1h) bounds how long the last known event schema id is served while the schema registry is unreachable.
 
-Every binary also refuses to start on a zero or negative timeout, interval, retention or connector pool size, a `NaN` trace sampling ratio, two equal listen ports, or a `.env` file it cannot parse; the error names the variable.
+Every binary also refuses to start on a zero or negative timeout, interval, retention, schema cache TTL or connector pool size, a `DEFINITION_SERVICE_URL` that is not an absolute http or https URL, a `NaN` trace sampling ratio, two equal listen ports, or a `.env` file it cannot parse; the error names the variable.
 
 ---
 
