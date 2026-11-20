@@ -671,7 +671,7 @@ paths:
       description: >
         Internal, service-to-service endpoint called by the Org & Membership Service (not routed through
         the gateway; no x-tenant-id / x-user-id headers). Returns how many active workflow
-        instances have at least one READY/IN_PROGRESS assignment held by delegate_user_id
+        instances (RUNNING, PAUSED or DEGRADED) have at least one READY/IN_PROGRESS assignment held by delegate_user_id
         that a delegation created (an assignment carrying a delegation tag; assignments made
         by hand or by other means are not counted), and one page of the affected workflow
         instance IDs. With delegation_id, only that delegation's assignments count. Used by
@@ -767,7 +767,9 @@ paths:
         transferred. Vacates old_delegate_id's active assignments that a delegation created
         and creates equivalent assignments for new_delegate_id, scoped to tenant_id. Without
         delegation_id only the assignments tagged by some delegation move; the delegate's own
-        tasks stay. new_delegate_id must differ from old_delegate_id (400 otherwise).
+        tasks stay. Only assignments on READY or IN_PROGRESS tasks of RUNNING, PAUSED or
+        DEGRADED instances move; the same filter applies to the delegate-impact count.
+        new_delegate_id must differ from old_delegate_id (400 otherwise).
       security:
         - InternalServiceAuth: []
       parameters:
@@ -953,8 +955,8 @@ paths:
         legitimate resolver (the worker that dispatched it), never a concurrent human
         racing it, so the service reads the task's current record_version itself.
         The body names no actor: the service records the tenant's automation principal,
-        resolved from IAM, and answers 409 NO_AUTOMATION_PRINCIPAL when the tenant has none.
-        The callback acts only for a READY or IN_PROGRESS task on an instance that is RUNNING,
+        resolved from IAM, and answers 503 UPSTREAM_UNAVAILABLE with a fixed detail when the
+        tenant has none, so the worker retries. The callback acts only for a READY or IN_PROGRESS task on an instance that is RUNNING,
         DEGRADED or PAUSED (a paused instance's workflow holds the result until resume). A task
         that has left its step, or an instance that has ended, is acknowledged 204 and ignored
         with no assignment and no signal; any other instance status is 409 INVALID_INSTANCE_STATE.
@@ -1005,7 +1007,7 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
         "409":
-          description: Task is not connector-typed (TASK_NOT_CONNECTOR_TYPED), the tenant has no automation principal (NO_AUTOMATION_PRINCIPAL), or the instance is in a status the callback does not accept (INVALID_INSTANCE_STATE).
+          description: Task is not connector-typed (TASK_NOT_CONNECTOR_TYPED) or the instance is in a status the callback does not accept (INVALID_INSTANCE_STATE).
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
@@ -1019,7 +1021,8 @@ paths:
           description: >
             An earlier callback for this task, or the other callback (complete or fail), is
             still in flight and has not delivered its signal. Nothing was acted on; retry
-            later. Also returned when a dependency is unavailable.
+            later. Also returned when a dependency is unavailable, and when the tenant has no
+            usable automation principal (UPSTREAM_UNAVAILABLE with a fixed detail).
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
@@ -1093,7 +1096,7 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
         "409":
-          description: Task is not connector-typed (TASK_NOT_CONNECTOR_TYPED), the tenant has no automation principal (NO_AUTOMATION_PRINCIPAL), or the instance is in a status the callback does not accept (INVALID_INSTANCE_STATE).
+          description: Task is not connector-typed (TASK_NOT_CONNECTOR_TYPED) or the instance is in a status the callback does not accept (INVALID_INSTANCE_STATE).
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
@@ -1107,7 +1110,8 @@ paths:
           description: >
             An earlier callback for this task, or the other callback (complete or fail), is
             still in flight and has not delivered its signal. Nothing was acted on; retry
-            later. Also returned when a dependency is unavailable.
+            later. Also returned when a dependency is unavailable, and when the tenant has no
+            usable automation principal (UPSTREAM_UNAVAILABLE with a fixed detail).
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }

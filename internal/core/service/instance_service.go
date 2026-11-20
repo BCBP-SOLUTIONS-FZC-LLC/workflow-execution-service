@@ -173,7 +173,7 @@ func (s *InstanceService) matchingStart(ctx context.Context, in port.StartInstan
 		}
 		return nil, wrapInstanceErr(err)
 	}
-	if existing.Status != domain.InstanceStatusRunning ||
+	if !existing.Status.IsLive() ||
 		existing.WorkflowVersionID != in.WorkflowVersionID ||
 		existing.StartedByUserID != in.StartedByUserID {
 		return nil, nil

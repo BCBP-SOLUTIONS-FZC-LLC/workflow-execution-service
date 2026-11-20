@@ -22,7 +22,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporalclient"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/valkeystream"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
-	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/service"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
@@ -141,11 +140,8 @@ func newApp(cfg *config.Config) (*app, error) {
 		Logger:    log,
 	})
 	statsSampler := service.NewOperationalGaugeSampler(service.OperationalGaugeSamplerDeps{
-		Stats: postgres.NewOperationalStatsRepo(relayPool),
-		Record: func(s domain.OperationalStats) {
-			observability.RecordOperationalStats(s.DegradedInstances, s.OldestDegradedAgeSeconds, s.OldestReadyTaskAgeSeconds, s.InstancesByQueue)
-			observability.SetGauge(observability.OldestReadyConnectorTaskAgeSeconds, s.OldestReadyConnectorTaskAgeSeconds)
-		},
+		Stats:    postgres.NewOperationalStatsRepo(relayPool),
+		Record:   recordOperationalStats(cfg.TemporalTaskQueue),
 		Interval: cfg.OperationalStatsInterval,
 		Logger:   log,
 	})

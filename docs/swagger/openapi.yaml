@@ -1091,7 +1091,7 @@ paths:
           description: >
             State conflict. See code field:
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body;
-            DUPLICATE_BUSINESS_KEY — a live instance (not COMPLETED, TERMINATED or FAILED, so RUNNING, PAUSED or DEGRADED) for this subject_id and business_key already exists and is not this caller's own unfinished start (a RUNNING instance of the same version started by the same caller with the same context_json and override_map is the same start sent again and is returned with 201), or the start's workflow execution is held by an open execution of a different instance;
+            DUPLICATE_BUSINESS_KEY — a live instance (not COMPLETED, TERMINATED or FAILED, so RUNNING, PAUSED or DEGRADED) for this subject_id and business_key already exists and is not this caller's own unfinished start (a RUNNING, PAUSED or DEGRADED instance of the same version started by the same caller with the same context_json and override_map is the same start sent again and is returned with 201), or the start's workflow execution is held by an open execution of a different instance;
             TENANT_NOT_ACTIVE — the tenant is offboarded, or its recorded status is one the service is configured to refuse starts for (no other status by default);
             VERSION_NOT_PUBLISHED — the referenced version is DRAFT or ARCHIVED;
             VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked), or the compiled plan has a schema version this service does not read, is not valid JSON, names no main plan, names a department whose iam_department_id is not a UUID, or cannot be expanded.
@@ -1323,7 +1323,9 @@ paths:
         Sends a pause signal to the Temporal workflow. A RUNNING instance transitions to
         PAUSED. A DEGRADED instance keeps its status and the pause is held until the
         park ends, which then leaves the instance PAUSED. Returns 409 if the instance
-        is neither RUNNING nor DEGRADED.
+        is neither RUNNING nor DEGRADED. If the Temporal workflow execution no longer exists,
+        the instance is marked TERMINATED directly and its active tasks fail, as for cancel,
+        and the call returns 202.
       security:
         - GatewayTenantContext: []
           UserContext: []
@@ -1424,7 +1426,9 @@ paths:
         Sends a resume signal to the Temporal workflow. A PAUSED instance transitions to
         RUNNING. On a DEGRADED instance the resume clears a pause held for the park, under
         the same initiator rule, and is dropped when none is held. Returns 409 if the
-        instance is neither PAUSED nor DEGRADED.
+        instance is neither PAUSED nor DEGRADED. If the Temporal workflow execution no longer
+        exists, the instance is marked TERMINATED directly and its active tasks fail, as for
+        cancel, and the call returns 202.
       security:
         - GatewayTenantContext: []
           UserContext: []
@@ -1753,7 +1757,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/SignalAccepted"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: >
+            BAD_REQUEST: the request is malformed, or its variables cannot be merged into the
+            instance's context because the stored context is not a JSON object. Nothing is
+            signalled.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1836,7 +1847,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/SignalAccepted"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: >
+            BAD_REQUEST: the request is malformed, or its variables cannot be merged into the
+            instance's context because the stored context is not a JSON object. Nothing is
+            signalled.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

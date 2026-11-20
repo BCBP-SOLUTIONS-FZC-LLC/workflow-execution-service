@@ -81,8 +81,8 @@ func TestPollQueueTopologyOnce_LastPollGaugePerQueue(t *testing.T) {
 				failing = append(failing, dynamicQueue)
 			}
 			t.Cleanup(func() {
-				observability.WorkerQueueLastPollTimestamp.DeleteLabelValues(defaultQueue)
-				observability.WorkerQueueLastPollTimestamp.DeleteLabelValues(dynamicQueue)
+				observability.WorkerQueueLastPollTimestamp.DeleteLabelValues(observability.QueueClassDefault)
+				observability.WorkerQueueLastPollTimestamp.DeleteLabelValues(observability.QueueClassDedicated)
 			})
 			starter := useTopoStarter(t, failing...)
 			registry := newWorkerRegistry()
@@ -95,16 +95,18 @@ func TestPollQueueTopologyOnce_LastPollGaugePerQueue(t *testing.T) {
 			pollQueueTopologyOnce(context.Background(), nil, nil, queues, defaultQueue, registry, quietLogger{})
 
 			assert.Equal(t, 1, queues.calls)
-			series := w27bPollSeries(t, defaultQueue, dynamicQueue)
+			series := w27bPollSeries(t, observability.QueueClassDefault, observability.QueueClassDedicated, defaultQueue, dynamicQueue)
+			assert.NotContains(t, series, defaultQueue, "a queue name is never a label")
+			assert.NotContains(t, series, dynamicQueue, "a queue name is never a label")
 			if tc.wantDefault {
-				assert.GreaterOrEqual(t, series[defaultQueue], begin, "the default queue's gauge is set to the time of the poll")
+				assert.GreaterOrEqual(t, series[observability.QueueClassDefault], begin, "the default queue's gauge is set to the time of the poll")
 			} else {
-				assert.NotContains(t, series, defaultQueue)
+				assert.NotContains(t, series, observability.QueueClassDefault)
 			}
 			if tc.wantDynamic {
-				assert.GreaterOrEqual(t, series[dynamicQueue], begin, "the dynamic queue's gauge is set to the time of the poll")
+				assert.GreaterOrEqual(t, series[observability.QueueClassDedicated], begin, "the dedicated gauge is set to the time of the poll")
 			} else {
-				assert.NotContains(t, series, dynamicQueue)
+				assert.NotContains(t, series, observability.QueueClassDedicated)
 			}
 			_, started := starter.started[dynamicQueue]
 			assert.Equal(t, !tc.preexisting && !tc.failStart && tc.listErr == nil, started, "a worker is started only for a queue that is new")

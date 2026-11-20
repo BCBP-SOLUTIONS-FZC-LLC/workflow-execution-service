@@ -142,7 +142,6 @@ func TestPollQueueTopologyOnce_AQueueGoneFromTheRegistryHasItsWorkerStoppedAndIt
 	registry.add(defaultQueue, defaultWorker)
 	registry.add(keptQueue, keptWorker)
 	registry.add(goneQueue, goneWorker)
-	observability.WorkerQueueLastPollTimestamp.WithLabelValues(goneQueue).Set(1)
 	repo := &wkbootQueueRepo{active: topoActive(kept)}
 
 	pollQueueTopologyOnce(context.Background(), nil, nil, repo, defaultQueue, registry, quietLogger{})
@@ -153,14 +152,37 @@ func TestPollQueueTopologyOnce_AQueueGoneFromTheRegistryHasItsWorkerStoppedAndIt
 	if registry.has(goneQueue) {
 		t.Error("the purged queue is still registered, so its worker is stopped again on every poll")
 	}
-	if topoQueueSeriesExists(t, goneQueue) {
-		t.Error("the purged queue's last-poll series is still exported: the stalled-queue alert would page for it")
+	if topoQueueSeriesExists(t, goneQueue) || topoQueueSeriesExists(t, keptQueue) {
+		t.Error("a queue name is exported as a label: tenant ids must stay out of metric labels")
+	}
+	if !topoQueueSeriesExists(t, observability.QueueClassDedicated) {
+		t.Error("the dedicated series is gone while a dedicated queue is still served")
 	}
 	if keptWorker.stopCount() != 0 || defaultWorker.stopCount() != 0 {
 		t.Errorf("stops of the listed queue's worker = %d and of the default worker = %d, want none", keptWorker.stopCount(), defaultWorker.stopCount())
 	}
 	if !registry.has(keptQueue) || !registry.has(defaultQueue) {
 		t.Error("a worker for a still-listed queue or the default queue was dropped")
+	}
+}
+
+func TestPollQueueTopologyOnce_TheDedicatedSeriesGoesWithTheLastDedicatedQueue(t *testing.T) {
+	obstest.Init(t)
+	const defaultQueue = "topo-last-default"
+	gone := domain.TenantTaskQueueName(uuid.New())
+	registry := newWorkerRegistry()
+	registry.add(defaultQueue, &topoFakeWorker{})
+	registry.add(gone, &topoFakeWorker{})
+	observability.WorkerQueueLastPollTimestamp.WithLabelValues(observability.QueueClassDedicated).Set(1)
+	repo := &wkbootQueueRepo{}
+
+	pollQueueTopologyOnce(context.Background(), nil, nil, repo, defaultQueue, registry, quietLogger{})
+
+	if topoQueueSeriesExists(t, observability.QueueClassDedicated) {
+		t.Error("the dedicated series is still exported with no dedicated queue served: the stalled-queue alert would page for it")
+	}
+	if !topoQueueSeriesExists(t, observability.QueueClassDefault) {
+		t.Error("the default series is missing after a successful poll")
 	}
 }
 

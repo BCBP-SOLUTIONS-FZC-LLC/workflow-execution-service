@@ -359,10 +359,11 @@ func TestWorkflowClient_DelegateImpact_Errors(t *testing.T) {
 	})
 
 	t.Run("Page.Limit caps the previewed workflow IDs", func(t *testing.T) {
-		svc, _, tasks, assignments, _ := newWorkflowClientHarness()
+		svc, instances, tasks, assignments, _ := newWorkflowClientHarness()
 		tenantID, delegate := uuid.New(), uuid.New()
 		for i := 0; i < 3; i++ {
 			task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: uuid.New()}
+			instances.byID[task.WorkflowInstanceID] = &domain.Instance{ID: task.WorkflowInstanceID, TenantID: tenantID}
 			tasks.byID[task.ID] = task
 			assignments.byID[uuid.New()] = &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: delegate, IsActive: true, Reason: "delegation:" + uuid.NewString()}
 		}
@@ -374,9 +375,10 @@ func TestWorkflowClient_DelegateImpact_Errors(t *testing.T) {
 }
 
 func TestWorkflowClient_DelegateImpact(t *testing.T) {
-	svc, _, tasks, assignments, _ := newWorkflowClientHarness()
+	svc, instances, tasks, assignments, _ := newWorkflowClientHarness()
 	tenantID, delegate := uuid.New(), uuid.New()
 	instanceID := uuid.New()
+	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID}
 
 	// Two tasks on the same instance must dedupe to one workflow ID.
 	taskA := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID}
@@ -395,10 +397,13 @@ func TestWorkflowClient_DelegateImpact(t *testing.T) {
 }
 
 func TestWorkflowClient_DelegateImpact_CountsWorkflowsAndAssignmentsAcrossPages(t *testing.T) {
-	svc, _, tasks, assignments, _ := newWorkflowClientHarness()
+	svc, instances, tasks, assignments, _ := newWorkflowClientHarness()
 	tenantID, delegate := uuid.New(), uuid.New()
 	created := time.Now()
 	instanceIDs := []uuid.UUID{uuid.New(), uuid.New()}
+	for _, id := range instanceIDs {
+		instances.byID[id] = &domain.Instance{ID: id, TenantID: tenantID}
+	}
 	for i, instanceID := range []uuid.UUID{instanceIDs[0], instanceIDs[0], instanceIDs[1]} {
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, CreatedAt: created.Add(time.Duration(i) * time.Second)}
 		tasks.byID[task.ID] = task
@@ -413,12 +418,13 @@ func TestWorkflowClient_DelegateImpact_CountsWorkflowsAndAssignmentsAcrossPages(
 }
 
 func TestWorkflowClient_DelegateImpact_CursorReachesEveryWorkflow(t *testing.T) {
-	svc, _, tasks, assignments, _ := newWorkflowClientHarness()
+	svc, instances, tasks, assignments, _ := newWorkflowClientHarness()
 	tenantID, delegate := uuid.New(), uuid.New()
 	created := time.Now()
 	want := map[uuid.UUID]bool{}
 	for i := 0; i < 5; i++ {
 		instanceID := uuid.New()
+		instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID}
 		want[instanceID] = true
 		task := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: instanceID, CreatedAt: created.Add(time.Duration(i) * time.Second)}
 		tasks.byID[task.ID] = task
@@ -452,7 +458,7 @@ func TestWorkflowClient_DelegateImpact_CursorReachesEveryWorkflow(t *testing.T) 
 // reflects C's own current holdings, never chasing back to A's original
 // grant.
 func TestWorkflowClient_DelegateImpact_ChainedDelegate(t *testing.T) {
-	svc, _, tasks, assignments, _ := newWorkflowClientHarness()
+	svc, instances, tasks, assignments, _ := newWorkflowClientHarness()
 	tenantID := uuid.New()
 	grantorA, delegateB, delegateC := uuid.New(), uuid.New(), uuid.New()
 	delegationID1, delegationID2 := uuid.New(), uuid.New()
@@ -467,6 +473,7 @@ func TestWorkflowClient_DelegateImpact_ChainedDelegate(t *testing.T) {
 
 	// B -> C: the only currently active assignment in this chain.
 	taskBC := &domain.Task{ID: uuid.New(), TenantID: tenantID, WorkflowInstanceID: uuid.New()}
+	instances.byID[taskBC.WorkflowInstanceID] = &domain.Instance{ID: taskBC.WorkflowInstanceID, TenantID: tenantID}
 	tasks.byID[taskBC.ID] = taskBC
 	assignments.byID[uuid.New()] = &domain.TaskAssignment{
 		ID: uuid.New(), TenantID: tenantID, TaskID: taskBC.ID, UserID: delegateC,

@@ -2,6 +2,8 @@ package handler_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -210,17 +212,33 @@ func TestFailConnectorTask_RequestCarriesNoActor(t *testing.T) {
 	assert.Equal(t, "upstream_timeout", fake.failCall.errorClass)
 }
 
-func TestCompleteConnectorTask_NoAutomationPrincipal_Returns409(t *testing.T) {
+func TestConnectorTaskCallbacks_NoAutomationPrincipal_Answers503ForTheWorkerToRetry(t *testing.T) {
+	cause := fmt.Errorf("token service answered 404 for tenant-secret-marker: %w", port.ErrNoAutomationPrincipal)
 	fake := &fakeConnectorTaskService{
-		complete: func(context.Context, uuid.UUID, uuid.UUID, map[string]any) error {
-			return port.ErrNoAutomationPrincipal
+		complete: func(context.Context, uuid.UUID, uuid.UUID, map[string]any) error { return cause },
+		fail: func(context.Context, uuid.UUID, uuid.UUID, string, map[string]any) error {
+			return cause
 		},
 	}
 	router := newInternalRouter(newConnectorTaskHandler(fake))
+	bodies := map[string]map[string]any{
+		"complete": {"tenant_id": testTenantID.String()},
+		"fail":     {"tenant_id": testTenantID.String(), "error_class": "timeout"},
+	}
 
-	w := do(router, internalReq(http.MethodPost, "/api/v1/internal/connector-tasks/"+testTaskID.String()+"/complete", map[string]any{
-		"tenant_id": testTenantID.String(),
-	}))
+	for outcome, body := range bodies {
+		t.Run(outcome, func(t *testing.T) {
+			w := do(router, internalReq(http.MethodPost, "/api/v1/internal/connector-tasks/"+testTaskID.String()+"/"+outcome, body))
 
-	assert.Equal(t, http.StatusConflict, w.Code)
+			require.Equal(t, http.StatusServiceUnavailable, w.Code)
+			var p struct {
+				Code   string `json:"code"`
+				Detail string `json:"detail"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &p))
+			assert.Equal(t, "UPSTREAM_UNAVAILABLE", p.Code)
+			assert.Equal(t, "the tenant's automation principal is not available; retry later", p.Detail)
+			assert.NotContains(t, w.Body.String(), "tenant-secret-marker")
+		})
+	}
 }

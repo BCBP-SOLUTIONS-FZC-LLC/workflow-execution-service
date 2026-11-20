@@ -134,10 +134,10 @@ func registerServiceMetrics() {
 		"Age in seconds of the longest-parked DEGRADED instance."))
 	WorkerQueueLastPollTimestamp = must(gincommon.NewGaugeVec(nil,
 		"workflow_execution_service_worker_queue_last_poll_timestamp",
-		"Unix time of the last topology poll in which this process served the task queue (set on every poll for every queue it runs a worker for, not a measure of the Temporal long poll itself).", "queue"))
+		"Unix time of the last topology poll in which this process served a task queue of the class in the queue label, default or dedicated (set on every poll for every queue it runs a worker for, not a measure of the Temporal long poll itself). Absent for dedicated while it serves none.", "queue"))
 	InstancesByQueue = must(gincommon.NewGaugeVec(nil,
 		"workflow_execution_service_instances_by_queue",
-		"Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue, sampled by the API process. A queue with none is absent.",
+		"Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue class, default or dedicated, sampled by the API process. A class with none is absent.",
 		"queue"))
 	SLABreachesTotal = must(gincommon.NewCounter(nil,
 		"workflow_execution_service_sla_breaches_total",
@@ -272,6 +272,26 @@ func AddRetentionRowsDeleted(table string, n int64) {
 	if RetentionRowsDeletedTotal != nil {
 		RetentionRowsDeletedTotal.WithLabelValues(table).Add(float64(n))
 	}
+}
+
+const (
+	QueueClassDefault   = "default"
+	QueueClassDedicated = "dedicated"
+)
+
+func QueueClass(queue, defaultQueue string) string {
+	if queue == defaultQueue {
+		return QueueClassDefault
+	}
+	return QueueClassDedicated
+}
+
+func InstancesByQueueClass(byQueue map[string]int64, defaultQueue string) map[string]int64 {
+	byClass := make(map[string]int64, 2)
+	for queue, n := range byQueue {
+		byClass[QueueClass(queue, defaultQueue)] += n
+	}
+	return byClass
 }
 
 func RecordOperationalStats(degraded int64, oldestDegradedAgeSeconds, oldestReadyTaskAgeSeconds float64, instancesByQueue map[string]int64) {

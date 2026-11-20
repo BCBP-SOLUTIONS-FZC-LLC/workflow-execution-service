@@ -206,6 +206,24 @@ func TestInstanceService_StartRetry_AnEmptyOrNullContextIsTheEmptyObjectAndOther
 	}
 }
 
+func TestInstanceService_StartRetry_ALiveInstanceInAnyOpenStatusIsTheSameStart(t *testing.T) {
+	statuses := []domain.InstanceStatus{
+		domain.InstanceStatusRunning, domain.InstanceStatusPaused, domain.InstanceStatusDegraded,
+	}
+	for _, status := range statuses {
+		t.Run(string(status), func(t *testing.T) {
+			w := w13aNewStartWorld(t)
+			stored := w.seedLive(nil, nil)
+			stored.Status = status
+			w.seeded = *stored
+
+			got, err := w.svc.Start(context.Background(), w.input)
+
+			w.requireSameStart(t, stored, got, err)
+		})
+	}
+}
+
 func TestInstanceService_StartRetry_AnOverrideMapIsComparedByNodeKeyAndUserId(t *testing.T) {
 	first, second := uuid.New(), uuid.New()
 	review, approve := "finance/review", "finance/approve"

@@ -235,8 +235,10 @@ func TestTaskService_Claim(t *testing.T) {
 		tasks.byID[task.ID] = task
 		lead := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: uuid.New(), IsActive: true, IsLead: true}
 		assignments.byID[lead.ID] = lead
+		caller := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: uuid.New(), IsActive: true}
+		assignments.byID[caller.ID] = caller
 
-		_, err := svc.Claim(context.Background(), tenantID, task.ID, uuid.New(), task.RecordVersion)
+		_, err := svc.Claim(context.Background(), tenantID, task.ID, caller.UserID, task.RecordVersion)
 		assert.ErrorIs(t, err, port.ErrTaskAlreadyClaimed)
 	})
 

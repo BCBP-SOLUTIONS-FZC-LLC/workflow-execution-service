@@ -341,8 +341,8 @@ spec:
             severity: page
           annotations:
             runbook: "workflow-execution-service/queue-polling"
-            summary: "Queue {{ "{{" }} $labels.queue {{ "}}" }} has not been polled in 5 minutes"
-            description: "A Worker silently failing to poll one tenant-isolated queue is invisible to the aggregate workflow_execution_service_worker_active_queues gauge alone (LLD §7.6)."
+            summary: "Queue class {{ "{{" }} $labels.queue {{ "}}" }} has not been polled in 5 minutes"
+            description: "A Worker silently failing to poll its queues is invisible to the aggregate workflow_execution_service_worker_active_queues gauge alone; the label is the queue class (default or dedicated), and the Worker log names the queue and tenant (LLD §7.6)."
 
         - alert: InstancesOnUnpolledQueue
           expr: |
@@ -354,7 +354,7 @@ spec:
             severity: page
           annotations:
             runbook: "workflow-execution-service/queue-polling"
-            summary: "Queue {{ "{{" }} $labels.queue {{ "}}" }} has instances and no Worker polling it"
+            summary: "Queue class {{ "{{" }} $labels.queue {{ "}}" }} has instances and no Worker polling it"
             description: "A Worker that could not start the worker for a queue only logs, so its instances wait with no task and no other signal (LLD §3.2, §7.6)."
 
         - alert: UpstreamDependencyErrors

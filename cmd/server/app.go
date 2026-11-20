@@ -109,16 +109,24 @@ func (a *app) startServers() <-chan error {
 	a.listen("HTTP", a.httpServer, serveErrs)
 	a.listen("metrics", a.metricsServer, serveErrs)
 
-	go func() {
-		a.log.Info("outbox relay starting", map[string]any{
-			"poll_interval": a.cfg.OutboxPollInterval.String(),
-			"batch_size":    a.cfg.OutboxBatchSize,
-		})
-		if err := a.outboxRelay.Start(context.Background()); err != nil {
-			a.log.Error("outbox relay exited", map[string]any{"error": err.Error()})
-		}
-	}()
+	go a.runRelay(a.outboxRelay.Start, serveErrs)
 	return serveErrs
+}
+
+func (a *app) runRelay(start func(context.Context) error, serveErrs chan<- error) {
+	a.log.Info("outbox relay starting", map[string]any{
+		"poll_interval": a.cfg.OutboxPollInterval.String(),
+		"batch_size":    a.cfg.OutboxBatchSize,
+	})
+	err := start(context.Background())
+	if err == nil || errors.Is(err, context.Canceled) {
+		return
+	}
+	a.log.Error("outbox relay exited", map[string]any{"error": err.Error()})
+	select {
+	case serveErrs <- fmt.Errorf("outbox relay: %w", err):
+	default:
+	}
 }
 
 func (a *app) goLoop(ctx context.Context, run func(context.Context)) {

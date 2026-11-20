@@ -648,8 +648,12 @@ func TestTaskClaim_SeveralChecksFail_ReturnsTheEarliestRefusalBeforeAnyLeadIsSet
 			}, stranger: true, wantErr: port.ErrInvalidInstanceState, wantInstances: 1,
 		},
 		{
-			name: "a lead held by another hides the not-assigned refusal", prepare: func(h *taHarness) { h.other.IsLead = true },
-			stranger: true, wantErr: port.ErrTaskAlreadyClaimed, wantLists: 1, wantInstances: 1,
+			name: "a lead held by another does not hide the not-assigned refusal", prepare: func(h *taHarness) { h.other.IsLead = true },
+			stranger: true, wantErr: port.ErrNotAssignee, wantLists: 1, wantInstances: 1,
+		},
+		{
+			name: "a lead held by another refuses an assignee who is not the lead", prepare: func(h *taHarness) { h.other.IsLead = true },
+			wantErr: port.ErrTaskAlreadyClaimed, wantLists: 1, wantInstances: 1,
 		},
 		{
 			name: "a stranger hides the eligibility check", prepare: func(h *taHarness) { h.elig.eligible = false },

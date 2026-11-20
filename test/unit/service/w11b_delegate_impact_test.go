@@ -39,6 +39,7 @@ func (r *w11bListingAssignments) ListActiveByUser(ctx context.Context, tenantID,
 
 type w11bImpactHarness struct {
 	svc         *service.WorkflowClient
+	instances   *fakeInstanceRepo
 	assignments *w11bListingAssignments
 	tasks       *w11bRecordingTasks
 	tenantID    uuid.UUID
@@ -47,8 +48,9 @@ type w11bImpactHarness struct {
 }
 
 func newW11bImpactHarness() *w11bImpactHarness {
-	svc, _, tasks, assignments, _ := newWorkflowClientHarness()
+	svc, instances, tasks, assignments, _ := newWorkflowClientHarness()
 	h := &w11bImpactHarness{
+		instances:   instances,
 		assignments: &w11bListingAssignments{fakeAssignmentRepo: assignments},
 		tasks:       &w11bRecordingTasks{fakeTaskRepo: tasks},
 		tenantID:    uuid.New(),
@@ -67,6 +69,9 @@ func (h *w11bImpactHarness) holdTaskOf(instanceID uuid.UUID) *domain.Task {
 	}
 	h.held = append(h.held, task)
 	h.tasks.byID[task.ID] = task
+	if _, ok := h.instances.byID[instanceID]; !ok {
+		h.instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: h.tenantID}
+	}
 	h.assignments.add(&domain.TaskAssignment{
 		ID: uuid.New(), TenantID: h.tenantID, TaskID: task.ID, UserID: h.delegate, IsActive: true, Reason: "delegation:" + uuid.NewString(),
 	})

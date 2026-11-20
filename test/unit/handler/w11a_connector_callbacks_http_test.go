@@ -312,14 +312,14 @@ func TestConnectorCallbacks_UnknownOrForeignTask_Returns404TaskNotFound(t *testi
 	}
 }
 
-func TestFailConnectorTask_PrincipalLookupFails_Returns409AndChangesNothing(t *testing.T) {
+func TestFailConnectorTask_PrincipalLookupFails_Returns503AndChangesNothing(t *testing.T) {
 	h := w11aNewCallbacks(`{}`)
 	h.principals.err = port.ErrNoAutomationPrincipal
 
 	w := h.fail("")
 
-	p := w11aProblemOf(t, w, http.StatusConflict)
-	assert.Equal(t, "NO_AUTOMATION_PRINCIPAL", p.Code)
+	p := w11aProblemOf(t, w, http.StatusServiceUnavailable)
+	assert.Equal(t, "UPSTREAM_UNAVAILABLE", p.Code)
 	assert.Equal(t, []uuid.UUID{h.tenant}, h.principals.tenants)
 	assert.NotEmpty(t, h.cache.ops, "the earlier outcomes were read before the lookup")
 	for _, op := range h.cache.ops {
