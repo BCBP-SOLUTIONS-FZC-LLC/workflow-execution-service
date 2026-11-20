@@ -130,6 +130,40 @@ tests:
               summary: "Queue class dedicated has not been polled in 5 minutes"
               description: "A Worker silently failing to poll its queues is invisible to the aggregate workflow_execution_service_worker_active_queues gauge alone; the label is the queue class (default or dedicated), and the Worker log names the queue and tenant (LLD §7.6)."
 
+  - name: a dedicated queue worker that keeps failing to start pages after ten minutes while the poll timestamp stays fresh
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="dedicated"}'
+        values: '0+60x30'
+      - series: 'workflow_execution_service_worker_queue_start_failures_total'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: WorkerQueuePollingStalled
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: WorkerQueueStartFailing
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: WorkerQueueStartFailing
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              runbook: workflow-execution-service/queue-start-failing
+              summary: "A dedicated task queue worker keeps failing to start"
+              description: "The dedicated poll timestamp stays fresh while any other dedicated queue is served, so a tenant whose queue cannot start waits with no worker and no other signal; the Worker log names the queue and tenant (LLD §3.2, §7.6)."
+
+  - name: no start failures keeps the queue start alert quiet
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_worker_queue_start_failures_total'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: WorkerQueueStartFailing
+        exp_alerts: []
+
   - name: instances of a queue class with no poll timestamp series page after five minutes
     interval: 1m
     input_series:

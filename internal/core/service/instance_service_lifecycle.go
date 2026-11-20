@@ -74,7 +74,7 @@ func validateInstanceStateFor(signalName string, status domain.InstanceStatus) e
 
 func (s *InstanceService) Pause(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string, recordVersion int64) error {
 	err := s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, signalAnnotation{reason: reason, initiator: domain.InitiatorAdmin}, recordVersion, port.SignalInstancePause)
-	return s.endIfWorkflowGone(ctx, err, tenantID, instanceID, actorUserID, reason)
+	return s.endIfWorkflowGone(ctx, err, tenantID, instanceID, actorUserID, workflowGoneReason)
 }
 
 func (s *InstanceService) Resume(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, recordVersion int64) error {

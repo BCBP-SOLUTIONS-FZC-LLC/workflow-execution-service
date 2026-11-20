@@ -73,7 +73,9 @@ func TestAddMessageCaseFires(t *testing.T) {
 		buf := newMessageBuffer()
 		buf.Send(ctx, "escalate", "sender:send")
 		sel := wf.NewSelector(ctx)
-		addMessageCase(ctx, sel, buf, "escalate", false, "escalation", func(f boundaryFire) { fired = f })
+		if _, err := addMessageCase(ctx, sel, buf, "escalate", false, "escalation", func(f boundaryFire) { fired = f }); err != nil {
+			return err
+		}
 		sel.Select(ctx)
 		return nil
 	})
@@ -92,7 +94,9 @@ func TestAddMessageCaseEmptyNameIsANoOp(t *testing.T) {
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		buf := newMessageBuffer()
 		sel := wf.NewSelector(ctx)
-		addMessageCase(ctx, sel, buf, "", false, "dept", func(boundaryFire) {})
+		if _, err := addMessageCase(ctx, sel, buf, "", false, "dept", func(boundaryFire) {}); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err := env.GetWorkflowError(); err != nil {

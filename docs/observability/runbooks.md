@@ -196,6 +196,14 @@ Fix the cause first. A task whose entry was lost is not redispatched by itself.
 
 **Triage.** As for `WorkerQueuePollingStalled`; the instances resume when a Worker polls the queue.
 
+### WorkerQueueStartFailing
+
+`runbook: workflow-execution-service/queue-start-failing`
+
+**Meaning.** The Worker keeps failing to start the worker for a tenant's dedicated task queue. The dedicated poll timestamp stays fresh while any other dedicated queue is served, so the stalled-queue alerts stay quiet while that tenant's instances wait with no worker.
+
+**Triage.** Look in the Worker logs for `failed to start worker for queue`, which names the queue and the error. The topology poll retries on each interval, so the alert clears once a start succeeds; fix the cause (for example the Temporal namespace or connection) and wait one poll, or restart the Worker.
+
 ### UpstreamDependencyErrors
 
 `runbook: workflow-execution-service/upstream-dependency`

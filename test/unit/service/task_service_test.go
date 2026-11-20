@@ -217,12 +217,15 @@ func TestTaskService_Claim(t *testing.T) {
 	})
 
 	t.Run("not applicable for single-assignee task", func(t *testing.T) {
-		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
 		tenantID := uuid.New()
 		task := newReadyTask(tenantID, uuid.New())
 		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+		assignments.byID[a.ID] = a
 
-		_, err := svc.Claim(context.Background(), tenantID, task.ID, uuid.New(), task.RecordVersion)
+		_, err := svc.Claim(context.Background(), tenantID, task.ID, userID, task.RecordVersion)
 		assert.ErrorIs(t, err, port.ErrClaimNotApplicable)
 	})
 
@@ -255,13 +258,16 @@ func TestTaskService_Claim(t *testing.T) {
 	})
 
 	t.Run("record version conflict", func(t *testing.T) {
-		svc, _, tasks, _, _, _ := newTaskServiceHarness()
+		svc, _, tasks, assignments, _, _ := newTaskServiceHarness()
 		tenantID := uuid.New()
 		task := newReadyTask(tenantID, uuid.New())
 		task.AssigneeMode = "all"
 		tasks.byID[task.ID] = task
+		userID := uuid.New()
+		a := &domain.TaskAssignment{ID: uuid.New(), TenantID: tenantID, TaskID: task.ID, UserID: userID, IsActive: true}
+		assignments.byID[a.ID] = a
 
-		_, err := svc.Claim(context.Background(), tenantID, task.ID, uuid.New(), 99)
+		_, err := svc.Claim(context.Background(), tenantID, task.ID, userID, 99)
 		assert.ErrorIs(t, err, port.ErrRecordVersionConflict)
 	})
 

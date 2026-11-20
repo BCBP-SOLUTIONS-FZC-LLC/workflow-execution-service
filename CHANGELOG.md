@@ -48,6 +48,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- A dedicated task queue whose worker fails to start is now counted (`workflow_execution_service_worker_queue_start_failures_total`) and pages after ten minutes, with a runbook entry, even while other dedicated queues keep the poll timestamp fresh.
+- Pausing an instance whose workflow no longer exists ends it with the same fixed reason a resume gives, not the pause reason typed by the user.
+- A message boundary on a task or sub-workflow whose name is blank or longer than 128 characters now fails the path cleanly, as send and receive stages already do.
+- A claim by someone who is not an assignee now always answers 403 NOT_ASSIGNEE, before any answer about the task's mode, version or state.
+
 - The server now shuts down gracefully and exits with an error when the event relay stops unexpectedly, instead of logging it and carrying on without publishing events; a normal stop is not an error.
 - Sending the same start request again while the instance it created is paused or degraded now returns that instance, as it does while it is running, instead of a duplicate-business-key conflict.
 - Moving a delegate's work to a new delegate, and the delegate-impact preview, now cover only open (ready or in-progress) tasks of instances that are running, paused or degraded; finished, failed, superseded and deferred tasks and ended instances are left alone, and the preview counts exactly what a move would touch.

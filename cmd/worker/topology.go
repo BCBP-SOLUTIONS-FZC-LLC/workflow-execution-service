@@ -207,6 +207,7 @@ func startMissingQueues(sdk client.Client, deps *outboundtemporal.Deps, active [
 		}
 		w, err := startQueueWorker(sdk, deps, q.QueueName, dynamicQueueWorkerOptions)
 		if err != nil {
+			observability.WorkerQueueStartFailuresTotal.Inc()
 			log.Error("failed to start worker for queue", map[string]any{"queue": q.QueueName, "error": err.Error()})
 			continue
 		}

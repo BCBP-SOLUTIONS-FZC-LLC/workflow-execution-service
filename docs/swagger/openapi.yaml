@@ -2490,9 +2490,9 @@ paths:
         first claim time) and increments task.record_version, and queues the WorkflowTaskClaimed
         event in the same transaction; no signal is sent. A claim does not change the task's
         status. The checks run in this order and the first that fails
-        refuses the claim: task exists, task is human-actionable, assignee_mode is all,
-        record_version is current, status is READY or IN_PROGRESS, the instance is RUNNING or
-        DEGRADED, the task has no other lead, the caller holds an active assignment, the
+        refuses the claim: task exists, task is human-actionable, the caller holds an active
+        assignment, assignee_mode is all, record_version is current, status is READY or
+        IN_PROGRESS, the instance is RUNNING or DEGRADED, the task has no other lead, the
         caller is eligible.
         Returns 403 NOT_ASSIGNEE if the user has no active assignment.
         Returns 409 TASK_ALREADY_CLAIMED if another assignee already holds the lead and the

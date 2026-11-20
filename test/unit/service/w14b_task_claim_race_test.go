@@ -54,12 +54,7 @@ func TestTaskServiceClaim_LosingTheRaceToAnotherClaimIsAVersionConflictNotAnAlre
 	assert.NotErrorIs(t, err, port.ErrTaskAlreadyClaimed, "the loser had listed no lead yet, so the conflict comes from the write")
 	assert.Equal(t, h.callerID, h.assignments.leadOf(h.task.ID), "the first claim stands")
 	assert.EqualValues(t, csdTaskVersion+1, h.task.RecordVersion, "only one claim bumped the task version")
-	require.Len(t, h.assignments.claims, 2)
-	loser := h.assignments.claims[1]
-	assert.Equal(t, h.tenantID, loser.TenantID)
-	assert.Equal(t, h.task.ID, loser.TaskID)
-	assert.Equal(t, h.other.ID, loser.AssignmentID, "the loser tried to make its own assignment the lead")
-	assert.EqualValues(t, csdTaskVersion, loser.RecordVersion, "with the version it had read")
+	require.Len(t, h.assignments.claims, 1, "the loser's version is already stale at the version check, so it writes nothing")
 }
 
 func TestTaskServiceClaim_AClaimAfterTheLeadIsSetIsAlreadyClaimed(t *testing.T) {

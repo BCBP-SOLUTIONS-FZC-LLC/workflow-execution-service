@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	wf "go.temporal.io/sdk/workflow"
@@ -39,9 +40,14 @@ func (in *interpreter) runSubWorkflow(ctx wf.Context, plan *dsl.CompiledPlan, sw
 	})
 
 	var fired *boundaryFire
-	cancelBoundaries := onceOnly(registerSubWorkflowBoundaries(ctx, sel, in, errCh, sw, func(f boundaryFire) {
+	cancelRegistered, err := registerSubWorkflowBoundaries(ctx, sel, in, errCh, sw, func(f boundaryFire) {
 		fired = &f
-	}))
+	})
+	if err != nil {
+		cancelChild()
+		return lastNode, fmt.Errorf("workflow: sub-workflow %q: %w", sw.Name, err)
+	}
+	cancelBoundaries := onceOnly(cancelRegistered)
 	defer cancelBoundaries()
 
 	for {

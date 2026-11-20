@@ -218,6 +218,23 @@ func TestPollQueueTopologyOnce_TheActiveQueuesGaugeCountsRunningWorkersNotRowsRe
 	}
 }
 
+func TestPollQueueTopologyOnce_EveryFailedQueueWorkerStartIsCounted(t *testing.T) {
+	obstest.Init(t)
+	const defaultQueue = "topo-failcount-default"
+	ok, failing, alsoFailing := uuid.New(), uuid.New(), uuid.New()
+	useTopoStarter(t, domain.TenantTaskQueueName(failing), domain.TenantTaskQueueName(alsoFailing))
+	registry := newWorkerRegistry()
+	registry.add(defaultQueue, &topoFakeWorker{})
+	repo := &wkbootQueueRepo{active: topoActive(ok, failing, alsoFailing)}
+	before := testutil.ToFloat64(observability.WorkerQueueStartFailuresTotal)
+
+	pollQueueTopologyOnce(context.Background(), nil, nil, repo, defaultQueue, registry, quietLogger{})
+
+	if got := testutil.ToFloat64(observability.WorkerQueueStartFailuresTotal) - before; got != 2 {
+		t.Errorf("start failures counted = %v, want 2: one per queue that failed to start", got)
+	}
+}
+
 func TestPollQueueTopologyOnce_TheActiveQueuesGaugeDropsWhenAQueueIsRetired(t *testing.T) {
 	obstest.Init(t)
 	const defaultQueue = "topo-gaugedrop-default"
