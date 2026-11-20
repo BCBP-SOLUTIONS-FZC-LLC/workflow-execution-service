@@ -55,7 +55,7 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 | `workflow_execution_service_entitlements_stale_served_total` | counter | - | Feature-flag answers served from a held set older than its TTL while a refresh runs or backs off. |
 | `workflow_execution_service_glue_schema_stale_served_total` | counter | - | Outbound events encoded with the last known schema version id (counted once per event) because the schema registry could not be read; the id is served for at most GLUE_SCHEMA_MAX_STALENESS past its cache TTL. |
 | `workflow_execution_service_instance_degraded_current` | gauge | - | Live count of instances currently DEGRADED. |
-| `workflow_execution_service_instance_degraded_oldest_age_seconds` | gauge | - | Age in seconds of the longest-parked DEGRADED instance. |
+| `workflow_execution_service_instance_degraded_oldest_age_seconds` | gauge | - | Age in seconds of the longest-parked DEGRADED instance, measured from the instant it entered DEGRADED. |
 | `workflow_execution_service_instance_degraded_total` | counter | - | Total instances that entered DEGRADED. |
 | `workflow_execution_service_instance_start_duration_seconds` | histogram | - | POST /instances received to 201-returned latency (LLD §7.6 SLO, p99 <= 1s). |
 | `workflow_execution_service_instances_by_queue` | gauge | `queue` | Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue class, default or dedicated, sampled by the API process. A class with none is absent. |

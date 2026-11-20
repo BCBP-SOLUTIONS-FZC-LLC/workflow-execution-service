@@ -1957,7 +1957,8 @@ paths:
             TARGET_NODE_NOT_FOUND — the workflow could not run target_node_key, checked against the
             compiled plan and the instance's current state before the signal is sent: the node is
             not in the plan the instance runs (a called plan counts once expanded), or, inside a
-            parallel step of a RUNNING instance, its department is not a branch of that step;
+            parallel step of a RUNNING instance, its department is not a branch of that step, or,
+            for a DEGRADED instance, it names no failed branch;
             VERSION_INVALID — the stored plan has a schema version this service does not read, is not valid JSON, or names no main plan;
             RECORD_VERSION_CONFLICT — record_version is stale;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
@@ -2078,7 +2079,7 @@ paths:
             INVALID_INSTANCE_STATE — instance is neither RUNNING nor DEGRADED;
             INSTANCE_ALREADY_TERMINAL — instance is already in a terminal state;
             TARGET_NODE_NOT_FOUND — a DEGRADED instance's target_node_key names no node of the
-            compiled plan the instance runs;
+            compiled plan the instance runs or names no failed branch;
             VERSION_INVALID — the stored compiled plan, read to check target_node_key, cannot be
             decoded;
             RECORD_VERSION_CONFLICT — record_version is stale;
