@@ -164,6 +164,35 @@ tests:
         alertname: WorkerQueueStartFailing
         exp_alerts: []
 
+  - name: a reassignment that keeps ending for good opens a ticket after ten minutes
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_reassign_failures_total'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: ReassignFailing
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: ReassignFailing
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+            exp_annotations:
+              runbook: workflow-execution-service/reassign-failing
+              summary: "Admin reassignments keep failing for good"
+              description: "An admin reassignment ended for good, so the task keeps its previous assignee; retries of a transient error are unlimited and not counted (LLD §7.6)."
+
+  - name: no reassign failures keeps the reassign alert quiet
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_reassign_failures_total'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ReassignFailing
+        exp_alerts: []
+
   - name: instances of a queue class with no poll timestamp series page after five minutes
     interval: 1m
     input_series:

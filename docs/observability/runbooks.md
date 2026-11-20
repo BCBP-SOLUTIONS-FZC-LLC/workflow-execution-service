@@ -204,6 +204,14 @@ Fix the cause first. A task whose entry was lost is not redispatched by itself.
 
 **Triage.** Look in the Worker logs for `failed to start worker for queue`, which names the queue and the error. The topology poll retries on each interval, so the alert clears once a start succeeds; fix the cause (for example the Temporal namespace or connection) and wait one poll, or restart the Worker.
 
+### ReassignFailing
+
+`runbook: workflow-execution-service/reassign-failing`
+
+**Meaning.** The Worker ended an admin reassignment for good: the ids were malformed, the task no longer exists, or the task changed since the admin read it (a stale record version). The task keeps its previous assignee. Transient errors retry without limit and are not counted.
+
+**Triage.** The Worker logs `reassignAssignment failed` with the error. A stale version is the usual cause and needs nothing but a new reassign by the admin from the current task; an unknown task or a malformed id points at a caller or data bug.
+
 ### UpstreamDependencyErrors
 
 `runbook: workflow-execution-service/upstream-dependency`

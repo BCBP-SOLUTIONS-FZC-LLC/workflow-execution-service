@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -32,6 +33,8 @@ const (
 	departmentsHeader = "x-departments"
 
 	maxBodyBytes = 10 << 20
+
+	maxErrorClassBytes = 100
 
 	reasonNotValid = "is not valid"
 )
@@ -311,5 +314,10 @@ func registerJSONFieldNames() {
 	})
 	_ = engine.RegisterValidation("notblank", func(fl validator.FieldLevel) bool {
 		return strings.TrimSpace(fl.Field().String()) != ""
+	})
+	_ = engine.RegisterValidation("errorclass", func(fl validator.FieldLevel) bool {
+		value := fl.Field().String()
+		return len(value) <= maxErrorClassBytes &&
+			strings.IndexFunc(value, unicode.IsControl) < 0
 	})
 }
