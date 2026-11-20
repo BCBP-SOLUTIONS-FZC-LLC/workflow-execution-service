@@ -67,8 +67,9 @@ components:
       description: >
         Opaque cursor returned as next_cursor by the previous page. The delegate-impact
         answer pages the affected workflow instance ids in ascending id order and its cursor
-        names the last id returned. Omit for the first page. An unparseable or tampered cursor
-        returns 400 BAD_REQUEST rather than silently restarting.
+        names the last id returned. Send only that next_cursor value; omit it, or send it empty,
+        for the first page. Any other value, unparseable or tampered, returns 400 BAD_REQUEST
+        rather than silently restarting.
 
     IdempotencyKey:
       name: Idempotency-Key
@@ -76,7 +77,6 @@ components:
       required: false
       schema:
         type: string
-        format: uuid
       description: >
         Optional client-supplied key for safe retry of this request, taken only by the delegate
         reassignment and cancellation. The key is the route and this header; it carries no user
@@ -94,11 +94,10 @@ components:
       schema:
         type: integer
         minimum: 1
-        maximum: 100
         default: 25
       description: >
-        Page size. Values above 100 are clamped, not rejected; values <= 0 are rejected
-        (§5.9).
+        Page size. Values above 100 are clamped to 100, not rejected; values <= 0 are
+        rejected (§5.9).
 
     TaskIdPath:
       name: id
@@ -269,7 +268,8 @@ components:
         Malformed JSON body, missing required fields, or a value that is not valid, such as an
         id that is not a UUID in the body, a query parameter or the path. invalid_params names
         the field (a path parameter as one) with the reason "is not valid"; the detail never
-        says the body is not valid JSON.
+        says the body is not valid JSON. A JSON body with a NUL character (\u0000) in any
+        string, key included, is refused as well, as the store cannot keep one.
       content:
         application/problem+json:
           schema:

@@ -127,6 +127,7 @@ func TestListActiveByUser_LimitParameter_SetsThePageSize(t *testing.T) {
 		{name: "limit of 100", query: "&limit=100", wantLimit: 100},
 		{name: "limit of 101", query: "&limit=101", wantLimit: 100},
 		{name: "limit of 100000", query: "&limit=100000", wantLimit: 100},
+		{name: "limit too large for any integer type", query: "&limit=99999999999999999999", wantLimit: 100},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -265,7 +266,7 @@ func TestListActiveByUser_UserIDIsMissingOrNotAUUID_Returns400(t *testing.T) {
 }
 
 func TestListActiveByUser_LimitIsNotAPositiveInteger_Returns400(t *testing.T) {
-	for _, limit := range []string{"abc", "1.5", "-5", "0", "+", "1e2", "999999999999999999999999"} {
+	for _, limit := range []string{"abc", "1.5", "-5", "0", "+", "1e2", "-999999999999999999999999"} {
 		t.Run("limit "+limit, func(t *testing.T) {
 			world := w26bNewActiveWorld()
 

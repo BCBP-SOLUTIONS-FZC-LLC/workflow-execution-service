@@ -91,6 +91,7 @@ COVER_PKG_FLOORS   := internal/workflow:88 cmd/connector-worker:55 internal/obse
 .PHONY: alerts-test metrics-lint metrics-inventory all tools tools-integration generate generate-sqlc mock contract-check contract-check-test contract-breaking \
         build migrate dev test test-integration test-e2e test-compat test-ci merge-coverage \
         cover cover-func cover-gaps cover-html cover-check cover-check-pkg \
+        hurl fuzz-api fuzz-internal-api \
         arch-lint lint lint-fix vuln \
         tidy fmt-check fix check \
         setup install-hooks \
@@ -268,6 +269,52 @@ cover-html:
 	go tool cover -html=$(COVER_PROFILE) -o $(COVER_HTML)
 	@echo "✓ report: $(COVER_HTML)"
 	@open $(COVER_HTML) 2>/dev/null || xdg-open $(COVER_HTML) 2>/dev/null || true
+
+# Local black-box checks against a running stack (the one scripts/smoke-test.sh describes). Not part of CI.
+API_BASE        ?= http://localhost:8080
+METRICS_BASE    ?= http://localhost:9091
+DEFINITION_BASE ?= http://localhost:8082
+SCENARIO_TENANT ?= 11111111-1111-4111-8111-111111111111
+SCENARIO_USER   ?= 018f2d3c-0000-7000-8000-0000000000a1
+SCHEMATHESIS_VERSION := 4.33.2
+PUBLIC_HEADERS   := -H 'x-tenant-id: $(SCENARIO_TENANT)' -H 'x-user-id: $(SCENARIO_USER)' \
+                    -H 'x-tenant-roles: tenant_admin' -H 'x-plan: enterprise'
+INTERNAL_HEADERS := -H 'x-user-id: $(SCENARIO_USER)' -H 'x-tenant-roles: iam-system'
+HURL_VARIABLES   := --variable host=$(API_BASE) --variable metrics=$(METRICS_BASE) \
+                    --variable definition=$(DEFINITION_BASE) --variable tenant=$(SCENARIO_TENANT) \
+                    --variable user=$(SCENARIO_USER)
+
+## hurl: Run the Hurl scenarios in test/hurl against a running local stack; they write data (needs hurl and python3)
+hurl:
+	@command -v hurl >/dev/null || { echo "hurl is not installed: brew install hurl"; exit 1; }
+	@command -v python3 >/dev/null || { echo "python3 is not installed: brew install python"; exit 1; }
+	@mkdir -p $(COVERAGE_DIR)
+	@set -ex; run=$$(date +%s); \
+	hurl --jobs 1 $(HURL_VARIABLES) --variable run=$$run $(PUBLIC_HEADERS) \
+	    --output $(COVERAGE_DIR)/hurl-published.json test/hurl/setup/*.hurl; \
+	version_id=$$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version_id"])' \
+	    $(COVERAGE_DIR)/hurl-published.json); \
+	hurl --test --jobs 1 $(HURL_VARIABLES) --variable run=$$run --variable version_id=$$version_id \
+	    $(PUBLIC_HEADERS) test/hurl/*.hurl; \
+	hurl --test --jobs 1 $(HURL_VARIABLES) --variable run=$$run --variable version_id=$$version_id \
+	    $(INTERNAL_HEADERS) test/hurl/internal/*.hurl; \
+	hurl --test --jobs 1 $(HURL_VARIABLES) --variable run=$$run test/hurl/auth/*.hurl
+
+## fuzz-api: Fuzz every route of the public spec with Schemathesis against a running local stack; it writes data, so use a throwaway database (needs uv)
+fuzz-api:
+	@command -v uvx >/dev/null || { echo "uv is not installed: brew install uv"; exit 1; }
+	@mkdir -p $(COVERAGE_DIR)/schemathesis
+	uvx --from schemathesis==$(SCHEMATHESIS_VERSION) schemathesis run docs/swagger/openapi.yaml \
+	    --url $(API_BASE) $(PUBLIC_HEADERS) \
+	    --max-examples 20 --workers 2 --report junit --report-dir $(COVERAGE_DIR)/schemathesis
+
+## fuzz-internal-api: Fuzz every route of the internal spec with Schemathesis as the system caller; it writes data, so use a throwaway database (needs uv)
+fuzz-internal-api:
+	@command -v uvx >/dev/null || { echo "uv is not installed: brew install uv"; exit 1; }
+	@mkdir -p $(COVERAGE_DIR)/schemathesis
+	uvx --from schemathesis==$(SCHEMATHESIS_VERSION) schemathesis run api/internal-openapi.yaml \
+	    --url $(API_BASE) $(INTERNAL_HEADERS) \
+	    --max-examples 20 --workers 2 --report junit --report-dir $(COVERAGE_DIR)/schemathesis
 
 ## cover-check-pkg: Per-package coverage gate — each package must meet its floor (run 'make test-ci' first)
 cover-check-pkg:
