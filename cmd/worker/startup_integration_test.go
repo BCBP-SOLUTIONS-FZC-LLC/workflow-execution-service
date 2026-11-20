@@ -173,8 +173,7 @@ func TestPollQueueTopologyOnce_StartsAndRegistersAWorkerForAQueueItDoesNotServeY
 	wkbootStopRegistered(t, registry)
 	log := &wkbootRecordingLog{}
 	repo := &wkbootQueueRepo{active: []*domain.ActiveTaskQueue{{TenantID: tenant, QueueName: queue, Routable: true}}}
-	gauge := observability.WorkerQueueLastPollTimestamp.WithLabelValues(observability.QueueClassDedicated)
-	gauge.Set(1)
+	observability.WorkerQueueLastPollTimestamp.WithLabelValues(observability.QueueClassDedicated).Set(1)
 
 	pollQueueTopologyOnce(context.Background(), sdk, &outboundtemporal.Deps{}, repo, "wkboot-start-default", registry, log)
 
@@ -184,7 +183,7 @@ func TestPollQueueTopologyOnce_StartsAndRegistersAWorkerForAQueueItDoesNotServeY
 	if got := len(registry.all()); got != 1 {
 		t.Errorf("registry holds %d workers, want 1", got)
 	}
-	if got := testutil.ToFloat64(gauge); got <= 1 {
+	if got := testutil.ToFloat64(observability.WorkerQueueLastPollTimestamp.WithLabelValues(observability.QueueClassDedicated)); got <= 1 {
 		t.Errorf("queue poll timestamp = %v, want it set when the worker started", got)
 	}
 	var started []wkbootLogEntry
