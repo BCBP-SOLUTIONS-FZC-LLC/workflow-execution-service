@@ -133,7 +133,7 @@ func registerServiceMetrics() {
 		"Live count of instances currently DEGRADED."))
 	InstanceDegradedOldestAgeSeconds = must(gincommon.NewGauge(nil,
 		"workflow_execution_service_instance_degraded_oldest_age_seconds",
-		"Age in seconds of the longest-parked DEGRADED instance."))
+		"Age in seconds of the longest-parked DEGRADED instance, measured from the instant it entered DEGRADED."))
 	WorkerQueueLastPollTimestamp = must(gincommon.NewGaugeVec(nil,
 		"workflow_execution_service_worker_queue_last_poll_timestamp",
 		"Unix time of the last topology poll in which this process served a task queue of the class in the queue label, default or dedicated (set on every poll for every queue it runs a worker for, not a measure of the Temporal long poll itself). Absent for dedicated while it serves none.", "queue"))

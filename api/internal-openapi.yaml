@@ -1040,8 +1040,8 @@ paths:
         path for a failed connector task. Same no-idempotency-wrapper,
         no-record_version rationale, task and instance rules, and one-outcome reservation as the
         complete endpoint above. The error class is relayed unchanged to the signal and the
-        task-failed event and is not checked against the connector worker's fixed set; an empty
-        value is refused 400 BAD_REQUEST.
+        task-failed event; it is free text, and the 400 conditions are those of the property
+        description.
       security:
         - InternalServiceAuth: []
       parameters:
@@ -1062,7 +1062,7 @@ paths:
                   type: string
                   description: >
                     Connector-defined error classification, a free-text label the connector worker
-                    chooses (the known values are in the failed-task event description). Required, and it
+                    chooses. Required, and it
                     must contain text: a value of only whitespace is refused 400 BAD_REQUEST. At
                     most 100 bytes, with no control characters (a longer value or one with a
                     control character is refused 400 BAD_REQUEST). It is carried unchanged onto the
