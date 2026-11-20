@@ -69,6 +69,7 @@ func cwdepsRunMain(t *testing.T, args string, env map[string]string) cwdepsRun {
 
 func cwdepsValidEnv() map[string]string {
 	return map[string]string{
+		"APP_ENV":                         "dev",
 		"DEFINITION_SERVICE_URL":          "http://127.0.0.1:1",
 		"DATABASE_URL":                    "postgres://user:pass@127.0.0.1:1/db",
 		"OPENBAO_ADDR":                    "http://127.0.0.1:1",

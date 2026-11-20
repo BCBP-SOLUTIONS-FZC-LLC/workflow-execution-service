@@ -47,7 +47,7 @@ Collectors are built in `internal/observability` with `platform-gincommon` const
 
 ## Configuration
 
-`internal/config` loads and validates the environment. `APP_ENV` must be one of `local`, `dev`, `test`, `staging`, `prod`. Each binary validates only the settings it uses, and refuses to start outside dev without them. `.env.example` is the reference list.
+`internal/config` loads and validates the environment. `APP_ENV` is required, with no default, and must be one of `local`, `dev`, `test`, `staging`, `prod`. Each binary validates only the settings it uses, and refuses to start outside dev without them. `.env.example` is the reference list.
 
 ## Specifications
 

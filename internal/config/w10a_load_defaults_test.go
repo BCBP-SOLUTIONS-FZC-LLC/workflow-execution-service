@@ -36,6 +36,7 @@ func w10aCleanEnv(t *testing.T) {
 	} {
 		t.Setenv(key, "")
 	}
+	t.Setenv("APP_ENV", "dev")
 }
 
 type w10aDefault struct {

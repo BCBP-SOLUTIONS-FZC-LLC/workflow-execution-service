@@ -354,6 +354,7 @@ jobs:
       - name: migrate subcommand applies the schema
         run: |
           docker run --rm --network host \
+            -e APP_ENV=dev \
             -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable \
             "${{ env.IMAGE_BASE }}-server:${{ github.sha }}" migrate
 

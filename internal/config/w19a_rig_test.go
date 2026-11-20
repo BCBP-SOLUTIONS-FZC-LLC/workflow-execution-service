@@ -23,10 +23,19 @@ func w19aEnv(t *testing.T, env map[string]string) {
 		t.Setenv(key, "")
 		require.NoError(t, os.Unsetenv(key))
 	}
+	if _, given := env["APP_ENV"]; !given {
+		t.Setenv("APP_ENV", "dev")
+	}
 	for key, value := range env {
+		if value == unsetEnv {
+			require.NoError(t, os.Unsetenv(key))
+			continue
+		}
 		t.Setenv(key, value)
 	}
 }
+
+const unsetEnv = "\x00unset"
 
 // w19aForget removes variables the test did not receive from the environment and arranges for them to be
 // removed again afterwards, so a .env file loaded by the test does not leak into other tests.

@@ -36,6 +36,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - Temporal adapter tests for own-assignment lookups, plan reads and instance events; server configuration tests through the real binary; middleware error-log tests; Temporal client tests and route chains through the real client; Valkey cache error and delete tests; event schema enum tests; force-back plan-read and signal failure tests.
 - Domain value tests; automation-principal client and connector callback route tests; outbound HTTP client, OpenBao reader and entitlements client tests; Valkey stream publisher and consumer, Glue codec, signal relay and metrics test-helper tests.
 
+### Changed
+
+- Start-up refuses an unset or empty `APP_ENV` for the server, the worker, the connector worker and `server migrate`, and the error names the variable and the allowed values; it used to default to `dev`.
+
 ### Removed
 
 - The unused claim activity on the worker: the task claim is a direct write that emits its own event.

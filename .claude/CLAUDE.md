@@ -14,7 +14,7 @@ Run `make help` for all available targets, or see [README.md](../README.md) for 
 - **Never import from a local path** in source code — always the full `github.com/BCBP-SOLUTIONS-FZC-LLC/...` module path.
 - Do not bloat this file with code specifics; it carries guidance only.
 - Treat every route and event change as a contract change: the parity tests in `internal/adapter/inbound/http` fail when the specs and the code differ.
-- `APP_ENV` is one of `local`, `dev`, `test`, `staging`, `prod`; `dev` and `local` are the only relaxed modes.
+- `APP_ENV` is required (no default) and is one of `local`, `dev`, `test`, `staging`, `prod`; `dev` and `local` are the only relaxed modes.
 
 ## Coding Conventions
 

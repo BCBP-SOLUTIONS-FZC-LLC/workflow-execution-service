@@ -12,8 +12,8 @@ func TestLoad_CleanEnvironment_ProcessIdentityAndPortDefaults(t *testing.T) {
 		name string
 		env  map[string]string
 	}{
-		{"nothing set", nil},
-		{"APP_ENV and BUILD_VERSION set to the empty string", map[string]string{"APP_ENV": "", "BUILD_VERSION": ""}},
+		{"only APP_ENV set", nil},
+		{"BUILD_VERSION set to the empty string", map[string]string{"BUILD_VERSION": ""}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

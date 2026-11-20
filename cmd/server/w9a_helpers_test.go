@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -122,7 +124,7 @@ func w9aRunServer(t *testing.T, env []string, args ...string) w9aRun {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, w9aServerBinary(t), args...)
 	cmd.Dir = t.TempDir()
-	cmd.Env = append([]string{}, env...)
+	cmd.Env = w9aWithAppEnv(env)
 	if dir := w9aCoverDir(); dir != "" {
 		cmd.Env = append(cmd.Env, "GOCOVERDIR="+dir)
 	}
@@ -139,6 +141,14 @@ func w9aRunServer(t *testing.T, env []string, args ...string) w9aRun {
 		t.Fatalf("run the server binary: %v (stderr: %s)", err, res.stderr)
 	}
 	return res
+}
+
+func w9aWithAppEnv(env []string) []string {
+	out := append([]string{}, env...)
+	if !slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, "APP_ENV=") }) {
+		out = append(out, "APP_ENV=dev")
+	}
+	return out
 }
 
 func (r w9aRun) combined() string { return r.stdout + "\n" + r.stderr }
