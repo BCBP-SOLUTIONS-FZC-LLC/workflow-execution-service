@@ -37,9 +37,9 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 		return failBeforeRun(ctx, in.tenantID, in.instanceID, err)
 	}
 
-	admin := wf.NewBufferedChannel(ctx, 8)
+	admin := newAdminChannel(ctx)
 	in.admin = admin
-	baseAdmin := wf.NewBufferedChannel(ctx, 8)
+	baseAdmin := newAdminChannel(ctx)
 	in.baseAdmin = baseAdmin
 	wf.Go(ctx, func(gctx wf.Context) { in.runSignalRouter(gctx, admin, baseAdmin) })
 
@@ -64,6 +64,12 @@ func Execute(ctx wf.Context, input ExecuteInput) (ExecuteOutput, error) {
 	}
 
 	return ExecuteOutput{Status: finalStatus}, runErr
+}
+
+const adminSignalBuffer = 64
+
+func newAdminChannel(ctx wf.Context) wf.Channel {
+	return wf.NewBufferedChannel(ctx, adminSignalBuffer)
 }
 
 // joinStatusWriteErr keeps the run's own error and the refused final status

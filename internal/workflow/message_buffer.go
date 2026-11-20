@@ -1,10 +1,29 @@
 package workflow
 
 import (
+	"errors"
+	"fmt"
+	"strings"
+
 	wf "go.temporal.io/sdk/workflow"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 )
+
+const (
+	maxBufferedMessages  = 64
+	maxMessageNameLength = 128
+)
+
+func validateMessageName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("workflow: message name is empty")
+	}
+	if len(name) > maxMessageNameLength {
+		return fmt.Errorf("workflow: message name is longer than %d characters", maxMessageNameLength)
+	}
+	return nil
+}
 
 type messageBuffer struct {
 	buf     map[string][]domain.NodeKey
@@ -24,7 +43,13 @@ func (b *messageBuffer) Send(ctx wf.Context, messageName string, node domain.Nod
 		b.blocked[messageName] = queue[1:]
 		return
 	}
-	b.buf[messageName] = append(b.buf[messageName], node)
+	queue := b.buf[messageName]
+	if len(queue) >= maxBufferedMessages {
+		wf.GetLogger(ctx).Warn("message buffer full: dropping the oldest message",
+			"message", messageName, "dropped_node_key", string(queue[0]), "cap", maxBufferedMessages)
+		queue = queue[1:]
+	}
+	b.buf[messageName] = append(queue, node)
 }
 
 func (b *messageBuffer) waitChannel(ctx wf.Context, messageName string) (ch wf.Channel, cancel func()) {
