@@ -76,6 +76,28 @@ func TestTaskClaim_AnotherAssigneeHoldsTheLead_ReturnsAlreadyClaimed(t *testing.
 	assert.Equal(t, h.otherID, h.assignments.leadOf(h.task.ID))
 }
 
+func TestTaskClaim_ACallerWithNoActiveAssignmentIsNotAnAssigneeEvenWhenAnotherHoldsTheLead(t *testing.T) {
+	cases := map[string]func(h *taHarness) uuid.UUID{
+		"a user never assigned": func(*taHarness) uuid.UUID { return uuid.New() },
+		"a user whose assignment ended": func(h *taHarness) uuid.UUID {
+			h.caller.IsActive = false
+			return h.callerID
+		},
+	}
+	for name, caller := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newTaHarness(t, "all")
+			h.other.IsLead = true
+
+			_, err := h.svc.Claim(context.Background(), h.tenantID, h.task.ID, caller(h), csdTaskVersion)
+
+			require.ErrorIs(t, err, port.ErrNotAssignee)
+			assert.NotErrorIs(t, err, port.ErrTaskAlreadyClaimed)
+			assert.Empty(t, h.assignments.setLeads)
+		})
+	}
+}
+
 func TestTaskClaim_ReadBackFailsOnce_ReturnsTheTaskReadOnTheRetry(t *testing.T) {
 	h, flaky := newTaFlakyHarness(t, "all", 1)
 

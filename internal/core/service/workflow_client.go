@@ -107,6 +107,9 @@ func (s *WorkflowClient) eligibleDelegateRows(ctx context.Context, in port.Reass
 		if err != nil {
 			return nil, fmt.Errorf("reassign delegate: read instance of task %s: %w", task.ID, err)
 		}
+		if !inDelegateScope(task, inst) {
+			continue
+		}
 		eligible, err := s.checkAssigneeEligible(ctx, plans, answered, in.TenantID, task, inst, in.NewDelegateID)
 		if err != nil {
 			return nil, err
@@ -310,6 +313,11 @@ func (s *WorkflowClient) readDelegateRows(ctx context.Context, tenantID uuid.UUI
 	return rows, nil
 }
 
+func inDelegateScope(task *domain.Task, inst *domain.Instance) bool {
+	open := task.Status == domain.TaskStatusReady || task.Status == domain.TaskStatusInProgress
+	return open && inst.Status.IsLive()
+}
+
 func isClosedTaskStatus(status domain.TaskStatus) bool {
 	return status == domain.TaskStatusCompleted || status == domain.TaskStatusFailed ||
 		status == domain.TaskStatusSuperseded
@@ -321,7 +329,7 @@ func (s *WorkflowClient) DelegateImpact(ctx context.Context, in port.DelegateImp
 		return port.DelegateImpactResult{}, err
 	}
 	matched := delegatedAssignments(active, in.DelegationID)
-	affected, err := s.affectedWorkflows(ctx, in.TenantID, matched)
+	affected, assignments, err := s.affectedWorkflows(ctx, in.TenantID, matched)
 	if err != nil {
 		return port.DelegateImpactResult{}, err
 	}
@@ -329,7 +337,7 @@ func (s *WorkflowClient) DelegateImpact(ctx context.Context, in port.DelegateImp
 
 	return port.DelegateImpactResult{
 		ActiveWorkflows:   len(affected),
-		ActiveAssignments: len(matched),
+		ActiveAssignments: assignments,
 		WorkflowIDs:       port.PageResult[uuid.UUID]{Items: ids, NextCursor: next},
 	}, nil
 }
@@ -339,14 +347,23 @@ type affectedWorkflow struct {
 	createdAt time.Time
 }
 
-func (s *WorkflowClient) affectedWorkflows(ctx context.Context, tenantID uuid.UUID, assignments []*domain.TaskAssignment) ([]affectedWorkflow, error) {
+func (s *WorkflowClient) affectedWorkflows(ctx context.Context, tenantID uuid.UUID, assignments []*domain.TaskAssignment) ([]affectedWorkflow, int, error) {
 	seen := make(map[uuid.UUID]struct{})
 	var affected []affectedWorkflow
+	inScope := 0
 	for _, a := range assignments {
 		task, err := s.Tasks.GetByID(ctx, tenantID, a.TaskID)
 		if err != nil {
-			return nil, fmt.Errorf("delegate impact: read task of assignment %s: %w", a.ID, err)
+			return nil, 0, fmt.Errorf("delegate impact: read task of assignment %s: %w", a.ID, err)
 		}
+		inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
+		if err != nil {
+			return nil, 0, fmt.Errorf("delegate impact: read instance of task %s: %w", task.ID, err)
+		}
+		if !inDelegateScope(task, inst) {
+			continue
+		}
+		inScope++
 		if _, ok := seen[task.WorkflowInstanceID]; ok {
 			continue
 		}
@@ -356,7 +373,7 @@ func (s *WorkflowClient) affectedWorkflows(ctx context.Context, tenantID uuid.UU
 	sort.Slice(affected, func(i, j int) bool {
 		return bytes.Compare(affected[i].id[:], affected[j].id[:]) < 0
 	})
-	return affected, nil
+	return affected, inScope, nil
 }
 
 func pageAffectedWorkflows(affected []affectedWorkflow, page port.Page) ([]uuid.UUID, string) {

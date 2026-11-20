@@ -160,7 +160,7 @@ func pollQueueTopologyOnce(
 		return
 	}
 
-	observability.WorkerQueueLastPollTimestamp.WithLabelValues(defaultQueue).SetToCurrentTime()
+	observability.WorkerQueueLastPollTimestamp.WithLabelValues(observability.QueueClassDefault).SetToCurrentTime()
 
 	retireGoneQueues(active, defaultQueue, registry, log)
 	startMissingQueues(sdk, deps, active, defaultQueue, registry, log)
@@ -180,9 +180,20 @@ func retireGoneQueues(active []*domain.ActiveTaskQueue, defaultQueue string, reg
 			w.Stop()
 			registry.remove(name)
 		}
-		observability.WorkerQueueLastPollTimestamp.DeleteLabelValues(name)
 		log.Info("stopped worker for a queue no longer registered", map[string]any{"queue": name})
 	}
+	if !servesDedicatedQueue(registry, defaultQueue) {
+		observability.WorkerQueueLastPollTimestamp.DeleteLabelValues(observability.QueueClassDedicated)
+	}
+}
+
+func servesDedicatedQueue(registry *workerRegistry, defaultQueue string) bool {
+	for _, name := range registry.names() {
+		if name != defaultQueue {
+			return true
+		}
+	}
+	return false
 }
 
 func startMissingQueues(sdk client.Client, deps *outboundtemporal.Deps, active []*domain.ActiveTaskQueue, defaultQueue string, registry *workerRegistry, log port.Logger) {
@@ -191,7 +202,7 @@ func startMissingQueues(sdk client.Client, deps *outboundtemporal.Deps, active [
 			continue
 		}
 		if registry.has(q.QueueName) {
-			observability.WorkerQueueLastPollTimestamp.WithLabelValues(q.QueueName).SetToCurrentTime()
+			observability.WorkerQueueLastPollTimestamp.WithLabelValues(observability.QueueClassDedicated).SetToCurrentTime()
 			continue
 		}
 		w, err := startQueueWorker(sdk, deps, q.QueueName, dynamicQueueWorkerOptions)
@@ -200,7 +211,7 @@ func startMissingQueues(sdk client.Client, deps *outboundtemporal.Deps, active [
 			continue
 		}
 		registry.add(q.QueueName, w)
-		observability.WorkerQueueLastPollTimestamp.WithLabelValues(q.QueueName).SetToCurrentTime()
+		observability.WorkerQueueLastPollTimestamp.WithLabelValues(observability.QueueClassDedicated).SetToCurrentTime()
 		log.Info("started worker for dynamic queue", map[string]any{"queue": q.QueueName, "tenant_id": q.TenantID.String()})
 	}
 }

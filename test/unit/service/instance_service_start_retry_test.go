@@ -134,13 +134,14 @@ func TestInstanceService_StartRetry(t *testing.T) {
 		assert.Len(t, instances.byID, 1)
 	})
 
-	t.Run("a live instance that is not RUNNING is a duplicate", func(t *testing.T) {
+	t.Run("a PAUSED or DEGRADED instance of the same start is replayed", func(t *testing.T) {
 		for _, status := range []domain.InstanceStatus{domain.InstanceStatusPaused, domain.InstanceStatusDegraded} {
 			instances, start := failedStart(t)
 			for _, inst := range instances.byID {
 				inst.Status = status
 			}
-			assert.ErrorIs(t, start(input(caller, versionID)), port.ErrDuplicateBusinessKey, status)
+			assert.NoError(t, start(input(caller, versionID)), status)
+			assert.Len(t, instances.byID, 1)
 		}
 	})
 

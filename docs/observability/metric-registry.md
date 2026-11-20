@@ -58,7 +58,7 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 | `workflow_execution_service_instance_degraded_oldest_age_seconds` | gauge | - | Age in seconds of the longest-parked DEGRADED instance. |
 | `workflow_execution_service_instance_degraded_total` | counter | - | Total instances that entered DEGRADED. |
 | `workflow_execution_service_instance_start_duration_seconds` | histogram | - | POST /instances received to 201-returned latency (LLD §7.6 SLO, p99 <= 1s). |
-| `workflow_execution_service_instances_by_queue` | gauge | `queue` | Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue, sampled by the API process. A queue with none is absent. |
+| `workflow_execution_service_instances_by_queue` | gauge | `queue` | Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue class, default or dedicated, sampled by the API process. A class with none is absent. |
 | `workflow_execution_service_internal_auth_rejected_total` | counter | `reason` | Internal-route requests refused for lacking the system caller identity, by reason (missing_user or missing_role). |
 | `workflow_execution_service_internal_events_ingest_total` | counter | `event_type`, `result` | Total internal event ingest calls, by event_type and result. |
 | `workflow_execution_service_internal_events_last_received_timestamp` | gauge | `event_type` | Unix timestamp of the last successfully dispatched POST /internal/events call, by event_type. |
@@ -68,14 +68,14 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 | `workflow_execution_service_retention_rows_deleted_total` | counter | `table` | Rows the retention sweeps deleted, by table (outbox_events, processed_events, or a tenant's purged tables). |
 | `workflow_execution_service_rls_violations_total` | counter | `violation_type` | Sampled row-level-security violations recorded in rls_violation_log, by violation_type. |
 | `workflow_execution_service_sla_breaches_total` | counter | - | Total workflow.task.sla-breached events. |
-| `workflow_execution_service_task_signal_duration_seconds` | histogram | `operation` | HTTP-request-received to 202-returned latency for task claim/complete/defer (LLD §7.6 SLO, p99 <= 300ms). |
+| `workflow_execution_service_task_signal_duration_seconds` | histogram | `operation` | HTTP-request-received to response-returned latency (202 for claim/complete, 200 for defer) for task claim/complete/defer (LLD §7.6 SLO, p99 <= 300ms). |
 | `workflow_execution_service_tenant_purge_failures_total` | counter | - | Tenant purges that failed part-way and will be retried on the next sweep. |
 | `workflow_execution_service_upstream_dependency_errors_total` | counter | `dependency` | Total upstream dependency call failures, by dependency. |
 | `workflow_execution_service_user_pause_failures_total` | counter | `stage` | Instances the membership-revocation pause could not pause, by stage (read_task, read_instance or signal). The call answers 503 so the caller retries. |
 | `workflow_execution_service_wf_cache_hits_total` | counter | - | Total compiled-plan cache hits. |
 | `workflow_execution_service_wf_cache_misses_total` | counter | - | Total compiled-plan cache misses. |
 | `workflow_execution_service_worker_active_queues` | gauge | - | Live count of dynamically-registered worker.Worker instances. |
-| `workflow_execution_service_worker_queue_last_poll_timestamp` | gauge | `queue` | Unix time of the last topology poll in which this process served the task queue (set on every poll for every queue it runs a worker for, not a measure of the Temporal long poll itself). |
+| `workflow_execution_service_worker_queue_last_poll_timestamp` | gauge | `queue` | Unix time of the last topology poll in which this process served a task queue of the class in the queue label, default or dedicated (set on every poll for every queue it runs a worker for, not a measure of the Temporal long poll itself). Absent for dedicated while it serves none. |
 | `workflow_execution_service_workflow_activity_duration_seconds` | histogram | `activity_name`, `outcome` | Per-Activity execution latency, by activity_name and outcome. |
 | `workflow_execution_service_workflow_replay_failures_total` | counter | `workflow_type` | Total Temporal workflow replay/non-determinism failures, by workflow_type. |
 

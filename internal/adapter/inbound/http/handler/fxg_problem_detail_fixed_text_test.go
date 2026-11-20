@@ -35,6 +35,7 @@ func TestMapErr_WrappedRefusalAnswersTheSentinelText(t *testing.T) {
 		{port.ErrTenantMismatch, http.StatusForbidden, CodeTenantMismatch},
 		{port.ErrIdempotencyKeyReplay, http.StatusConflict, CodeIdempotencyReplay},
 		{port.ErrOverrideNoOp, http.StatusBadRequest, CodeOverrideNoOp},
+		{port.ErrAnswerVariablesInvalid, http.StatusBadRequest, CodeBadRequest},
 		{port.ErrInstanceNotFound, http.StatusNotFound, CodeInstanceNotFound},
 		{port.ErrWaitNotFound, http.StatusNotFound, CodeWaitNotFound},
 		{port.ErrNotWaiting, http.StatusConflict, CodeNotWaiting},

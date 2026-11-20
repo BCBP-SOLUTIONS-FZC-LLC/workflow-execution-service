@@ -86,6 +86,9 @@ func (r *fakeInstanceRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domain.
 	if !ok {
 		return nil, domain.ErrNotFound
 	}
+	if inst.Status == "" {
+		inst.Status = domain.InstanceStatusRunning
+	}
 	return inst, nil
 }
 
@@ -262,6 +265,9 @@ func (r *fakeTaskRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domain.Task
 	task, ok := r.byID[id]
 	if !ok {
 		return nil, domain.ErrNotFound
+	}
+	if task.Status == "" {
+		task.Status = domain.TaskStatusReady
 	}
 	return task, nil
 }

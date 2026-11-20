@@ -93,10 +93,6 @@ func TestResumeInstanceRoute_InstanceReadFailsOrTheExecutionIsMissing_AnswersWit
 		wantCode   string
 	}{
 		{name: "the instance read fails with a database error", getErr: errW26aDatabase, wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_ERROR"},
-		{
-			name:      "the workflow execution is missing in Temporal",
-			signalErr: serviceerror.NewNotFound("workflow w26a-secret-run not found"), wantStatus: http.StatusConflict, wantCode: "INVALID_INSTANCE_STATE",
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

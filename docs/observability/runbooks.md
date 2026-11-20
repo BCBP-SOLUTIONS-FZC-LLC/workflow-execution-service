@@ -184,15 +184,15 @@ Fix the cause first. A task whose entry was lost is not redispatched by itself.
 
 `runbook: workflow-execution-service/queue-polling`
 
-**Meaning.** The named tenant queue has not been polled in 5 minutes, although the Worker is up.
+**Meaning.** The queue class in the `queue` label (`default` or `dedicated`) has not been polled in 5 minutes, although the Worker is up. A `dedicated` series covers every tenant queue the Worker serves, so one stalled tenant queue among healthy ones does not show here.
 
-**Triage.** Look in the Worker logs for `failed to start worker for queue` for that queue (a worker that cannot start for one queue only logs). The topology poll retries every queue without a registered worker on each interval, so a persistent failure names its own cause in that line; a restart is only needed when the cause is fixed and the next poll has not yet passed.
+**Triage.** Look in the Worker logs for `failed to start worker for queue`, which names the queue and the tenant (a worker that cannot start for one queue only logs). The topology poll retries every queue without a registered worker on each interval, so a persistent failure names its own cause in that line; a restart is only needed when the cause is fixed and the next poll has not yet passed.
 
 ### InstancesOnUnpolledQueue
 
 `runbook: workflow-execution-service/queue-polling`
 
-**Meaning.** The named queue has running instances and no Worker polling it, so they wait with no task and no other signal.
+**Meaning.** The queue class in the `queue` label (`default` or `dedicated`) has running instances and no Worker polling that class, so they wait with no task and no other signal.
 
 **Triage.** As for `WorkerQueuePollingStalled`; the instances resume when a Worker polls the queue.
 

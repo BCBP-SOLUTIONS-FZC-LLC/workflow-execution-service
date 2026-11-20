@@ -219,19 +219,21 @@ func (s *TaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.U
 		return nil, err
 	}
 	var target *domain.TaskAssignment
+	leadHeld := false
 	for _, a := range assignments {
-		if a.IsLead && a.UserID == userID {
-			return s.presentedTask(ctx, tenantID, task), nil
-		}
-		if a.IsLead {
-			return nil, port.ErrTaskAlreadyClaimed
-		}
 		if a.UserID == userID {
 			target = a
 		}
+		leadHeld = leadHeld || a.IsLead
 	}
 	if target == nil {
 		return nil, port.ErrNotAssignee
+	}
+	if target.IsLead {
+		return s.presentedTask(ctx, tenantID, task), nil
+	}
+	if leadHeld {
+		return nil, port.ErrTaskAlreadyClaimed
 	}
 	if err := s.checkActorEligible(ctx, tenantID, task, userID); err != nil {
 		return nil, err

@@ -353,6 +353,7 @@ var refusals = []refusal{
 	{port.ErrTenantMismatch, http.StatusForbidden, CodeTenantMismatch},
 	{port.ErrIdempotencyKeyReplay, http.StatusConflict, CodeIdempotencyReplay},
 	{port.ErrOverrideNoOp, http.StatusBadRequest, CodeOverrideNoOp},
+	{port.ErrAnswerVariablesInvalid, http.StatusBadRequest, CodeBadRequest},
 	{port.ErrInstanceNotFound, http.StatusNotFound, CodeInstanceNotFound},
 	{port.ErrTargetNodeNotFound, http.StatusConflict, CodeTargetNodeNotFound},
 	{port.ErrWaitNotFound, http.StatusNotFound, CodeWaitNotFound},
