@@ -17,7 +17,7 @@ CREATE TABLE workflow_instance (
     started_by_user_id    UUID                     NOT NULL,
     started_at            TIMESTAMPTZ,
     completed_at          TIMESTAMPTZ,
-    degraded_since        TIMESTAMPTZ,  -- set when the status becomes DEGRADED, NULL in any other status
+    degraded_since        TIMESTAMPTZ CHECK (degraded_since IS NULL OR status = 'DEGRADED'),  -- set when the status becomes DEGRADED, NULL in any other status
     record_version        BIGINT                   NOT NULL DEFAULT 1 CHECK (record_version > 0),
     created_at            TIMESTAMPTZ              NOT NULL DEFAULT now(),
     updated_at            TIMESTAMPTZ              NOT NULL DEFAULT now(),
