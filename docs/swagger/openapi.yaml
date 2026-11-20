@@ -849,7 +849,7 @@ components:
             code: "PAYLOAD_TOO_LARGE"
 
     UnsupportedMediaType:
-      description: Request Content-Type is not application/json.
+      description: Request Content-Type is not application/json (parameters such as charset are accepted; a request with no Content-Type is read as JSON).
       content:
         application/problem+json:
           schema:
@@ -1009,7 +1009,7 @@ paths:
         started after the service's retries, are 503 UPSTREAM_UNAVAILABLE with a fixed detail
         that carries no error text of the failed call; the instance row stays committed and
         the same request sent again completes the start. A published, valid version whose plan
-        cannot be expanded, cannot be decoded or names no main plan is 409 VERSION_INVALID. A start whose execution is held by an open execution of a different
+        cannot be expanded, cannot be decoded, names no main plan or names a department whose iam_department_id is not a UUID is 409 VERSION_INVALID. A start whose execution is held by an open execution of a different
         instance is 409 DUPLICATE_BUSINESS_KEY.
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
@@ -1094,7 +1094,7 @@ paths:
             DUPLICATE_BUSINESS_KEY — a live instance (not COMPLETED, TERMINATED or FAILED, so RUNNING, PAUSED or DEGRADED) for this subject_id and business_key already exists and is not this caller's own unfinished start (a RUNNING instance of the same version started by the same caller with the same context_json and override_map is the same start sent again and is returned with 201), or the start's workflow execution is held by an open execution of a different instance;
             TENANT_NOT_ACTIVE — the tenant is offboarded, or its recorded status is one the service is configured to refuse starts for (no other status by default);
             VERSION_NOT_PUBLISHED — the referenced version is DRAFT or ARCHIVED;
-            VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked), or the compiled plan has a schema version this service does not read, is not valid JSON, names no main plan, or cannot be expanded.
+            VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked), or the compiled plan has a schema version this service does not read, is not valid JSON, names no main plan, names a department whose iam_department_id is not a UUID, or cannot be expanded.
           content:
             application/problem+json:
               schema:
