@@ -260,6 +260,10 @@ func (c *cscTemporal) SignalWorkflow(_ context.Context, workflowID string, insta
 	return c.signalErr
 }
 
+func (c *cscTemporal) QueryWorkflow(_ context.Context, _, _ string, out any) error {
+	return json.Unmarshal([]byte(`{"FailedBranches":[{"DeptID":"finance","Covers":["finance"]}],"HistoryLen":1}`), out)
+}
+
 func (c *cscTemporal) TerminateWorkflow(_ context.Context, workflowID, runID, reason string) error {
 	c.terminates = append(c.terminates, cscTerminate{WorkflowID: workflowID, RunID: runID, Reason: reason})
 	return nil

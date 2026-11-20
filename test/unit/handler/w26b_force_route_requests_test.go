@@ -87,6 +87,10 @@ type w26bTemporalClient struct {
 	signals []w26bSignal
 }
 
+func (c *w26bTemporalClient) QueryWorkflow(_ context.Context, _, _ string, out any) error {
+	return json.Unmarshal([]byte(`{"FailedBranches":[{"DeptID":"finance","Covers":["finance"]}],"HistoryLen":1}`), out)
+}
+
 func (c *w26bTemporalClient) SignalWorkflow(_ context.Context, workflowID string, instanceID uuid.UUID, name string, payload any) error {
 	c.signals = append(c.signals, w26bSignal{workflowID, instanceID, name, payload})
 	return nil

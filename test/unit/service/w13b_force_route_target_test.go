@@ -136,13 +136,14 @@ func TestForceForward_CompiledPlanReadFails_ReturnsTheCauseAndSignalsNothing(t *
 func TestForceForward_DegradedInstance_ReadsNoTasksAfterThePlanCheck(t *testing.T) {
 	plan := w13bBranchPlan(frfixDept("legal", "review"), w13bLegalOnly())
 
-	t.Run("a degraded instance accepts a node outside the open step without listing tasks", func(t *testing.T) {
+	t.Run("a degraded instance accepts a node of a failed branch without listing tasks", func(t *testing.T) {
 		rig, _ := w13bRoutedRig(t, plan, "legal/review", domain.TaskStatusFailed)
 		rig.instance.Status = domain.InstanceStatusDegraded
+		rig.temporal.queryFunc = forceRouteQuery(frfixLegalFailed())
 
-		require.NoError(t, rig.forward("archive/file"))
+		require.NoError(t, rig.forward("legal/review"))
 
-		rig.w13bRequireSignalled(t, "archive/file")
+		rig.w13bRequireSignalled(t, "legal/review")
 		assert.Empty(t, rig.tasks.pages, "no task is read")
 	})
 

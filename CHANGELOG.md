@@ -50,6 +50,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 - Docs only: the metric registry names the 200 answer of a task defer in the help text of the task signal duration.
 - CI: the schema registration, schema prune, quarterly schema health and release workflows can read the private schema-governance image and the service images: the staging and production jobs keep `packages: read` next to their own `contents: write`, and each job that pulls an image logs in to the registry first. Before, every push to `main` failed the staging registration with 403 on the image pull.
+- A force-forward on a degraded instance whose target is not in a failed branch, and a force-back with no earlier step or no failed branch to resume, are now refused with 409 straight away instead of being accepted and silently dropped.
+- A force-back inside nested parallel steps now returns the innermost parallel step that still has an open branch to the step before it, instead of whichever enclosing step picked the request up first.
 - A dedicated task queue whose worker fails to start is now counted (`workflow_execution_service_worker_queue_start_failures_total`) and pages after ten minutes, with a runbook entry, even while other dedicated queues keep the poll timestamp fresh.
 - Pausing an instance whose workflow no longer exists ends it with the same fixed reason a resume gives, not the pause reason typed by the user.
 - A message boundary on a task or sub-workflow whose name is blank or longer than 128 characters now fails the path cleanly, as send and receive stages already do.

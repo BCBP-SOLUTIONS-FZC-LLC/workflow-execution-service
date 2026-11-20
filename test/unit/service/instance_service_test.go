@@ -803,6 +803,7 @@ func TestInstanceService_LifecycleSignals(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, instances, tasks, _, _, temporal, _, _ := newInstanceServiceHarness()
+			temporal.queryFunc = forceRouteQuery(port.ForceRouteState{HistoryLen: 1})
 			tenantID, actorID := uuid.New(), uuid.New()
 			inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: tc.status, RecordVersion: 3, TemporalWorkflowID: "tenant:biz"}
 			instances.byID[inst.ID] = inst
@@ -831,6 +832,9 @@ func TestInstanceService_LifecycleSignals(t *testing.T) {
 
 	t.Run("force-back of a degraded instance needs no completed step and passes the node key", func(t *testing.T) {
 		svc, instances, _, _, _, temporal, definitions, _ := newInstanceServiceHarness()
+		temporal.queryFunc = forceRouteQuery(port.ForceRouteState{
+			FailedBranches: []port.FailedBranchState{{DeptID: "billing", Covers: []string{"billing"}}},
+		})
 		tenantID := uuid.New()
 		inst := &domain.Instance{ID: uuid.New(), TenantID: tenantID, Status: domain.InstanceStatusDegraded, RecordVersion: 3, TemporalWorkflowID: "tenant:biz"}
 		instances.byID[inst.ID] = inst
