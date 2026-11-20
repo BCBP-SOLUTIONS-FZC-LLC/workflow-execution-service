@@ -125,7 +125,6 @@ func TestDelegateImpact_RefusedQuery_Returns400WithTheProblemBody(t *testing.T) 
 		{"limit negative", with("limit", str("-5")), "limit must be a positive integer"},
 		{"limit not a number", with("limit", str("abc")), "limit must be a positive integer"},
 		{"limit fractional", with("limit", str("1.5")), "limit must be a positive integer"},
-		{"limit overflows an integer", with("limit", str("99999999999999999999")), "limit must be a positive integer"},
 		{"cursor not base64url", with("cursor", str("%%%")), "invalid cursor"},
 		{"cursor in the standard alphabet", with("cursor", str(base64.StdEncoding.EncodeToString([]byte{0xfb, 0xff, 0xfe}))), "invalid cursor"},
 		{"cursor not JSON", with("cursor", str(w15bCursor("not json"))), "invalid cursor"},

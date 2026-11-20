@@ -352,6 +352,7 @@ func TestDelegateImpact_Limit_DefaultsToTwentyFiveAndClampsAtOneHundred(t *testi
 		{"exactly 100", "&limit=100", 100},
 		{"101", "&limit=101", 100},
 		{"far above", "&limit=100000", 100},
+		{"too large for any integer type", "&limit=99999999999999999999", 100},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

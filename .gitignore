@@ -59,3 +59,6 @@ vendor/
 .claude/CLAUDE.local.md
 .claude/NEXT_STEPS.md
 /connector-worker
+
+# Schemathesis local state
+.schemathesis/

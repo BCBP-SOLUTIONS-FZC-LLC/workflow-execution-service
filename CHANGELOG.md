@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Tests
 
+- `make hurl`, `make fuzz-api` and `make fuzz-internal-api` check a running local stack from the outside with Hurl scenarios and Schemathesis; `scripts/smoke-test.sh` describes the stack, and a token service stub supports it. They write data, so they need a throwaway database and do not run in CI.
 - The metric test helper `obstest.Sum` now fails the test when a requested label name is carried by no metric of the family, instead of returning zero.
 - The test targets run the Go version `go.mod` names, keep `.env` values out of the tests, regenerate stale sqlc output first and allow 30 minutes per package; the Postgres integration suite shares one container with a fresh database per test, which takes it from about seven minutes to under one. A cache-eviction test no longer spends a minute in reflection, and a degraded-park test no longer depends on the order of two signals sent at the same instant.
 - Stronger tests for task and instance read and write bodies and their edge cases, page-size clamps and subject filters against real Postgres, and the Temporal activities: input validation, assignment and lead moves, audit records and instance status writes.
@@ -39,6 +40,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 ### Changed
 
 - Start-up refuses an unset or empty `APP_ENV` for the server, the worker, the connector worker and `server migrate`, and the error names the variable and the allowed values; it used to default to `dev`.
+- The public and internal contracts say what the service accepts: `Idempotency-Key` is any string rather than a UUID, `limit` has no maximum (a larger value is clamped), `record_version` is a 64-bit integer, a force-forward `target_node_key` is 1 to 255 characters, a cancel, terminate or override `reason` must contain a non-space character, the `workflow_version_id` filter of the instance list may be empty, a cursor is only the `next_cursor` of the previous page, and a body with a NUL character is refused.
 
 ### Removed
 
@@ -48,6 +50,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- `.env.example` keeps the `APP_ENV` comment on its own line: `make` passed the spaces before an inline comment into the value, and the start refused `dev` followed by spaces.
+- A task assignment always carries `assigned_at`: it was stored empty and left out of the task detail, although the contract requires it; an assignment made without a time now gets the time of the insert.
+- A request body with a NUL character in any string, such as a subject id, is refused with 400 instead of failing with 500 when the store rejects it.
+- A page size too large to be a number, such as `limit=99999999999999999999`, is clamped to 100 like any other size above 100, instead of being refused with 400.
 - A force-forward on a degraded instance whose target is not in a failed branch, and a force-back with no earlier step or no failed branch to resume, are now refused with 409 straight away instead of being accepted and silently dropped.
 - A force-back inside nested parallel steps now returns the innermost parallel step that still has an open branch to the step before it, instead of whichever enclosing step picked the request up first.
 - A failed connector task callback now refuses an `error_class` longer than 100 bytes or containing a control character with `400 BAD_REQUEST`, instead of relaying it onto the task-failed event.

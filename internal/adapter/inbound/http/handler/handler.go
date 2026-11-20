@@ -204,6 +204,10 @@ func bindBody(c *gin.Context, req any, bind func(*gin.Context, any) error) bool 
 		bindErrResponse(c, err)
 		return false
 	}
+	if jsonHasNulEscape(body) {
+		writeProblem(c, http.StatusBadRequest, CodeBadRequest, "request body has a NUL character", nil)
+		return false
+	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(body))
 	err = bind(c, req)
 	if err == nil {
@@ -216,6 +220,19 @@ func bindBody(c *gin.Context, req any, bind func(*gin.Context, any) error) bool 
 		}
 	}
 	bindErrResponse(c, err)
+	return false
+}
+
+func jsonHasNulEscape(body []byte) bool {
+	for i := 0; i < len(body); i++ {
+		if body[i] != '\\' {
+			continue
+		}
+		if bytes.HasPrefix(body[i+1:], []byte(`u0000`)) {
+			return true
+		}
+		i++
+	}
 	return false
 }
 
@@ -277,6 +294,9 @@ func pageParams(c *gin.Context) (port.Page, bool) {
 	limit := defaultPageLimit
 	if raw := c.Query("limit"); raw != "" {
 		v, err := strconv.Atoi(raw)
+		if errors.Is(err, strconv.ErrRange) && !strings.HasPrefix(raw, "-") {
+			v, err = maxPageLimit, nil
+		}
 		if err != nil || v <= 0 {
 			writeProblem(c, http.StatusBadRequest, CodeBadRequest, "limit must be a positive integer", nil)
 			return port.Page{}, false
