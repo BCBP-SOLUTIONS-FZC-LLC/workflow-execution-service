@@ -30,6 +30,13 @@ func TestLoad_AppEnvOutsideTheKnownSet_IsRefused(t *testing.T) {
 	w19aRunLoadCases(t, cases)
 }
 
+func TestLoad_AppEnvUnsetOrEmpty_IsRefused(t *testing.T) {
+	w19aRunLoadCases(t, []w19aLoadCase{
+		{name: "unset", env: map[string]string{"APP_ENV": unsetEnv}, wantErr: w19aAppEnvMessage},
+		{name: "empty", env: map[string]string{"APP_ENV": ""}, wantErr: w19aAppEnvMessage},
+	})
+}
+
 func TestConfigIsDev_TrueOnlyForDevAndLocal(t *testing.T) {
 	cases := []struct {
 		appEnv string

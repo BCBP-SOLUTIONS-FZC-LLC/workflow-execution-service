@@ -112,6 +112,9 @@ func wkbootRunWorker(t *testing.T, bin string, env []string, args ...string) wkb
 func wkbootWithFreePorts(t *testing.T, env []string) []string {
 	t.Helper()
 	out := append([]string{}, env...)
+	if !slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, "APP_ENV=") }) {
+		out = append(out, "APP_ENV=dev")
+	}
 	for _, key := range []string{"WORKER_HEALTH_PORT", "WORKER_METRICS_PORT"} {
 		if slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, key+"=") }) {
 			continue

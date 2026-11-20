@@ -20,6 +20,11 @@ func TestWorkerBinary_InvalidSettings_PrintTheConfigErrorAndExitOne(t *testing.T
 			wantStderr: "config error: invalid environment variable(s): WORKER_HEALTH_PORT=\"abc\": strconv.Atoi: parsing \"abc\": invalid syntax; QUEUE_TOPOLOGY_POLL_INTERVAL=\"soon\": time: invalid duration \"soon\"\n",
 		},
 		{
+			name:       "an empty application environment",
+			env:        []string{"APP_ENV="},
+			wantStderr: "config error: APP_ENV must be one of local, dev, test, staging, prod\n",
+		},
+		{
 			name:       "health port 0",
 			env:        []string{"WORKER_HEALTH_PORT=0"},
 			wantStderr: "config error: WORKER_HEALTH_PORT must be in [1, 65535]\n",
