@@ -1060,8 +1060,9 @@ paths:
                   description: >
                     Connector-defined error classification, a label the connector worker chooses
                     from its fixed set (the error-class set of the failed-task event). Required, and it
-                    must contain text: a value of only whitespace is refused 400 BAD_REQUEST. It is carried unchanged onto the stage-fail signal and the task-failed
-                    event. The endpoint does not check membership of the set.
+                    must contain text: a value of only whitespace is refused 400 BAD_REQUEST. It is
+                    carried unchanged onto the stage-fail signal and the task-failed event. The
+                    endpoint does not check membership of the set.
                   example: "upstream_timeout"
                 output:
                   type: object
