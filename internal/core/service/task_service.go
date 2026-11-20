@@ -197,6 +197,21 @@ func (s *TaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.U
 	if err := checkHumanActionable(task); err != nil {
 		return nil, err
 	}
+	assignments, err := s.Assignments.ListActiveByTask(ctx, tenantID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	var target *domain.TaskAssignment
+	leadHeld := false
+	for _, a := range assignments {
+		if a.UserID == userID {
+			target = a
+		}
+		leadHeld = leadHeld || a.IsLead
+	}
+	if target == nil {
+		return nil, port.ErrNotAssignee
+	}
 	if task.AssigneeMode != "all" {
 		return nil, port.ErrClaimNotApplicable
 	}
@@ -212,22 +227,6 @@ func (s *TaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.U
 	}
 	if err := checkInstanceActionable(inst); err != nil {
 		return nil, err
-	}
-
-	assignments, err := s.Assignments.ListActiveByTask(ctx, tenantID, taskID)
-	if err != nil {
-		return nil, err
-	}
-	var target *domain.TaskAssignment
-	leadHeld := false
-	for _, a := range assignments {
-		if a.UserID == userID {
-			target = a
-		}
-		leadHeld = leadHeld || a.IsLead
-	}
-	if target == nil {
-		return nil, port.ErrNotAssignee
 	}
 	if target.IsLead {
 		return s.presentedTask(ctx, tenantID, task), nil

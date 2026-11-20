@@ -45,6 +45,9 @@ func TestInstancePauseAndResume_AWorkflowThatNoLongerExistsEndsTheInstanceRow(t 
 			assert.Equal(t, domain.InstanceStatusTerminated, instances.byID[instanceID].Status)
 			require.Len(t, outbox.enqueued, 1)
 			assert.Equal(t, domain.EventWorkflowInstanceTerminated, outbox.enqueued[0].Type)
+			assert.Contains(t, string(outbox.enqueued[0].Payload),
+				"the workflow execution no longer exists")
+			assert.NotContains(t, string(outbox.enqueued[0].Payload), "cleanup")
 		})
 	}
 }

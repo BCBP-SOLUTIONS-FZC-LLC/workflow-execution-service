@@ -150,9 +150,13 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	})
 
 	var fired *boundaryFire
-	cancelBoundaries := registerTaskBoundaries(ctx, sel, in, string(nodeKey), stage.BoundaryTimer, stage.BoundaryMessage, func(f boundaryFire) {
+	cancelBoundaries, err := registerTaskBoundaries(ctx, sel, in, string(nodeKey), stage.BoundaryTimer, stage.BoundaryMessage, func(f boundaryFire) {
 		fired = &f
 	})
+	if err != nil {
+		in.supersedeTask(ctx, out.TaskID)
+		return nodeKey, "", fmt.Errorf("workflow: stage %q: %w", nodeKey, err)
+	}
 	cancelSLA := addSLATimers(ctx, sel, slaTimerParams{
 		TenantID: in.tenantID, InstanceID: in.instanceID, TaskID: out.TaskID, NodeKey: nodeKey,
 		DueDate: stage.DueDate, FollowUpDate: stage.FollowUpDate,
