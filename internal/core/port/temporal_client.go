@@ -19,6 +19,21 @@ const (
 
 const QueryWaitingExternal = "waiting-external"
 
+const QueryForceRouteState = "force-route-state"
+
+// ForceRouteState is what only the running workflow knows about a force-route:
+// the branches that failed, each with every department it runs, and how many
+// completed nodes a force-back can return to.
+type ForceRouteState struct {
+	FailedBranches []FailedBranchState
+	HistoryLen     int
+}
+
+type FailedBranchState struct {
+	DeptID string
+	Covers []string
+}
+
 const WorkflowTypeExecute = "Execute"
 
 type StartWorkflowInput struct {

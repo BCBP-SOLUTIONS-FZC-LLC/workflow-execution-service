@@ -117,6 +117,9 @@ func (s *InstanceService) ForceForward(ctx context.Context, tenantID, instanceID
 	if err := s.validateForwardTarget(ctx, tenantID, inst, targetNodeKey); err != nil {
 		return err
 	}
+	if err := s.checkForceRouteState(ctx, inst, port.SignalInstanceForceFwd, targetNodeKey); err != nil {
+		return err
+	}
 	return s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, port.SignalInstanceForceFwd, adminSignalWire{
 		AdminUserID: actorUserID.String(), TargetNodeKey: targetNodeKey, RecordVersion: recordVersion,
 	})
@@ -149,6 +152,9 @@ func (s *InstanceService) ForceBack(ctx context.Context, tenantID, instanceID, a
 		targetNodeKey = ""
 	}
 	if err := s.validateBackTarget(ctx, tenantID, inst, targetNodeKey); err != nil {
+		return err
+	}
+	if err := s.checkForceRouteState(ctx, inst, port.SignalInstanceForceBack, targetNodeKey); err != nil {
 		return err
 	}
 	return s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, port.SignalInstanceForceBack, adminSignalWire{

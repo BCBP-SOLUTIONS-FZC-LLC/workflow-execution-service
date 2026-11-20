@@ -27,7 +27,9 @@ func TestForceBack_DegradedWithAKeyNamingNoNode_IsRefusedBeforeTheSignal(t *test
 		assert.Zero(t, rig.signals())
 	})
 	t.Run("control: a node of the plan is signalled", func(t *testing.T) {
-		rig := newFrfixRig(t, domain.InstanceStatusDegraded, plan, failed)
+		rig := newFrfixRig(t, domain.InstanceStatusDegraded, plan, failed).workflowState(port.ForceRouteState{
+			FailedBranches: []port.FailedBranchState{{DeptID: "finance", Covers: []string{"finance"}}},
+		})
 		require.NoError(t, rig.back("finance/check"))
 		assert.Equal(t, 1, rig.signals())
 	})

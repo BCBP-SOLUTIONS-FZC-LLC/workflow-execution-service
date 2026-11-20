@@ -2,11 +2,13 @@ package workflow
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	wf "go.temporal.io/sdk/workflow"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
 const QueryGetWorkflowStatus = "get-workflow-status"
@@ -22,6 +24,30 @@ type WorkflowStatusQuery struct {
 	// assignee and have not been given a new one; the instance waits on them
 	// (execution LLD §3.1).
 	UnassignedTasks []string
+}
+
+func (in *interpreter) registerForceRouteStateQuery(ctx wf.Context) error {
+	err := wf.SetQueryHandler(ctx, port.QueryForceRouteState, func() (port.ForceRouteState, error) {
+		state := port.ForceRouteState{HistoryLen: len(in.history.stack)}
+		for _, p := range in.liveParks() {
+			for _, fb := range p.failed {
+				state.FailedBranches = append(state.FailedBranches, failedBranchState(fb))
+			}
+		}
+		return state, nil
+	})
+	if err != nil {
+		return fmt.Errorf("workflow: registering %s query handler: %w", port.QueryForceRouteState, err)
+	}
+	return nil
+}
+
+func failedBranchState(fb failedBranch) port.FailedBranchState {
+	covers := appendStepDepts([]string{fb.DeptID}, fb.Steps)
+	if dept := deptFromNodeKey(fb.LastCompletedNode); dept != "" && !slices.Contains(covers, dept) {
+		covers = append(covers, dept)
+	}
+	return port.FailedBranchState{DeptID: fb.DeptID, Covers: covers}
 }
 
 func (in *interpreter) registerStatusQuery(ctx wf.Context) error {

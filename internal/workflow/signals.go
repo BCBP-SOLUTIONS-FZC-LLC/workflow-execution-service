@@ -257,7 +257,7 @@ func (in *interpreter) routeAdminSignal(ctx wf.Context, kind string, sig adminSi
 		return
 	}
 	if in.parallelDepth > 0 {
-		if gw := in.forceForwardOwner(kind, sig); gw != nil {
+		if gw := in.adminSignalOwner(kind, sig); gw != nil {
 			gw.own.Send(ctx, envelope)
 			return
 		}
@@ -285,11 +285,14 @@ func (in *interpreter) routeDeferToFork(ctx wf.Context, envelope adminSignalEnve
 	return true
 }
 
-func (in *interpreter) forceForwardOwner(kind string, sig adminSignal) *gateway {
-	if kind != SignalInstanceForceFwd {
-		return nil
+func (in *interpreter) adminSignalOwner(kind string, sig adminSignal) *gateway {
+	switch kind {
+	case SignalInstanceForceFwd:
+		return in.innermostGatewayRunning(sig.TargetDeptID)
+	case SignalInstanceForceBack:
+		return in.innermostGatewayOpen()
 	}
-	return in.innermostGatewayRunning(sig.TargetDeptID)
+	return nil
 }
 
 func (in *interpreter) validateStageDefer(sig stageDeferSignal) error {

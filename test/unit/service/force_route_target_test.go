@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -64,6 +65,25 @@ type frfixRig struct {
 	tenantID uuid.UUID
 	inst     *domain.Instance
 	signals  func() int
+	temporal *fakeTemporalClient
+}
+
+func forceRouteQuery(state port.ForceRouteState) func(context.Context, string, string, any) error {
+	return func(_ context.Context, _, queryType string, out any) error {
+		if queryType != port.QueryForceRouteState {
+			return errors.New("unexpected query " + queryType)
+		}
+		raw, err := json.Marshal(state)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(raw, out)
+	}
+}
+
+func (r *frfixRig) workflowState(state port.ForceRouteState) *frfixRig {
+	r.temporal.queryFunc = forceRouteQuery(state)
+	return r
 }
 
 func newFrfixRig(t *testing.T, status domain.InstanceStatus, planJSON string, tasks ...*domain.Task) *frfixRig {
@@ -77,7 +97,7 @@ func newFrfixRig(t *testing.T, status domain.InstanceStatus, planJSON string, ta
 		task.ID, task.TenantID, task.WorkflowInstanceID = uuid.New(), tenantID, inst.ID
 		taskRepo.byID[task.ID] = task
 	}
-	return &frfixRig{svc: svc, tenantID: tenantID, inst: inst, signals: func() int { return len(temporal.signals) }}
+	return &frfixRig{svc: svc, tenantID: tenantID, inst: inst, temporal: temporal, signals: func() int { return len(temporal.signals) }}
 }
 
 func (r *frfixRig) forward(target string) error {
@@ -173,33 +193,118 @@ func TestForceForward_OutsideAParallelStep_AnyNodeOfThePlanIsAccepted(t *testing
 	assert.Equal(t, 1, rig.signals())
 }
 
-func TestForceForward_Degraded_AnyNodeOfThePlanIsAccepted(t *testing.T) {
-	plan := frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixParallelMain())
-	staleFailure := frfixTask("legal/review", domain.TaskStatusFailed)
+func frfixLegalFailed() port.ForceRouteState {
+	return port.ForceRouteState{
+		FailedBranches: []port.FailedBranchState{{DeptID: "legal", Covers: []string{"legal"}}},
+	}
+}
 
-	t.Run("a node of a branch with no failed task is accepted", func(t *testing.T) {
-		rig := newFrfixRig(t, domain.InstanceStatusDegraded, plan, staleFailure)
-		require.NoError(t, rig.forward("finance/check"))
-		assert.Equal(t, 1, rig.signals())
-	})
-	t.Run("a node outside the parallel step is accepted", func(t *testing.T) {
-		rig := newFrfixRig(t, domain.InstanceStatusDegraded, plan, staleFailure)
-		require.NoError(t, rig.forward("archive/file"))
-		assert.Equal(t, 1, rig.signals())
-	})
-	t.Run("a node that is not in the plan is refused", func(t *testing.T) {
-		rig := newFrfixRig(t, domain.InstanceStatusDegraded, plan, staleFailure)
-		require.ErrorIs(t, rig.forward("finance/typo"), port.ErrTargetNodeNotFound)
+func TestForceForward_Degraded_TargetMustBeAFailedBranchTheWorkflowReports(t *testing.T) {
+	plan := frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixParallelMain())
+	failed := frfixTask("legal/review", domain.TaskStatusFailed)
+
+	for _, tc := range []struct {
+		name    string
+		target  string
+		refused bool
+	}{
+		{"a node of the failed branch", "legal/sign", false},
+		{"a node of a branch that did not fail", "finance/check", true},
+		{"a node outside the parallel step", "archive/file", true},
+		{"a node that is not in the plan", "finance/typo", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newFrfixRig(t, domain.InstanceStatusDegraded, plan, failed).workflowState(frfixLegalFailed())
+
+			err := rig.forward(tc.target)
+
+			if tc.refused {
+				require.ErrorIs(t, err, port.ErrTargetNodeNotFound)
+				assert.Zero(t, rig.signals(), "a refused force-forward must not be signalled")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, 1, rig.signals())
+		})
+	}
+}
+
+func TestForceBack_Degraded_TargetMustNameAFailedBranchTheWorkflowReports(t *testing.T) {
+	plan := frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixParallelMain())
+	twoFailed := port.ForceRouteState{FailedBranches: []port.FailedBranchState{
+		{DeptID: "legal", Covers: []string{"legal"}}, {DeptID: "finance", Covers: []string{"finance"}},
+	}}
+
+	for _, tc := range []struct {
+		name    string
+		state   port.ForceRouteState
+		target  string
+		refused bool
+	}{
+		{"a node of a failed branch", frfixLegalFailed(), "legal/review", false},
+		{"a node of a branch that did not fail", frfixLegalFailed(), "finance/check", true},
+		{"no target with one failed branch", frfixLegalFailed(), "", false},
+		{"no target with two failed branches", twoFailed, "", true},
+		{"no target with no failed branch", port.ForceRouteState{}, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newFrfixRig(t, domain.InstanceStatusDegraded, plan, frfixTask("legal/review", domain.TaskStatusFailed)).workflowState(tc.state)
+
+			err := rig.back(tc.target)
+
+			if tc.refused {
+				require.ErrorIs(t, err, port.ErrTargetNodeNotFound)
+				assert.Zero(t, rig.signals(), "a refused force-back must not be signalled")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, 1, rig.signals())
+		})
+	}
+}
+
+func TestForceBack_Running_RefusedWhenTheWorkflowHasNoCompletedNodeToReturnTo(t *testing.T) {
+	plan := frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixParallelMain())
+	completed := frfixTask("intake/open", domain.TaskStatusCompleted)
+
+	t.Run("an empty node history", func(t *testing.T) {
+		rig := newFrfixRig(t, domain.InstanceStatusRunning, plan, completed).workflowState(port.ForceRouteState{})
+
+		require.ErrorIs(t, rig.back(""), port.ErrForceBackNoSavedBranch)
 		assert.Zero(t, rig.signals())
+	})
+	t.Run("a node to return to", func(t *testing.T) {
+		rig := newFrfixRig(t, domain.InstanceStatusRunning, plan, completed).workflowState(port.ForceRouteState{HistoryLen: 1})
+
+		require.NoError(t, rig.back(""))
+		assert.Equal(t, 1, rig.signals())
 	})
 }
 
-func TestForceBack_DegradedWithATarget_IsSignalledWithoutABranchCheck(t *testing.T) {
-	rig := newFrfixRig(t, domain.InstanceStatusDegraded, frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixParallelMain()),
-		frfixTask("legal/review", domain.TaskStatusFailed))
+func TestForceRoute_QueryFailure(t *testing.T) {
+	plan := frfixPlanJSON(t, dsl.CurrentSchemaVersion, frfixParallelMain())
+	completed := frfixTask("intake/open", domain.TaskStatusCompleted)
 
-	require.NoError(t, rig.back("finance/check"))
-	assert.Equal(t, 1, rig.signals())
+	for _, tc := range []struct {
+		name   string
+		status domain.InstanceStatus
+		route  func(*frfixRig) error
+	}{
+		{"force-forward of a degraded instance", domain.InstanceStatusDegraded, func(r *frfixRig) error { return r.forward("legal/sign") }},
+		{"force-back of a running instance", domain.InstanceStatusRunning, func(r *frfixRig) error { return r.back("") }},
+	} {
+		for _, queryErr := range []error{port.ErrTemporalUnavailable, port.ErrWorkflowNotFound} {
+			t.Run(tc.name+": "+queryErr.Error(), func(t *testing.T) {
+				rig := newFrfixRig(t, tc.status, plan, completed)
+				rig.temporal.queryFunc = func(context.Context, string, string, any) error { return queryErr }
+
+				err := tc.route(rig)
+
+				require.ErrorIs(t, err, queryErr)
+				assert.Zero(t, rig.signals(), "the signal is not sent when the workflow could not be asked")
+			})
+		}
+	}
 }
 
 // frfixRoutedMain is a plan whose open parallel step holds "legal" (open

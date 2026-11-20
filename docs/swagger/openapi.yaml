@@ -1895,7 +1895,8 @@ paths:
         Sends a force-forward signal to the Temporal workflow. Active tasks at the current
         node(s) are marked SUPERSEDED and the workflow function jumps to target_node_key.
         Inside a parallel step or a DEGRADED instance, the department of target_node_key
-        names the branch the jump applies to.
+        names the branch the jump applies to. In a DEGRADED instance the target must be in a
+        failed branch; otherwise the call is refused with 409 before anything is sent.
         Use only when a step is legitimately blocked and cannot be resolved through normal
         task operations.
       security:
@@ -2015,8 +2016,12 @@ paths:
         Sends a force-back signal to the Temporal workflow. The workflow function pops
         the completedNodes stack, cancels any currently active tasks, and re-creates the
         task for the previous step. Returns 409 if there is no previous step to revert to
-        (the instance is at its first step). In a DEGRADED instance with more than one
-        failed branch, target_node_key names a node of the branch to resume.
+        (the instance is at its first step); the answer is given before anything is sent, so
+        an instance whose step history is empty is refused at once. In a DEGRADED instance
+        with more than one failed branch, target_node_key names a node of the branch to
+        resume, and a key that names no failed branch is refused with 409. Inside nested
+        parallel steps the force-back applies to the innermost parallel step that still has
+        an open branch.
       security:
         - GatewayTenantContext: []
           UserContext: []
