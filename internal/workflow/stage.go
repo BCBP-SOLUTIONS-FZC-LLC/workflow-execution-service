@@ -25,11 +25,17 @@ func (in *interpreter) runStage(ctx wf.Context, plan *dsl.CompiledPlan, deptID s
 	switch stage.Type {
 	case string(enums.StageTypeSendTask):
 		msgName := stage.Extras["message"]
+		if err := validateMessageName(msgName); err != nil {
+			return nodeKey, "", fmt.Errorf("workflow: send stage %q: %w", nodeKey, err)
+		}
 		in.msgBuf.Send(ctx, msgName, nodeKey)
 		in.history.Push(nodeKey)
 		return nodeKey, "", nil
 
 	case string(enums.StageTypeReceiveTask):
+		if err := validateMessageName(stage.Extras["message"]); err != nil {
+			return nodeKey, "", fmt.Errorf("workflow: receive stage %q: %w", nodeKey, err)
+		}
 		if err := updateInstanceNodes(ctx, port.UpdateInstanceNodesInput{
 			InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{nodeKey},
 		}); err != nil {

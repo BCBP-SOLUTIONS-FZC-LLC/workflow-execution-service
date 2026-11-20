@@ -56,6 +56,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - Pausing or resuming an instance whose workflow execution no longer exists now ends the instance as terminated and fails its active tasks, as cancel does, and answers 202 instead of a 409.
 - An answer to an outside wait whose variables cannot be merged into the instance's stored context (the context is not a JSON object) is now refused with a 400 before it is accepted, instead of a 202 that the workflow then dropped.
 - The queue label of the worker poll timestamp and of the instances-by-queue gauge now holds `default` or `dedicated` instead of the queue name, which carried a tenant id for dedicated queues; the queue and tenant stay in the Worker logs.
+- An exclusive gateway that opens a run no longer matches a branch such as `status != "x"` against a result that does not exist yet; with no result, the gateway takes its else branch.
+- A message sent with no receiver waiting keeps at most 64 messages per message name and drops the oldest with a warning; a send or receive step with an empty or over-long message name now fails the path instead of buffering under that name.
+- A pause that arrives together with a step's result now holds the next step until the instance is resumed, instead of letting that step start while the instance reads as paused.
+- A burst of up to 64 admin signals (pause, resume, cancel, force-forward, force-back) is now queued without stalling the signal router; the queue held 8.
 - The connector failure callback now refuses an `error_class` that is only whitespace with a 400, as it already did for an empty one; a blank class used to reach the workflow as the failure reason.
 - A request body is accepted only with the media type `application/json` (with or without parameters such as a charset); a type that merely begins with it, such as `application/jsonfoo`, now gets the 415 answer. A request with no `Content-Type` header is still accepted.
 - A failed call to the token service is now counted under the `token_service` dependency of the upstream error metric and no longer as `iam`; the runbook names the new label.

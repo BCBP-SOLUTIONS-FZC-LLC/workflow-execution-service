@@ -113,6 +113,9 @@ func (in *interpreter) runDepartmentFrom(ctx wf.Context, plan *dsl.CompiledPlan,
 		if err := in.checkPaused(ctx, deptID); err != nil {
 			return last, lastResult, err
 		}
+		if err := in.awaitResumed(ctx); err != nil {
+			return last, lastResult, err
+		}
 		node, result, err := in.runStage(ctx, plan, deptID, &dept.Stages[i])
 		if errors.Is(err, errStageDeferred) {
 			i--
