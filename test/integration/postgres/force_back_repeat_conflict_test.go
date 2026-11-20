@@ -32,6 +32,18 @@ type wflSignal struct {
 	name       string
 }
 
+func (r *wflSignalRecorder) QueryWorkflow(_ context.Context, _, _ string, out any) error {
+	state, ok := out.(*port.ForceRouteState)
+	if !ok {
+		return nil
+	}
+	*state = port.ForceRouteState{
+		FailedBranches: []port.FailedBranchState{{DeptID: "billing", Covers: []string{"billing"}}},
+		HistoryLen:     1,
+	}
+	return nil
+}
+
 func (r *wflSignalRecorder) SignalWorkflow(_ context.Context, workflowID string, instanceID uuid.UUID, name string, _ any) error {
 	r.signals = append(r.signals, wflSignal{workflowID: workflowID, instanceID: instanceID, name: name})
 	return nil
