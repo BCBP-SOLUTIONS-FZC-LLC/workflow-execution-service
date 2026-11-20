@@ -1060,10 +1060,9 @@ paths:
                   description: Tenant UUID the task belongs to.
                 error_class:
                   type: string
-                  maxLength: 100
                   description: >
-                    Connector-defined error classification, a label the connector worker chooses
-                    from its fixed set (the error-class set of the failed-task event). Required, and it
+                    Connector-defined error classification, a free-text label the connector worker
+                    chooses (the known values are in the failed-task event description). Required, and it
                     must contain text: a value of only whitespace is refused 400 BAD_REQUEST. At
                     most 100 bytes, with no control characters (a longer value or one with a
                     control character is refused 400 BAD_REQUEST). It is carried unchanged onto the
