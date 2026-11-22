@@ -114,7 +114,6 @@ flowchart TB
     direction TB
         Dash["Dashboard Stream Gateway"]
         Tender["Tender Service"]
-        LLM["LLM Service"]
         Notif["Notification"]
         Audit["Audit Log"]
   end
@@ -132,7 +131,7 @@ flowchart TB
     Consumer -- POST /api/v1/internal/events --> API
     Outbox -- poll outbox_events --> PG
     Outbox -- publish --> SNS[/"SNS<br>wf-workflow-events"/]
-    SNS --> Dash & Tender & LLM & Notif & Audit
+    SNS --> Dash & Tender & Notif & Audit
 ```
 
 ### 1.6 Technical Stack
@@ -1479,7 +1478,7 @@ Envelope shape: `events.NewEnvelope(type, "workflow-execution-svc", payload, Wit
 | `WorkflowInstanceDegraded` | parallel aggregation, ≥1 failed branch | `started_by_user_id`, `failed_branches[]{department_id, last_node_key}` | Audit, Ops, Notif, Dashboard |
 | `WorkflowInstanceFailed` | main-path non-retryable failure | `started_by_user_id`, `error_class` | Audit, Ops, Notif, Dashboard |
 | `WorkflowInstanceFinished` | clean completion | `started_by_user_id`, `completed_at` | Tender post-hoc finalization, Audit, Notif, Dashboard |
-| `WorkflowTaskCreated` | task creation | `due_at?`, `follow_up_at?`, `stage_type`, `connector_type?`, `resolved_inputs?`, `output_mapping?` | Notif, LLM pre-warm, Dashboard, `cmd/connector-worker` (connector-typed tasks only, `workflow_connectors.md` §5.4) |
+| `WorkflowTaskCreated` | task creation | `due_at?`, `follow_up_at?`, `stage_type`, `connector_type?`, `resolved_inputs?`, `output_mapping?` | Notif, Dashboard, `cmd/connector-worker` (connector-typed tasks only, `workflow_connectors.md` §5.4) |
 | `WorkflowTaskClaimed` | a claim (§3.1), multi-assignee only | `claimed_by_user_id`; `assignee_user_ids` lists every active assignee of the task at claim time, the claimer included | Audit, Dashboard |
 | `WorkflowTaskCompleted` | assignment completion, `allDone` | `completed_by_user_id` | Dashboard, Audit |
 | `WorkflowTaskDeferred` | task deferral | `deferred_to_node_key`, `reason?`, `due_at?` | Notif, Dashboard |
@@ -1611,9 +1610,7 @@ Downstream consumers subscribe to the shared SNS topic (`wf-workflow-events`) us
    - Subscribes to `WorkflowInstancePaused`, `.resumed`, `.cancelled`, `.terminated`, `.degraded`, `.failed`, `.finished`, `WorkflowTaskCreated`, `.deferred`, `.reassigned`, `.superseded`, `.failed`, `.sla-warning`, `.sla-breached`. On receipt, dispatches in-app/email notifications to the affected `user_id`(s) or the tenant's admin team, depending on whether the event is task-scoped or instance-scoped.
 3. **Tender Service** — queue: not provisioned; subscription owned by the Tender HLD
    - Subscribes only to `WorkflowInstanceFinished`, and only as a post-hoc finalization notification — the actual approval signing already happened synchronously before Complete was called (§1.3), so this queue never gates or triggers signing.
-4. **LLM Service** — queue: `wf-llm-context-q`
-   - Subscribes to `WorkflowTaskCreated`, using it purely as a pre-warm signal for `prep`/`review`/`approve` stages. LLM assistance during `prep` drafting itself runs entirely over the Frontend ↔ LLM Service ↔ User Profile path, outside Execution's own call chain.
-5. **Dashboard Stream Gateway** — queue: `wf-workflow-dash-q`
+4. **Dashboard Stream Gateway** — queue: `wf-workflow-dash-q`
    - Subscribes to all 9 task-scoped events (`WorkflowTaskCreated`, `.claimed`, `.completed`, `.deferred`, `.reassigned`, `.superseded`, `.failed`, `.sla-warning`, `.sla-breached`) plus 7 of the 9 instance-lifecycle events (`.paused`, `.resumed`, `.cancelled`, `.terminated`, `.degraded`, `.failed`, `.finished` — excluding `.started`, whose creating client already knows synchronously via the instantiation response, and the purely ops-facing `.force-routed`). On receipt, fans the event out per user over Server-Sent Events to the browser — every task-scoped payload already carries `assignee_user_ids[]` for exactly this reason, and `WorkflowTaskCompleted`'s presence in this set specifically drives the Gateway's optimistic-UI reconciliation. The Gateway owns all UUID-to-display-name enrichment itself; Execution's payloads carry raw IDs only. The Gateway's own subscription mechanism, SSE connection auth, wire format, and backfill design are owned by that service.
 
 ### 6.6 Outbox Runner and Publisher Bootstrap
@@ -2149,7 +2146,7 @@ This appendix consolidates every design decision made across the document, group
 | 6 | Exclusive-gateway evaluation scoped to binary yes/no + implicit-else, no third-party expression engine | Matches actual domain usage (non-technical authors, binary approve/reject pattern); avoids committing to a general evaluator before it's needed. |
 | 7 | Unrecognized `StageDef.Type` does not fail — dispatched as an ordinary claim/complete task | Definition Service documents unknown `type` as intentional forward-compatibility for a task type it does not define; hard-failing would break that path. |
 | 8 | ~~`CompiledCollaboration.Messages` treated as diagram-only, not a correlation mechanism~~ Superseded (rev 1.67): the field is removed | Zero consumers anywhere in the compiler; real correlation already exists via `Extras["message"]`. |
-| 9 | `prep`/`review` LLM assistance is out of scope for the Temporal workflow function entirely | Frontend calls LLM Service directly; Execution's only touchpoint is a one-way async cache pre-warm event, not a functional dependency. |
+| 9 | `prep`/`review` LLM assistance is out of scope for the Temporal workflow function entirely | Frontend calls LLM Service directly. Execution has no event or call towards the LLM Service, and a task's type does not say whether its user will use assistance. |
 | 10 | ~~`call_pool` into an `Ignored` target → ordinary admin-completed task, not a new signal/status mechanism~~ Superseded (rev 1.67): one pool runs, and the call-pool step is removed | The target has no compiled steps to run; a full task/signal apparatus would be overkill for what is really a manual checkpoint. |
 | 11 | ~~Cross-pool reverts get the same admin-completed-task treatment, gated to `tenant_admin`-equivalent~~ Superseded (rev 1.67): one pool runs, and the call-pool step is removed | Avoids building automated cross-workflow rollback machinery for a case with zero real examples. |
 | 12 | Intra-pool `send_task`→`receive_task` delivery via a workflow-local, instance-wide, node-keyed message buffer, not a Temporal signal | No signal channel exists between two tasks in the same execution; single-threaded workflow scheduling makes the shared map lock-free and replay-safe; instance-wide scope is required for cross-sibling correlation, and node-keyed reset prevents double-counting on regression without breaking that correlation. |
@@ -2829,3 +2826,4 @@ Coding style, formatting rules, naming conventions, comment/documentation standa
 | 1.166 | 2026-11-20 | **Relay exit, repeated starts, delegate scope, automation principal callbacks, claim order, lifecycle of a missing execution, answer variables, queue metrics and workflow limits are stated** (§2.4; §2.5; §2.6; §3.1; §3.4; §5.2; §5.7; §5.8; §5.10; §5.11; §6.4; §6.6; §7.6; §8.2). An outbox relay that stops with an error ends the API process with a non-zero status after the listeners stop. A repeated start is the same start while the instance is `RUNNING`, `PAUSED` or `DEGRADED`. A reassign-delegate and the delegate-impact count cover only active assignments on `READY` or `IN_PROGRESS` tasks of live instances, the count is an upper bound, and a delegation start whose rows are all ineligible is acknowledged. A connector callback for a tenant with no automation principal is `503 UPSTREAM_UNAVAILABLE`, and the event route stays `422 NO_AUTOMATION_PRINCIPAL`. A claim checks the caller's assignment before the task's mode, version and state. A pause or resume of an instance with no workflow execution ends it `TERMINATED` like a cancel. An outside answer whose variables cannot merge into the instance context is `400 BAD_REQUEST`. The `queue` label of the poll timestamp and instances-by-queue is `default` or `dedicated`, and a counter and the `WorkerQueueStartFailing` alert cover failed queue worker starts. An exclusive gateway first in its list takes the default branch, the message buffer holds 64 entries per name and message names are bounded, a pause holds the next stage, and admin signals queue up to 64. |
 | 1.167 | 2026-11-20 | **Force routes, degraded age, reassign failures, error classes and out-of-office events are stated** (§2.2; §2.7; §3.1; §4.2; §5.2; §5.4; §5.10; §6.2; §6.4; §7.6; Appendix C). `workflow_instance.degraded_since` records when an instance entered `DEGRADED` and the age metric is measured from it. A `DEGRADED` force-forward or force-back whose target names no failed branch, and a force-back of a `RUNNING` instance with no completed node, are refused `409` before the signal. A force-back goes to the innermost parallel gateway that holds an open branch and rewinds that whole gateway when siblings are open. A force-back that arrives during a fork's rerun is held and applied in arrival order. A reassign the workflow ends for good is counted in `workflow_execution_service_reassign_failures_total` and alerted by `ReassignFailing`, and a reassign answer means accepted. The connector failure `error_class` is free text of at most 100 bytes without control characters, with the values in use listed. A `405` is given regardless of authorisation. `ooo_from` and `ooo_until` do not start or end a pause. A published plan carries no timer duration outside the accepted forms. |
 | 1.168 | 2026-11-20 | **A NUL character in a request body is refused** (§5.10). A body string that holds a NUL character, as a raw byte or a unicode escape, is answered `400 BAD_REQUEST` on every route that binds a JSON body, because text storage cannot hold it. |
+| 1.169 | 2026-11-22 | **No LLM Service subscription to `WorkflowTaskCreated`** (§1.5; §6.4; §6.5; Appendix A.1 decision 9). The queue `wf-llm-context-q` and the LLM Service consumer are removed. A task's type does not say whether its user will use assistance, so a pre-warm on task creation has no basis. |
