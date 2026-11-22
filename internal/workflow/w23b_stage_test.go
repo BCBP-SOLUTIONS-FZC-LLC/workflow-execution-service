@@ -379,6 +379,7 @@ func TestRunTaskStage_CancelledDuringTheNodeWrite_SupersedesTheNewTask(t *testin
 		wantStatus []domain.TaskStatus
 	}{
 		{name: "not routing", routing: false, wantStatus: []domain.TaskStatus{domain.TaskStatusSuperseded}},
+		{name: "a force route is in progress", routing: true, wantStatus: []domain.TaskStatus{domain.TaskStatusSuperseded}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

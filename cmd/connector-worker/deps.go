@@ -83,6 +83,16 @@ type deps struct {
 	now           func() time.Time
 }
 
+func pingValkeyOrClose(client *redis.Client, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		return fmt.Errorf("valkey ping: %w", err)
+	}
+	return nil
+}
+
 func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
 	aliases, err := fetchAliases(context.Background(), cfg.DefinitionServiceURL, cfg.ConnectorAliasFetchTimeout, wlog)
 	if err != nil {
@@ -96,10 +106,8 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*deps, func(), error) {
 		ReadTimeout:  cfg.ValkeyReadTimeout,
 		WriteTimeout: cfg.ValkeyWriteTimeout,
 	})
-	pingCtx, cancel := context.WithTimeout(context.Background(), cfg.ValkeyDialTimeout)
-	defer cancel()
-	if err := valkeyClient.Ping(pingCtx).Err(); err != nil {
-		return nil, nil, fmt.Errorf("valkey ping: %w", err)
+	if err := pingValkeyOrClose(valkeyClient, cfg.ValkeyDialTimeout); err != nil {
+		return nil, nil, err
 	}
 
 	consumer := valkeystream.NewConsumer(valkeyClient)

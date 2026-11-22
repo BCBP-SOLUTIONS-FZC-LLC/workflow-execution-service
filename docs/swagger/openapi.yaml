@@ -1445,7 +1445,9 @@ paths:
       summary: Cancel a workflow instance (admin)
       description: >
         Sends a cancel signal to the Temporal workflow. Valid from RUNNING or PAUSED status.
-        The workflow function cleans up active tasks and transitions to TERMINATED.
+        The workflow function cleans up active tasks and transitions to TERMINATED. When the
+        Temporal workflow execution no longer exists, the instance is marked TERMINATED directly,
+        its active tasks are failed, and the request is still answered 202.
       security:
         - GatewayTenantContext: []
           UserContext: []
@@ -1969,6 +1971,10 @@ paths:
             no completed step to go back to (it has not yet advanced past the first step);
             INVALID_INSTANCE_STATE — instance is neither RUNNING nor DEGRADED;
             INSTANCE_ALREADY_TERMINAL — instance is already in a terminal state;
+            TARGET_NODE_NOT_FOUND — a DEGRADED instance's target_node_key names no node of the
+            compiled plan the instance runs;
+            VERSION_INVALID — the stored compiled plan, read to check target_node_key, cannot be
+            decoded;
             RECORD_VERSION_CONFLICT — record_version is stale;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:
@@ -2355,8 +2361,9 @@ paths:
       summary: Claim a task assignment
       description: >
         The calling user claims their active unclaimed assignment for this task.
-        Sets claimed_at on the assignment row and increments task.record_version.
-        Sends a task-claim signal to the Temporal workflow.
+        Sets is_lead and claimed_at on the assignment row, increments task.record_version and
+        queues the WorkflowTaskClaimed event in the same transaction. No signal is sent to the
+        Temporal workflow.
         Returns 403 if the user has no active assignment.
         Returns 409 TASK_ALREADY_CLAIMED if another assignee already holds the lead; the lead
         repeating its own claim at the current record_version gets the task back.
@@ -2364,7 +2371,7 @@ paths:
         Returns 409 CLAIM_NOT_APPLICABLE if the task's assignee_mode is single — claim exists
         only to establish a lead among multiple assignees (assignee_mode=all).
         The calling user's eligibility for the task's department and its stage's required level
-        is read from Org & Membership before the signal: 422 ASSIGNEE_INELIGIBLE when the read
+        is read from Org & Membership before the claim is stored: 422 ASSIGNEE_INELIGIBLE when the read
         answers ineligible (a suspended, removed or demoted member) or the node has no stage in
         the compiled plan, 503 UPSTREAM_UNAVAILABLE when the read or the compiled plan fails.
       parameters:

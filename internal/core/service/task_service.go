@@ -17,13 +17,19 @@ import (
 
 var _ port.TaskService = (*TaskService)(nil)
 
+// errEligibilityNotWired refuses an action from a service built without the collaborators the
+// eligibility check needs, rather than letting the user through unchecked.
+var errEligibilityNotWired = errors.New("service has no eligibility checker or definitions client: refusing to act without the eligibility check")
+
 type TaskService struct {
 	Instances   port.InstanceRepository
 	Tasks       port.TaskRepository
 	Assignments port.TaskAssignmentRepository
 	Overrides   port.AssigneeOverrideRepository
 	Transactor  port.Transactor
+	Outbox      port.OutboxRepository
 	Signals     port.WorkflowSignalOutbox
+	Validator   port.EventValidator
 	Temporal    port.TemporalClient
 	Eligibility port.EligibilityChecker
 	Definitions port.DefinitionServiceClient
@@ -143,7 +149,7 @@ func (s *TaskService) ActiveByUser(ctx context.Context, tenantID, userID uuid.UU
 
 func (s *TaskService) checkActorEligible(ctx context.Context, tenantID uuid.UUID, task *domain.Task, userID uuid.UUID) error {
 	if s.Eligibility == nil || s.Definitions == nil {
-		return nil
+		return errEligibilityNotWired
 	}
 	inst, err := s.Instances.GetByID(ctx, tenantID, task.WorkflowInstanceID)
 	if err != nil {
@@ -231,12 +237,39 @@ func (s *TaskService) Claim(ctx context.Context, tenantID, taskID, userID uuid.U
 		return nil, err
 	}
 
-	if _, err := s.Assignments.ClaimLead(ctx, tenantID, taskID, target.ID, recordVersion); err != nil {
-		return nil, wrapTaskErr(err)
+	err = s.Transactor.RunInTx(withTenantGUC(ctx, tenantID), func(ctx context.Context) error {
+		if _, err := s.Assignments.ClaimLead(ctx, tenantID, taskID, target.ID, recordVersion); err != nil {
+			return claimLeadErr(err)
+		}
+		return s.enqueueTaskClaimed(ctx, inst, task, assignments, userID)
+	})
+	if err != nil {
+		return nil, err
 	}
 	committed := *task
 	committed.RecordVersion++
 	return s.readCommitted(ctx, tenantID, &committed)
+}
+
+func (s *TaskService) enqueueTaskClaimed(ctx context.Context, inst *domain.Instance, task *domain.Task, assignments []*domain.TaskAssignment, claimedBy uuid.UUID) error {
+	assignees := make([]uuid.UUID, len(assignments))
+	for i, a := range assignments {
+		assignees[i] = a.UserID
+	}
+	taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assignees}
+	payload := domain.NewWorkflowTaskClaimedPayload(instanceCore(inst), taskCore, claimedBy)
+	envelope, err := BuildEnvelope(ctx, s.Validator, domain.EventWorkflowTaskClaimed, inst.TenantID.String(), "instances/"+inst.ID.String(), claimedBy.String(), payload)
+	if err != nil {
+		return err
+	}
+	return s.Outbox.Enqueue(ctx, envelope)
+}
+
+func claimLeadErr(err error) error {
+	if errors.Is(err, domain.ErrNotFound) {
+		return port.ErrNotAssignee
+	}
+	return wrapTaskErr(err)
 }
 
 // readCommitted answers with the task as stored now. A read-back that fails twice does not undo a change
@@ -443,7 +476,7 @@ func (s *TaskService) sendReassignSignal(ctx context.Context, inst *domain.Insta
 
 func (s *TaskService) checkEligible(ctx context.Context, inst *domain.Instance, task *domain.Task, userID uuid.UUID) error {
 	if s.Eligibility == nil || s.Definitions == nil {
-		return nil
+		return errEligibilityNotWired
 	}
 	plan, err := newCompiledPlanCache(s.Definitions, s.logger()).backedBy(s.Cache).mainPlan(ctx, inst.TenantID, inst.WorkflowVersionID)
 	if err != nil {

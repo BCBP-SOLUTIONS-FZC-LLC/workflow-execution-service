@@ -59,7 +59,14 @@ func newApp(cfg *config.Config) (*app, error) {
 	}
 	cleanups = append(cleanups, appPool.Close)
 
-	processedEvents, err := eventbus.NewInbox(appPool, port.EventConsumers...)
+	inboxPool, err := newInboxPool(ctx, cfg, log)
+	if err != nil {
+		unwind()
+		return nil, err
+	}
+	cleanups = append(cleanups, inboxPool.Close)
+
+	processedEvents, err := eventbus.NewInbox(inboxPool, port.EventConsumers...)
 	if err != nil {
 		unwind()
 		return nil, err
@@ -200,8 +207,8 @@ func newApp(cfg *config.Config) (*app, error) {
 		return nil, err
 	}
 	taskService := &service.TaskService{
-		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides, Transactor: transactor, Signals: outboxRepo,
-		Temporal: temporal, Eligibility: eligibility, Definitions: definitions, Cache: cache, Log: log,
+		Instances: instances, Tasks: tasks, Assignments: assignments, Overrides: overrides, Transactor: transactor, Outbox: outboxRepo, Signals: outboxRepo,
+		Validator: validator, Temporal: temporal, Eligibility: eligibility, Definitions: definitions, Cache: cache, Log: log,
 	}
 	connectorTaskService := &service.ConnectorTaskService{
 		Instances: instances, Tasks: tasks, Assignments: assignments,
@@ -272,6 +279,7 @@ func newApp(cfg *config.Config) (*app, error) {
 		cfg:              cfg,
 		log:              log,
 		appPool:          appPool,
+		inboxPool:        inboxPool,
 		relayPool:        relayPool,
 		lockPool:         lockPool,
 		cache:            cacheClient,

@@ -80,6 +80,30 @@ func (r *TaskAssignmentRepo) ListActiveByTask(
 	return assignments, err
 }
 
+func (r *TaskAssignmentRepo) ListByTaskAndUser(
+	ctx context.Context,
+	tenantID, taskID, userID uuid.UUID,
+) ([]*domain.TaskAssignment, error) {
+	ctx = withTenantGUC(ctx, tenantID)
+	var assignments []*domain.TaskAssignment
+	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+		rows, err := db.New(dbtx).ListAssignmentsByTaskAndUser(ctx, db.ListAssignmentsByTaskAndUserParams{
+			TenantID: tenantID,
+			TaskID:   taskID,
+			UserID:   userID,
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		assignments = make([]*domain.TaskAssignment, len(rows))
+		for i, row := range rows {
+			assignments[i] = taskAssignmentFromDB(row)
+		}
+		return nil
+	})
+	return assignments, err
+}
+
 func (r *TaskAssignmentRepo) ListActiveByUser(
 	ctx context.Context,
 	tenantID, userID uuid.UUID,
@@ -248,17 +272,23 @@ func (r *TaskAssignmentRepo) Complete(
 ) (*domain.TaskAssignment, error) {
 	ctx = withTenantGUC(ctx, tenantID)
 	var assignment *domain.TaskAssignment
-	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+	err := execTx(ctx, r.pool, func(dbtx db.DBTX) error {
 		q := db.New(dbtx)
+		current, err := q.GetWorkflowTaskAssignment(ctx, id)
+		if err != nil {
+			return mapErr(err)
+		}
+		// The task row is locked before any assignment row, so two assignees completing at once
+		// queue on the task and the later one loses on the version instead of deadlocking.
+		if err := bumpTaskRecordVersion(ctx, q, current.TaskID, taskRecordVersion); err != nil {
+			return err
+		}
 		row, err := q.CompleteWorkflowTaskAssignment(ctx, db.CompleteWorkflowTaskAssignmentParams{
 			ID:         id,
 			ResultJson: resultJSON,
 		})
 		if err != nil {
 			return mapErr(err)
-		}
-		if err := bumpTaskRecordVersion(ctx, q, row.TaskID, taskRecordVersion); err != nil {
-			return err
 		}
 		assignment = taskAssignmentFromDB(row)
 		return nil
@@ -267,22 +297,26 @@ func (r *TaskAssignmentRepo) Complete(
 }
 
 func (r *TaskAssignmentRepo) SetLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {
-	return r.moveLead(ctx, tenantID, taskID, id, taskRecordVersion, (*db.Queries).SetTaskAssignmentLead)
+	return r.moveLead(ctx, tenantID, taskID, id, taskRecordVersion, func(q *db.Queries, ctx context.Context) (db.WorkflowTaskAssignment, error) {
+		return q.SetTaskAssignmentLead(ctx, db.SetTaskAssignmentLeadParams{ID: id, TaskID: taskID})
+	})
 }
 
 func (r *TaskAssignmentRepo) ClaimLead(ctx context.Context, tenantID, taskID, id uuid.UUID, taskRecordVersion int64) (*domain.TaskAssignment, error) {
-	return r.moveLead(ctx, tenantID, taskID, id, taskRecordVersion, (*db.Queries).ClaimTaskAssignmentLead)
+	return r.moveLead(ctx, tenantID, taskID, id, taskRecordVersion, func(q *db.Queries, ctx context.Context) (db.WorkflowTaskAssignment, error) {
+		return q.ClaimTaskAssignmentLead(ctx, db.ClaimTaskAssignmentLeadParams{ID: id, TaskID: taskID})
+	})
 }
 
 func (r *TaskAssignmentRepo) moveLead(
 	ctx context.Context,
 	tenantID, taskID, id uuid.UUID,
 	taskRecordVersion int64,
-	promote func(*db.Queries, context.Context, uuid.UUID) (db.WorkflowTaskAssignment, error),
+	promote func(*db.Queries, context.Context) (db.WorkflowTaskAssignment, error),
 ) (*domain.TaskAssignment, error) {
 	ctx = withTenantGUC(ctx, tenantID)
 	var assignment *domain.TaskAssignment
-	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
+	err := execTx(ctx, r.pool, func(dbtx db.DBTX) error {
 		q := db.New(dbtx)
 		if err := bumpTaskRecordVersion(ctx, q, taskID, taskRecordVersion); err != nil {
 			return err
@@ -293,7 +327,7 @@ func (r *TaskAssignmentRepo) moveLead(
 		}); err != nil {
 			return mapErr(err)
 		}
-		row, err := promote(q, ctx, id)
+		row, err := promote(q, ctx)
 		if err != nil {
 			return mapErr(err)
 		}

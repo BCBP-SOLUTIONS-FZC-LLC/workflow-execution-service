@@ -80,6 +80,7 @@ func TestDelegationStarted_AfterAnHTTPCancelOfTheSameDelegationMovesNothing(t *t
 		Instances: w.svc.Instances, Tasks: w.svc.Tasks, Assignments: w.svc.Assignments, Transactor: w.svc.Transactor,
 		Outbox: w.svc.Outbox, Signals: w.svc.Signals, Validator: w.svc.Validator, Ended: w.ended, Locks: &fakeLocker{},
 	}
+	fx10AllowClientEligibility(client, w.task.DepartmentID)
 	cancelled, err := client.CancelByDelegate(t.Context(), port.CancelByDelegateInput{TenantID: w.tenantID, DelegateUserID: w.delegate, DelegationID: &delegationID})
 	require.NoError(t, err)
 	require.Equal(t, 1, cancelled)

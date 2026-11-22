@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
+
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
@@ -97,6 +99,10 @@ func (f *w17bInbox) MarkProcessed(ctx context.Context, eventID uuid.UUID, consum
 	}
 	f.done[call] = true
 	return nil
+}
+
+func (f *w17bInbox) Process(ctx context.Context, env events.Envelope[json.RawMessage], consumer string, apply func(context.Context) error) error {
+	return processThrough(ctx, f, env, consumer, apply)
 }
 
 func (f *w17bInbox) Prune(context.Context, time.Duration) (int64, error) { return 0, nil }
@@ -235,10 +241,10 @@ func (l *w17bLog) Error(msg string, fields map[string]any) {
 
 var _ port.Logger = (*w17bLog)(nil)
 
-func (l *w17bLog) warnWith(eventID uuid.UUID, contains string) (w17bLogLine, bool) {
+func (l *w17bLog) errorWith(eventID uuid.UUID, contains string) (w17bLogLine, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for _, line := range l.warns {
+	for _, line := range l.errs {
 		if id, ok := line.Fields["event_id"].(uuid.UUID); ok && id == eventID && strings.Contains(line.Message, contains) {
 			return line, true
 		}

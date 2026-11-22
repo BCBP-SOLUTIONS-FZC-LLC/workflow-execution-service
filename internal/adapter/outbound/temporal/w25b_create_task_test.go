@@ -519,8 +519,7 @@ func TestCreateTask_AFailureAfterTheTaskInsert_RollsBackTheWholeTransaction(t *t
 			if tc.breakIt != nil {
 				w25bRequireRetryable(t, err)
 			} else {
-				// Whether a payload the schema refuses should be retried at all is an open question: only the rollback is pinned for it.
-				require.Error(t, err)
+				_ = w25bRequireNonRetryable(t, err, "ValidationError", tc.messagePart)
 			}
 			require.ErrorIs(t, err, errW25bStorage)
 			assert.Contains(t, err.Error(), tc.messagePart)

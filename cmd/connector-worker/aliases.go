@@ -133,11 +133,43 @@ func fetchAliases(ctx context.Context, addr string, timeout time.Duration, log p
 	if len(raw) > maxAliasBodyBytes {
 		return aliasconfig.Config{}, fmt.Errorf("alias registry response exceeds 1 MiB")
 	}
-	var cfg aliasconfig.Config
-	if err := json.Unmarshal(raw, &cfg); err != nil {
+	cfg, err := decodeAliasRows(raw, log)
+	if err != nil {
 		return aliasconfig.Config{}, fmt.Errorf("decode alias registry response: %w", err)
 	}
 	return validAliasRows(cfg, log), nil
+}
+
+// decodeAliasRows reads the registry answer one row at a time, so a row with a wrong-typed field
+// (a string where the timeout is a number) is skipped and named instead of failing the whole fetch.
+// An answer that is not a registry at all still fails.
+func decodeAliasRows(raw []byte, log port.Logger) (aliasconfig.Config, error) {
+	var rows struct {
+		Version  int
+		RestCall []json.RawMessage
+		SQLQuery []json.RawMessage
+	}
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return aliasconfig.Config{}, fmt.Errorf("decode alias registry: %w", err)
+	}
+	return aliasconfig.Config{
+		Version:  rows.Version,
+		RestCall: decodeEachRow[aliasconfig.Endpoint]("restCall", rows.RestCall, log),
+		SQLQuery: decodeEachRow[aliasconfig.Query]("sqlQuery", rows.SQLQuery, log),
+	}, nil
+}
+
+func decodeEachRow[T any](kind string, rows []json.RawMessage, log port.Logger) []T {
+	var out []T
+	for i, r := range rows {
+		var row T
+		if err := json.Unmarshal(r, &row); err != nil {
+			log.Warn("connector alias row skipped: it cannot be decoded", map[string]any{"kind": kind, "index": i, "failure": "undecodable row"})
+			continue
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // validAliasRows keeps the rows the connector library accepts. connectors.New

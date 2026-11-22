@@ -87,9 +87,10 @@ func (w *wkactWorld) addInstance(tenant uuid.UUID, status domain.InstanceStatus)
 }
 
 func (w *wkactWorld) addTask(tenant uuid.UUID, inst *domain.Instance, nodeKey string, status domain.TaskStatus) *domain.Task {
+	slaDate := time.Date(2026, 4, 2, 10, 30, 0, 0, time.UTC)
 	task := &domain.Task{
 		ID: uuid.New(), TenantID: tenant, WorkflowInstanceID: inst.ID, NodeKey: nodeKey, DepartmentID: uuid.New(),
-		Status: status, RecordVersion: 1,
+		Status: status, RecordVersion: 1, DueAt: &slaDate, FollowUpAt: &slaDate,
 	}
 	w.tasks[task.ID] = task
 	return task

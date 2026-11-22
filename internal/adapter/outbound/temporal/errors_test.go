@@ -306,7 +306,7 @@ func TestCreateTask_AssignmentsCreateFails(t *testing.T) {
 	assert.True(t, errors.Is(err, errBoom))
 }
 
-func TestPauseInstance_InvalidAdminUserID_TreatedAsNilActor(t *testing.T) {
+func TestPauseInstance_InvalidAdminUserID_IsRefusedAndWritesNothing(t *testing.T) {
 	instanceID := uuid.New()
 	inst := &domain.Instance{ID: instanceID, RecordVersion: 1}
 	deps, outbox := newInstanceTestDeps(inst, nil, nil)
@@ -314,8 +314,11 @@ func TestPauseInstance_InvalidAdminUserID_TreatedAsNilActor(t *testing.T) {
 	err := deps.PauseInstance(context.Background(), port.PauseInstanceInput{
 		InstanceID: instanceID.String(), TenantID: uuid.New().String(), AdminUserID: "not-a-uuid", Initiator: domain.InitiatorAdmin, RecordVersion: 1,
 	})
-	require.NoError(t, err, "adminUserIDPtr degrades to a nil actor rather than failing pause")
-	require.Len(t, outbox.enqueued, 1)
+	var appErr *temporal.ApplicationError
+	require.ErrorAs(t, err, &appErr, "a malformed actor is refused, not dropped from the event")
+	assert.True(t, appErr.NonRetryable())
+	assert.Empty(t, outbox.enqueued)
+	assert.NotEqual(t, domain.InstanceStatusPaused, inst.Status)
 }
 
 func TestCompleteAssignment_NoMatchingAssignmentForUser_NoOp(t *testing.T) {

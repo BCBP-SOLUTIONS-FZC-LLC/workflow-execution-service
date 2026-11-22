@@ -349,16 +349,16 @@ func TestReassignTask_Failures_AnswerWithTheMappedProblemAndSignalNothingUnlessT
 			wantStatus: http.StatusServiceUnavailable, wantCode: "UPSTREAM_UNAVAILABLE", wantDefinition: 1, wantInstReads: 1,
 		},
 		{
-			name: "the workflow engine cannot take the signal",
+			name: "the workflow engine cannot take the signal", withPlan: true,
 			setup: func(rig *w26aRig) {
 				rig.temporal.signalErr = fmt.Errorf("signal: %w: dial tcp 10.1.2.3:7233", port.ErrTemporalUnavailable)
 			},
-			wantStatus: http.StatusServiceUnavailable, wantCode: "UPSTREAM_UNAVAILABLE", wantSignals: 1, wantInstReads: 1,
+			wantStatus: http.StatusServiceUnavailable, wantCode: "UPSTREAM_UNAVAILABLE", wantEligible: 1, wantSignals: 1, wantInstReads: 1,
 		},
 		{
-			name:       "the signal fails for any other reason",
+			name: "the signal fails for any other reason", withPlan: true,
 			setup:      func(rig *w26aRig) { rig.temporal.signalErr = errW26aDatabase },
-			wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_ERROR", wantSignals: 1, wantInstReads: 1,
+			wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_ERROR", wantEligible: 1, wantSignals: 1, wantInstReads: 1,
 		},
 		{
 			name:       "the instance read fails with a database error",

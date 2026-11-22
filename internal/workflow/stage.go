@@ -106,7 +106,8 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 		InstanceID: in.instanceID, TenantID: in.tenantID, NodeKeys: []domain.NodeKey{nodeKey},
 	}); err != nil {
 		if abandonedMidActivity(ctx) {
-			in.supersedeAbandoned(ctx, out.TaskID)
+			// Not pending yet, so a force route's audit does not list this task.
+			in.supersedeTask(ctx, out.TaskID)
 			return nodeKey, "", errStageAbandoned
 		}
 		return nodeKey, "", err
@@ -159,7 +160,7 @@ func (in *interpreter) runTaskStage(ctx wf.Context, plan *dsl.CompiledPlan, dept
 	if fired != nil && !fired.Interrupting && !abandoned && !deferred {
 		var pathCtx wf.Context
 		pathCtx, cancelPaths = wf.WithCancel(ctx)
-		in.spawnFiredPath(pathCtx, plan, fired)
+		in.spawnFiredPath(pathCtx, plan, fired, string(nodeKey))
 		for !resolved && !abandoned && !deferred {
 			sel.Select(ctx)
 		}

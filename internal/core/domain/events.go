@@ -81,6 +81,13 @@ type TaskScopedCore struct {
 	AssigneeUserIDs []uuid.UUID `json:"assignee_user_ids"`
 }
 
+func (t TaskScopedCore) withNonNilAssignees() TaskScopedCore {
+	if t.AssigneeUserIDs == nil {
+		t.AssigneeUserIDs = []uuid.UUID{}
+	}
+	return t
+}
+
 type FailedBranch struct {
 	DepartmentID uuid.UUID `json:"department_id"`
 	LastNodeKey  string    `json:"last_node_key"`
@@ -151,6 +158,9 @@ type WorkflowInstanceDegradedPayload struct {
 }
 
 func NewWorkflowInstanceDegradedPayload(core CommonCore, startedByUserID uuid.UUID, failedBranches []FailedBranch) WorkflowInstanceDegradedPayload {
+	if failedBranches == nil {
+		failedBranches = []FailedBranch{}
+	}
 	return WorkflowInstanceDegradedPayload{CommonCore: core, StartedByUserID: startedByUserID, FailedBranches: failedBranches}
 }
 
@@ -183,6 +193,9 @@ type WorkflowInstanceForceRoutedPayload struct {
 }
 
 func NewWorkflowInstanceForceRoutedPayload(core CommonCore, actorUserID uuid.UUID, fromNodeKeys []string, toNodeKey, direction string) WorkflowInstanceForceRoutedPayload {
+	if fromNodeKeys == nil {
+		fromNodeKeys = []string{}
+	}
 	return WorkflowInstanceForceRoutedPayload{CommonCore: core, ActorUserID: actorUserID, FromNodeKeys: fromNodeKeys, ToNodeKey: toNodeKey, Direction: direction}
 }
 
@@ -202,7 +215,7 @@ func NewWorkflowTaskCreatedPayload(
 	connectorType *string, resolvedInputs map[string]any, outputMapping []dsl.IOVar,
 ) WorkflowTaskCreatedPayload {
 	return WorkflowTaskCreatedPayload{
-		CommonCore: core, TaskScopedCore: task, StageType: stageType, DueAt: dueAt, FollowUpAt: followUpAt,
+		CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), StageType: stageType, DueAt: dueAt, FollowUpAt: followUpAt,
 		ConnectorType: connectorType, ResolvedInputs: resolvedInputs, OutputMapping: outputMapping,
 	}
 }
@@ -214,7 +227,7 @@ type WorkflowTaskClaimedPayload struct {
 }
 
 func NewWorkflowTaskClaimedPayload(core CommonCore, task TaskScopedCore, claimedByUserID uuid.UUID) WorkflowTaskClaimedPayload {
-	return WorkflowTaskClaimedPayload{CommonCore: core, TaskScopedCore: task, ClaimedByUserID: claimedByUserID}
+	return WorkflowTaskClaimedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), ClaimedByUserID: claimedByUserID}
 }
 
 type WorkflowTaskCompletedPayload struct {
@@ -224,7 +237,7 @@ type WorkflowTaskCompletedPayload struct {
 }
 
 func NewWorkflowTaskCompletedPayload(core CommonCore, task TaskScopedCore, completedByUserID uuid.UUID) WorkflowTaskCompletedPayload {
-	return WorkflowTaskCompletedPayload{CommonCore: core, TaskScopedCore: task, CompletedByUserID: completedByUserID}
+	return WorkflowTaskCompletedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), CompletedByUserID: completedByUserID}
 }
 
 type WorkflowTaskDeferredPayload struct {
@@ -236,7 +249,7 @@ type WorkflowTaskDeferredPayload struct {
 }
 
 func NewWorkflowTaskDeferredPayload(core CommonCore, task TaskScopedCore, deferredToNodeKey string, reason *string, dueAt *time.Time) WorkflowTaskDeferredPayload {
-	return WorkflowTaskDeferredPayload{CommonCore: core, TaskScopedCore: task, DeferredToNodeKey: deferredToNodeKey, Reason: reason, DueAt: dueAt}
+	return WorkflowTaskDeferredPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), DeferredToNodeKey: deferredToNodeKey, Reason: reason, DueAt: dueAt}
 }
 
 type WorkflowTaskReassignedPayload struct {
@@ -249,7 +262,7 @@ type WorkflowTaskReassignedPayload struct {
 }
 
 func NewWorkflowTaskReassignedPayload(core CommonCore, task TaskScopedCore, oldUserID *uuid.UUID, newUserID uuid.UUID, initiator string, delegationID *uuid.UUID) WorkflowTaskReassignedPayload {
-	return WorkflowTaskReassignedPayload{CommonCore: core, TaskScopedCore: task, OldUserID: oldUserID, NewUserID: newUserID, Initiator: initiator, DelegationID: delegationID}
+	return WorkflowTaskReassignedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), OldUserID: oldUserID, NewUserID: newUserID, Initiator: initiator, DelegationID: delegationID}
 }
 
 // OptionalUserID is the pointer form of a user id the caller holds as the all-zero id when nobody is meant.
@@ -268,7 +281,7 @@ type WorkflowTaskSupersededPayload struct {
 
 // NewWorkflowTaskSupersededPayload leaves the actor out when actorUserID is the all-zero id, as when the system superseded the task.
 func NewWorkflowTaskSupersededPayload(core CommonCore, task TaskScopedCore, actorUserID uuid.UUID) WorkflowTaskSupersededPayload {
-	return WorkflowTaskSupersededPayload{CommonCore: core, TaskScopedCore: task, ActorUserID: OptionalUserID(actorUserID)}
+	return WorkflowTaskSupersededPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), ActorUserID: OptionalUserID(actorUserID)}
 }
 
 type WorkflowTaskFailedPayload struct {
@@ -279,7 +292,7 @@ type WorkflowTaskFailedPayload struct {
 }
 
 func NewWorkflowTaskFailedPayload(core CommonCore, task TaskScopedCore, cascadeSource, errorClass string) WorkflowTaskFailedPayload {
-	return WorkflowTaskFailedPayload{CommonCore: core, TaskScopedCore: task, CascadeSource: cascadeSource, ErrorClass: errorClass}
+	return WorkflowTaskFailedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), CascadeSource: cascadeSource, ErrorClass: errorClass}
 }
 
 type WorkflowTaskSLAWarningPayload struct {
@@ -289,7 +302,7 @@ type WorkflowTaskSLAWarningPayload struct {
 }
 
 func NewWorkflowTaskSLAWarningPayload(core CommonCore, task TaskScopedCore, followUpAt time.Time) WorkflowTaskSLAWarningPayload {
-	return WorkflowTaskSLAWarningPayload{CommonCore: core, TaskScopedCore: task, FollowUpAt: followUpAt}
+	return WorkflowTaskSLAWarningPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), FollowUpAt: followUpAt}
 }
 
 type WorkflowTaskSLABreachedPayload struct {
@@ -299,7 +312,7 @@ type WorkflowTaskSLABreachedPayload struct {
 }
 
 func NewWorkflowTaskSLABreachedPayload(core CommonCore, task TaskScopedCore, dueAt time.Time) WorkflowTaskSLABreachedPayload {
-	return WorkflowTaskSLABreachedPayload{CommonCore: core, TaskScopedCore: task, DueAt: dueAt}
+	return WorkflowTaskSLABreachedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), DueAt: dueAt}
 }
 
 const (

@@ -203,6 +203,7 @@ func dlgfixNewClient(t *testing.T) *dlgfixClient {
 		Instances: h.instances, Tasks: h.tasks, Assignments: h.assignments,
 		Transactor: h.tx, Outbox: h.outbox, Signals: h.outbox, Validator: realValidator(), Ended: newFakeEndedDelegations(), Locks: &fakeLocker{}, Log: &fakeLogger{},
 	}
+	h.withEligibility(func(string) (bool, error) { return true, nil })
 	return h
 }
 
@@ -357,7 +358,7 @@ func TestDelegationReassign_AReadThatFailsChangesNothingAndFailsTheCall(t *testi
 		assert.Zero(t, h.tx.commits)
 	})
 
-	t.Run("an instance that cannot be read, with the eligibility check off", func(t *testing.T) {
+	t.Run("an instance that cannot be read", func(t *testing.T) {
 		h := dlgfixNewClient(t)
 		first := h.seed(t, "reviewer")
 		second := h.seed(t, "reviewer")

@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/inbound/http/handler"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
+
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
@@ -67,6 +69,10 @@ func (f *w15bProcessedEvents) IsProcessed(context.Context, uuid.UUID, string) (b
 func (f *w15bProcessedEvents) MarkProcessed(_ context.Context, eventID uuid.UUID, consumer string) error {
 	f.marks = append(f.marks, w15bProcessedMark{eventID, consumer})
 	return nil
+}
+
+func (f *w15bProcessedEvents) Process(ctx context.Context, env events.Envelope[json.RawMessage], consumer string, apply func(context.Context) error) error {
+	return processThrough(ctx, f, env, consumer, apply)
 }
 
 func (f *w15bProcessedEvents) Prune(context.Context, time.Duration) (int64, error) { return 0, nil }

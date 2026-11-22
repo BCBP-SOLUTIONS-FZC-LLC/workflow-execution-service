@@ -30,6 +30,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - Postgres repository tests for error mapping, assignment and task writes, the recency lock, outbox records, keyset paging, task filters, tenant retention, missing tenant scope and tenant-scoped writes under row-level security, and the instance start queue choice.
 - Handler and middleware tests for idempotency, internal event envelopes and recency, problem documents, strict bodies, identity routes and task reads; Temporal activity tests for task creation, instance nodes, assignments, instance status and plan reads, with real-Postgres claim and complete races.
 - Route tests for task claim, complete, defer and reassign, instance pause, resume and cancel, force routes, node overrides, outside answers and active tasks by user, run through the real services; event schema registry and validation tests; Postgres tests for inbox failures and a blank override reason.
+- Router tests for routing, readiness, route groups, replayed idempotent routes and the AsyncAPI page; logger level and slow-query argument redaction tests; connector-worker tests for configuration, document references, the alias registry, dispatch and its background loops on a fake clock; worker configuration, topology polling and OpenBao reader validation tests.
+- Interpreter tests for pause signals, reassign stamps, message boundaries, fork reruns, respawned branches, status restore and wind-down; port value tests; observability tests for metric registration, telemetry, Temporal interceptors and the metric registry document; service tests for node overrides and repeated outside answers.
+- Temporal adapter tests for own-assignment lookups, plan reads and instance events; server configuration tests through the real binary; middleware error-log tests; Temporal client tests and route chains through the real client; Valkey cache error and delete tests; event schema enum tests; force-back plan-read and signal failure tests.
+- Domain value tests; automation-principal client and connector callback route tests; outbound HTTP client, OpenBao reader and entitlements client tests; Valkey stream publisher and consumer, Glue codec, signal relay and metrics test-helper tests.
 
 ### Removed
 
@@ -38,6 +42,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- Claiming a multi-assignee task now emits `WorkflowTaskClaimed`, naming the claimer (also as the event's actor) and every active assignee; the event is stored in the same transaction as the lead, so the lead and the event stand or fall together. A claim used to change the lead and tell nobody.
+- A claim by a user whose assignment was closed a moment earlier (membership revoked, user deleted) is now refused as "not the task's active assignee" and changes nothing; it used to mark the closed assignment lead and announce a claim by someone who no longer held the task.
+- Handling inbound events no longer competes with their own effects for database connections: the event inbox has its own small connection pool, so a burst of deliveries cannot use up the application pool and stall user requests.
+- Two simultaneous deliveries of the same inbound event (delegation, user, membership, tenant and connector-task events) now apply once: the event's id is claimed before it is applied, and the second delivery waits and is acknowledged as a duplicate. Both used to pass the duplicate check and apply. A delivery whose claim cannot be written is still answered 503.
+- Start-up refuses a zero or negative `GLUE_SCHEMA_CACHE_TTL` and a `DEFINITION_SERVICE_URL` that is not an absolute http or https URL with a host, instead of silently using 5 minutes or failing on the first call.
+- The connector worker closes its Valkey connection when the first ping fails, and exits with status 1 when its health listener cannot start or stops, instead of running on without a health endpoint.
+- The worker lets a second SIGTERM or Ctrl+C end a stuck shutdown, drains correctly when a signal arrives during start-up, and logs a failed database pool drain.
+- The event encoder refuses a schema version that is not AVAILABLE in the registry, and the decoder refuses a message with no payload after the header or with a compressed payload.
+- A task without a due date or follow-up date no longer produces an SLA breach or warning event with a zero date; the activity fails without retry.
+- The `/asyncapi` page shows the environment the service is configured for instead of the `ENV` variable, escapes message and schema names in links and ids, copies field names that contain an apostrophe, no longer repeats element ids, and shows "(not found)" for a payload schema that does not exist.
+- Cancelling an instance whose Temporal workflow no longer exists ends the instance (TERMINATED, active tasks failed) and answers 202, as terminate does, instead of 409 INVALID_INSTANCE_STATE.
+- The tenant purge stops quietly when the service shuts down: it no longer counts a failure or delays the tenant's next attempt.
+- Degraded and force-route events, and every task event, carry empty lists instead of null when they name no failed branches, source nodes or assignees.
+- Cancelling a COMPLETED or FAILED instance leaves it as it is and emits no cancelled event; it used to be rewritten as TERMINATED.
+- Completing a task without a result stores no result; an empty value used to be refused by the database, so the completion was retried without end.
+- Vacating an assignment that is already closed is not found and changes nothing, and setting or claiming the lead with an assignment of another task is not found; both used to rewrite the row.
+- Cancel-by-delegate leaves assignments on finished tasks alone, and the active-tasks-by-user listing returns only READY and IN_PROGRESS tasks; both used to include finished tasks.
+- Inbound event delivery answers 503 when the dedup check or record fails, so the sender retries; it used to proceed, or answer 200 with the delivery unrecorded. The four event routes are exempt from the 30-second request timeout, which used to answer 503 after the effects had committed.
+- Shutdown waits for the background loops before closing the database pools; a loop in the middle of a tick used to hit a closed pool.
+- A force-route with no target while two or more branches are failed targets none, and a boundary timer with a zero or negative duration is disabled; the first used to pick a branch that had never completed a node, the second fired at once.
+- Every task action that checks eligibility (claim, complete, defer, reassign, node override, a delegate's reassignment and the return to the delegator on cancel) is refused, with nothing signalled or stored, when the service has no eligibility checker or definitions client; these used to skip the eligibility and plan checks.
+- The connector worker's reclaim of stale stream entries fails and retries on the next tick when the delivery count cannot be read; it used to hand the entry over as a first delivery, so a poison entry never reached the delivery cap.
+- Reassigning a task to a user who already holds it takes the named old assignee off the task and records a reassigned event in the same transaction; the old assignee used to stay active with no event.
+- Pausing or resuming an instance with a malformed admin id is refused as a non-retryable validation error; the event used to be published without an actor.
+- A revoked or otherwise non-active automation principal is answered as "no automation principal" even when the token service sends it without a principal id; it used to be reported as upstream unavailable and retried forever. An answer with no status at all is still treated as unavailable.
+- Force-back of a degraded instance with a target node key that is not in the workflow answers 409 TARGET_NODE_NOT_FOUND; it used to answer 202 and the workflow dropped the signal.
+- Cancelling an instance that has two or more failed parallel forks open records the cancellation once and ends the instance TERMINATED; it used to end the run without the cancel write, leaving the instance row DEGRADED.
+- A user who was reassigned a task and then lost the completion race to a co-assignee no longer gets "all done"; their reassigned assignment was not found before.
+- The connector worker skips and logs an alias row it cannot decode (for example a string timeout) and loads the rest; one such row used to fail the whole registry and stop start-up.
+- The AsyncAPI page shortens long descriptions at a character boundary; a multi-byte character at the cut used to be split, leaving invalid UTF-8.
+- Two force routes through the same parallel branch each run their own remaining steps; the second used to overwrite the first one's continuation.
+- A non-interrupting boundary path that fails logs a warning with tenant, instance and host node; it used to fail with no trace.
+- A refused FAILED status write is logged, and an instance that fails at start (plan read, missing main plan, query registration) gets a completion time. When a failed run's final FAILED write is also refused, the run returns both errors instead of dropping the write error.
+- A task created just as its stage was cancelled during a force route is marked SUPERSEDED; it used to stay READY forever.
+- Claiming a task or setting its lead, and completing an assignment, succeed or fail as a whole; a later failing step used to leave the task version bumped or the assignment completed.
+- Two assignees completing an all-assignee task at once, or a completion beside a reassignment to an existing holder, no longer deadlock: every task write locks the task row first, and the later one gets a version conflict.
+- The tenant purge due-list treats a limit of zero or less as the default page; a negative limit used to fail with a database error and zero returned nothing.
+- An Idempotency-Key claim expires after one minute; a pod that crashed mid-request used to leave every retry with that key answered 409 for 24 hours. The stored answer keeps the full lifetime.
+- An event payload the schema refuses ends the activity with a non-retryable ValidationError, and a task whose compiled node is JSON null is refused the same way; the first used to be retried until the activity timed out, and the second created a task with no assignees.
 - A refused request answers with the refusal's own fixed text (for example "workflow execution not found"), except a refused force-route target and an invalid override map, which still explain which node and why. It used to echo the wrapped error text, such as Temporal SDK text and signal channel names, on 404 and 409 answers.
 - A request refused with a wrapped cause logs that cause once, with request id, trace id, route and status, at Warn for 4xx and Error for 5xx.
 - Terminating an instance that another write changes at the same moment retries the transaction a few times and answers 409 RECORD_VERSION_CONFLICT only if the conflict persists. It used to retry under serializable isolation and answer 500 after the workflow was already terminated.

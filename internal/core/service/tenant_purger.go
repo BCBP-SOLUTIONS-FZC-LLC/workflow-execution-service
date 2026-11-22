@@ -53,6 +53,9 @@ func (p *TenantPurger) Tick(ctx context.Context) error {
 			p.deps.Logger.Info("tenant purge skipped: its record changed or another replica is purging it", map[string]any{"tenant_id": d.TenantID})
 			continue
 		}
+		if ctx.Err() != nil && err != nil {
+			return errors.Join(append(failures, fmt.Errorf("tenant purge stopped: %w", ctx.Err()))...)
+		}
 		if err != nil {
 			p.deps.Failed()
 			p.deps.Logger.Error("tenant purge failed", map[string]any{"tenant_id": d.TenantID, "error": err.Error()})

@@ -129,7 +129,7 @@ func TestRepositories_AFailingStatement_ReturnsTheDatabaseErrorWithNoResult(t *t
 	t.Run("a lead move of an assignment that does not exist is not found", func(t *testing.T) {
 		_, err := assignments.ClaimLead(ctx, tenantID, task.ID, id, task.RecordVersion)
 		require.ErrorIs(t, err, domain.ErrNotFound)
-		_, err = assignments.SetLead(ctx, tenantID, task.ID, id, task.RecordVersion+1)
+		_, err = assignments.SetLead(ctx, tenantID, task.ID, id, task.RecordVersion)
 		require.ErrorIs(t, err, domain.ErrNotFound)
 	})
 
@@ -174,7 +174,7 @@ func TestRepositories_AFailingStatement_ReturnsTheDatabaseErrorWithNoResult(t *t
 		assert.Empty(t, found)
 	})
 	t.Run("a lead move whose lead clearing fails", func(t *testing.T) {
-		claimed, err := assignments.ClaimLead(ctx, tenantID, task.ID, id, task.RecordVersion+2)
+		claimed, err := assignments.ClaimLead(ctx, tenantID, task.ID, id, task.RecordVersion)
 		requireQueryFailure(t, err)
 		assert.Nil(t, claimed)
 	})

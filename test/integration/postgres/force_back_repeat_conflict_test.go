@@ -46,7 +46,7 @@ func TestInstanceService_RepeatedForceBackWithTheOldRecordVersionConflictsAfterT
 	appPool := newAppRolePool(t, superPool, superDSN)
 	instances := postgres.NewInstanceRepo(appPool)
 	recorder := &wflSignalRecorder{}
-	svc := &service.InstanceService{Instances: instances, Tasks: postgres.NewTaskRepo(appPool), Temporal: recorder}
+	svc := &service.InstanceService{Instances: instances, Tasks: postgres.NewTaskRepo(appPool), Temporal: recorder, Definitions: newFx8Definitions(t, "billing", "prep")}
 	workflowSide := &temporaladapter.Deps{Instances: instances, Transactor: postgres.NewTransactor(appPool)}
 	ctx := context.Background()
 

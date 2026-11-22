@@ -267,7 +267,7 @@ func (in *interpreter) closePark(p *park) {
 }
 
 func (in *interpreter) writeDegraded(ctx wf.Context) error {
-	var branches []domain.FailedBranch
+	branches := []domain.FailedBranch{}
 	for _, p := range in.parks {
 		branches = append(branches, p.branches...)
 	}
@@ -292,9 +292,6 @@ func (in *interpreter) routeToParks(ctx wf.Context, envelope adminSignalEnvelope
 	switch envelope.Kind {
 	case SignalInstanceCancel:
 		parks[0].ch.Send(ctx, envelope)
-		for _, p := range parks[1:] {
-			p.ch.Send(ctx, adminSignalEnvelope{Kind: parkTerminate})
-		}
 		return true
 	case SignalInstanceForceFwd, SignalInstanceForceBack:
 		target := envelope.Signal.TargetDeptID
@@ -311,6 +308,17 @@ func (in *interpreter) routeToParks(ctx wf.Context, envelope adminSignalEnvelope
 		return true
 	}
 	return false
+}
+
+// terminateOtherParks stops the parks that did not take a cancel. They are told only once the
+// cancel write is done: a park that stops ends its fork, which can cancel the branch still
+// holding the write.
+func (in *interpreter) terminateOtherParks(ctx wf.Context, taker *park) {
+	for _, p := range in.liveParks() {
+		if p != taker {
+			p.ch.Send(ctx, adminSignalEnvelope{Kind: parkTerminate})
+		}
+	}
 }
 
 func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, gw *gateway, preFork domain.NodeKey, completed []completedBranch, failed []failedBranch, admin wf.Channel) (stepOutcome, error) {
@@ -337,7 +345,11 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, gw 
 			switch envelope.Kind {
 			case SignalInstanceCancel:
 				terminated = true
-				cancelErr = in.cancelInstanceOnSignal(ctx, sig)
+				// This park is the only one that writes the cancel, so a boundary
+				// that cancelled its context must not stop the write.
+				writeCtx, _ := wf.NewDisconnectedContext(ctx)
+				cancelErr = in.cancelInstanceOnSignal(writeCtx, sig)
+				in.terminateOtherParks(ctx, p)
 
 			case parkTerminate:
 				terminated = true
@@ -897,6 +909,9 @@ func firstNodeOf(plan *dsl.CompiledPlan, steps []dsl.ExecutionStep) domain.NodeK
 func failedBranchFor(failed []failedBranch, sig adminSignal) int {
 	if sig.TargetDeptID == "" && len(failed) == 1 {
 		return 0
+	}
+	if sig.TargetDeptID == "" {
+		return -1
 	}
 	if idx := indexOfFailedBranch(failed, sig.TargetDeptID); idx >= 0 {
 		return idx

@@ -9,6 +9,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsglue "github.com/aws/aws-sdk-go-v2/service/glue"
+	"github.com/aws/aws-sdk-go-v2/service/glue/types"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,7 +24,7 @@ func (f fakeSchemaVersionGetter) GetSchemaVersion(_ context.Context, _ *awsglue.
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &awsglue.GetSchemaVersionOutput{SchemaVersionId: aws.String(f.versionID)}, nil
+	return &awsglue.GetSchemaVersionOutput{SchemaVersionId: aws.String(f.versionID), Status: types.SchemaVersionStatusAvailable}, nil
 }
 
 type nilSchemaVersionIDGetter struct{}
@@ -176,7 +177,7 @@ type nameCapturingGetter struct {
 
 func (g *nameCapturingGetter) GetSchemaVersion(_ context.Context, params *awsglue.GetSchemaVersionInput, _ ...func(*awsglue.Options)) (*awsglue.GetSchemaVersionOutput, error) {
 	g.gotSchemaName = params.SchemaId.SchemaName
-	return &awsglue.GetSchemaVersionOutput{SchemaVersionId: aws.String(g.versionID)}, nil
+	return &awsglue.GetSchemaVersionOutput{SchemaVersionId: aws.String(g.versionID), Status: types.SchemaVersionStatusAvailable}, nil
 }
 
 func TestCodec_Encode_RegistryLookupError_FailsClosed(t *testing.T) {
@@ -220,7 +221,7 @@ type countingGetter struct {
 
 func (g *countingGetter) GetSchemaVersion(_ context.Context, _ *awsglue.GetSchemaVersionInput, _ ...func(*awsglue.Options)) (*awsglue.GetSchemaVersionOutput, error) {
 	*g.calls++
-	return &awsglue.GetSchemaVersionOutput{SchemaVersionId: aws.String(g.versionID)}, nil
+	return &awsglue.GetSchemaVersionOutput{SchemaVersionId: aws.String(g.versionID), Status: types.SchemaVersionStatusAvailable}, nil
 }
 
 // TestRegistrySchemaName_MatchesEventschemaFilenames pins registrySchemaName's

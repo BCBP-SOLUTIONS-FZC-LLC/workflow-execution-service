@@ -210,6 +210,7 @@ func cseNewTaskWorld() *cseTaskWorld {
 	w.svc = &service.TaskService{
 		Instances: w.instances, Tasks: w.tasks, Assignments: w.assignments, Temporal: w.temporal,
 	}
+	fx10AllowTaskEligibility(w.svc, w.task.DepartmentID)
 	return w
 }
 

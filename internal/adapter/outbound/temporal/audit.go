@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -141,29 +140,27 @@ func (d *Deps) supersedeTask(ctx context.Context, tenantID, instanceID uuid.UUID
 
 func (d *Deps) RecordSLAWarning(ctx context.Context, in port.RecordSLAWarningInput) error {
 	return d.recordSLAEvent(ctx, in.TenantID, in.InstanceID, in.TaskID, domain.EventWorkflowTaskSLAWarning,
-		func(core domain.CommonCore, taskCore domain.TaskScopedCore, task *domain.Task) any {
-			followUpAt := time.Time{}
-			if task.FollowUpAt != nil {
-				followUpAt = *task.FollowUpAt
+		func(core domain.CommonCore, taskCore domain.TaskScopedCore, task *domain.Task) (any, error) {
+			if task.FollowUpAt == nil {
+				return nil, nonRetryable("ValidationError", fmt.Errorf("task %s has no follow-up date", task.ID))
 			}
-			return domain.NewWorkflowTaskSLAWarningPayload(core, taskCore, followUpAt)
+			return domain.NewWorkflowTaskSLAWarningPayload(core, taskCore, *task.FollowUpAt), nil
 		})
 }
 
 func (d *Deps) RecordSLABreach(ctx context.Context, in port.RecordSLABreachInput) error {
 	return d.recordSLAEvent(ctx, in.TenantID, in.InstanceID, in.TaskID, domain.EventWorkflowTaskSLABreached,
-		func(core domain.CommonCore, taskCore domain.TaskScopedCore, task *domain.Task) any {
-			dueAt := time.Time{}
-			if task.DueAt != nil {
-				dueAt = *task.DueAt
+		func(core domain.CommonCore, taskCore domain.TaskScopedCore, task *domain.Task) (any, error) {
+			if task.DueAt == nil {
+				return nil, nonRetryable("ValidationError", fmt.Errorf("task %s has no due date", task.ID))
 			}
-			return domain.NewWorkflowTaskSLABreachedPayload(core, taskCore, dueAt)
+			return domain.NewWorkflowTaskSLABreachedPayload(core, taskCore, *task.DueAt), nil
 		})
 }
 
 func (d *Deps) recordSLAEvent(
 	ctx context.Context, tenantIDStr, instanceIDStr, taskIDStr, eventType string,
-	buildPayload func(core domain.CommonCore, taskCore domain.TaskScopedCore, task *domain.Task) any,
+	buildPayload func(core domain.CommonCore, taskCore domain.TaskScopedCore, task *domain.Task) (any, error),
 ) error {
 	tenantID, err := uuid.Parse(tenantIDStr)
 	if err != nil {
@@ -205,7 +202,11 @@ func (d *Deps) recordSLAEvent(
 			return err
 		}
 		taskCore := domain.TaskScopedCore{TaskID: task.ID, NodeKey: task.NodeKey, DepartmentID: task.DepartmentID, AssigneeUserIDs: assigneeUserIDs}
-		if err := d.enqueueInstanceEvent(ctx, tenantID, instanceID, eventType, buildPayload(core, taskCore, task)); err != nil {
+		payload, err := buildPayload(core, taskCore, task)
+		if err != nil {
+			return err
+		}
+		if err := d.enqueueInstanceEvent(ctx, tenantID, instanceID, eventType, payload); err != nil {
 			return err
 		}
 		recorded = true

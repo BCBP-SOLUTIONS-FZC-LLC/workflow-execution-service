@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -43,6 +44,21 @@ type RouterConfig struct {
 
 const RequestTimeout = 30 * time.Second
 
+const eventRoutePrefix = "/api/v1/internal/events/"
+
+// requestTimeout leaves the event routes out: they run detached from the request and must answer
+// with their own result once effects have committed, not with a late 503 (execution LLD §6.2).
+func requestTimeout(d time.Duration) gin.HandlerFunc {
+	timeout := gincommon.TimeoutMiddleware(d)
+	return func(c *gin.Context) {
+		if strings.HasPrefix(c.FullPath(), eventRoutePrefix) {
+			c.Next()
+			return
+		}
+		timeout(c)
+	}
+}
+
 type Router struct {
 	engine *gin.Engine
 }
@@ -62,13 +78,14 @@ func NewRouter(cfg RouterConfig) *Router {
 	r.NoRoute(handler.NotFound)
 
 	if dev {
-		r.GET("/asyncapi", AsyncAPIHandler)
+		r.GET("/asyncapi", AsyncAPIHandler(cfg.AppEnv))
 	}
 
-	cfg.GinConfig.RequestTimeout = RequestTimeout
+	cfg.GinConfig.RequestTimeout = 0
 	for _, mw := range gincommon.ObservabilityMiddlewares(cfg.GinConfig) {
 		r.Use(mw)
 	}
+	r.Use(requestTimeout(RequestTimeout))
 	r.Use(middleware.LogRequestErrors(cfg.GinConfig.Logger))
 
 	r.GET("/healthz", gincommon.HealthHandler())

@@ -83,6 +83,7 @@ func TestW21aTaskComplete_WithoutAResult_SignalsAnEmptyResultString(t *testing.T
 
 func TestW21aTaskReassign_Success_AnswersTheTaskWithItsTypeAndAssigneeCount(t *testing.T) {
 	svc, instances, tasks, assignments, _, temporal := newTaskServiceHarness()
+	fx9AllowEligibility(t, svc, uuid.Nil)
 	tenantID, instanceID, oldUser, newUser, actor := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	instances.byID[instanceID] = &domain.Instance{ID: instanceID, TenantID: tenantID, TemporalWorkflowID: "tenant:biz", Status: domain.InstanceStatusRunning}
 	task := newReadyTask(tenantID, instanceID)

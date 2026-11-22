@@ -79,12 +79,17 @@ func (c *AutomationPrincipalClient) AutomationPrincipal(ctx context.Context, ten
 		PrincipalSub string    `json:"principal_sub"`
 		Status       string    `json:"status"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil || body.PrincipalID == uuid.Nil {
-		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered without a principal_id", ErrUpstreamUnavailable)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered an unreadable principal: %v", ErrUpstreamUnavailable, err)
 	}
-
+	if body.Status == "" {
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered without a status", ErrUpstreamUnavailable)
+	}
 	if body.Status != "active" {
 		return port.AutomationPrincipal{}, port.ErrNoAutomationPrincipal
+	}
+	if body.PrincipalID == uuid.Nil {
+		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered without a principal_id", ErrUpstreamUnavailable)
 	}
 	if body.PrincipalSub == "" {
 		return port.AutomationPrincipal{}, fmt.Errorf("%w: token service answered without a principal_sub", ErrUpstreamUnavailable)

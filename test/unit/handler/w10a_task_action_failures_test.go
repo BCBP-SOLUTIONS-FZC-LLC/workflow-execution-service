@@ -296,6 +296,8 @@ func (w *w10aWorld) router(withPlanCheck bool) *gin.Engine {
 	if withPlanCheck {
 		svc.Definitions = w.definitions
 		svc.Eligibility = w.eligibility
+	} else {
+		fx10AllowEligibility(svc, w.task.DepartmentID)
 	}
 	return newRouter(handler.New(handler.Services{Tasks: svc}))
 }
@@ -373,7 +375,7 @@ func TestCompleteTask_SignalFailsAndTheReservationCannotBeReleased_AnswersWithTh
 	require.Len(t, w.cache.reserve, 1)
 	assert.Contains(t, w.cache.reserve[0], testTaskID.String(), "the reservation is for this task")
 	assert.Equal(t, w.cache.reserve, w.cache.dels, "the release asked for the very key that was reserved")
-	assert.Len(t, w.cache.values, 1, "the key stays because the delete failed")
+	assert.Contains(t, w.cache.values, w.cache.reserve[0], "the key stays because the delete failed")
 
 	complete()
 
@@ -381,7 +383,7 @@ func TestCompleteTask_SignalFailsAndTheReservationCannotBeReleased_AnswersWithTh
 	assert.Equal(t, w.cache.reserve[0], w.cache.reserve[1])
 	assert.Len(t, w.temporal.signals, 1, "the retry sends no second signal")
 	assert.Len(t, w.cache.dels, 1, "the retry releases nothing")
-	assert.Len(t, w.cache.values, 1, "the key is still held")
+	assert.Contains(t, w.cache.values, w.cache.reserve[0], "the key is still held")
 }
 
 func TestReassignTask_TaskReadFails_Returns500AndReachesNothingElse(t *testing.T) {
@@ -464,8 +466,11 @@ func TestOverrideNodeAssignee_CompiledPlanCannotBeServed_AnswersForTheCauseAndSt
 func TestOverrideNodeAssignee_TaskDeletedBeforeTheVersionBump_Returns404AndStoresNothing(t *testing.T) {
 	w := newW10aWorld()
 	w.tasks.vanishOnBump = true
+	w.definitions.resp = &port.CompiledWorkflow{
+		VersionID: w.instances.rows[0].WorkflowVersionID, Status: "PUBLISHED", IsValid: true, CompiledPlanJSON: w26aPlanJSON(t, uuid.Nil),
+	}
 
-	rec := do(w.router(false), asAdmin(req(http.MethodPost, overridePath(testInstID, "finance%2Freview"), map[string]any{
+	rec := do(w.router(true), asAdmin(req(http.MethodPost, overridePath(testInstID, "finance%2Freview"), map[string]any{
 		"new_user_id": uuid.New(), "record_version": w10aTaskVersion,
 	})))
 
