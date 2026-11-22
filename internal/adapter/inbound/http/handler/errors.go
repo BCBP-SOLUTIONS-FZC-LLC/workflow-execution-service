@@ -59,6 +59,7 @@ const (
 	CodeTaskNotConnectorTyped   ErrCode = "TASK_NOT_CONNECTOR_TYPED"
 	CodeNoAutomationPrincipal   ErrCode = "NO_AUTOMATION_PRINCIPAL"
 	CodeNotFound                ErrCode = "NOT_FOUND"
+	CodeMethodNotAllowed        ErrCode = "METHOD_NOT_ALLOWED"
 )
 
 var codeTitles = map[ErrCode]string{
@@ -100,6 +101,7 @@ var codeTitles = map[ErrCode]string{
 	CodeTaskNotHumanActionable:  "Task Not Human Actionable",
 	CodeTaskNotConnectorTyped:   "Task Not Connector Typed",
 	CodeNoAutomationPrincipal:   "No Automation Principal",
+	CodeMethodNotAllowed:        "Method Not Allowed",
 }
 
 const errBase = "https://errors.bcbp.io/execution/"
@@ -143,6 +145,7 @@ var problemTypes = map[ErrCode]string{
 	CodeTaskNotHumanActionable:  errBase + "task-not-human-actionable",
 	CodeTaskNotConnectorTyped:   errBase + "task-not-connector-typed",
 	CodeNoAutomationPrincipal:   errBase + "no-automation-principal",
+	CodeMethodNotAllowed:        errBase + "method-not-allowed",
 }
 
 type invalidParam struct {
@@ -229,6 +232,12 @@ func NotFound(c *gin.Context) {
 	writeProblem(c, http.StatusNotFound, CodeNotFound, "no route matches this method and path", nil)
 }
 
+func MethodNotAllowed(c *gin.Context) {
+	writeProblem(
+		c, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "the method is not allowed for this path", nil,
+	)
+}
+
 var errTrailingData = errors.New("request body has data after its JSON value")
 
 const maxEchoedFieldName = 64
@@ -313,6 +322,9 @@ func invalidParamsFor(err error) []invalidParam {
 }
 
 func upstreamDependency(err error) string {
+	if errors.Is(err, adapterhttp.ErrTokenServiceUnavailable) {
+		return "token_service"
+	}
 	if errors.Is(err, port.ErrDefinitionUnavailable) || errors.Is(err, port.ErrDefinitionRejected) {
 		return "definition_service"
 	}

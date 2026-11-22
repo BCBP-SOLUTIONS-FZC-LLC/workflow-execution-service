@@ -119,7 +119,7 @@ func TestConsumerGroup_UnackedEntryReclaimable(t *testing.T) {
 	// Deliberately never Ack — simulates consumer-a dying mid-dispatch.
 
 	time.Sleep(50 * time.Millisecond)
-	reclaimed, err := consumer.ReclaimStale(ctx, stream, testGroup, "consumer-b", 10*time.Millisecond, 10)
+	reclaimed, _, err := consumer.ReclaimStale(ctx, stream, testGroup, "consumer-b", "0", 10*time.Millisecond, 10)
 	require.NoError(t, err)
 	require.Len(t, reclaimed, 1)
 	assert.Equal(t, entries[0].ID, reclaimed[0].ID)
@@ -193,7 +193,7 @@ func TestConsumerGroup_ReclaimStale_ReportsDeliveries(t *testing.T) {
 
 	for want := int64(2); want <= 3; want++ {
 		time.Sleep(20 * time.Millisecond)
-		reclaimed, err := consumer.ReclaimStale(ctx, stream, testGroup, "consumer-b", 10*time.Millisecond, 10)
+		reclaimed, _, err := consumer.ReclaimStale(ctx, stream, testGroup, "consumer-b", "0", 10*time.Millisecond, 10)
 		require.NoError(t, err)
 		require.Len(t, reclaimed, 1)
 		assert.Equal(t, want, reclaimed[0].Deliveries)
@@ -250,7 +250,7 @@ func TestConsumerGroup_Touch_KeepsEntryFromReclaim(t *testing.T) {
 	require.NoError(t, consumer.Touch(ctx, stream, testGroup, "consumer-a", []string{entries[0].ID}))
 	time.Sleep(1500 * time.Millisecond)
 
-	reclaimed, err := consumer.ReclaimStale(ctx, stream, testGroup, "consumer-b", minIdle, 10)
+	reclaimed, _, err := consumer.ReclaimStale(ctx, stream, testGroup, "consumer-b", "0", minIdle, 10)
 	require.NoError(t, err)
 	assert.Empty(t, reclaimed, "a touched entry was reclaimed from a live consumer")
 
@@ -293,7 +293,7 @@ func TestConsumerGroup_ReclaimStale_FailsWhenCountUnavailableAndTheEntryStaysPen
 	time.Sleep(20 * time.Millisecond)
 
 	client.AddHook(failXPending{})
-	reclaimed, err := consumer.ReclaimStale(ctx, stream, testGroup, "consumer-b", 10*time.Millisecond, 10)
+	reclaimed, _, err := consumer.ReclaimStale(ctx, stream, testGroup, "consumer-b", "0", 10*time.Millisecond, 10)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "valkeystream reclaim stale: pending count: ")

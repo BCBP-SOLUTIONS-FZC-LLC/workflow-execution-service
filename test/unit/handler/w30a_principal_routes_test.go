@@ -215,9 +215,9 @@ func TestConnectorCallbacks_TokenServiceGivesNoUsableAnswer_Returns503AndChanges
 					url = token.srv.URL
 				}
 				route := w30aNewRoute(url)
-				iamLabels := map[string]string{"dependency": "iam"}
+				tokenLabels := map[string]string{"dependency": "token_service"}
 				definitionLabels := map[string]string{"dependency": "definition_service"}
-				iamBefore := obstest.Sum(t, w30aUpstreamMetric, iamLabels)
+				tokenBefore := obstest.Sum(t, w30aUpstreamMetric, tokenLabels)
 				definitionBefore := obstest.Sum(t, w30aUpstreamMetric, definitionLabels)
 
 				w := route.post(action)
@@ -231,7 +231,7 @@ func TestConnectorCallbacks_TokenServiceGivesNoUsableAnswer_Returns503AndChanges
 				if token != nil {
 					assert.Equal(t, []string{route.tenant.String()}, token.reads(), "one read of the calling tenant's principal")
 				}
-				assert.Equal(t, iamBefore+1, obstest.Sum(t, w30aUpstreamMetric, iamLabels), "the failure counts against iam")
+				assert.Equal(t, tokenBefore+1, obstest.Sum(t, w30aUpstreamMetric, tokenLabels), "the failure counts against the token service")
 				assert.Equal(t, definitionBefore, obstest.Sum(t, w30aUpstreamMetric, definitionLabels))
 				assert.Empty(t, route.assignments.attempts, "no assignment is written")
 				assert.Empty(t, route.temporal.signals, "no signal is sent")

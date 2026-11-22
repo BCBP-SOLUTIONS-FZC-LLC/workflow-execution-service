@@ -94,18 +94,6 @@ func TestUpdateInstanceNodes_InstanceNotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestClaimAssignment_InvalidIDs(t *testing.T) {
-	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(), newFakeAssignmentRepo())
-	require.Error(t, deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{TenantID: "bad", AssignmentID: uuid.New().String()}))
-	require.Error(t, deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{TenantID: uuid.New().String(), AssignmentID: "bad"}))
-}
-
-func TestClaimAssignment_AssignmentNotFound(t *testing.T) {
-	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(), newFakeAssignmentRepo())
-	err := deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{TenantID: uuid.New().String(), AssignmentID: uuid.New().String()})
-	require.Error(t, err)
-}
-
 func TestCompleteAssignment_InvalidIDs(t *testing.T) {
 	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(), newFakeAssignmentRepo())
 	_, err := deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{TenantID: "bad", TaskID: uuid.New().String()})
@@ -452,30 +440,6 @@ func TestFailActiveTasks_UpdateStatusFails(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errBoom))
-}
-
-func TestClaimAssignment_SetLeadFails(t *testing.T) {
-	task := &domain.Task{ID: uuid.New(), RecordVersion: 1}
-	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: task.ID, UserID: uuid.New()}
-	assignments := newFakeAssignmentRepo(assignment)
-	assignments.setLeadErr = errBoom
-	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(task), assignments)
-
-	err := deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{
-		AssignmentID: assignment.ID.String(), TenantID: uuid.New().String(), UserID: assignment.UserID.String(),
-	})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, errBoom))
-}
-
-func TestClaimAssignment_TaskNotFound(t *testing.T) {
-	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: uuid.New(), UserID: uuid.New()}
-	deps, _ := newAssignmentTestDeps(newFakeTaskRepo(), newFakeAssignmentRepo(assignment))
-
-	err := deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{
-		AssignmentID: assignment.ID.String(), TenantID: uuid.New().String(), UserID: assignment.UserID.String(),
-	})
-	require.Error(t, err)
 }
 
 func TestReassignAssignment_TaskFoundButCreateFails(t *testing.T) {

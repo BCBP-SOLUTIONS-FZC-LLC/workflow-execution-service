@@ -19,13 +19,20 @@ import (
 
 func TestDeptUUID_PrefersIAMDepartmentID(t *testing.T) {
 	iamDeptID := uuid.New()
-	got := deptUUID(&dsl.DepartmentDef{ID: "sales", IAMDepartmentID: iamDeptID.String()})
+	got, err := deptUUID(&dsl.DepartmentDef{ID: "sales", IAMDepartmentID: iamDeptID.String()})
+	assert.NoError(t, err)
 	assert.Equal(t, iamDeptID, got)
 }
 
 func TestDeptUUID_NilWithoutIAMDepartmentID(t *testing.T) {
-	got := deptUUID(&dsl.DepartmentDef{ID: "sales"})
+	got, err := deptUUID(&dsl.DepartmentDef{ID: "sales"})
+	assert.NoError(t, err)
 	assert.Equal(t, uuid.Nil, got)
+}
+
+func TestDeptUUID_MalformedIDIsAnInvalidVersion(t *testing.T) {
+	_, err := deptUUID(&dsl.DepartmentDef{ID: "sales", IAMDepartmentID: "nope"})
+	assert.ErrorIs(t, err, port.ErrVersionInvalid)
 }
 
 func plainPlan(dept dsl.DepartmentDef) *dsl.CompiledPlan {

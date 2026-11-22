@@ -45,7 +45,7 @@ func TestConsumer_TrimToOldestPending(t *testing.T) {
 		assert.EqualValues(t, 2, trimmed)
 		assert.Equal(t, []string{entries[2].ID, entries[3].ID, entries[4].ID}, vsxEntryIDs(t, client, stream))
 		vsxMakeIdle(t, client, stream, vsxClaimerA, []string{entries[2].ID}, vsxLongIdle)
-		reclaimed, err := consumer.ReclaimStale(ctx, stream, vsxGroup, vsxClaimerB, vsxMinIdle, vsxReadBatch)
+		reclaimed, _, err := consumer.ReclaimStale(ctx, stream, vsxGroup, vsxClaimerB, "0", vsxMinIdle, vsxReadBatch)
 		require.NoError(t, err)
 		require.Len(t, reclaimed, 1)
 		assert.Equal(t, entries[2].ID, reclaimed[0].ID, "the pending entry survived the trim with its fields")

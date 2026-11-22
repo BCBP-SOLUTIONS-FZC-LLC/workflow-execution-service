@@ -152,7 +152,7 @@ func TestRegister_PreInitializesClosedLabelSets(t *testing.T) {
 	for name, label := range map[string][]string{
 		"workflow_execution_service_task_signal_duration_seconds":       {"operation=claim", "operation=complete", "operation=defer"},
 		"workflow_execution_service_rls_violations_total":               {"violation_type=missing_or_invalid_guc", "violation_type=cross_tenant_access"},
-		"workflow_execution_service_upstream_dependency_errors_total":   {"dependency=definition_service", "dependency=iam"},
+		"workflow_execution_service_upstream_dependency_errors_total":   {"dependency=definition_service", "dependency=iam", "dependency=token_service"},
 		"workflow_execution_service_entitlements_call_duration_seconds": {"outcome=success", "outcome=error"},
 		"workflow_execution_service_entitlements_call_errors_total":     {"reason=transport", "reason=status", "reason=response"},
 	} {

@@ -45,18 +45,6 @@ func w22aRequireBadIDsRefused(t *testing.T, cases []w22aBadIDCase) {
 	}
 }
 
-func TestClaimAssignment_NonUUIDIDs_NonRetryableValidationErrorNamingTheField(t *testing.T) {
-	t.Parallel()
-	w22aRequireBadIDsRefused(t, []w22aBadIDCase{
-		{name: "tenant_id", field: "tenant_id", run: func(d *outboundtemporal.Deps) error {
-			return d.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{TenantID: "bad", AssignmentID: uuid.NewString()})
-		}},
-		{name: "assignment_id", field: "assignment_id", run: func(d *outboundtemporal.Deps) error {
-			return d.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{TenantID: uuid.NewString(), AssignmentID: "bad"})
-		}},
-	})
-}
-
 func TestCompleteAssignment_NonUUIDIDs_NonRetryableValidationErrorNamingTheField(t *testing.T) {
 	t.Parallel()
 	w22aRequireBadIDsRefused(t, []w22aBadIDCase{

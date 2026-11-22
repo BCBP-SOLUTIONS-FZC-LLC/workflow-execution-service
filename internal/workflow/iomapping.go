@@ -3,6 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
@@ -13,7 +14,9 @@ func applyIOMapping(contextJSON string, m *dsl.IOMapping) (string, error) {
 	}
 	vars := map[string]any{}
 	if contextJSON != "" {
-		if err := json.Unmarshal([]byte(contextJSON), &vars); err != nil {
+		dec := json.NewDecoder(strings.NewReader(contextJSON))
+		dec.UseNumber()
+		if err := dec.Decode(&vars); err != nil {
 			return "", fmt.Errorf("workflow: parsing context_json for io_mapping: %w", err)
 		}
 	}

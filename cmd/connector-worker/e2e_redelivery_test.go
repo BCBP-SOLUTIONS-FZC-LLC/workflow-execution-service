@@ -36,10 +36,10 @@ type reclaimCounter struct {
 	reclaimed atomic.Int32
 }
 
-func (c *reclaimCounter) ReclaimStale(ctx context.Context, streamKey, group, consumerName string, minIdle time.Duration, count int64) ([]valkeystream.Entry, error) {
-	entries, err := c.streamConsumer.ReclaimStale(ctx, streamKey, group, consumerName, minIdle, count)
+func (c *reclaimCounter) ReclaimStale(ctx context.Context, streamKey, group, consumerName, start string, minIdle time.Duration, count int64) ([]valkeystream.Entry, string, error) {
+	entries, next, err := c.streamConsumer.ReclaimStale(ctx, streamKey, group, consumerName, start, minIdle, count)
 	c.reclaimed.Add(int32(len(entries)))
-	return entries, err
+	return entries, next, err
 }
 
 type sleepyConnector struct {

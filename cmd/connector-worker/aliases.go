@@ -84,24 +84,61 @@ func refreshAliases(ctx context.Context, d *deps, cfg *config.Config, log port.L
 	log.Info("connector alias registry refreshed", map[string]any{"rest_call_aliases": len(fresh.RestCall)})
 }
 
-// refusalKind names which part of a row the library refused, from a fixed set of words.
-func refusalKind(err error) string {
-	text := err.Error()
+// The refusal kinds a skipped row is logged under, a fixed set of words.
+const (
+	refusalDuplicate = "duplicate alias"
+	refusalBaseURL   = "base URL"
+	refusalPath      = "path"
+	refusalMethod    = "method"
+	refusalRow       = "invalid row"
+)
+
+var (
+	probeEndpoint = aliasconfig.Endpoint{
+		Alias: "probe", Method: http.MethodGet, BaseURL: "http://probe.invalid", PathTemplate: "/",
+	}
+	probeQuery = aliasconfig.Query{
+		Alias: "probe", BaseURL: "http://probe.invalid", Path: "/", QueryID: "probe",
+	}
+)
+
+// endpointRefusal names the field the library refuses by putting each field of the row, one at a
+// time, into a row that is valid otherwise; the library's own message is never read.
+func endpointRefusal(e aliasconfig.Endpoint) string {
+	refuses := func(edit func(*aliasconfig.Endpoint)) bool {
+		row := probeEndpoint
+		edit(&row)
+		return aliasconfig.Config{RestCall: []aliasconfig.Endpoint{row}}.Validate() != nil
+	}
 	switch {
-	case strings.Contains(text, "duplicate alias"):
-		return "duplicate alias"
-	case strings.Contains(text, "baseURL"):
-		return "base URL"
-	case strings.Contains(text, "pathTemplate"), strings.Contains(text, "path must"):
-		return "path"
-	case strings.Contains(text, "method"):
-		return "method"
+	case refuses(func(r *aliasconfig.Endpoint) { r.Method = e.Method }):
+		return refusalMethod
+	case refuses(func(r *aliasconfig.Endpoint) { r.BaseURL = e.BaseURL }):
+		return refusalBaseURL
+	case refuses(func(r *aliasconfig.Endpoint) { r.PathTemplate = e.PathTemplate }):
+		return refusalPath
 	default:
-		return "invalid row"
+		return refusalRow
 	}
 }
 
-func aliasCount(c aliasconfig.Config) int { return len(c.RestCall) + len(c.SQLQuery) }
+func queryRefusal(q aliasconfig.Query) string {
+	refuses := func(edit func(*aliasconfig.Query)) bool {
+		row := probeQuery
+		edit(&row)
+		return aliasconfig.Config{SQLQuery: []aliasconfig.Query{row}}.Validate() != nil
+	}
+	switch {
+	case refuses(func(r *aliasconfig.Query) { r.BaseURL = q.BaseURL }):
+		return refusalBaseURL
+	case refuses(func(r *aliasconfig.Query) { r.Path = q.Path }):
+		return refusalPath
+	default:
+		return refusalRow
+	}
+}
+
+func aliasCount(c aliasconfig.Config) int { return len(c.RestCall) }
 
 func fetchAliases(ctx context.Context, addr string, timeout time.Duration, log port.Logger) (aliasconfig.Config, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -181,28 +218,29 @@ func decodeEachRow[T any](kind string, rows []json.RawMessage, log port.Logger) 
 func validAliasRows(in aliasconfig.Config, log port.Logger) aliasconfig.Config {
 	out := aliasconfig.Config{Version: in.Version}
 	seenRest, seenSQL := map[string]bool{}, map[string]bool{}
-	skip := func(kind, alias string, err error) {
-		log.Warn("connector alias row skipped: the library refuses it", map[string]any{"kind": kind, "alias": alias, "failure": refusalKind(err)})
+	skip := func(kind, alias, failure string) {
+		log.Warn("connector alias row skipped: the library refuses it",
+			map[string]any{"kind": kind, "alias": alias, "failure": failure})
 	}
 	for _, e := range in.RestCall {
-		err := aliasconfig.Config{RestCall: []aliasconfig.Endpoint{e}}.Validate()
-		if err == nil && seenRest[e.Alias] {
-			err = fmt.Errorf("duplicate alias %q", e.Alias)
-		}
-		if err != nil {
-			skip("restCall", e.Alias, err)
+		switch {
+		case aliasconfig.Config{RestCall: []aliasconfig.Endpoint{e}}.Validate() != nil:
+			skip("restCall", e.Alias, endpointRefusal(e))
+			continue
+		case seenRest[e.Alias]:
+			skip("restCall", e.Alias, refusalDuplicate)
 			continue
 		}
 		seenRest[e.Alias] = true
 		out.RestCall = append(out.RestCall, e)
 	}
 	for _, q := range in.SQLQuery {
-		err := aliasconfig.Config{SQLQuery: []aliasconfig.Query{q}}.Validate()
-		if err == nil && seenSQL[q.Alias] {
-			err = fmt.Errorf("duplicate alias %q", q.Alias)
-		}
-		if err != nil {
-			skip("sqlQuery", q.Alias, err)
+		switch {
+		case aliasconfig.Config{SQLQuery: []aliasconfig.Query{q}}.Validate() != nil:
+			skip("sqlQuery", q.Alias, queryRefusal(q))
+			continue
+		case seenSQL[q.Alias]:
+			skip("sqlQuery", q.Alias, refusalDuplicate)
 			continue
 		}
 		seenSQL[q.Alias] = true

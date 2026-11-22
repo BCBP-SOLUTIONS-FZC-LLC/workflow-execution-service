@@ -78,9 +78,14 @@ components:
         type: string
         format: uuid
       description: >
-        Optional client-supplied key for safe retry of this request. A replay with the same
-        key and an identical request body returns the original cached response. A replay with
-        the same key and a different body returns 409 IDEMPOTENCY_KEY_REPLAY.
+        Optional client-supplied key for safe retry of this request, taken only by the delegate
+        reassignment and cancellation. The key is the route and this header; it carries no user
+        or tenant part, and the body hash covers the body's tenant_id, so another tenant's request
+        under the same key is refused. A replay with the same key and an identical request body
+        returns the original cached response. A replay with the same key and a different body
+        returns 409 IDEMPOTENCY_KEY_REPLAY, as does a repeat while the first request under the
+        key is still running (it does not wait; retry after the first has finished). Send a fresh
+        UUID per logical request.
 
     LimitQuery:
       name: limit
@@ -211,7 +216,10 @@ components:
             TASK_ALREADY_CLAIMED, CLAIM_NOT_APPLICABLE, INVALID_TASK_STATE,
             FORCE_BACK_NO_SAVED_BRANCH, NODE_ALREADY_RESOLVED, IDEMPOTENCY_KEY_REPLAY,
             ASSIGNEE_INELIGIBLE, OVERRIDE_MAP_INVALID, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE,
-            UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, NO_AUTOMATION_PRINCIPAL, INTERNAL_ERROR.
+            UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, NO_AUTOMATION_PRINCIPAL,
+            METHOD_NOT_ALLOWED, INTERNAL_ERROR.
+            METHOD_NOT_ALLOWED is the 405 answer for a path that exists under other methods only;
+            the Allow header lists those methods.
           example: "RECORD_VERSION_CONFLICT"
         trace_id:
           type: string
@@ -257,7 +265,11 @@ components:
             code: "UNAUTHORIZED"
 
     BadRequest:
-      description: Malformed JSON body or missing required fields.
+      description: >
+        Malformed JSON body, missing required fields, or a value that is not valid, such as an
+        id that is not a UUID in the body, a query parameter or the path. invalid_params names
+        the field (a path parameter as one) with the reason "is not valid"; the detail never
+        says the body is not valid JSON.
       content:
         application/problem+json:
           schema:
@@ -266,7 +278,7 @@ components:
             type: "https://errors.bcbp.io/execution/bad-request"
             title: "Bad Request"
             status: 400
-            detail: "field 'version' is required"
+            detail: "request body has missing or invalid fields"
             instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
             code: "BAD_REQUEST"
 
@@ -321,7 +333,7 @@ components:
             type: "https://errors.bcbp.io/execution/payload-too-large"
             title: "Payload Too Large"
             status: 413
-            detail: "request body exceeds 10 MB limit"
+            detail: "request body exceeds the 10 MB limit"
             instance: "/api/v1/instances"
             code: "PAYLOAD_TOO_LARGE"
 
@@ -395,6 +407,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /api/v1/internal/users/{user_id}/pause-tasks:
     post:
@@ -502,16 +516,20 @@ paths:
         "502":
           $ref: "#/components/responses/EventDecodeFailed"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: The claim on the event id could not be recorded, or an upstream dependency could not serve the event. The sender retries the delivery.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
 
   /api/v1/internal/events/user-profile:
     post:
       operationId: ingestUserProfileEvent
       tags: [Internal (Events)]
-      summary: Ingest UserDeleted / UserAvailabilityChanged directly
+      summary: Ingest UserDeleted / UserAvailabilityChanged / MembershipRevoked directly
       description: >
         Service-to-service ingest of an envelope forwarded by the shared Workflow-Events Consumer (§6.1); sets the RLS GUC from the tenant_id, is idempotent per envelope id, and is scoped to
-        UserDeleted/UserAvailabilityChanged. A type outside this category
+        UserDeleted/UserAvailabilityChanged/MembershipRevoked, the three types that concern one user;
+        a revocation runs the same tenant-wide vacate as a deletion. A type outside this category
         is accepted and ignored with 200.
       security:
         - InternalServiceAuth: []
@@ -542,7 +560,10 @@ paths:
         "502":
           $ref: "#/components/responses/EventDecodeFailed"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: The claim on the event id could not be recorded, or an upstream dependency could not serve the event. The sender retries the delivery.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
 
   /api/v1/internal/events/tenant:
     post:
@@ -582,7 +603,10 @@ paths:
         "502":
           $ref: "#/components/responses/EventDecodeFailed"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: The claim on the event id could not be recorded, or an upstream dependency could not serve the event. The sender retries the delivery.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
 
   /api/v1/internal/events/workflow-task:
     post:
@@ -634,7 +658,10 @@ paths:
         "502":
           $ref: "#/components/responses/EventDecodeFailed"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: The claim on the event id could not be recorded, or an upstream dependency could not serve the event. The sender retries the delivery.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/ProblemDetails" }
 
   /api/v1/internal/workflows/delegate-impact:
     get:
@@ -676,7 +703,9 @@ paths:
           schema:
             type: string
             format: uuid
-          description: Optional delegation UUID to scope the query to a single delegation.
+          description: >
+            Optional delegation UUID to scope the query to a single delegation. An empty value is
+            treated as not sent: the preview then counts all of the delegate's active assignments.
         - $ref: "#/components/parameters/CursorQuery"
         - $ref: "#/components/parameters/LimitQuery"
       responses:
@@ -719,7 +748,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/tenant-mismatch"
                 title: "Tenant Mismatch"
                 status: 403
-                detail: "the delegation belongs to a different tenant than the tenant_id parameter"
+                detail: "delegation_id belongs to a different tenant than tenant_id"
                 instance: "/api/v1/internal/workflows/delegate-impact"
                 code: "TENANT_MISMATCH"
         "500":
@@ -798,7 +827,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/tenant-mismatch"
                 title: "Tenant Mismatch"
                 status: 403
-                detail: "the delegation belongs to a different tenant than the tenant_id parameter"
+                detail: "delegation_id belongs to a different tenant than tenant_id"
                 instance: "/api/v1/internal/workflows/reassign-delegate"
                 code: "TENANT_MISMATCH"
         "409":
@@ -889,7 +918,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/tenant-mismatch"
                 title: "Tenant Mismatch"
                 status: 403
-                detail: "the delegation belongs to a different tenant than the tenant_id parameter"
+                detail: "delegation_id belongs to a different tenant than tenant_id"
                 instance: "/api/v1/internal/workflows/cancel-by-delegate"
                 code: "TENANT_MISMATCH"
         "409":
@@ -924,7 +953,16 @@ paths:
         legitimate resolver (the worker that dispatched it), never a concurrent human
         racing it, so the service reads the task's current record_version itself.
         The body names no actor: the service records the tenant's automation principal,
-        resolved from IAM, and answers 409 when the tenant has none.
+        resolved from IAM, and answers 409 NO_AUTOMATION_PRINCIPAL when the tenant has none.
+        The callback acts only for a READY or IN_PROGRESS task on an instance that is RUNNING,
+        DEGRADED or PAUSED (a paused instance's workflow holds the result until resume). A task
+        that has left its step, or an instance that has ended, is acknowledged 204 and ignored
+        with no assignment and no signal; any other instance status is 409 INVALID_INSTANCE_STATE.
+        complete and fail share one per-task reservation, so a task has one outcome; a concurrent
+        attempt on the same task answers 503, and a reservation never makes a retry look finished
+        before the signal was delivered. A stage with no output mapping passes the output through
+        unchanged; a stored mapping that cannot be read is refused 500 INTERNAL_ERROR. An absent
+        output is an empty object.
       security:
         - InternalServiceAuth: []
       parameters:
@@ -967,10 +1005,14 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
         "409":
-          description: Task is not connector-typed, the instance is in a state that cannot take the callback, or the tenant has no automation principal.
+          description: Task is not connector-typed (TASK_NOT_CONNECTOR_TYPED), the tenant has no automation principal (NO_AUTOMATION_PRINCIPAL), or the instance is in a status the callback does not accept (INVALID_INSTANCE_STATE).
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
         "500":
           $ref: "#/components/responses/InternalError"
         "503":
@@ -993,7 +1035,10 @@ paths:
         error_class; the human /tasks/:id/complete path explicitly rejects
         connector-typed tasks (checkHumanActionable), so this is the only resolution
         path for a failed connector task. Same no-idempotency-wrapper,
-        no-record_version rationale as the complete endpoint above.
+        no-record_version rationale, task and instance rules, and one-outcome reservation as the
+        complete endpoint above. The error class is relayed unchanged to the signal and the
+        task-failed event and is not checked against the connector worker's fixed set; an empty
+        value is refused 400 BAD_REQUEST.
       security:
         - InternalServiceAuth: []
       parameters:
@@ -1012,7 +1057,12 @@ paths:
                   description: Tenant UUID the task belongs to.
                 error_class:
                   type: string
-                  description: Connector-defined error classification, carried onto the stage-fail signal.
+                  description: >
+                    Connector-defined error classification, a label the connector worker chooses
+                    from its fixed set (the error-class set of the failed-task event). Required, and it
+                    must contain text: a value of only whitespace is refused 400 BAD_REQUEST. It is
+                    carried unchanged onto the stage-fail signal and the task-failed event. The
+                    endpoint does not check membership of the set.
                   example: "upstream_timeout"
                 output:
                   type: object
@@ -1020,8 +1070,10 @@ paths:
                   description: >
                     The connector's output map, returned with the failure when the connector
                     produced one (a send-email call always carries deliveryOutcome, a rest-call
-                    status of 300 or more carries status, headers and body). Written to the
-                    failure log; not part of the stage-fail signal.
+                    status of 300 or more carries status, headers and body). Not part of the
+                    stage-fail signal; the failure log records only the names of its top-level
+                    keys, since the output can hold response bodies and delivery details that
+                    belong to the tenant.
       responses:
         "204":
           description: >
@@ -1041,10 +1093,14 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
         "409":
-          description: Task is not connector-typed, the instance is in a state that cannot take the callback, or the tenant has no automation principal.
+          description: Task is not connector-typed (TASK_NOT_CONNECTOR_TYPED), the tenant has no automation principal (NO_AUTOMATION_PRINCIPAL), or the instance is in a status the callback does not accept (INVALID_INSTANCE_STATE).
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
         "500":
           $ref: "#/components/responses/InternalError"
         "503":

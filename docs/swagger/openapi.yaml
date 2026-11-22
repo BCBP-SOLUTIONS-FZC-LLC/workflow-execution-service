@@ -80,7 +80,11 @@ components:
       required: false
       schema:
         type: string
-      description: Comma-separated department UUIDs the caller belongs to (gateway-injected).
+      description: >
+        Comma-separated pairs of department UUID and role, in the form the Definition Service
+        design owns (gateway-injected). Execution reads the department half of each pair. An
+        entry that is not such a pair grants no department and never fails the request, so a
+        malformed header can only narrow what the caller sees.
     PlanHeader:
       name: x-plan
       in: header
@@ -118,8 +122,10 @@ components:
       description: >
         Optional client-supplied key for safe retry of this request. A replay with the same
         key and an identical request body returns the original cached response. A replay with
-        the same key and a different body returns 409 IDEMPOTENCY_KEY_REPLAY. A key belongs to the
-        calling user within the tenant: another user sending the same key is a separate request.
+        the same key and a different body returns 409 IDEMPOTENCY_KEY_REPLAY, as does a
+        repeat while the first request under the key is still running (it does not wait; retry
+        after the first has finished). A key belongs to the calling user within the tenant:
+        another user sending the same key is a separate request.
     InstanceIdPath:
       name: id
       in: path
@@ -195,8 +201,9 @@ components:
       type: string
       enum: [READY, IN_PROGRESS, COMPLETED, DEFERRED, FAILED, SUPERSEDED]
       description: >
-        READY: no assignment has been claimed. IN_PROGRESS: at least one assignment claimed,
-        not all completed. COMPLETED: all active assignments completed (Temporal advances).
+        READY and IN_PROGRESS: the task is open; every action that accepts one accepts the
+        other, and a claim changes neither. COMPLETED: the lead's completion closed the other open assignments
+        and the instance moved on.
         DEFERRED: the assignee sent the instance one step back; the earlier step's task is created when its department runs again.
         FAILED: swept up in an instance-cancel/-terminate/FAILED cascade — never an
         independent per-task failure. SUPERSEDED: bypassed by an admin instance-force-forward.
@@ -245,15 +252,27 @@ components:
         - TASK_DEFERRED
         - TASK_REJECTED
         - TASK_REASSIGNED
+        - INSTANCE_CANCELLED
+        - INSTANCE_DEGRADED
+        - INSTANCE_FORCE_ROUTED
+        - TASK_CLAIMED
+        - TASK_SUPERSEDED
+        - TASK_FAILED
+        - TASK_SLA_WARNING
+        - TASK_SLA_BREACHED
         # COMMENT_ADDED / RESOURCE_LINKED: currently unused — workflow_comment/workflow_resource_link
         # are tentatively removed from scope pending confirmation (see open_questions.md). Kept here,
         # not deleted, in case the removal is reversed.
         - COMMENT_ADDED
         - RESOURCE_LINKED
       description: >
-        Activity event type. TASK_REJECTED is reserved for future explicit rejection workflows;
-        deferral emits TASK_DEFERRED. OUTBOX_SENT is an internal platform concern and is never
-        written to the workflow_event table.
+        Activity event type. The log returns every event type of the outbound catalogue (§6.4),
+        named in upper snake case, a finished instance being reported as INSTANCE_COMPLETED:
+        instance started, paused, resumed, cancelled, terminated, degraded, failed, completed and
+        force-routed; task created, claimed, completed, deferred, reassigned, superseded, failed,
+        SLA warning and SLA breached. TASK_REJECTED, COMMENT_ADDED and RESOURCE_LINKED are
+        reserved for features out of scope and are never emitted; deferral emits TASK_DEFERRED.
+        OUTBOX_SENT is an internal platform concern and is never returned.
 
     WorkflowEvent:
       type: object
@@ -288,7 +307,7 @@ components:
         payload_json:
           type: object
           additionalProperties: true
-          description: Event-specific context (e.g. reason, new_assignee_user_id).
+          description: Event-specific context (e.g. reason, new_user_id).
         occurred_at:
           type: string
           format: date-time
@@ -332,7 +351,8 @@ components:
           type: string
           description: >
             Caller-supplied key identifying this instance within its subject; the pair is
-            unique among RUNNING/PAUSED instances per tenant.
+            unique per tenant among instances that are not COMPLETED, TERMINATED or FAILED,
+            which includes RUNNING, PAUSED and DEGRADED.
           example: "stage-prequalification"
         workflow_version_id:
           type: string
@@ -340,7 +360,7 @@ components:
           description: Pinned at instance creation; immutable.
         temporal_workflow_id:
           type: string
-          description: Temporal workflow id of this instance's execution, `tenant:<tenant id>:instance:<instance id>`. It is unique per instance, so a reused subject_id and business_key never shares an execution with an earlier instance.
+          description: Temporal workflow id of this instance's execution, `tenant:<tenant id>:instance:<instance id>`. It is unique per instance, so a reused subject_id and business_key never shares an execution with an earlier instance. A row keeps the value stored when the instance started.
         current_node_keys:
           type: array
           items:
@@ -364,6 +384,7 @@ components:
         started_at:
           type: string
           format: date-time
+          description: The instant the instance row was created at start.
         completed_at:
           type: string
           format: date-time
@@ -682,7 +703,7 @@ components:
         detail:
           type: string
           description: Human-readable explanation of this specific occurrence.
-          example: "task record_version mismatch; refresh and retry"
+          example: "record version conflict"
         instance:
           type: string
           format: uri-reference
@@ -694,13 +715,15 @@ components:
             Machine-readable error code (stable across releases). One of:
             BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_ASSIGNEE, NOT_AUTHORIZED_FOR_RESOURCE,
             TENANT_MISMATCH, NOT_FOUND, INSTANCE_NOT_FOUND, TASK_NOT_FOUND,
-            TARGET_NODE_NOT_FOUND, WAIT_NOT_FOUND, NOT_WAITING, OVERRIDE_NO_OP, DUPLICATE_BUSINESS_KEY,
-            TENANT_NOT_ACTIVE, VERSION_NOT_PUBLISHED, VERSION_INVALID, VERSION_NOT_FOUND,
+            VERSION_NOT_FOUND, TARGET_NODE_NOT_FOUND, WAIT_NOT_FOUND, NOT_WAITING, OVERRIDE_NO_OP, DUPLICATE_BUSINESS_KEY,
+            TENANT_NOT_ACTIVE, VERSION_NOT_PUBLISHED, VERSION_INVALID,
             RECORD_VERSION_CONFLICT, INSTANCE_ALREADY_TERMINAL, INVALID_INSTANCE_STATE,
             TASK_ALREADY_CLAIMED, CLAIM_NOT_APPLICABLE, INVALID_TASK_STATE,
             FORCE_BACK_NO_SAVED_BRANCH, NODE_ALREADY_RESOLVED, IDEMPOTENCY_KEY_REPLAY,
             ASSIGNEE_INELIGIBLE, OVERRIDE_MAP_INVALID, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE,
-            UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, INTERNAL_ERROR.
+            UPSTREAM_UNAVAILABLE, EVENT_DECODE_FAILED, METHOD_NOT_ALLOWED, INTERNAL_ERROR.
+            METHOD_NOT_ALLOWED is the 405 answer for a path that exists under other methods only;
+            the Allow header lists those methods.
           example: "RECORD_VERSION_CONFLICT"
         trace_id:
           type: string
@@ -733,7 +756,10 @@ components:
 
   responses:
     BadRequest:
-      description: Malformed JSON body or missing required fields.
+      description: >
+        Malformed JSON body, missing required fields, or a value that is not valid, such as an
+        id that is not a UUID in the body, a query parameter or the path. invalid_params names
+        the field (a path parameter as one) with the reason "is not valid".
       content:
         application/problem+json:
           schema:
@@ -742,7 +768,7 @@ components:
             type: "https://errors.bcbp.io/execution/bad-request"
             title: "Bad Request"
             status: 400
-            detail: "field 'version' is required"
+            detail: "request body has missing or invalid fields"
             instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
             code: "BAD_REQUEST"
 
@@ -759,7 +785,7 @@ components:
             type: "https://errors.bcbp.io/execution/unauthorized"
             title: "Unauthorized"
             status: 401
-            detail: "x-tenant-id header is not a valid UUID"
+            detail: "missing or invalid authentication headers"
             instance: "/api/v1/instances"
             code: "UNAUTHORIZED"
         application/json:
@@ -773,10 +799,10 @@ components:
           schema:
             $ref: "#/components/schemas/ProblemDetails"
           example:
-            type: "https://errors.bcbp.io/execution/forbidden"
-            title: "Forbidden"
+            type: "https://errors.bcbp.io/execution/not-assignee"
+            title: "Not Assigned"
             status: 403
-            detail: "caller does not have an active assignment for this task"
+            detail: "caller is not the task's active assignee"
             instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
             code: "NOT_ASSIGNEE"
 
@@ -790,7 +816,7 @@ components:
             type: "https://errors.bcbp.io/execution/instance-not-found"
             title: "Instance Not Found"
             status: 404
-            detail: "workflow instance not found"
+            detail: "instance not found"
             instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6"
             code: "INSTANCE_NOT_FOUND"
 
@@ -804,7 +830,7 @@ components:
             type: "https://errors.bcbp.io/execution/task-not-found"
             title: "Task Not Found"
             status: 404
-            detail: "workflow task not found"
+            detail: "task not found"
             instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6"
             code: "TASK_NOT_FOUND"
 
@@ -818,12 +844,12 @@ components:
             type: "https://errors.bcbp.io/execution/payload-too-large"
             title: "Payload Too Large"
             status: 413
-            detail: "request body exceeds 10 MB limit"
+            detail: "request body exceeds the 10 MB limit"
             instance: "/api/v1/instances"
             code: "PAYLOAD_TOO_LARGE"
 
     UnsupportedMediaType:
-      description: Request Content-Type is not application/json.
+      description: Request Content-Type is not application/json (parameters such as charset are accepted; a request with no Content-Type is read as JSON).
       content:
         application/problem+json:
           schema:
@@ -884,6 +910,14 @@ paths:
                   status:
                     type: string
                     example: "ok"
+    head:
+      tags: [Ops]
+      summary: Liveness probe, status only
+      description: Answers the same status as GET; the response has no body.
+      security: []
+      responses:
+        "200":
+          description: Process is alive.
 
   /readyz:
     get:
@@ -946,6 +980,16 @@ paths:
               example:
                 status: unavailable
                 temporal: unreachable
+    head:
+      tags: [Ops]
+      summary: Readiness probe, status only
+      description: Runs the same checks as GET and answers the same status; the response has no body.
+      security: []
+      responses:
+        "200":
+          description: Service is ready.
+        "503":
+          description: A dependency is unreachable, or the process is shutting down.
 
   /api/v1/instances:
     post:
@@ -955,8 +999,18 @@ paths:
       description: >
         Validates that the referenced version is PUBLISHED and is_valid=true, then starts
         a Temporal workflow execution and inserts the instance record transactionally.
-        Returns 409 if an active instance (RUNNING or PAUSED) with the same
-        subject_id and business_key already exists for this tenant.
+        Returns 409 if an instance that is not COMPLETED, TERMINATED or FAILED (RUNNING,
+        PAUSED or DEGRADED) with the same subject_id and business_key already exists for
+        this tenant. A value that is not a UUID in workflow_version_id or in override_map is
+        400 BAD_REQUEST naming the field in invalid_params. A workflow_version_id that does not
+        exist for the caller's tenant, including one that belongs to another tenant, is
+        404 VERSION_NOT_FOUND, the same answer for both. A failure to read the compiled plan
+        from the Definition Service other than not-found, and a workflow that cannot be
+        started after the service's retries, are 503 UPSTREAM_UNAVAILABLE with a fixed detail
+        that carries no error text of the failed call; the instance row stays committed and
+        the same request sent again completes the start. A published, valid version whose plan
+        cannot be expanded, cannot be decoded, names no main plan or names a department whose iam_department_id is not a UUID is 409 VERSION_INVALID. A start whose execution is held by an open execution of a different
+        instance is 409 DUPLICATE_BUSINESS_KEY.
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
         - $ref: "#/components/parameters/UserIdHeader"
@@ -989,7 +1043,8 @@ paths:
                   maxLength: 64
                   description: >
                     Caller-supplied key for this run within its subject. The pair must be
-                    unique among RUNNING and PAUSED instances for this tenant. A caller
+                    unique for this tenant among instances that are not COMPLETED, TERMINATED
+                    or FAILED, which includes RUNNING, PAUSED and DEGRADED. A caller
                     running one instance per subject sets this to a constant of its own
                     choosing.
                   example: "stage-prequalification"
@@ -1036,10 +1091,10 @@ paths:
           description: >
             State conflict. See code field:
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body;
-            DUPLICATE_BUSINESS_KEY — a live instance for this subject_id and business_key already exists and is not this caller's own unfinished start (a RUNNING instance of the same version started by the same caller with the same context_json and override_map is the same start sent again and is returned with 201);
+            DUPLICATE_BUSINESS_KEY — a live instance (not COMPLETED, TERMINATED or FAILED, so RUNNING, PAUSED or DEGRADED) for this subject_id and business_key already exists and is not this caller's own unfinished start (a RUNNING instance of the same version started by the same caller with the same context_json and override_map is the same start sent again and is returned with 201), or the start's workflow execution is held by an open execution of a different instance;
             TENANT_NOT_ACTIVE — the tenant is offboarded, or its recorded status is one the service is configured to refuse starts for (no other status by default);
             VERSION_NOT_PUBLISHED — the referenced version is DRAFT or ARCHIVED;
-            VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked), or the compiled plan has a schema version this service does not read, is not valid JSON, or names no main plan.
+            VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked), or the compiled plan has a schema version this service does not read, is not valid JSON, names no main plan, names a department whose iam_department_id is not a UUID, or cannot be expanded.
           content:
             application/problem+json:
               schema:
@@ -1050,7 +1105,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/duplicate-business-key"
                     title: "Duplicate Business Key"
                     status: 409
-                    detail: "an active instance for business_key 'tender-abc-001' already exists"
+                    detail: "business key already active for this subject"
                     instance: "/api/v1/instances"
                     code: "DUPLICATE_BUSINESS_KEY"
                 TenantNotActive:
@@ -1066,7 +1121,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/version-not-published"
                     title: "Version Not Published"
                     status: 409
-                    detail: "workflow version is not PUBLISHED"
+                    detail: "workflow version is not published"
                     instance: "/api/v1/instances"
                     code: "VERSION_NOT_PUBLISHED"
                 VersionInvalid:
@@ -1074,7 +1129,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/version-invalid"
                     title: "Version Invalid"
                     status: 409
-                    detail: "workflow version is_valid=false; default assignee eligibility was revoked"
+                    detail: "workflow version is not valid"
                     instance: "/api/v1/instances"
                     code: "VERSION_INVALID"
                 IdempotencyReplay:
@@ -1103,7 +1158,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/override-map-invalid"
                     title: "Override Map Invalid"
                     status: 422
-                    detail: "node key 'unknown_stage' does not exist in the compiled plan"
+                    detail: "override_map references an unknown node key or invalid value: node key \"unknown_stage\""
                     instance: "/api/v1/instances"
                     code: "OVERRIDE_MAP_INVALID"
                 AssigneeIneligible:
@@ -1122,7 +1177,18 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: >
+            UPSTREAM_UNAVAILABLE — the compiled-plan read from the Definition Service failed
+            for any reason other than not-found (the Definition Service unreachable, a server
+            error, a refusal, an answer that breaks the contract), or the workflow could not
+            be started after the service's retries. The detail is fixed and carries no error
+            text of the failed call, and the problem type does not name Temporal. For a
+            workflow that could not be started, the instance row stays committed and the same
+            request sent again completes the start.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
 
     get:
       operationId: listInstances
@@ -1131,7 +1197,8 @@ paths:
       description: >
         Returns a paginated list of instances for the caller's tenant, additionally scoped to
         the same assignee/department/admin visibility rule as GET /instances/:id (§9.2) —
-        non-visible instances are simply absent from the page, not an error.
+        non-visible instances are simply absent from the page, not an error. A filter parameter sent with an
+        empty value is treated as not sent.
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
         - $ref: "#/components/parameters/UserIdHeader"
@@ -1204,9 +1271,11 @@ paths:
       summary: Get workflow instance detail
       description: >
         Returns instance detail including all tasks created for this instance. Visible only
-        if the caller is (or was) an assignee on any task under this instance, the caller's
-        x-departments includes any currently-open task's department_id, or the caller holds
-        tenant_admin/tenant_owner (§9.2). Returns 403 NOT_AUTHORIZED_FOR_RESOURCE otherwise —
+        if the caller holds an active assignment on any task under this instance, the caller's
+        x-departments includes the department_id of any task of the instance (open or closed),
+        or the caller holds tenant_admin/tenant_owner (§9.2). A caller who held a task earlier
+        but holds no active assignment now reads the instance only through department
+        membership or an admin role. Returns 403 NOT_AUTHORIZED_FOR_RESOURCE otherwise —
         not 404, since the instance is already confirmed to exist in the caller's own tenant.
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
@@ -1227,8 +1296,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: >
-            NOT_AUTHORIZED_FOR_RESOURCE — caller is not an assignee, not in the current
-            department, and not an admin.
+            NOT_AUTHORIZED_FOR_RESOURCE — caller holds no active assignment on a task of the
+            instance, has no department of any task of the instance, and is not an admin.
           content:
             application/problem+json:
               schema:
@@ -1237,7 +1306,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/not-authorized-for-resource"
                 title: "Not Authorized For Resource"
                 status: 403
-                detail: "caller is not an assignee, department member, or admin for this instance"
+                detail: "caller is not authorized to read this resource"
                 instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6"
                 code: "NOT_AUTHORIZED_FOR_RESOURCE"
         "404":
@@ -1279,7 +1348,9 @@ paths:
                   minimum: 1
                   description: >
                     The caller's current view of the instance's record_version, checked
-                    synchronously before the signal is forwarded (§5.10).
+                    synchronously before the signal is forwarded (§5.10); required, and at
+                    least 1, the lowest version an instance can hold. A body that omits it or
+                    carries 0 is refused 400 BAD_REQUEST.
                   example: 3
                 reason:
                   type: string
@@ -1316,7 +1387,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/invalid-instance-state"
                     title: "Invalid Instance State"
                     status: 409
-                    detail: "instance is not RUNNING"
+                    detail: "action not valid for instance's current status"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/pause"
                     code: "INVALID_INSTANCE_STATE"
                 RecordVersionConflict:
@@ -1324,7 +1395,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "the instance has been modified since record_version=3 was read"
+                    detail: "record version conflict"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/pause"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -1378,7 +1449,9 @@ paths:
                   minimum: 1
                   description: >
                     The caller's current view of the instance's record_version, checked
-                    synchronously before the signal is forwarded (§5.10).
+                    synchronously before the signal is forwarded (§5.10); required, and at
+                    least 1, the lowest version an instance can hold. A body that omits it or
+                    carries 0 is refused 400 BAD_REQUEST.
                   example: 4
       responses:
         "202":
@@ -1410,7 +1483,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/invalid-instance-state"
                     title: "Invalid Instance State"
                     status: 409
-                    detail: "instance is not PAUSED"
+                    detail: "action not valid for instance's current status"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/resume"
                     code: "INVALID_INSTANCE_STATE"
                 RecordVersionConflict:
@@ -1418,7 +1491,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "the instance has been modified since record_version=4 was read"
+                    detail: "record version conflict"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/resume"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -1444,10 +1517,11 @@ paths:
       tags: [Instances]
       summary: Cancel a workflow instance (admin)
       description: >
-        Sends a cancel signal to the Temporal workflow. Valid from RUNNING or PAUSED status.
+        Sends a cancel signal to the Temporal workflow. Valid from RUNNING, PAUSED or DEGRADED status.
         The workflow function cleans up active tasks and transitions to TERMINATED. When the
         Temporal workflow execution no longer exists, the instance is marked TERMINATED directly,
-        its active tasks are failed, and the request is still answered 202.
+        its active tasks are failed, WorkflowInstanceTerminated is emitted instead of
+        WorkflowInstanceCancelled, and the request is still answered 202.
       security:
         - GatewayTenantContext: []
           UserContext: []
@@ -1472,7 +1546,9 @@ paths:
                   minLength: 1
                   maxLength: 500
                   description: >
-                    Human-readable reason for the cancellation; stored on the instance record.
+                    Human-readable reason for the cancellation; carried in the
+                    WorkflowInstanceCancelled event (WorkflowInstanceTerminated when the
+                    workflow execution no longer exists), not stored on the instance.
                     It must contain text: a reason of only whitespace is refused 400 BAD_REQUEST.
                   example: "Superseded by a corrected instance"
                 record_version:
@@ -1480,7 +1556,9 @@ paths:
                   minimum: 1
                   description: >
                     The caller's current view of the instance's record_version, checked
-                    synchronously before the signal is forwarded (§5.10).
+                    synchronously before the signal is forwarded (§5.10); required, and at
+                    least 1, the lowest version an instance can hold. A body that omits it or
+                    carries 0 is refused 400 BAD_REQUEST.
                   example: 2
       responses:
         "202":
@@ -1513,7 +1591,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/instance-already-terminal"
                     title: "Instance Already Terminal"
                     status: 409
-                    detail: "instance is already COMPLETED"
+                    detail: "instance is already in a terminal state"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/cancel"
                     code: "INSTANCE_ALREADY_TERMINAL"
                 RecordVersionConflict:
@@ -1521,7 +1599,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "the instance has been modified since record_version=2 was read"
+                    detail: "record version conflict"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/cancel"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -1574,7 +1652,8 @@ paths:
                   minLength: 1
                   maxLength: 500
                   description: >
-                    Human-readable reason for termination; stored on the instance record.
+                    Human-readable reason for termination; carried in the
+                    WorkflowInstanceTerminated event, not stored on the instance.
                     It must contain text: a reason of only whitespace is refused 400 BAD_REQUEST.
                   example: "Duplicate instance created in error"
       responses:
@@ -1610,7 +1689,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/instance-already-terminal"
                     title: "Instance Already Terminal"
                     status: 409
-                    detail: "instance is already TERMINATED"
+                    detail: "instance is already in a terminal state"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/terminate"
                     code: "INSTANCE_ALREADY_TERMINAL"
                 IdempotencyReplay:
@@ -1832,7 +1911,9 @@ paths:
                   minimum: 1
                   description: >
                     The caller's current view of the instance's record_version, checked
-                    synchronously before the signal is forwarded (§5.10).
+                    synchronously before the signal is forwarded (§5.10); required, and at
+                    least 1, the lowest version an instance can hold. A body that omits it or
+                    carries 0 is refused 400 BAD_REQUEST.
                   example: 5
       responses:
         "202":
@@ -1871,7 +1952,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/invalid-instance-state"
                     title: "Invalid Instance State"
                     status: 409
-                    detail: "instance is not RUNNING"
+                    detail: "action not valid for instance's current status"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-forward"
                     code: "INVALID_INSTANCE_STATE"
                 TargetNodeNotFound:
@@ -1887,7 +1968,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "the instance has been modified since record_version=5 was read"
+                    detail: "record version conflict"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-forward"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -1942,7 +2023,9 @@ paths:
                   minimum: 1
                   description: >
                     The caller's current view of the instance's record_version, checked
-                    synchronously before the signal is forwarded (§5.10).
+                    synchronously before the signal is forwarded (§5.10); required, and at
+                    least 1, the lowest version an instance can hold. A body that omits it or
+                    carries 0 is refused 400 BAD_REQUEST.
                   example: 6
                 target_node_key:
                   type: string
@@ -1987,7 +2070,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/force-back-no-saved-branch"
                     title: "Force Back No Saved Branch"
                     status: 409
-                    detail: "no completed steps to revert to"
+                    detail: "no completed step to go back to"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-back"
                     code: "FORCE_BACK_NO_SAVED_BRANCH"
                 RecordVersionConflict:
@@ -1995,7 +2078,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "the instance has been modified since record_version=6 was read"
+                    detail: "record version conflict"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/force-back"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -2022,14 +2105,19 @@ paths:
       summary: Override the assignee for a specific node on a running instance (admin)
       description: >
         Admin override: replaces the default/current assignee for the given BPMN node with
-        new_user_id, independent of the compiled plan's default assignment. Applies only to
-        the node's current or future assignment; does not affect already-completed assignments.
-        A task with no active assignee (for example after its only assignee was removed) is
-        accepted and given to new_user_id. The new user's eligibility is checked once, against
-        the compiled plan, before anything is stored. The task's record_version is bumped in the
-        same transaction as the override record, so of two admins overriding the same version only
+        new_user_id, independent of the compiled plan's default assignment. Applies to a node
+        that already has an open task; a node the instance has not reached has no task and is
+        refused 404 TASK_NOT_FOUND (the assignee of a later node is set at start through the
+        override map). Does not affect already-completed assignments. A task with no active
+        assignee (for example after its only assignee was removed) is accepted and given to
+        new_user_id. A connector-typed task is refused 409 TASK_NOT_HUMAN_ACTIONABLE before
+        the eligibility read. The new user's eligibility is checked once, against the compiled
+        plan, before anything is stored. The task's record_version is bumped in the same
+        transaction as the override record, so of two admins overriding the same version only
         the first succeeds.
         Returns 400 OVERRIDE_NO_OP if new_user_id is already the effective assignee for this node.
+        A 200 means the override is stored and the reassign signal was accepted, not that the
+        assignment has already moved; read the task again to see who holds it.
       security:
         - GatewayTenantContext: []
           UserContext: []
@@ -2070,11 +2158,13 @@ paths:
                   minimum: 1
                   description: >
                     The caller's current view of the task's record_version at this node,
-                    checked before the eligibility call and again before persisting (§5.4).
+                    checked before the eligibility call and again before persisting (§5.4);
+                    required, and at least 1. A body that omits it or carries 0 is refused
+                    400 BAD_REQUEST.
                   example: 4
       responses:
         "200":
-          description: Override persisted and signaled; returns the override record (rev 1.23 — not a 202/SignalAccepted body).
+          description: Override persisted and the reassign signal accepted (the assignment may not have moved yet); returns the override record, not a 202/SignalAccepted body.
           content:
             application/json:
               schema:
@@ -2093,7 +2183,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/bad-request"
                     title: "Bad Request"
                     status: 400
-                    detail: "field 'new_user_id' is required"
+                    detail: "request body has missing or invalid fields"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
                     code: "BAD_REQUEST"
                 OverrideNoOp:
@@ -2101,7 +2191,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/override-no-op"
                     title: "Override No-Op"
                     status: 400
-                    detail: "new_user_id is already the effective assignee for node 'review_stage_1'"
+                    detail: "new assignee is already the current assignee"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
                     code: "OVERRIDE_NO_OP"
         "401":
@@ -2109,14 +2199,23 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/InstanceNotFound"
+          description: >
+            INSTANCE_NOT_FOUND, with the same answer for an instance that does not exist and
+            one that belongs to another tenant, or TASK_NOT_FOUND: the node has no task
+            (the instance has not reached it, or it is not in the plan).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
         "409":
           description: >
-            State conflict. See code field: NODE_ALREADY_RESOLVED — the node has already
+            State conflict. See code field: TASK_NOT_HUMAN_ACTIONABLE — the task is
+            connector-typed; NODE_ALREADY_RESOLVED — the node has already
             completed or advanced past; INVALID_INSTANCE_STATE — the instance is not RUNNING or
             DEGRADED; RECORD_VERSION_CONFLICT — record_version is stale, including the losing
-            admin of two concurrent overrides; IDEMPOTENCY_KEY_REPLAY — same key reused with a
-            different request body.
+            admin of two concurrent overrides; VERSION_INVALID — the eligibility check reads the
+            compiled plan, and its schema version is not one this service reads;
+            IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:
             application/problem+json:
               schema:
@@ -2127,7 +2226,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/node-already-resolved"
                     title: "Node Already Resolved"
                     status: 409
-                    detail: "node 'review_stage_1' has already been completed or advanced past"
+                    detail: "node has already progressed"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
                     code: "NODE_ALREADY_RESOLVED"
                 RecordVersionConflict:
@@ -2135,7 +2234,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "a concurrent change was applied to this node; refresh and retry"
+                    detail: "record version conflict"
                     instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -2158,7 +2257,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/assignee-ineligible"
                 title: "Assignee Ineligible"
                 status: 422
-                detail: "new_user_id is not eligible to be assigned to node 'review_stage_1'"
+                detail: "the user does not satisfy the task's department and role level"
                 instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/nodes/review_stage_1/override"
                 code: "ASSIGNEE_INELIGIBLE"
         "413":
@@ -2179,7 +2278,10 @@ paths:
         Returns the activity event log for a workflow instance ordered by occurred_at DESC,
         indexed by (workflow_instance_id, occurred_at DESC, id DESC) (§4.9). Keyset pagination
         (§5.9), same contract as every other list endpoint — cursor/limit in, items[] +
-        next_cursor out. Same intra-tenant visibility rule as GET /instances/:id (§9.2): visible
+        next_cursor out. An event whose type this version does not name, or whose recorded
+        envelope cannot be read, is left out and logged, so a page may hold fewer than limit
+        items, or none, and still carry next_cursor; the end of the history is signalled only
+        by the absence of next_cursor. Same intra-tenant visibility rule as GET /instances/:id (§9.2): visible
         only if the caller is (or was) an assignee on any task under this instance, the caller's
         x-departments includes any currently-open task's department_id, or the caller holds
         tenant_admin/tenant_owner.
@@ -2225,7 +2327,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/not-authorized-for-resource"
                 title: "Not Authorized For Resource"
                 status: 403
-                detail: "caller is not an assignee, department member, or admin for this instance"
+                detail: "caller is not authorized to read this resource"
                 instance: "/api/v1/instances/3fa85f64-5717-4562-b3fc-2c963f66afa6/events"
                 code: "NOT_AUTHORIZED_FOR_RESOURCE"
         "404":
@@ -2243,6 +2345,7 @@ paths:
         status, assignee, department, instance, and due date. Used by task dashboards.
         Additionally scoped to the same assignee/department/admin visibility rule as
         GET /tasks/:id (§9.2) — non-visible tasks are simply absent from the page, not an error.
+        A filter parameter sent with an empty value is treated as not sent.
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
         - $ref: "#/components/parameters/UserIdHeader"
@@ -2312,10 +2415,13 @@ paths:
       tags: [Tasks]
       summary: Get task detail
       description: >
-        Returns task detail including payload_json and all assignment records (active and
-        historical). Visible only if the caller is (or was) an assignee, the caller's
-        x-departments includes the task's department_id, or the caller holds
-        tenant_admin/tenant_owner (§9.2). Returns 403 NOT_AUTHORIZED_FOR_RESOURCE otherwise —
+        Returns task detail including payload_json and every assignment record the task has
+        had, active and historical, each marked by is_active, in every task status (completed
+        tasks included). Visible only if the caller holds an active assignment on the task,
+        the caller's x-departments includes the task's department_id, or the caller holds
+        tenant_admin/tenant_owner (§9.2). A caller who held the task earlier but holds no
+        active assignment now reads it only through department membership or an admin role.
+        Returns 403 NOT_AUTHORIZED_FOR_RESOURCE otherwise —
         not 404, since the task is already confirmed to exist in the caller's own tenant.
       parameters:
         - $ref: "#/components/parameters/TenantIdHeader"
@@ -2336,8 +2442,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: >
-            NOT_AUTHORIZED_FOR_RESOURCE — caller is not an assignee, not in the task's
-            department, and not an admin.
+            NOT_AUTHORIZED_FOR_RESOURCE — caller holds no active assignment on the task, is
+            not in the task's department, and is not an admin.
           content:
             application/problem+json:
               schema:
@@ -2346,7 +2452,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/not-authorized-for-resource"
                 title: "Not Authorized For Resource"
                 status: 403
-                detail: "caller is not the assignee, department member, or admin for this task"
+                detail: "caller is not authorized to read this resource"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6"
                 code: "NOT_AUTHORIZED_FOR_RESOURCE"
         "404":
@@ -2360,18 +2466,27 @@ paths:
       tags: [Tasks]
       summary: Claim a task assignment
       description: >
-        The calling user claims their active unclaimed assignment for this task.
-        Sets is_lead and claimed_at on the assignment row, increments task.record_version and
-        queues the WorkflowTaskClaimed event in the same transaction. No signal is sent to the
-        Temporal workflow.
-        Returns 403 if the user has no active assignment.
-        Returns 409 TASK_ALREADY_CLAIMED if another assignee already holds the lead; the lead
-        repeating its own claim at the current record_version gets the task back.
-        Returns 409 RECORD_VERSION_CONFLICT if the supplied record_version is stale.
+        The calling user claims the task, becoming its lead (assignee_mode=all only). One
+        database transaction moves the lead marker to the caller, clears it on every other
+        assignment, sets claimed_at on the caller's assignment (a repeated claim keeps the
+        first claim time) and increments task.record_version, and queues the WorkflowTaskClaimed
+        event in the same transaction; no signal is sent. A claim does not change the task's
+        status. The checks run in this order and the first that fails
+        refuses the claim: task exists, task is human-actionable, assignee_mode is all,
+        record_version is current, status is READY or IN_PROGRESS, the instance is RUNNING or
+        DEGRADED, the task has no other lead, the caller holds an active assignment, the
+        caller is eligible.
+        Returns 403 NOT_ASSIGNEE if the user has no active assignment.
+        Returns 409 TASK_ALREADY_CLAIMED if another assignee already holds the lead and the
+        supplied record_version is current; the lead repeating its own claim at the current
+        record_version gets the task back.
+        Returns 409 RECORD_VERSION_CONFLICT if the supplied record_version is not the task's
+        current version, so a retry of a claim that already succeeded, sent with the earlier
+        version, is a version conflict.
         Returns 409 CLAIM_NOT_APPLICABLE if the task's assignee_mode is single — claim exists
         only to establish a lead among multiple assignees (assignee_mode=all).
         The calling user's eligibility for the task's department and its stage's required level
-        is read from Org & Membership before the claim is stored: 422 ASSIGNEE_INELIGIBLE when the read
+        is read from Org & Membership before the write: 422 ASSIGNEE_INELIGIBLE when the read
         answers ineligible (a suspended, removed or demoted member) or the node has no stage in
         the compiled plan, 503 UPSTREAM_UNAVAILABLE when the read or the compiled plan fails.
       parameters:
@@ -2392,12 +2507,14 @@ paths:
                   type: integer
                   minimum: 1
                   description: >
-                    The task record_version the client last observed. Must match the current
-                    task.record_version; mismatch returns RECORD_VERSION_CONFLICT.
+                    The task record_version the client last observed; required, and at least 1,
+                    the lowest version a task can hold. A body that omits it or carries 0 is
+                    refused 400 BAD_REQUEST. Any other value that is not the task's current
+                    version returns RECORD_VERSION_CONFLICT.
                   example: 1
       responses:
         "202":
-          description: Claim accepted; returns the task with its incremented record_version.
+          description: Claim written; returns the updated task with its incremented record_version, once the transaction has committed.
           content:
             application/json:
               schema:
@@ -2416,7 +2533,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/not-assignee"
                 title: "Not Assigned"
                 status: 403
-                detail: "caller does not have an active assignment for this task"
+                detail: "caller is not the task's active assignee"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
                 code: "NOT_ASSIGNEE"
         "404":
@@ -2424,10 +2541,11 @@ paths:
         "409":
           description: >
             State conflict. See code field:
-            TASK_ALREADY_CLAIMED — another assignee already holds the lead;
-            RECORD_VERSION_CONFLICT — the supplied version is stale (another claim beat you);
+            TASK_ALREADY_CLAIMED — another assignee already holds the lead and the supplied version is current;
+            RECORD_VERSION_CONFLICT — the supplied version is not the task's current one (another claim beat you, or this claim already succeeded);
             INVALID_TASK_STATE — the task is not in READY or IN_PROGRESS status;
-            CLAIM_NOT_APPLICABLE — the task's assignee_mode is single, so claim does not apply.
+            CLAIM_NOT_APPLICABLE — the task's assignee_mode is single, so claim does not apply;
+            VERSION_INVALID — the eligibility check reads the compiled plan, and its schema version is not one this service reads.
           content:
             application/problem+json:
               schema:
@@ -2438,7 +2556,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/task-already-claimed"
                     title: "Task Already Claimed"
                     status: 409
-                    detail: "this assignment has already been claimed"
+                    detail: "task already claimed by another assignee"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
                     code: "TASK_ALREADY_CLAIMED"
                 ClaimNotApplicable:
@@ -2446,15 +2564,15 @@ paths:
                     type: "https://errors.bcbp.io/execution/claim-not-applicable"
                     title: "Claim Not Applicable"
                     status: 409
-                    detail: "claim only applies to tasks with assignee_mode=all"
+                    detail: "claim only applies to multi-assignee tasks"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
                     code: "CLAIM_NOT_APPLICABLE"
                 ConcurrencyViolation:
                   value:
-                    type: "https://errors.bcbp.io/execution/task-concurrency-violation"
-                    title: "Task Concurrency Violation"
+                    type: "https://errors.bcbp.io/execution/record-version-conflict"
+                    title: "Record Version Conflict"
                     status: 409
-                    detail: "task record_version mismatch; refresh and retry"
+                    detail: "record version conflict"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -2475,7 +2593,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/assignee-ineligible"
                 title: "Assignee Ineligible"
                 status: 422
-                detail: "assignee is not eligible for this node"
+                detail: "the user does not satisfy the task's department and role level"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/claim"
                 code: "ASSIGNEE_INELIGIBLE"
         "413":
@@ -2493,10 +2611,14 @@ paths:
       tags: [Tasks]
       summary: Complete a task assignment
       description: >
-        The calling user submits their completion payload for their active assignment.
-        Sets completed_at and result_json on the assignment. If all active assignments for
-        the task are now complete, the task status transitions to COMPLETED and a
-        task-complete signal is sent to Temporal (which then advances the workflow).
+        The calling user, an active assignee who may act (the only assignee, or the lead of an
+        assignee_mode=all task), submits the completion payload. A task in READY or
+        IN_PROGRESS can be completed with no claim first; in assignee_mode=all only the lead
+        may complete. The request forwards the completion to the workflow as a signal and
+        answers 202 with the task as it stood when the signal was accepted. The workflow
+        applies it afterwards: it records completed_at and result_json on the
+        assignment, closes the co-assignees' open assignments and moves the task to COMPLETED
+        as the instance moves on, so a client that needs the outcome reads the task again.
         The calling user's eligibility for the task's department and its stage's required level
         is read from Org & Membership before the signal: 422 ASSIGNEE_INELIGIBLE when the read
         answers ineligible (a suspended, removed or demoted member) or the node has no stage in
@@ -2521,7 +2643,9 @@ paths:
                 record_version:
                   type: integer
                   minimum: 1
-                  description: The task record_version the client last observed.
+                  description: >
+                    The task record_version the client last observed; required, and at least 1.
+                    A body that omits it or carries 0 is refused 400 BAD_REQUEST.
                   example: 1
                 result_json:
                   type: object
@@ -2536,8 +2660,10 @@ paths:
       responses:
         "202":
           description: >
-            Completion recorded; returns the task as of this write. The response does not
-            carry a separate all_done flag — check the returned status field instead (rev 1.23).
+            Completion accepted; returns the task as it stood when the signal was accepted,
+            so status, record_version and assignment still show the earlier state and there is
+            no completed_at. The workflow applies the completion after the response; read the
+            task again for the outcome.
           content:
             application/json:
               schema:
@@ -2547,7 +2673,9 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Caller has no active claimed assignment for this task.
+          description: >
+            Caller has no active assignment for this task or, in an assignee_mode=all task,
+            is not its lead.
           content:
             application/problem+json:
               schema:
@@ -2556,7 +2684,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/not-assignee"
                 title: "Not Assigned"
                 status: 403
-                detail: "caller does not have an active claimed assignment for this task"
+                detail: "caller is not the task's active assignee"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/complete"
                 code: "NOT_ASSIGNEE"
         "404":
@@ -2565,8 +2693,9 @@ paths:
           description: >
             State conflict. See code field:
             RECORD_VERSION_CONFLICT — version mismatch;
-            INVALID_TASK_STATE — task is not IN_PROGRESS;
+            INVALID_TASK_STATE — the task is not READY or IN_PROGRESS;
             INVALID_INSTANCE_STATE — the instance is not RUNNING or DEGRADED (for example paused), so the workflow would drop the completion;
+            VERSION_INVALID — the eligibility check reads the compiled plan, and its schema version is not one this service reads;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:
             application/problem+json:
@@ -2591,7 +2720,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/assignee-ineligible"
                 title: "Assignee Ineligible"
                 status: 422
-                detail: "assignee is not eligible for this node"
+                detail: "the user does not satisfy the task's department and role level"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/complete"
                 code: "ASSIGNEE_INELIGIBLE"
         "413":
@@ -2609,18 +2738,21 @@ paths:
       tags: [Tasks]
       summary: Defer a task (send it back)
       description: >
-        The calling user defers their claimed assignment — indicating the task cannot
+        The calling user, an active assignee who may act (the only assignee, or the lead of an
+        assignee_mode=all task), defers the task — indicating it cannot
         proceed as-is (e.g. missing documents, incomplete prior step). The task status
         transitions to DEFERRED and the instance goes back one step, as an admin
         force-back does: the previous step's department runs again and creates a new
         task for it. The request waits for the workflow to apply the defer and answers
-        200 with the deferred task, now DEFERRED. The instance may be RUNNING or DEGRADED;
-        on a DEGRADED instance the work goes back to the step before the fork and the
-        failed branch is not rerun. Any other instance state answers 409
-        INVALID_INSTANCE_STATE. When the workflow cannot apply it (no completed step to go
-        back to) it answers 409 INVALID_TASK_STATE naming the reason, and nothing changes.
+        200 with the deferred task, now DEFERRED. A task in READY or IN_PROGRESS can be
+        deferred with no claim first; in assignee_mode=all only the lead may defer. The
+        instance may be RUNNING or DEGRADED; on a DEGRADED instance the work goes back to the
+        step before the fork and the failed branch is not rerun. Any other instance state
+        answers 409 INVALID_INSTANCE_STATE before the Update is sent. A task that is not READY
+        or IN_PROGRESS, or an instance with no completed step to go back to, answers 409
+        INVALID_TASK_STATE naming the reason. Nothing changes on a refusal.
         The calling user's eligibility for the task's department and its stage's required level
-        is read from Org & Membership before the signal: 422 ASSIGNEE_INELIGIBLE when the read
+        is read from Org & Membership before the Update: 422 ASSIGNEE_INELIGIBLE when the read
         answers ineligible (a suspended, removed or demoted member) or the node has no stage in
         the compiled plan, 503 UPSTREAM_UNAVAILABLE when the read or the compiled plan fails.
       parameters:
@@ -2640,7 +2772,9 @@ paths:
                 record_version:
                   type: integer
                   minimum: 1
-                  description: The task record_version the client last observed.
+                  description: >
+                    The task record_version the client last observed; required, and at least 1.
+                    A body that omits it or carries 0 is refused 400 BAD_REQUEST.
                   example: 1
                 reason:
                   type: string
@@ -2661,7 +2795,9 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Caller has no active claimed assignment for this task.
+          description: >
+            Caller has no active assignment for this task or, in an assignee_mode=all task,
+            is not its lead.
           content:
             application/problem+json:
               schema:
@@ -2670,7 +2806,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/not-assignee"
                 title: "Not Assigned"
                 status: 403
-                detail: "caller does not have an active claimed assignment for this task"
+                detail: "caller is not the task's active assignee"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/defer"
                 code: "NOT_ASSIGNEE"
         "404":
@@ -2678,8 +2814,9 @@ paths:
         "409":
           description: >
             RECORD_VERSION_CONFLICT — version mismatch;
-            INVALID_TASK_STATE — task is not IN_PROGRESS or has no previous step to defer to;
+            INVALID_TASK_STATE — the task is not READY or IN_PROGRESS, or the instance has no completed step to defer to;
             INVALID_INSTANCE_STATE — the instance is not RUNNING or DEGRADED;
+            VERSION_INVALID — the eligibility check reads the compiled plan, and its schema version is not one this service reads;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
           content:
             application/problem+json:
@@ -2704,7 +2841,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/assignee-ineligible"
                 title: "Assignee Ineligible"
                 status: 422
-                detail: "assignee is not eligible for this node"
+                detail: "the user does not satisfy the task's department and role level"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/defer"
                 code: "ASSIGNEE_INELIGIBLE"
         "413":
@@ -2723,14 +2860,18 @@ paths:
       summary: Reassign a task to a different user (admin)
       description: >
         Admin override: vacates the current active assignment(s) and creates a new assignment
-        for the specified user. Sends an instance-reassign signal to Temporal.
+        for the specified user. Sends an instance-reassign signal to Temporal. The body
+        carries new_user_id and record_version only; a reason is not accepted, and a body with
+        any other field is refused 400 BAD_REQUEST naming it. A reassign of a connector-typed
+        task is refused 409 TASK_NOT_HUMAN_ACTIONABLE before the version and status checks.
+        A task with no active assignee is accepted and treated as having no current holder.
         The new assignee's eligibility for the node is checked before the signal, as for
         node-override (§5.4): 422 ASSIGNEE_INELIGIBLE when the Org & Membership read answers
         ineligible or the node has no stage in the compiled plan, 503 UPSTREAM_UNAVAILABLE when
         the read fails.
         A task with no active assignee (for example after its only assignee was removed) is
         accepted and given to the new user; the reassign then names no previous user.
-        Returns 400 OVERRIDE_NO_OP if new_assignee_user_id is already the current assignee.
+        Returns 400 OVERRIDE_NO_OP if new_user_id is already the current assignee.
       security:
         - GatewayTenantContext: []
           UserContext: []
@@ -2748,36 +2889,34 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [new_assignee_user_id, record_version]
+              required: [new_user_id, record_version]
               properties:
-                new_assignee_user_id:
+                new_user_id:
                   type: string
                   format: uuid
-                  description: UUID of the user to assign this task to.
-                reason:
-                  type: string
-                  maxLength: 500
-                  nullable: true
-                  description: Optional human-readable reason for the reassignment.
-                  example: "Original assignee is on leave"
+                  description: UUID of the user who takes the task.
                 record_version:
                   type: integer
                   minimum: 1
                   description: >
                     The caller's current view of the task's record_version, checked
-                    synchronously before the signal is forwarded (§5.10).
+                    synchronously before the signal is forwarded (§5.10); required, and at
+                    least 1. A body that omits it or carries 0 is refused 400 BAD_REQUEST.
                   example: 2
       responses:
         "202":
-          description: Reassignment accepted; returns the task with its new assignment reflected.
+          description: >
+            Reassignment accepted; returns the task as it stood when the signal was accepted.
+            The workflow applies the change after the response, so the body still shows the
+            earlier assignment; read the task again for the outcome.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskActionResult"
         "400":
           description: >
-            Malformed request body, or code field OVERRIDE_NO_OP — new_assignee_user_id is
-            already the current assignee.
+            Malformed request body (a field this operation does not define included), or code
+            field OVERRIDE_NO_OP — new_user_id is already the current assignee.
           content:
             application/problem+json:
               schema:
@@ -2788,15 +2927,18 @@ paths:
                     type: "https://errors.bcbp.io/execution/bad-request"
                     title: "Bad Request"
                     status: 400
-                    detail: "field 'new_assignee_user_id' is required"
+                    detail: "request body has missing or invalid fields"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
                     code: "BAD_REQUEST"
+                    invalid_params:
+                      - name: "new_user_id"
+                        reason: "is required"
                 OverrideNoOp:
                   value:
                     type: "https://errors.bcbp.io/execution/override-no-op"
                     title: "Override No-Op"
                     status: 400
-                    detail: "new_assignee_user_id is already the current assignee"
+                    detail: "new assignee is already the current assignee"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
                     code: "OVERRIDE_NO_OP"
         "401":
@@ -2808,6 +2950,7 @@ paths:
         "409":
           description: >
             State conflict. See code field:
+            TASK_NOT_HUMAN_ACTIONABLE — the task is connector-typed;
             INVALID_TASK_STATE — task is already COMPLETED, DEFERRED, or FAILED;
             INVALID_INSTANCE_STATE — the instance is not RUNNING or DEGRADED;
             VERSION_INVALID — the eligibility check reads the compiled plan, and its schema version is not one this service reads;
@@ -2823,7 +2966,7 @@ paths:
                     type: "https://errors.bcbp.io/execution/record-version-conflict"
                     title: "Record Version Conflict"
                     status: 409
-                    detail: "the task has been modified since record_version=2 was read"
+                    detail: "record version conflict"
                     instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
                     code: "RECORD_VERSION_CONFLICT"
                 IdempotencyReplay:
@@ -2844,7 +2987,7 @@ paths:
                 type: "https://errors.bcbp.io/execution/assignee-ineligible"
                 title: "Assignee Ineligible"
                 status: 422
-                detail: "assignee is not eligible for this node"
+                detail: "the user does not satisfy the task's department and role level"
                 instance: "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6/reassign"
                 code: "ASSIGNEE_INELIGIBLE"
         "413":
@@ -2900,18 +3043,11 @@ paths:
                     nullable: true
                     description: Opaque cursor for the next page; omitted/null on the final page.
         "400":
-          description: Missing or invalid user_id query parameter.
+          description: Missing or invalid user_id query parameter; the detail is "invalid user_id query parameter".
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ProblemDetails"
-              example:
-                type: "https://errors.bcbp.io/execution/bad-request"
-                title: "Bad Request"
-                status: 400
-                detail: "user_id query parameter is required"
-                instance: "/api/v1/workflows/active-by-user"
-                code: "BAD_REQUEST"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

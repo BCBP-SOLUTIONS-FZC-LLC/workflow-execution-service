@@ -30,7 +30,7 @@ func TestConsumer_DeadLetter_CopyFails_EntryStaysPendingAndIsReclaimable(t *test
 	assert.Equal(t, entries[0].ID, pending[0].ID)
 
 	vsxMakeIdle(t, client, stream, vsxClaimerA, []string{entries[0].ID}, vsxLongIdle)
-	reclaimed, err := consumer.ReclaimStale(ctx, stream, vsxGroup, vsxClaimerB, vsxMinIdle, vsxReadBatch)
+	reclaimed, _, err := consumer.ReclaimStale(ctx, stream, vsxGroup, vsxClaimerB, "0", vsxMinIdle, vsxReadBatch)
 	require.NoError(t, err)
 	require.Len(t, reclaimed, 1)
 	assert.Equal(t, entries[0].ID, reclaimed[0].ID)

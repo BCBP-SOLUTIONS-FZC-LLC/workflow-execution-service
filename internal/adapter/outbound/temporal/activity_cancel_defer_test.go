@@ -78,7 +78,7 @@ func wkactNewDeferFixture(t *testing.T, validatorErr error) *wkactDeferFixture {
 	f := &wkactDeferFixture{deps: deps, world: world, tx: tx, tenant: tenant, task: task, assignment: assignment}
 	f.input = port.DeferTaskInput{
 		TaskID: task.ID.String(), TenantID: tenant.String(), UserID: assignment.UserID.String(),
-		AssignmentID: assignment.ID.String(), Reason: "waiting for documents", DeferredToNodeKey: "sales/later",
+		AssignmentID: assignment.ID.String(), Reason: "waiting for documents", DeferredToNodeKey: "sales/later", RecordVersion: task.RecordVersion,
 	}
 	f.run = func() error { return deps.DeferTask(context.Background(), f.input) }
 	return f

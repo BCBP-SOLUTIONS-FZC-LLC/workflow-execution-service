@@ -61,7 +61,6 @@ var wkbootExpectedActivityBindings = map[string]string{
 	"GetCompiledPlanActivity":      "GetCompiledPlan",
 	"CreateTaskActivity":           "CreateTask",
 	"UpdateInstanceNodesActivity":  "UpdateInstanceNodes",
-	"ClaimAssignmentActivity":      "ClaimAssignment",
 	"CompleteAssignmentActivity":   "CompleteAssignment",
 	"DeferTaskActivity":            "DeferTask",
 	"UpdateInstanceStatusActivity": "UpdateInstanceStatus",

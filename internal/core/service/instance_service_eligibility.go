@@ -11,9 +11,21 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
-func deptUUID(dept *dsl.DepartmentDef) uuid.UUID {
-	id, _ := uuid.Parse(dept.IAMDepartmentID)
-	return id
+func deptUUID(dept *dsl.DepartmentDef) (uuid.UUID, error) {
+	if dept.IAMDepartmentID == "" {
+		return uuid.Nil, nil
+	}
+	id, err := uuid.Parse(dept.IAMDepartmentID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("%w: department %q has iam_department_id %q: %w",
+			port.ErrVersionInvalid, dept.ID, dept.IAMDepartmentID, err)
+	}
+	return id, nil
+}
+
+func deptIsTaskDept(dept *dsl.DepartmentDef, taskDeptID uuid.UUID) bool {
+	id, err := deptUUID(dept)
+	return err == nil && id == taskDeptID
 }
 
 func findPlan(collab *dsl.CompiledCollaboration, name string) *dsl.CompiledPlan {
@@ -66,8 +78,12 @@ func resolveStageAssignees(stage *dsl.StageDef, nodeKey string, overrideMap map[
 func collectAssigneeChecks(
 	plan *dsl.CompiledPlan,
 	overrideMap map[string]uuid.UUID,
-) (checks []eligibilityCheck, unresolvedNodes []string) {
+) (checks []eligibilityCheck, unresolvedNodes []string, err error) {
 	for _, dept := range plan.Departments {
+		departmentID, err := deptUUID(&dept)
+		if err != nil {
+			return nil, nil, err
+		}
 		for i := range dept.Stages {
 			stage := &dept.Stages[i]
 			if !stage.CreatesHumanTask() {
@@ -83,17 +99,20 @@ func collectAssigneeChecks(
 				checks = append(checks, eligibilityCheck{
 					nodeKey: nodeKey,
 					req: port.EligibilityCheckRequest{
-						NewUserID: userID, DepartmentID: deptUUID(&dept), RequiredLevel: stage.Role,
+						NewUserID: userID, DepartmentID: departmentID, RequiredLevel: stage.Role,
 					},
 				})
 			}
 		}
 	}
-	return checks, unresolvedNodes
+	return checks, unresolvedNodes, nil
 }
 
 func (s *InstanceService) validateAssigneeEligibility(ctx context.Context, tenantID uuid.UUID, plan *dsl.CompiledPlan, overrideMap map[string]uuid.UUID) error {
-	checks, ineligibleNodes := collectAssigneeChecks(plan, overrideMap)
+	checks, ineligibleNodes, err := collectAssigneeChecks(plan, overrideMap)
+	if err != nil {
+		return err
+	}
 
 	if len(checks) > 0 {
 		requests := make([]port.EligibilityCheckRequest, len(checks))

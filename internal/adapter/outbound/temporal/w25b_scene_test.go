@@ -45,12 +45,6 @@ func w25bNewScene(t *testing.T, withInstance bool) *w25bScene {
 	return s
 }
 
-func (s *w25bScene) claim() error {
-	return s.deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{
-		TenantID: s.tenant.String(), AssignmentID: s.helper.ID.String(), UserID: s.helperUser.String(),
-	})
-}
-
 func (s *w25bScene) complete() error {
 	_, err := s.deps.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{
 		TenantID: s.tenant.String(), TaskID: s.task.ID.String(), UserID: s.leadUser.String(), ResultJSON: `{"ok":true}`,
@@ -61,7 +55,7 @@ func (s *w25bScene) complete() error {
 func (s *w25bScene) deferTask() error {
 	return s.deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TenantID: s.tenant.String(), TaskID: s.task.ID.String(), UserID: s.leadUser.String(), AssignmentID: s.lead.ID.String(),
-		Reason: "needs rework", DeferredToNodeKey: "sales/draft",
+		Reason: "needs rework", DeferredToNodeKey: "sales/draft", RecordVersion: s.task.RecordVersion,
 	})
 }
 

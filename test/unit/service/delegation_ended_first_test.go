@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -129,4 +130,31 @@ func TestDelegationStartAndEnd_TakeTheDelegatorsLockAroundTheEndRecord(t *testin
 	assert.Equal(t, []string{
 		scope, port.DelegationScope(w.tenantID, delegationID), port.DelegateScope(w.tenantID, w.delegate), scope, scope,
 	}, locker.keys, "the start also holds the delegation's and the delegate's locks")
+}
+
+func TestDelegationStarted_ByItsEndDate(t *testing.T) {
+	past := time.Now().Add(-time.Minute)
+	future := time.Now().Add(time.Hour)
+	tests := []struct {
+		name      string
+		endsAt    *time.Time
+		wantMoved bool
+	}{
+		{"no end date moves the work", nil, true},
+		{"an end date ahead moves the work", &future, true},
+		{"an end date already passed moves nothing", &past, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newEndedFirstWorld(t)
+
+			err := w.svc.Reroute(context.Background(), port.DelegationRerouteInput{
+				TenantID: w.tenantID, DelegationID: uuid.New(), DelegatorID: w.delegator,
+				DelegateID: w.delegate, Scope: "all", EndsAt: tt.endsAt,
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, !tt.wantMoved, w.held.IsActive)
+		})
+	}
 }

@@ -23,8 +23,14 @@ type Inbox struct {
 }
 
 func NewInbox(pool *pgcommon.Pool, consumers ...string) (*Inbox, error) {
+	if len(consumers) == 0 {
+		return nil, errors.New("inbox: no consumers")
+	}
 	stores := make(map[string]*inbox.Store, len(consumers))
 	for _, consumer := range consumers {
+		if _, repeated := stores[consumer]; repeated {
+			return nil, fmt.Errorf("inbox: duplicate consumer %q", consumer)
+		}
 		store, err := inbox.NewStore(pool, consumer)
 		if err != nil {
 			return nil, fmt.Errorf("inbox store %q: %w", consumer, err)

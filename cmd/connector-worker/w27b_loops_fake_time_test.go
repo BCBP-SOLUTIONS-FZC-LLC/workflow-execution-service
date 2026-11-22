@@ -383,8 +383,8 @@ func (c *w27bReadStream) EnsureGroup(context.Context, string, string) error {
 	return assert.AnError
 }
 
-func (c *w27bReadStream) ReclaimStale(context.Context, string, string, string, time.Duration, int64) ([]valkeystream.Entry, error) {
-	return nil, nil
+func (c *w27bReadStream) ReclaimStale(context.Context, string, string, string, string, time.Duration, int64) ([]valkeystream.Entry, string, error) {
+	return nil, "0-0", nil
 }
 
 func (c *w27bReadStream) reads() []time.Time {
@@ -487,16 +487,16 @@ type w27bReclaimStream struct {
 	calls   []w27bReclaimCall
 }
 
-func (c *w27bReclaimStream) ReclaimStale(_ context.Context, stream, group, consumer string, minIdle time.Duration, count int64) ([]valkeystream.Entry, error) {
+func (c *w27bReclaimStream) ReclaimStale(_ context.Context, stream, group, consumer, _ string, minIdle time.Duration, count int64) ([]valkeystream.Entry, string, error) {
 	c.rmu.Lock()
 	defer c.rmu.Unlock()
 	c.calls = append(c.calls, w27bReclaimCall{at: time.Now(), stream: stream, group: group, consumer: consumer, minIdle: minIdle, count: count})
 	if len(c.batches) == 0 {
-		return nil, nil
+		return nil, "0-0", nil
 	}
 	batch := c.batches[0]
 	c.batches = c.batches[1:]
-	return batch, nil
+	return batch, "0-0", nil
 }
 
 func (c *w27bReclaimStream) reclaimCalls() []w27bReclaimCall {

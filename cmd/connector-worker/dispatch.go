@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -68,16 +69,21 @@ func dispatchBatch(ctx context.Context, d *deps, wg *sync.WaitGroup, entries []v
 func reclaimLoop(ctx context.Context, d *deps, wg *sync.WaitGroup, wlog port.Logger) {
 	ticker := time.NewTicker(d.claimMinIdle)
 	defer ticker.Stop()
+	cursor := "0"
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			entries, err := d.consumer.ReclaimStale(ctx, d.streamKey, d.streamGroup, d.consumerName, d.claimMinIdle, d.batchSize)
+			entries, next, err := d.consumer.ReclaimStale(
+				ctx, d.streamKey, d.streamGroup, d.consumerName, cursor, d.claimMinIdle, d.batchSize,
+			)
 			if err != nil {
 				wlog.Warn("connector-worker: reclaim stale failed", map[string]any{"error": err.Error()})
+				cursor = "0"
 				continue
 			}
+			cursor = next
 			dispatchBatch(ctx, d, wg, entries, wlog)
 		}
 	}
@@ -110,7 +116,9 @@ func parseDispatchJob(entry valkeystream.Entry) (dispatchJob, error) {
 	}
 	var resolvedInputs map[string]any
 	if raw := entry.Fields["resolved_inputs"]; raw != "" {
-		if err := json.Unmarshal([]byte(raw), &resolvedInputs); err != nil {
+		dec := json.NewDecoder(strings.NewReader(raw))
+		dec.UseNumber()
+		if err := dec.Decode(&resolvedInputs); err != nil {
 			return dispatchJob{}, fmt.Errorf("parse resolved_inputs: %w", err)
 		}
 	}

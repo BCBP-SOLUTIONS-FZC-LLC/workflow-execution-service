@@ -34,7 +34,7 @@ func scopeMatches(ctx context.Context, log port.Logger, plans *compiledPlanCache
 			if dept.ID != taskDeptID {
 				continue
 			}
-			return sameUUID(dept.IAMDepartmentID, *scopeID) && deptUUID(&dept) == c.task.DepartmentID
+			return sameUUID(dept.IAMDepartmentID, *scopeID) && deptIsTaskDept(&dept, c.task.DepartmentID)
 		}
 		return false
 	case scopeTender:
@@ -148,7 +148,7 @@ func (c *compiledPlanCache) readMainPlan(ctx context.Context, tenantID, versionI
 
 func requiredLevelForTask(plan *dsl.CompiledPlan, task *domain.Task) (string, bool) {
 	for _, dept := range plan.Departments {
-		if deptUUID(&dept) != task.DepartmentID {
+		if !deptIsTaskDept(&dept, task.DepartmentID) {
 			continue
 		}
 		for i := range dept.Stages {

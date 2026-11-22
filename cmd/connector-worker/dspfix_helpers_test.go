@@ -88,8 +88,8 @@ func (c *dspfixStreamFake) Ack(_ context.Context, stream, group, entryID string)
 	return nil
 }
 
-func (c *dspfixStreamFake) ReclaimStale(context.Context, string, string, string, time.Duration, int64) ([]valkeystream.Entry, error) {
-	return nil, nil
+func (c *dspfixStreamFake) ReclaimStale(context.Context, string, string, string, string, time.Duration, int64) ([]valkeystream.Entry, string, error) {
+	return nil, "0-0", nil
 }
 
 func (c *dspfixStreamFake) Touch(context.Context, string, string, string, []string) error { return nil }

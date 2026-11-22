@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.temporal.io/sdk/temporal"
 
 	outboundtemporal "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/temporal"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
@@ -37,38 +38,6 @@ func newAssignmentTestDeps(tasks *fakeTaskRepo, assignments *fakeAssignmentRepo)
 		Validator:   realValidator(),
 	}
 	return deps, outbox
-}
-
-func TestClaimAssignment_SetsLeadAndEnqueuesClaimed(t *testing.T) {
-	tenantID, taskID := uuid.New(), uuid.New()
-	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
-	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
-	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(assignment))
-
-	err := deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{
-		AssignmentID: assignment.ID.String(), TenantID: tenantID.String(), UserID: assignment.UserID.String(), RecordVersion: 1,
-	})
-	require.NoError(t, err)
-	assert.True(t, assignment.IsLead)
-	require.Len(t, outbox.enqueued, 1)
-	assert.Equal(t, domain.EventWorkflowTaskClaimed, outbox.enqueued[0].Type)
-}
-
-// TestClaimAssignment_AlreadyLead_NoOp is the idempotency no-op for a
-// retried ClaimAssignment: a prior attempt already made this assignment
-// lead, so the retry must skip SetLead/the event re-enqueue entirely rather
-// than reusing a stale task.RecordVersion.
-func TestClaimAssignment_AlreadyLead_NoOp(t *testing.T) {
-	tenantID, taskID := uuid.New(), uuid.New()
-	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
-	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New(), IsLead: true}
-	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(assignment))
-
-	err := deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{
-		AssignmentID: assignment.ID.String(), TenantID: tenantID.String(), UserID: assignment.UserID.String(), RecordVersion: 1,
-	})
-	require.NoError(t, err)
-	assert.Empty(t, outbox.enqueued, "already-lead retry must not re-enqueue workflow.task.claimed")
 }
 
 func TestCompleteAssignment_AllDoneWhenNoActiveAssignmentsRemain(t *testing.T) {
@@ -127,7 +96,7 @@ func TestDeferTask_ClosesTheTaskAndNamesWhereTheInstanceGoes(t *testing.T) {
 
 	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: assignment.ID.String(), Reason: "not ready yet", DeferredToNodeKey: "sales/prepare",
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet", DeferredToNodeKey: "sales/prepare", RecordVersion: 1,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, domain.TaskStatusDeferred, task.Status)
@@ -173,13 +142,33 @@ func TestDeferTask_RetriedCall_IsIdempotent(t *testing.T) {
 
 	in := port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: assignment.ID.String(), Reason: "not ready yet", DeferredToNodeKey: "sales/prepare",
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet", DeferredToNodeKey: "sales/prepare", RecordVersion: 1,
 	}
 
 	require.NoError(t, deps.DeferTask(context.Background(), in))
 	require.NoError(t, deps.DeferTask(context.Background(), in), "a retried DeferTask must succeed idempotently, not error")
 
 	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.deferred")
+}
+
+func TestDeferTask_StaleRecordVersion_ConflictsAndChangesNothing(t *testing.T) {
+	tenantID, deferrerID := uuid.New(), uuid.New()
+	taskID := uuid.New()
+	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), NodeKey: "sales/review", RecordVersion: 3}
+	assignment := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: deferrerID, IsActive: true}
+	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(assignment))
+
+	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
+		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet", RecordVersion: 2,
+	})
+	require.ErrorIs(t, err, domain.ErrRecordVersionConflict)
+	var appErr *temporal.ApplicationError
+	require.ErrorAs(t, err, &appErr)
+	assert.True(t, appErr.NonRetryable())
+	assert.NotEqual(t, domain.TaskStatusDeferred, task.Status)
+	assert.True(t, assignment.IsActive)
+	assert.Empty(t, outbox.enqueued)
 }
 
 // TestDeferTask_GetAssignmentError forces Assignments.GetByID to fail.
@@ -193,7 +182,7 @@ func TestDeferTask_GetAssignmentError(t *testing.T) {
 
 	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: uuid.New().String(), Reason: "not ready yet",
+		AssignmentID: uuid.New().String(), Reason: "not ready yet", RecordVersion: 1,
 	})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "get assignment")
@@ -212,7 +201,7 @@ func TestDeferTask_MarkDeferredError(t *testing.T) {
 
 	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: assignment.ID.String(), Reason: "not ready yet",
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet", RecordVersion: 1,
 	})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "mark task deferred")
@@ -231,7 +220,7 @@ func TestDeferTask_CompleteDeferringAssignmentError(t *testing.T) {
 
 	err := deps.DeferTask(context.Background(), port.DeferTaskInput{
 		TaskID: taskID.String(), TenantID: tenantID.String(), UserID: deferrerID.String(),
-		AssignmentID: assignment.ID.String(), Reason: "not ready yet",
+		AssignmentID: assignment.ID.String(), Reason: "not ready yet", RecordVersion: 1,
 	})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "complete deferring assignment")
@@ -473,25 +462,4 @@ func TestUpdateTaskStatus_RetriedCall_NoOp(t *testing.T) {
 	require.NoError(t, deps.UpdateTaskStatus(context.Background(), in))
 	require.NoError(t, deps.UpdateTaskStatus(context.Background(), in), "a retried UpdateTaskStatus must succeed idempotently, not error on the now-stale RecordVersion")
 	assert.Len(t, outbox.enqueued, 1, "retry must not re-enqueue workflow.task.failed")
-}
-
-func TestClaimAssignment_NamesEveryActiveAssigneeAndTheClaimer(t *testing.T) {
-	tenantID, taskID := uuid.New(), uuid.New()
-	task := &domain.Task{ID: taskID, WorkflowInstanceID: uuid.New(), RecordVersion: 1}
-	claimer := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
-	second := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
-	third := &domain.TaskAssignment{ID: uuid.New(), TaskID: taskID, UserID: uuid.New()}
-	deps, outbox := newAssignmentTestDeps(newFakeTaskRepo(task), newFakeAssignmentRepo(claimer, second, third))
-
-	err := deps.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{
-		AssignmentID: claimer.ID.String(), TenantID: tenantID.String(), UserID: claimer.UserID.String(), RecordVersion: 1,
-	})
-	require.NoError(t, err)
-
-	require.Len(t, outbox.enqueued, 1)
-	var payload domain.WorkflowTaskClaimedPayload
-	require.NoError(t, json.Unmarshal(outbox.enqueued[0].Payload, &payload))
-	assert.Equal(t, claimer.UserID, payload.ClaimedByUserID)
-	assert.ElementsMatch(t, []uuid.UUID{claimer.UserID, second.UserID, third.UserID}, payload.AssigneeUserIDs,
-		"every assignee learns that the task is taken")
 }

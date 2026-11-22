@@ -74,11 +74,14 @@ func NewRouter(cfg RouterConfig) *Router {
 	r.UseRawPath = true
 	r.RedirectTrailingSlash = false
 	r.RedirectFixedPath = false
+	r.HandleMethodNotAllowed = true
 	h := cfg.Handler
 	r.NoRoute(handler.NotFound)
+	r.NoMethod(handler.MethodNotAllowed)
 
 	if dev {
 		r.GET("/asyncapi", AsyncAPIHandler(cfg.AppEnv))
+		r.HEAD("/asyncapi", AsyncAPIHandler(cfg.AppEnv))
 	}
 
 	cfg.GinConfig.RequestTimeout = 0
@@ -88,8 +91,11 @@ func NewRouter(cfg RouterConfig) *Router {
 	r.Use(requestTimeout(RequestTimeout))
 	r.Use(middleware.LogRequestErrors(cfg.GinConfig.Logger))
 
+	ready := readyzHandler(cfg.DB, cfg.Cache, cfg.Temporal, cfg.ShuttingDown)
 	r.GET("/healthz", gincommon.HealthHandler())
-	r.GET("/readyz", readyzHandler(cfg.DB, cfg.Cache, cfg.Temporal, cfg.ShuttingDown))
+	r.HEAD("/healthz", gincommon.HealthHandler())
+	r.GET("/readyz", ready)
+	r.HEAD("/readyz", ready)
 
 	internal := r.Group("/api/v1/internal")
 	internal.Use(middleware.RequireSystemCaller())

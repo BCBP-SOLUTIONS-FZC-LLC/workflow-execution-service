@@ -161,7 +161,7 @@ func (c *cwdepsConsumer) Ack(_ context.Context, stream, group, id string) error 
 	return nil
 }
 
-func (c *cwdepsConsumer) ReclaimStale(_ context.Context, stream, group, consumer string, minIdle time.Duration, count int64) ([]valkeystream.Entry, error) {
+func (c *cwdepsConsumer) ReclaimStale(_ context.Context, stream, group, consumer, _ string, minIdle time.Duration, count int64) ([]valkeystream.Entry, string, error) {
 	c.mu.Lock()
 	c.reclaims = append(c.reclaims, cwdepsReclaimCall{stream: stream, group: group, consumer: consumer, minIdle: minIdle, count: count})
 	n := len(c.reclaims)
@@ -177,7 +177,7 @@ func (c *cwdepsConsumer) ReclaimStale(_ context.Context, stream, group, consumer
 	if step.gate != nil {
 		<-step.gate
 	}
-	return step.entries, step.err
+	return step.entries, "0-0", step.err
 }
 
 func (c *cwdepsConsumer) DeadLetter(context.Context, string, string, string, valkeystream.Entry, string) error {

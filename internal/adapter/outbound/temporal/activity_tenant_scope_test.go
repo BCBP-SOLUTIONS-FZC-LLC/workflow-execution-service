@@ -26,9 +26,6 @@ func TestActivities_EveryTransactionOpensWithTheInputTenantOnTheContext(t *testi
 			})
 			return err
 		}},
-		{"ClaimAssignment", func(d *outboundtemporal.Deps, tenant string) error {
-			return d.ClaimAssignment(context.Background(), port.ClaimAssignmentInput{AssignmentID: uuid.NewString(), TenantID: tenant})
-		}},
 		{"CompleteAssignment", func(d *outboundtemporal.Deps, tenant string) error {
 			_, err := d.CompleteAssignment(context.Background(), port.CompleteAssignmentInput{TaskID: uuid.NewString(), TenantID: tenant})
 			return err

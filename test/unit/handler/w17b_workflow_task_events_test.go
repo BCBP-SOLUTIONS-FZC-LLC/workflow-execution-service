@@ -316,7 +316,7 @@ func TestWorkflowTaskEvents_TokenServiceCannotAnswer_Returns503AndQueuesNothing(
 			client := adapterhttp.NewAutomationPrincipalClient(srv.URL, 5*time.Second, time.Minute)
 			rig := newW17bConnectorRig(true, client)
 			tenantID, eventID := uuid.New(), uuid.New()
-			dependency := map[string]string{"dependency": "iam"}
+			dependency := map[string]string{"dependency": "token_service"}
 			before := obstest.Sum(t, w17bUpstreamMetric, dependency)
 
 			w := w17bPost(rig.router, w17bWorkflowTaskPath, w17bTaskEnvelope(eventID, tenantID, w17bTaskPayload("storage")))
@@ -351,7 +351,7 @@ func TestWorkflowTaskEvents_TokenServiceUnreachableOrMisconfigured_Returns503And
 		t.Run(tc.name, func(t *testing.T) {
 			client := adapterhttp.NewAutomationPrincipalClient(tc.baseURL, 5*time.Second, time.Minute)
 			rig := newW17bConnectorRig(true, client)
-			dependency := map[string]string{"dependency": "iam"}
+			dependency := map[string]string{"dependency": "token_service"}
 			before := obstest.Sum(t, w17bUpstreamMetric, dependency)
 
 			w := w17bPost(rig.router, w17bWorkflowTaskPath, w17bTaskEnvelope(uuid.New(), uuid.New(), w17bTaskPayload("storage")))

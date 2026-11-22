@@ -20,7 +20,6 @@ func TestInstanceCore_EventsCarryTheInstancesSubjectBusinessKeyAndVersion_AndAMi
 		eventType string
 		run       func(s *w25bScene) error
 	}{
-		{name: "claim", eventType: domain.EventWorkflowTaskClaimed, run: (*w25bScene).claim},
 		{name: "complete", eventType: domain.EventWorkflowTaskCompleted, run: (*w25bScene).complete},
 		{name: "defer", eventType: domain.EventWorkflowTaskDeferred, run: (*w25bScene).deferTask},
 		{name: "reassign to a new user", eventType: domain.EventWorkflowTaskReassigned, run: (*w25bScene).reassignToNewUser},

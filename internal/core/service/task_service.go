@@ -385,6 +385,9 @@ func (s *TaskService) Defer(ctx context.Context, tenantID, taskID, userID uuid.U
 	if errors.Is(err, port.ErrUpdateRefused) {
 		return nil, fmt.Errorf("%w: %w", port.ErrInvalidTaskState, err)
 	}
+	if errors.Is(err, port.ErrRecordVersionConflict) {
+		return nil, staleTaskVersion()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("update stage-defer: %w", err)
 	}

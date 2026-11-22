@@ -19,7 +19,6 @@ func w9aActivityNames() map[string]string {
 		"ActivityGetCompiledPlan":      port.ActivityGetCompiledPlan,
 		"ActivityCreateTask":           port.ActivityCreateTask,
 		"ActivityUpdateInstanceNodes":  port.ActivityUpdateInstanceNodes,
-		"ActivityClaimAssignment":      port.ActivityClaimAssignment,
 		"ActivityCompleteAssignment":   port.ActivityCompleteAssignment,
 		"ActivityDeferTask":            port.ActivityDeferTask,
 		"ActivityUpdateInstanceStatus": port.ActivityUpdateInstanceStatus,
@@ -63,7 +62,7 @@ func w9aDeclaredActivityConstants(t *testing.T) map[string]string {
 	return declared
 }
 
-func TestActivityNames_AreFifteenNonEmptyDistinctNamesEndingInActivity(t *testing.T) {
+func TestActivityNames_AreFourteenNonEmptyDistinctNamesEndingInActivity(t *testing.T) {
 	names := w9aActivityNames()
 	declared := w9aDeclaredActivityConstants(t)
 
@@ -72,7 +71,7 @@ func TestActivityNames_AreFifteenNonEmptyDistinctNamesEndingInActivity(t *testin
 		check func(t *testing.T)
 	}{
 		{name: "the checked set is every Activity constant the file declares", check: func(t *testing.T) {
-			assert.Len(t, declared, 15)
+			assert.Len(t, declared, 14)
 			assert.Equal(t, declared, names)
 		}},
 		{name: "every name is non-empty and ends with Activity", check: func(t *testing.T) {
@@ -103,7 +102,6 @@ func TestActivityNames_KeepTheirTemporalWireStrings(t *testing.T) {
 		{"ActivityGetCompiledPlan", "GetCompiledPlanActivity"},
 		{"ActivityCreateTask", "CreateTaskActivity"},
 		{"ActivityUpdateInstanceNodes", "UpdateInstanceNodesActivity"},
-		{"ActivityClaimAssignment", "ClaimAssignmentActivity"},
 		{"ActivityCompleteAssignment", "CompleteAssignmentActivity"},
 		{"ActivityDeferTask", "DeferTaskActivity"},
 		{"ActivityUpdateInstanceStatus", "UpdateInstanceStatusActivity"},

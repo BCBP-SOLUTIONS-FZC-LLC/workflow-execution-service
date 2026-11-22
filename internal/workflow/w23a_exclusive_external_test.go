@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -168,7 +169,7 @@ func w23aAnswerRun(t *testing.T, status domain.InstanceStatus, key string) (rele
 		in.status = status
 		ch, cancel := in.waitExternal(ctx, "Ops/Wait")
 		defer cancel()
-		in.handleExternalAnswer(ctx, externalAnswerSignal{Key: key, Variables: map[string]any{"leaked": "no"}})
+		in.handleExternalAnswer(ctx, externalAnswerSignal{Key: key, Variables: map[string]json.RawMessage{"leaked": json.RawMessage(`"no"`)}})
 		sel := wf.NewSelector(ctx)
 		sel.AddReceive(ch, func(wf.ReceiveChannel, bool) {})
 		released = sel.HasPending()

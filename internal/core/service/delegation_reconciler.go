@@ -176,7 +176,7 @@ func (s *DelegationReconciler) commitReassignments(ctx context.Context, tenantID
 }
 
 func (s *DelegationReconciler) Reroute(ctx context.Context, in port.DelegationRerouteInput) error {
-	if in.DelegateID == in.DelegatorID {
+	if in.DelegateID == in.DelegatorID || (in.EndsAt != nil && !in.EndsAt.After(time.Now())) {
 		return nil
 	}
 	active, err := s.Assignments.ListActiveByUser(ctx, in.TenantID, in.DelegatorID)

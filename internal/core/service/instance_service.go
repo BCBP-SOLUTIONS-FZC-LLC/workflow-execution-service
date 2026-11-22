@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math/big"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -227,7 +230,40 @@ func nullContextAsEmptyObject(raw []byte) []byte {
 func sameContext(stored, requested []byte) bool {
 	a, okA := decodeContext(stored)
 	b, okB := decodeContext(requested)
-	return okA && okB && reflect.DeepEqual(a, b)
+	return okA && okB && sameJSONValue(a, b)
+}
+
+func sameJSONValue(a, b any) bool {
+	switch x := a.(type) {
+	case json.Number:
+		y, ok := b.(json.Number)
+		return ok && sameNumber(x, y)
+	case map[string]any:
+		y, ok := b.(map[string]any)
+		if !ok || len(x) != len(y) {
+			return false
+		}
+		for k, v := range x {
+			if w, found := y[k]; !found || !sameJSONValue(v, w) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		y, ok := b.([]any)
+		return ok && slices.EqualFunc(x, y, sameJSONValue)
+	default:
+		return reflect.DeepEqual(a, b)
+	}
+}
+
+func sameNumber(a, b json.Number) bool {
+	x, okX := new(big.Rat).SetString(string(a))
+	y, okY := new(big.Rat).SetString(string(b))
+	if !okX || !okY {
+		return a == b
+	}
+	return x.Cmp(y) == 0
 }
 
 func decodeContext(raw []byte) (any, bool) {
@@ -235,7 +271,12 @@ func decodeContext(raw []byte) (any, bool) {
 		return map[string]any{}, true
 	}
 	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&v); err != nil {
+		return nil, false
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, false
 	}
 	if v == nil {

@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Tests
 
+- The metric test helper `obstest.Sum` now fails the test when a requested label name is carried by no metric of the family, instead of returning zero.
 - The test targets run the Go version `go.mod` names, keep `.env` values out of the tests, regenerate stale sqlc output first and allow 30 minutes per package; the Postgres integration suite shares one container with a fresh database per test, which takes it from about seven minutes to under one. A cache-eviction test no longer spends a minute in reflection, and a degraded-park test no longer depends on the order of two signals sent at the same instant.
 - Stronger tests for task and instance read and write bodies and their edge cases, page-size clamps and subject filters against real Postgres, and the Temporal activities: input validation, assignment and lead moves, audit records and instance status writes.
 - Table-driven route tests through the production router for request validation, a 401 for an identity that is missing or not a UUID, and Idempotency-Key replay, changed-body and in-flight answers on seven routes, plus the department header on task reads.
@@ -37,11 +38,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Removed
 
+- The unused claim activity on the worker: the task claim is a direct write that emits its own event.
 - Workflow code kept for histories recorded by earlier interpreter versions: every workflow version marker, the older-history branches behind them, and the replay fixtures and tests that exercised them. Every run takes the current path; nothing is deployed yet, so no recorded history needs the old paths. The pull-request check that asked for a version marker on each interpreter change is removed with them.
 - The unused task lookup by node key in the task service, and the derived id and conflict-ignoring insert of a node override (the record-version bump in the same transaction already refuses a repeated override).
 
 ### Fixed
 
+- The connector failure callback now refuses an `error_class` that is only whitespace with a 400, as it already did for an empty one; a blank class used to reach the workflow as the failure reason.
+- A request body is accepted only with the media type `application/json` (with or without parameters such as a charset); a type that merely begins with it, such as `application/jsonfoo`, now gets the 415 answer. A request with no `Content-Type` header is still accepted.
+- A failed call to the token service is now counted under the `token_service` dependency of the upstream error metric and no longer as `iam`; the runbook names the new label.
+- A request with a method that a path does not serve now answers 405 `METHOD_NOT_ALLOWED` with an `Allow` header listing the methods it does serve, instead of 404. `HEAD` now works on `/healthz`, `/readyz` and, in `dev` and `local`, `/asyncapi`.
+- The public reassign body is documented with its real field `new_user_id` and no `reason`, the cancel and terminate reasons are documented as carried in the lifecycle event only, and the internal specs now list the 413 and 415 answers of the connector callbacks and the 503 answer of the active-instances count.
+- The connector worker no longer holds back an empty alias answer for two cycles when the registry it holds has only SQL query aliases, and a skipped alias row is logged under the field that was refused (method, base URL or path) whatever the alias is named.
+- The connector worker's stale-entry reclaim now resumes from where the previous pass stopped and starts over at the end of the list or after a failed pass, so a stale task behind a long run of busy ones is eventually picked up; it used to rescan the same first entries on every pass.
+- A secret read from OpenBao no longer fails because another field of the same secret holds a number or an object; only the requested field has to be a string.
+- Building the processed-event ledger now fails at start-up when given no consumers or the same consumer twice, instead of pruning nothing or twice.
+- Deferring a task now uses the record version the caller sent: a defer that names an out-of-date version is answered 409 `RECORD_VERSION_CONFLICT` and changes nothing, instead of silently applying to the newer task or answering 500.
+- A delegation that starts after its end date has passed no longer moves any work to the delegate.
+- Starting an instance with a context that holds integers above 2^53 now compares numbers by their exact value, so two requests one apart are no longer treated as the same request while `1e2`, `1.0` and `100` still are; outside answers, step results, input mappings and connector inputs write such integers back unchanged instead of rounding them.
+- Starting an instance whose plan names a department id that is not a UUID is now refused as an invalid workflow version before any eligibility check, instead of checking eligibility against an empty department.
+- A workflow that cannot register its stage-defer handler now fails before it runs, instead of running without one.
 - Claiming a multi-assignee task now emits `WorkflowTaskClaimed`, naming the claimer (also as the event's actor) and every active assignee; the event is stored in the same transaction as the lead, so the lead and the event stand or fall together. A claim used to change the lead and tell nobody.
 - A claim by a user whose assignment was closed a moment earlier (membership revoked, user deleted) is now refused as "not the task's active assignee" and changes nothing; it used to mark the closed assignment lead and announce a claim by someone who no longer held the task.
 - Handling inbound events no longer competes with their own effects for database connections: the event inbox has its own small connection pool, so a burst of deliveries cannot use up the application pool and stall user requests.
@@ -52,7 +68,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - The event encoder refuses a schema version that is not AVAILABLE in the registry, and the decoder refuses a message with no payload after the header or with a compressed payload.
 - A task without a due date or follow-up date no longer produces an SLA breach or warning event with a zero date; the activity fails without retry.
 - The `/asyncapi` page shows the environment the service is configured for instead of the `ENV` variable, escapes message and schema names in links and ids, copies field names that contain an apostrophe, no longer repeats element ids, and shows "(not found)" for a payload schema that does not exist.
-- Cancelling an instance whose Temporal workflow no longer exists ends the instance (TERMINATED, active tasks failed) and answers 202, as terminate does, instead of 409 INVALID_INSTANCE_STATE.
+- Cancelling an instance whose Temporal workflow no longer exists ends the instance (TERMINATED, active tasks failed) and answers 202, as terminate does, instead of 409 INVALID_INSTANCE_STATE; the event emitted is `WorkflowInstanceTerminated`, not `WorkflowInstanceCancelled`.
 - The tenant purge stops quietly when the service shuts down: it no longer counts a failure or delays the tenant's next attempt.
 - Degraded and force-route events, and every task event, carry empty lists instead of null when they name no failed branches, source nodes or assignees.
 - Cancelling a COMPLETED or FAILED instance leaves it as it is and emits no cancelled event; it used to be rewritten as TERMINATED.
@@ -62,6 +78,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - Inbound event delivery answers 503 when the dedup check or record fails, so the sender retries; it used to proceed, or answer 200 with the delivery unrecorded. The four event routes are exempt from the 30-second request timeout, which used to answer 503 after the effects had committed.
 - Shutdown waits for the background loops before closing the database pools; a loop in the middle of a tick used to hit a closed pool.
 - A force-route with no target while two or more branches are failed targets none, and a boundary timer with a zero or negative duration is disabled; the first used to pick a branch that had never completed a node, the second fired at once.
+- The LLD, OpenAPI and AsyncAPI documents state the current behaviour: plan-read refusals (409 VERSION_INVALID), fixed refusal details, delegation moves and ended delegations, event retention, callback repeats, force-back targets and the reasons carried in lifecycle events; the task signal duration metric's help text names the answer each action gives.
 - Every task action that checks eligibility (claim, complete, defer, reassign, node override, a delegate's reassignment and the return to the delegator on cancel) is refused, with nothing signalled or stored, when the service has no eligibility checker or definitions client; these used to skip the eligibility and plan checks.
 - The connector worker's reclaim of stale stream entries fails and retries on the next tick when the delivery count cannot be read; it used to hand the entry over as a first delivery, so a poison entry never reached the delivery cap.
 - Reassigning a task to a user who already holds it takes the named old assignee off the task and records a reassigned event in the same transaction; the old assignee used to stay active with no event.

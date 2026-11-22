@@ -80,6 +80,7 @@ func TestUpstreamFailures_AreCountedByDependency(t *testing.T) {
 		{port.ErrDefinitionUnavailable, "definition_service"},
 		{port.ErrDefinitionRejected, "definition_service"},
 		{adapterhttp.ErrUpstreamUnavailable, "iam"},
+		{adapterhttp.ErrTokenServiceUnavailable, "token_service"},
 	}
 	for _, tc := range cases {
 		fake := &fakeInstanceService{

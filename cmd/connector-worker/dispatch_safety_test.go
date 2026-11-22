@@ -291,8 +291,8 @@ func (c *fakeConsumer) ReadGroup(context.Context, string, string, string, int64,
 	return nil, nil
 }
 
-func (c *fakeConsumer) ReclaimStale(context.Context, string, string, string, time.Duration, int64) ([]valkeystream.Entry, error) {
-	return nil, nil
+func (c *fakeConsumer) ReclaimStale(context.Context, string, string, string, string, time.Duration, int64) ([]valkeystream.Entry, string, error) {
+	return nil, "0-0", nil
 }
 
 func (c *fakeConsumer) Ack(_ context.Context, _, _, entryID string) error {
