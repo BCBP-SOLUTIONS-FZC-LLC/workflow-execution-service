@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Tests
 
+- The metric test helper `obstest.Sum` now fails the test when the metric name has no series at all (a typo in the name, or a labelled metric no code has touched yet), instead of returning 0; tests that read a labelled metric before its first observation create the series first.
 - `make hurl`, `make fuzz-api` and `make fuzz-internal-api` check a running local stack from the outside with Hurl scenarios and Schemathesis; `scripts/smoke-test.sh` describes the stack, and a token service stub supports it. They write data, so they need a throwaway database and do not run in CI.
 - The metric test helper `obstest.Sum` now fails the test when a requested label name is carried by no metric of the family, instead of returning zero.
 - The test targets run the Go version `go.mod` names, keep `.env` values out of the tests, regenerate stale sqlc output first and allow 30 minutes per package; the Postgres integration suite shares one container with a fresh database per test, which takes it from about seven minutes to under one. A cache-eviction test no longer spends a minute in reflection, and a degraded-park test no longer depends on the order of two signals sent at the same instant.

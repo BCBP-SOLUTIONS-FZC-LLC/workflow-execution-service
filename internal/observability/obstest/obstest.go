@@ -29,16 +29,21 @@ func Sum(tb testing.TB, name string, labels map[string]string) float64 {
 		tb.Fatalf("gather: %v", err)
 	}
 	var total float64
+	found := false
 	for _, f := range families {
 		if f.GetName() != name {
 			continue
 		}
+		found = true
 		requireKnownLabelKeys(tb, f, labels)
 		for _, m := range f.GetMetric() {
 			if matches(m, labels) {
 				total += value(tb, f.GetName(), f.GetType(), m)
 			}
 		}
+	}
+	if !found {
+		tb.Fatalf("obstest: no series of metric %s: it is not registered, or no code has touched it yet", name)
 	}
 	return total
 }
