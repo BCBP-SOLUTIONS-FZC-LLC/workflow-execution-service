@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Starts or stops the stack the black-box checks (make hurl, make fuzz-api, make fuzz-internal-api)
-# run against: Execution and Definition infrastructure, the Definition stubs, the real Definition
+# run against: Postgres, Valkey and Temporal for Execution and Postgres and Valkey for Definition (no
+# LocalStack: the Execution Service runs with AWS_USE_STUB), the Definition stubs, the real Definition
 # Service, a token service stub, and the Execution API and worker. The checks write data, so use
 # throwaway databases (the compose ones are).
 #
@@ -63,8 +64,8 @@ up() {
   [ -f "$root/.env" ] || cp "$root/.env.example" "$root/.env"
   [ -f "$def/.env" ] || cp "$def/.env.example" "$def/.env"
 
-  (cd "$root" && docker compose up -d --wait --wait-timeout 180)
-  (cd "$def" && docker compose up -d --wait --wait-timeout 180)
+  (cd "$root" && docker compose up -d --wait --wait-timeout 180 postgres valkey temporal)
+  (cd "$def" && docker compose up -d --wait --wait-timeout 180 postgres valkey)
   (cd "$root" && go run ./cmd/server migrate >"$work/migrate-execution.log" 2>&1)
   (cd "$def" && as_definition go run ./cmd/server migrate >"$work/migrate-definition.log" 2>&1)
 
