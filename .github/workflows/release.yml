@@ -202,6 +202,13 @@ jobs:
             --set secret.existingSecretName=workflow-execution-service-secrets \
             --atomic
 
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Verify deployed image digests
         env:
           IMAGE_VERSION: ${{ needs.docker.outputs.version }}

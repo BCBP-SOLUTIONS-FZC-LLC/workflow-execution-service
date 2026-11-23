@@ -44,6 +44,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- Docs only: the metric registry names the 200 answer of a task defer in the help text of the task signal duration.
+- CI: the schema registration, schema prune, quarterly schema health and release workflows can read the private schema-governance image and the service images: the staging and production jobs keep `packages: read` next to their own `contents: write`, and each job that pulls an image logs in to the registry first. Before, every push to `main` failed the staging registration with 403 on the image pull.
 - The connector failure callback now refuses an `error_class` that is only whitespace with a 400, as it already did for an empty one; a blank class used to reach the workflow as the failure reason.
 - A request body is accepted only with the media type `application/json` (with or without parameters such as a charset); a type that merely begins with it, such as `application/jsonfoo`, now gets the 415 answer. A request with no `Content-Type` header is still accepted.
 - A failed call to the token service is now counted under the `token_service` dependency of the upstream error metric and no longer as `iam`; the runbook names the new label.
