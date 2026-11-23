@@ -32,11 +32,25 @@ func (l *eventLog) add(e string) {
 	l.events = append(l.events, e)
 }
 
+func (l *eventLog) waitFor(event string, limit time.Duration) {
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) {
+		for _, e := range l.snapshot() {
+			if e == event {
+				return
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 func (l *eventLog) snapshot() []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return append([]string(nil), l.events...)
 }
+
+const parkSignalsFrom = 6 * tick
 
 type degradedPauseScenario struct {
 	pauseBeforeFailure   bool
@@ -113,7 +127,12 @@ func runDegradedPause(t *testing.T, sc degradedPauseScenario) []string {
 	}, tick)
 	for _, s := range sc.signals {
 		s := s
-		env.RegisterDelayedCallback(func() { env.SignalWorkflow(s.name, s.payload) }, s.at)
+		env.RegisterDelayedCallback(func() {
+			if s.at >= parkSignalsFrom {
+				log.waitFor("status:DEGRADED", 10*time.Second)
+			}
+			env.SignalWorkflow(s.name, s.payload)
+		}, s.at)
 	}
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
