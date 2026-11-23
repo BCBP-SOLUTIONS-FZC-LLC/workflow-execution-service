@@ -1730,7 +1730,8 @@ paths:
       summary: An outside party's answer completes a receive task
       description: >
         Callable by an admin or by a user with an active assignment on a task of the instance.
-        Completes the receive task whose node key is node, which no send task of the plan
+        Completes the receive task whose node key is node, or the message boundary wait named by
+        host#boundary (the # percent-encoded as %23), which no send task of the plan
         feeds: only an outside party's answer can. The published version lists such steps as
         its waits. The variables merge into the instance's variables. The node key's "/" must
         be percent-encoded as %2F.
