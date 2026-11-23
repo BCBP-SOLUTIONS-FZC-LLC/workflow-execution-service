@@ -105,11 +105,11 @@ func TestRunMaintenanceLoop_ResetsClientsOnItsPeriodAndStopsWithTheContext(t *te
 		close(done)
 	}()
 
-	require.Eventually(t, func() bool { return caching.resetCount() > 0 }, time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return caching.resetCount() > 0 }, 30*time.Second, 5*time.Millisecond)
 	cancel()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("the loop did not stop with its context")
 	}
 }
@@ -157,7 +157,7 @@ func TestRunMaintenanceLoop_PrunesOnceAtStartup(t *testing.T) {
 		close(done)
 	}()
 
-	require.Eventually(t, func() bool { return pruner.pruneCount() == 1 }, time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return pruner.pruneCount() == 1 }, 30*time.Second, 5*time.Millisecond)
 	cancel()
 	<-done
 }

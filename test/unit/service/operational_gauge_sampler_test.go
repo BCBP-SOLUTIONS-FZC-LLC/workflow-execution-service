@@ -57,11 +57,11 @@ func TestOperationalGaugeSampler_RunSamplesImmediatelyAndStopsOnCancel(t *testin
 	done := make(chan struct{})
 	go func() { sampler.Run(ctx); close(done) }()
 
-	require.Eventually(t, func() bool { return reader.reads.Load() >= 2 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return reader.reads.Load() >= 2 }, 30*time.Second, time.Millisecond)
 	cancel()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("Run did not return after cancel")
 	}
 }

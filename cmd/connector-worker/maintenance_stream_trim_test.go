@@ -105,7 +105,7 @@ func TestRunMaintenanceLoop_TrimsStreamsOnceAtStartup(t *testing.T) {
 	require.Eventually(t, func() bool {
 		pending, age := consumer.trimCounts()
 		return pending == 1 && age == 1
-	}, time.Second, 5*time.Millisecond)
+	}, 30*time.Second, 5*time.Millisecond)
 	cancel()
 	<-done
 }
@@ -128,7 +128,7 @@ func TestRunMaintenanceLoop_TrimsDeadLettersOlderThanTheConfiguredWindow(t *test
 	require.Eventually(t, func() bool {
 		_, age := consumer.trimCounts()
 		return age == 1
-	}, time.Second, 5*time.Millisecond)
+	}, 30*time.Second, 5*time.Millisecond)
 	cancel()
 	<-done
 

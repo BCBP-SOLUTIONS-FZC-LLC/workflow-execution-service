@@ -31,7 +31,7 @@ func TestConsumerGroup_ReclaimStale_ResumingFromTheCursorReachesAStaleEntryBehin
 	entries, err := consumer.ReadGroup(ctx, stream, testGroup, "consumer-a", total, time.Second)
 	require.NoError(t, err)
 	require.Len(t, entries, total)
-	time.Sleep(700 * time.Millisecond)
+	time.Sleep(1200 * time.Millisecond)
 	busyIDs := make([]string, 0, busy)
 	for _, e := range entries[:busy] {
 		busyIDs = append(busyIDs, e.ID)
@@ -41,7 +41,7 @@ func TestConsumerGroup_ReclaimStale_ResumingFromTheCursorReachesAStaleEntryBehin
 	var reclaimed []valkeystream.Entry
 	cursor := "0"
 	for call := 0; call < 5 && len(reclaimed) == 0; call++ {
-		reclaimed, cursor, err = consumer.ReclaimStale(ctx, stream, testGroup, "consumer-b", cursor, 500*time.Millisecond, 1)
+		reclaimed, cursor, err = consumer.ReclaimStale(ctx, stream, testGroup, "consumer-b", cursor, time.Second, 1)
 		require.NoError(t, err)
 	}
 

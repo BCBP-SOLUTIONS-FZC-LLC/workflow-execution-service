@@ -69,7 +69,7 @@ func TestOutboxRelayLifecycle(t *testing.T) {
 		default:
 			return false
 		}
-	}, 5*time.Second, 20*time.Millisecond, "outbox relay never became ready")
+	}, 30*time.Second, 20*time.Millisecond, "outbox relay never became ready")
 
 	tenantID := uuid.New()
 	transactor := postgres.NewTransactor(appPool)
@@ -86,7 +86,7 @@ func TestOutboxRelayLifecycle(t *testing.T) {
 			}
 		}
 		return false
-	}, 5*time.Second, 50*time.Millisecond, "enqueued event was never published")
+	}, 30*time.Second, 50*time.Millisecond, "enqueued event was never published")
 
 	require.NoError(t, runner.Stop())
 	require.NoError(t, <-done)

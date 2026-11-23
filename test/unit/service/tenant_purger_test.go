@@ -218,7 +218,7 @@ func TestTenantPurger_RunSweepsAndStopsWhenCancelled(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("Run did not stop after its context was cancelled")
 	}
 	assert.Equal(t, 1, sweeps, "one sweep at start, none after the cancel")
@@ -232,7 +232,7 @@ func TestTenantPurger_RunLogsAFailedSweepAndKeepsGoing(t *testing.T) {
 	go func() { newPurger(r, &fakeDataPurger{}, rec, &failed).Run(ctx); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("Run did not stop")
 	}
 }

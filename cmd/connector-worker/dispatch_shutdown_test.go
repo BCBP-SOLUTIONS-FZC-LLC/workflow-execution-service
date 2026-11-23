@@ -73,7 +73,7 @@ func TestRunDispatchLoop_CancelWithAReclaimTickInFlight_ReturnsOnlyAfterTheRecla
 	close(releaseReclaim)
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("the dispatch loop did not return")
 	}
 

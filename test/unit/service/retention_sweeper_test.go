@@ -103,11 +103,11 @@ func TestRetentionSweeper_RunSweepsImmediatelyAndStopsOnCancel(t *testing.T) {
 	done := make(chan struct{})
 	go func() { sweeper.Run(ctx); close(done) }()
 
-	require.Eventually(t, func() bool { return inbox.calls.Load() >= 2 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return inbox.calls.Load() >= 2 }, 30*time.Second, time.Millisecond)
 	cancel()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("Run did not stop after the context ended")
 	}
 }

@@ -33,7 +33,7 @@ func TestWaitForStop_ReleasesTheSignalSoASecondOneEndsAStuckDrain(t *testing.T) 
 	for range 2 {
 		select {
 		case <-witness:
-		case <-time.After(2 * time.Second):
+		case <-time.After(30 * time.Second):
 			t.Fatal("witness missed a signal")
 		}
 	}

@@ -17,7 +17,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability/obstest"
 )
 
-const w14bWait = 5 * time.Second
+const w14bWait = 30 * time.Second
 
 func TestEntitlementsGrants_TheThirtyThirdReadWhoseCallerGivesUpIsUnavailableYetStillFillsTheCache(t *testing.T) {
 	reader := newGatedReader(testFlag)

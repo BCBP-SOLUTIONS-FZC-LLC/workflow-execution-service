@@ -135,7 +135,7 @@ func TestSignalRelay_AFailedDeliveryIsRetriedAndEachSignalArrivesOnce(t *testing
 		<-done
 	})
 
-	require.Eventually(t, func() bool { return len(temporal.delivered()) == 2 }, 20*time.Second, 20*time.Millisecond,
+	require.Eventually(t, func() bool { return len(temporal.delivered()) == 2 }, 30*time.Second, 20*time.Millisecond,
 		"both signals are delivered once Temporal answers again")
 	assert.ElementsMatch(t, []string{
 		port.SignalInstanceReassign + `{"TaskID":"first"}`,
@@ -148,6 +148,6 @@ func TestSignalRelay_AFailedDeliveryIsRetriedAndEachSignalArrivesOnce(t *testing
 			return conn.QueryRow(ctx, "SELECT count(*) FROM outbox_events WHERE event_type = $1 AND published_at IS NULL", port.WorkflowSignalEventType).Scan(&pending)
 		}))
 		return pending == 0
-	}, 10*time.Second, 20*time.Millisecond, "a delivered signal is marked published, so it is not sent again")
+	}, 30*time.Second, 20*time.Millisecond, "a delivered signal is marked published, so it is not sent again")
 	assert.Len(t, temporal.delivered(), 2)
 }

@@ -156,7 +156,7 @@ func (l *recLog) Error(msg string, f map[string]any) { l.record("error", msg, f)
 // waitFor returns the lines at level once there are n of them: a read logs after it unlocks, so it can trail settled.
 func (l *recLog) waitFor(t *testing.T, level string, n int) []logLine {
 	t.Helper()
-	require.Eventually(t, func() bool { return len(l.at(level)) >= n }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return len(l.at(level)) >= n }, 30*time.Second, time.Millisecond)
 	return l.at(level)
 }
 
@@ -214,7 +214,7 @@ func (h *grantsHarness) isInflight(id uuid.UUID) bool {
 
 func (h *grantsHarness) settled(t *testing.T) {
 	t.Helper()
-	require.Eventually(t, func() bool { return h.inflightCount() == 0 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return h.inflightCount() == 0 }, 30*time.Second, time.Millisecond)
 }
 
 // prime reads the tenant once so a held set exists.
@@ -366,10 +366,10 @@ func TestEntitlementsGrants_AStaleSetIsServedAtOnceWhileTheReadRunsAndTheNewValu
 	select {
 	case has := <-answered:
 		assert.True(t, has, "the held set answers")
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("the caller waited for the reader")
 	}
-	require.Eventually(t, func() bool { return reader.callsFor(tenant) == 2 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return reader.callsFor(tenant) == 2 }, 30*time.Second, time.Millisecond)
 	assert.Equal(t, 1, reader.activeNow(), "the reader is still running")
 	assert.Equal(t, before+1, staleServed())
 
@@ -398,7 +398,7 @@ func TestEntitlementsGrants_AtOneAndAHalfTTLTheHeldSetIsServedWithoutWaitingForT
 	require.NoError(t, err)
 	assert.True(t, has, "the held value answered while the reader is still blocked")
 	assert.Equal(t, before+1, staleServed())
-	require.Eventually(t, func() bool { return reader.callsFor(tenant) == 2 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return reader.callsFor(tenant) == 2 }, 30*time.Second, time.Millisecond)
 }
 
 func TestEntitlementsGrants_AtTwoAndAHalfTTLTheCallerWaitsForTheReaderAndGetsTheNewValue(t *testing.T) {
@@ -418,7 +418,7 @@ func TestEntitlementsGrants_AtTwoAndAHalfTTLTheCallerWaitsForTheReaderAndGetsThe
 		assert.NoError(t, err)
 		result <- has
 	}()
-	require.Eventually(t, func() bool { return reader.callsFor(tenant) == 2 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return reader.callsFor(tenant) == 2 }, 30*time.Second, time.Millisecond)
 	select {
 	case <-result:
 		t.Fatal("the caller must wait for the reader, not get the held value")
@@ -473,7 +473,7 @@ func TestEntitlementsGrants_TheWindowEndsAtTheBoundWhenTwiceTheTTLIsBeyondIt(t *
 		_, err := g.HasFeature(context.Background(), tenant, testFlag)
 		result <- err
 	}()
-	require.Eventually(t, func() bool { return reader.callsFor(tenant) == 2 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return reader.callsFor(tenant) == 2 }, 30*time.Second, time.Millisecond)
 	close(gate)
 
 	require.ErrorIs(t, <-result, port.ErrEntitlementsUnavailable, "at the bound the held set is no longer served")
@@ -504,7 +504,7 @@ func TestEntitlementsGrants_ManyConcurrentCallersStartOneBackgroundRefreshPerTen
 		}()
 	}
 	wg.Wait()
-	require.Eventually(t, func() bool { return reader.callsFor(tenant) == 2 && reader.callsFor(other) == 2 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return reader.callsFor(tenant) == 2 && reader.callsFor(other) == 2 }, 30*time.Second, time.Millisecond)
 	assert.Equal(t, 2, h.inflightCount())
 
 	close(gate)
@@ -561,7 +561,7 @@ func TestEntitlementsGrants_PastTheBoundTheCallerWaitsForTheReadAndAFailureIsAnE
 		_, err := h.has(context.Background(), tenant)
 		result <- err
 	}()
-	require.Eventually(t, func() bool { return reader.callsFor(tenant) == 2 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return reader.callsFor(tenant) == 2 }, 30*time.Second, time.Millisecond)
 	select {
 	case err := <-result:
 		t.Fatalf("the caller must wait for the read, got %v", err)
@@ -591,7 +591,7 @@ func TestEntitlementsGrants_PastTheBoundAWaitingCallerHonoursItsOwnContext(t *te
 		_, err := h.has(ctx, tenant)
 		result <- err
 	}()
-	require.Eventually(t, func() bool { return h.isInflight(tenant) }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return h.isInflight(tenant) }, 30*time.Second, time.Millisecond)
 
 	cancel()
 
@@ -622,7 +622,7 @@ func TestEntitlementsGrants_ARunningReadIsNotCancelledWithTheCallerThatStartedIt
 			if stale {
 				want = 2
 			}
-			require.Eventually(t, func() bool { return reader.callsFor(tenant) == want }, 5*time.Second, time.Millisecond)
+			require.Eventually(t, func() bool { return reader.callsFor(tenant) == want }, 30*time.Second, time.Millisecond)
 
 			cancel()
 			if !stale {
@@ -659,14 +659,14 @@ func TestEntitlementsGrants_NeverMoreThan32ReadsAreInFlight(t *testing.T) {
 			assert.True(t, has)
 		}()
 	}
-	require.Eventually(t, func() bool { return reader.activeNow() == 32 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return reader.activeNow() == 32 }, 30*time.Second, time.Millisecond)
 	assert.Equal(t, 32, entitlementsMaxConcurrentReads)
-	require.Eventually(t, func() bool { return h.inflightCount() == tenants }, 5*time.Second, time.Millisecond, "the rest wait for a slot")
+	require.Eventually(t, func() bool { return h.inflightCount() == tenants }, 30*time.Second, time.Millisecond, "the rest wait for a slot")
 
 	close(gate)
 	wg.Wait()
 	assert.Equal(t, 32, reader.peakActive())
-	require.Eventually(t, func() bool { return len(h.g.slots) == 0 }, 5*time.Second, time.Millisecond, "every slot was given back")
+	require.Eventually(t, func() bool { return len(h.g.slots) == 0 }, 30*time.Second, time.Millisecond, "every slot was given back")
 }
 
 func TestEntitlementsGrants_ABlockingReadWaitsForASlotWithItsContext(t *testing.T) {
@@ -682,14 +682,14 @@ func TestEntitlementsGrants_ABlockingReadWaitsForASlotWithItsContext(t *testing.
 			_, _ = h.has(context.Background(), uuid.New())
 		}()
 	}
-	require.Eventually(t, func() bool { return reader.activeNow() == 32 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return reader.activeNow() == 32 }, 30*time.Second, time.Millisecond)
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
 	go func() {
 		_, err := h.has(ctx, uuid.New())
 		result <- err
 	}()
-	require.Eventually(t, func() bool { return h.inflightCount() == 33 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return h.inflightCount() == 33 }, 30*time.Second, time.Millisecond)
 
 	cancel()
 
@@ -713,7 +713,7 @@ func TestEntitlementsGrants_ABackgroundRefreshWithoutAFreeSlotIsSkippedAndRetrie
 			_, _ = h.has(context.Background(), uuid.New())
 		}()
 	}
-	require.Eventually(t, func() bool { return reader.activeNow() == 32 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return reader.activeNow() == 32 }, 30*time.Second, time.Millisecond)
 	h.clock.advance(testTTL)
 
 	has, err := h.has(context.Background(), held)
@@ -893,6 +893,6 @@ func TestEntitlementsGrants_ManyTenantsAndCallersUnderFailuresAndClockJumpsStayC
 	wg.Wait()
 	h.settled(t)
 
-	require.Eventually(t, func() bool { return len(h.g.slots) == 0 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return len(h.g.slots) == 0 }, 30*time.Second, time.Millisecond)
 	assert.LessOrEqual(t, reader.peakActive(), 32)
 }

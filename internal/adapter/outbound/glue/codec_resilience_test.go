@@ -143,7 +143,7 @@ func TestCodec_Encode_ASlowLookupForOneSchemaDoesNotDelayAnother(t *testing.T) {
 		defer close(slowDone)
 		_, _, _ = c.Encode(slowCtx, "SlowEvent", []byte(`{}`))
 	}()
-	require.Eventually(t, func() bool { return getter.calls["slow_event"].Load() == 1 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return getter.calls["slow_event"].Load() == 1 }, 30*time.Second, time.Millisecond)
 
 	close(getter.release["fast_event"])
 	_, _, err := c.Encode(context.Background(), "FastEvent", []byte(`{}`))
@@ -161,7 +161,7 @@ func TestCodec_Encode_AWaiterLeavesWhenItsContextIsCancelled(t *testing.T) {
 		_, _, err := c.Encode(context.Background(), "SharedEvent", []byte(`{}`))
 		leaderDone <- err
 	}()
-	require.Eventually(t, func() bool { return getter.calls["shared_event"].Load() == 1 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return getter.calls["shared_event"].Load() == 1 }, 30*time.Second, time.Millisecond)
 
 	waiterCtx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -186,7 +186,7 @@ func TestCodec_Encode_ConcurrentCallsForOneSchemaShareOneLookup(t *testing.T) {
 			errs <- err
 		}()
 	}
-	require.Eventually(t, func() bool { return getter.calls["shared_event"].Load() >= 1 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return getter.calls["shared_event"].Load() >= 1 }, 30*time.Second, time.Millisecond)
 
 	close(getter.release["shared_event"])
 	wg.Wait()

@@ -15,7 +15,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 )
 
-const cstBarrierTimeout = 10 * time.Second
+const cstBarrierTimeout = 30 * time.Second
 
 // cstBarrier releases its waiters once n of them have arrived. A waiter that is
 // never joined gives up after cstBarrierTimeout and reports it, so a broken

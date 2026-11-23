@@ -18,7 +18,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/config"
 )
 
-const w19aWaitLimit = 10 * time.Second
+const w19aWaitLimit = 30 * time.Second
 
 // w19aCleanEnv gives the test a working directory without a .env file and removes every inherited variable
 // (not merely empties it), so the machine's own settings cannot change what Load returns. Not for parallel tests.

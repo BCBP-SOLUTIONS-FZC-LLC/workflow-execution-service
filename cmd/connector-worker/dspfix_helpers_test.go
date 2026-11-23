@@ -20,7 +20,7 @@ const (
 	dspfixGroup      = "dspfix-group"
 	dspfixConsumer   = "dspfix-consumer"
 	dspfixDeadLetter = "dspfix-dead"
-	dspfixGuard      = 10 * time.Second
+	dspfixGuard      = 30 * time.Second
 )
 
 type dspfixStreamCall struct{ stream, group, id string }

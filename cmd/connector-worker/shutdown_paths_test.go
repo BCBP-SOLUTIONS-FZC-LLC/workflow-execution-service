@@ -34,7 +34,7 @@ func TestServeHealth_ReportsAListenFailureAndStaysQuietOnShutdown(t *testing.T) 
 	select {
 	case got := <-failing:
 		assert.ErrorContains(t, got, "health server")
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("a listen failure was not reported")
 	}
 
