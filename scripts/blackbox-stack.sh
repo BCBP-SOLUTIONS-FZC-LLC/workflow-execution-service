@@ -64,7 +64,7 @@ up() {
   [ -f "$root/.env" ] || cp "$root/.env.example" "$root/.env"
   [ -f "$def/.env" ] || cp "$def/.env.example" "$def/.env"
 
-  (cd "$root" && docker compose up -d --wait --wait-timeout 180 postgres valkey temporal)
+  (cd "$root" && docker compose -p workflow-execution up -d --wait --wait-timeout 180 postgres valkey temporal)
   (cd "$def" && docker compose up -d --wait --wait-timeout 180 postgres valkey)
   (cd "$root" && go run ./cmd/server migrate >"$work/migrate-execution.log" 2>&1)
   (cd "$def" && as_definition go run ./cmd/server migrate >"$work/migrate-definition.log" 2>&1)
@@ -105,7 +105,7 @@ down() {
     while read -r pid; do kill "$pid" 2>/dev/null || true; done <"$pids"
     : >"$pids"
   fi
-  (cd "$root" && docker compose stop >/dev/null 2>&1) || true
+  (cd "$root" && docker compose -p workflow-execution stop >/dev/null 2>&1) || true
   (cd "$def" && docker compose stop >/dev/null 2>&1) || true
 }
 
