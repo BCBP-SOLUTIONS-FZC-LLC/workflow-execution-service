@@ -19,6 +19,11 @@ import (
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
 )
 
+var defaultQueueWorkerOptions = worker.Options{
+	WorkerStopTimeout: 25 * time.Second,
+	Interceptors:      []interceptor.WorkerInterceptor{observability.NewTemporalMetricsInterceptor()},
+}
+
 var dynamicQueueWorkerOptions = worker.Options{
 	MaxConcurrentActivityExecutionSize:     200,
 	MaxConcurrentWorkflowTaskExecutionSize: 200,
