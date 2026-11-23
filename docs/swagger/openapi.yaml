@@ -68,12 +68,13 @@ components:
     TenantRolesHeader:
       name: x-tenant-roles
       in: header
-      required: true
+      required: false
       schema:
         type: string
       description: >
-        Comma-separated tenant roles. Must include tenant_admin or tenant_owner
-        for admin-only endpoints.
+        Comma-separated tenant roles. A request without it carries no roles, which is enough
+        for the reads scoped to the caller. Admin-only endpoints refuse it with 403 unless it
+        includes tenant_admin or tenant_owner.
     DepartmentsHeader:
       name: x-departments
       in: header

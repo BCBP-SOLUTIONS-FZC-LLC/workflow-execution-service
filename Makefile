@@ -88,7 +88,7 @@ COVER_THRESHOLD    := 95
 # its own identity, and the Search Attribute upsert failure.
 COVER_PKG_FLOORS   := internal/workflow:88 cmd/connector-worker:55 internal/observability:90
 
-.PHONY: schema-freeze-step-test alerts-test metrics-lint metrics-inventory all tools tools-integration generate generate-sqlc mock contract-check contract-check-test contract-breaking \
+.PHONY: schema-freeze-step-test blackbox blackbox-up blackbox-down alerts-test metrics-lint metrics-inventory all tools tools-integration generate generate-sqlc mock contract-check contract-check-test contract-breaking \
         build migrate dev test test-integration test-e2e test-compat test-ci merge-coverage \
         cover cover-func cover-gaps cover-html cover-check cover-check-pkg \
         hurl fuzz-api fuzz-internal-api \
@@ -270,13 +270,14 @@ cover-html:
 	@echo "✓ report: $(COVER_HTML)"
 	@open $(COVER_HTML) 2>/dev/null || xdg-open $(COVER_HTML) 2>/dev/null || true
 
-# Local black-box checks against a running stack (the one scripts/smoke-test.sh describes). Not part of CI.
+# Black-box checks against the stack scripts/blackbox-stack.sh starts. `make blackbox` runs all three; the CI test job runs it.
 API_BASE        ?= http://localhost:8080
 METRICS_BASE    ?= http://localhost:9091
 DEFINITION_BASE ?= http://localhost:8082
 SCENARIO_TENANT ?= 11111111-1111-4111-8111-111111111111
 SCENARIO_USER   ?= 018f2d3c-0000-7000-8000-0000000000a1
 SCHEMATHESIS_VERSION := 4.33.2
+FUZZ_SEED ?= 1
 PUBLIC_HEADERS   := -H 'x-tenant-id: $(SCENARIO_TENANT)' -H 'x-user-id: $(SCENARIO_USER)' \
                     -H 'x-tenant-roles: tenant_admin' -H 'x-plan: enterprise'
 INTERNAL_HEADERS := -H 'x-user-id: $(SCENARIO_USER)' -H 'x-tenant-roles: iam-system'
@@ -284,7 +285,23 @@ HURL_VARIABLES   := --variable host=$(API_BASE) --variable metrics=$(METRICS_BAS
                     --variable definition=$(DEFINITION_BASE) --variable tenant=$(SCENARIO_TENANT) \
                     --variable user=$(SCENARIO_USER)
 
-## hurl: Run the Hurl scenarios in test/hurl against a running local stack; they write data (needs hurl and python3)
+## blackbox-up: Build and start the stack the black-box checks run against (Execution and Definition infrastructure, stubs, both services)
+blackbox-up:
+	@scripts/blackbox-stack.sh up
+
+## blackbox-down: Stop the black-box stack
+blackbox-down:
+	@scripts/blackbox-stack.sh down
+
+## blackbox: Start the stack, run hurl, fuzz-api and fuzz-internal-api against it, stop it (DEFINITION_SERVICE_DIR names the Definition checkout)
+blackbox:
+	@trap '$(MAKE) --no-print-directory blackbox-down' EXIT; \
+	$(MAKE) --no-print-directory blackbox-up && \
+	$(MAKE) --no-print-directory hurl && \
+	$(MAKE) --no-print-directory fuzz-api && \
+	$(MAKE) --no-print-directory fuzz-internal-api
+
+## hurl: Run the Hurl scenarios in test/hurl against the running stack; they write data (needs hurl and python3)
 hurl:
 	@command -v hurl >/dev/null || { echo "hurl is not installed: brew install hurl"; exit 1; }
 	@command -v python3 >/dev/null || { echo "python3 is not installed: brew install python"; exit 1; }
@@ -306,7 +323,8 @@ fuzz-api:
 	@mkdir -p $(COVERAGE_DIR)/schemathesis
 	uvx --from schemathesis==$(SCHEMATHESIS_VERSION) schemathesis run docs/swagger/openapi.yaml \
 	    --url $(API_BASE) $(PUBLIC_HEADERS) \
-	    --max-examples 20 --workers 2 --report junit --report-dir $(COVERAGE_DIR)/schemathesis
+	    --max-examples 20 --workers 1 --seed $(FUZZ_SEED) --generation-deterministic \
+	    --phases examples,coverage,fuzzing --report junit --report-dir $(COVERAGE_DIR)/schemathesis
 
 ## fuzz-internal-api: Fuzz every route of the internal spec with Schemathesis as the system caller; it writes data, so use a throwaway database (needs uv)
 fuzz-internal-api:
@@ -314,7 +332,8 @@ fuzz-internal-api:
 	@mkdir -p $(COVERAGE_DIR)/schemathesis
 	uvx --from schemathesis==$(SCHEMATHESIS_VERSION) schemathesis run api/internal-openapi.yaml \
 	    --url $(API_BASE) $(INTERNAL_HEADERS) \
-	    --max-examples 20 --workers 2 --report junit --report-dir $(COVERAGE_DIR)/schemathesis
+	    --max-examples 20 --workers 1 --seed $(FUZZ_SEED) --generation-deterministic \
+	    --phases examples,coverage,fuzzing --report junit --report-dir $(COVERAGE_DIR)/schemathesis
 
 ## cover-check-pkg: Per-package coverage gate — each package must meet its floor (run 'make test-ci' first)
 cover-check-pkg:
