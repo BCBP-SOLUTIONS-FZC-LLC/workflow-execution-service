@@ -3,9 +3,12 @@ package workflow_test
 import (
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 
@@ -30,18 +33,6 @@ func (l *eventLog) add(e string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.events = append(l.events, e)
-}
-
-func (l *eventLog) waitFor(event string, limit time.Duration) {
-	deadline := time.Now().Add(limit)
-	for time.Now().Before(deadline) {
-		for _, e := range l.snapshot() {
-			if e == event {
-				return
-			}
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
 }
 
 func (l *eventLog) snapshot() []string {
@@ -92,6 +83,7 @@ func runDegradedPause(t *testing.T, sc degradedPauseScenario) []string {
 	log := &eventLog{}
 	released := make(chan struct{})
 	var once sync.Once
+	var degradedWritten atomic.Bool
 	registerFakeActivities(env, degradedPauseCollaboration(), &activityHooks{
 		createTask: func(in port.CreateTaskInput) (port.CreateTaskOutput, error) {
 			if in.NodeKey == "billing/prep" {
@@ -111,11 +103,11 @@ func runDegradedPause(t *testing.T, sc degradedPauseScenario) []string {
 				}
 			}
 			log.add("status:" + string(in.Status))
+			if in.Status == domain.InstanceStatusDegraded {
+				degradedWritten.Store(true)
+			}
 		},
-		pauseInstance: func(in port.PauseInstanceInput) {
-			log.add("pause:" + in.Initiator)
-			once.Do(func() { close(released) })
-		},
+		pauseInstance:  func(in port.PauseInstanceInput) { log.add("pause:" + in.Initiator) },
 		resumeInstance: func(in port.ResumeInstanceInput) { log.add("resume:" + in.Initiator) },
 		cancelInstance: func(port.CancelInstanceInput) error { log.add("cancel"); return nil },
 	})
@@ -125,15 +117,35 @@ func runDegradedPause(t *testing.T, sc degradedPauseScenario) []string {
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, tick)
-	for _, s := range sc.signals {
-		s := s
-		env.RegisterDelayedCallback(func() {
-			if s.at >= parkSignalsFrom {
-				log.waitFor("status:DEGRADED", 10*time.Second)
-			}
-			env.SignalWorkflow(s.name, s.payload)
-		}, s.at)
+
+	sendSignal := func(s timedSignal) func() {
+		return func() { env.SignalWorkflow(s.name, s.payload) }
 	}
+	var parkSignals []timedSignal
+	for _, s := range sc.signals {
+		if s.at >= parkSignalsFrom {
+			parkSignals = append(parkSignals, s)
+			continue
+		}
+		env.RegisterDelayedCallback(sendSignal(s), s.at)
+	}
+
+	var parked sync.Once
+	env.SetOnActivityCompletedListener(func(info *activity.Info, _ converter.EncodedValue, _ error) {
+		switch info.ActivityType.Name {
+		case "PauseInstanceActivity":
+			once.Do(func() { close(released) })
+		case "UpdateInstanceStatusActivity":
+			if !degradedWritten.Load() {
+				return
+			}
+			parked.Do(func() {
+				for _, s := range parkSignals {
+					env.RegisterDelayedCallback(sendSignal(s), s.at-parkSignalsFrom)
+				}
+			})
+		}
+	})
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
