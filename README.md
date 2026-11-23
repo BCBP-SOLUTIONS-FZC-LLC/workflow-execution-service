@@ -214,12 +214,12 @@ Every test target runs the Go version `go.mod` names (`GOTOOLCHAIN`), clears the
 | `make design-sync-check` / `make design-sync-check-test` | Fail when a document kept here and in the design repository differs (`DESIGN_DIR=<checkout>`, or `GH_TOKEN` reads `Haroon-BCBP/design`); local only, because CI does not read the personal design repository |
 | `make docker-build` / `make pin-base-images` / `make lint-workflows` | The three images, base-image digests, `actionlint` on the workflows |
 | `make helm-lint` / `make vuln` / `make docker-check` | Chart, dependency vulnerabilities, Dockerfile lint and scan |
-| `make blackbox` | Starts the stack, runs the Hurl scenarios and both Schemathesis runs against it, stops it (also the `blackbox` CI job) |
+| `make blackbox` | Starts the stack, runs the Hurl scenarios and both Schemathesis runs against it, stops it (also the last steps of the CI `test` job) |
 | `make check` | Everything CI gates on, locally |
 
 ### Black-box checks
 
-`make blackbox` starts the stack (`scripts/blackbox-stack.sh up`: Postgres, Valkey and Temporal for Execution and Postgres and Valkey for Definition from their compose files (no LocalStack, so the 2 GB image is not pulled), the Definition Service with its stubs, a token service stub in `test/hurl/stub/tokenservice`, then the Execution API and worker), runs the three checks below against it and stops it. `DEFINITION_SERVICE_DIR` names the Definition Service checkout (default `../definition_service`). The whole run takes about 40 seconds on a laptop (the stack 15 to 20 seconds of it, Hurl 7, the two fuzz runs 15) and is the `blackbox` job of the CI test workflow.
+`make blackbox` starts the stack (`scripts/blackbox-stack.sh up`: Postgres, Valkey and Temporal for Execution and Postgres and Valkey for Definition from their compose files (no LocalStack, so the 2 GB image is not pulled), the Definition Service with its stubs, a token service stub in `test/hurl/stub/tokenservice`, then the Execution API and worker), runs the three checks below against it and stops it. `DEFINITION_SERVICE_DIR` names the Definition Service checkout (default `../definition_service`). The whole run takes about 40 seconds on a laptop (the stack 15 to 20 seconds of it, Hurl 7, the two fuzz runs 15) and runs as the last steps of the `test` job of the CI test workflow (Validate / Test).
 
 `make hurl` runs the Hurl scenarios in `test/hurl` against the running stack: health, the instance lifecycle, the task flow and the problem-document contract through the public API, the inbound event and connector callback routes as the system caller (`test/hurl/internal`), and the authentication boundary (`test/hurl/auth`). `make fuzz-api` and `make fuzz-internal-api` run Schemathesis against the public and the internal spec.
 
