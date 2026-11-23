@@ -45,6 +45,7 @@ jobs:
     environment: staging
     permissions:
       contents: write
+      packages: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.0
@@ -298,6 +299,7 @@ jobs:
     environment: production
     permissions:
       contents: write
+      packages: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.0
