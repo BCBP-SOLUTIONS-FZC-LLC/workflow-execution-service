@@ -284,6 +284,12 @@ jobs:
           sudo dpkg -i "$RUNNER_TEMP/hurl.deb"
           hurl --version
 
+      - name: Cache the Schemathesis download
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
       - name: Install uv
         run: python3 -m pip install --user uv==0.13.7
 
