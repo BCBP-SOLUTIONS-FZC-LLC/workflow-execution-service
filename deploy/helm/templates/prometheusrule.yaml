@@ -377,6 +377,16 @@ spec:
             summary: "Admin reassignments keep failing for good"
             description: "An admin reassignment ended for good, so the task keeps its previous assignee; retries of a transient error are unlimited and not counted (LLD §7.6)."
 
+        - alert: ActivityRetriesLong
+          expr: rate(workflow_execution_service_activity_long_retries_total[10m]) > 0
+          for: 10m
+          labels:
+            severity: ticket
+          annotations:
+            runbook: "workflow-execution-service/activity-retries-long"
+            summary: "An activity keeps failing and retrying"
+            description: "An activity has failed more than ten times in a row; activities retry without limit, so the instance stays stuck with no other signal until the cause is fixed (LLD §3.3, §7.6)."
+
         - alert: UpstreamDependencyErrors
           expr: rate(workflow_execution_service_upstream_dependency_errors_total[5m]) > 0
           for: 5m

@@ -41,6 +41,7 @@ var (
 	WorkerQueueLastPollTimestamp        *prometheus.GaugeVec
 	WorkerQueueStartFailuresTotal       prometheus.Counter
 	ReassignFailuresTotal               prometheus.Counter
+	ActivityLongRetriesTotal            prometheus.Counter
 	InstancesByQueue                    *prometheus.GaugeVec
 	SLABreachesTotal                    prometheus.Counter
 	DelegationScopeUnhandledTotal       *prometheus.CounterVec
@@ -143,6 +144,9 @@ func registerServiceMetrics() {
 	ReassignFailuresTotal = must(gincommon.NewCounter(nil,
 		"workflow_execution_service_reassign_failures_total",
 		"Admin reassignments the reassign Activity ended for good (a malformed id, an unknown task or a stale record version), so the task keeps its previous assignee. Transient errors retry without limit and are not counted."))
+	ActivityLongRetriesTotal = must(gincommon.NewCounter(nil,
+		"workflow_execution_service_activity_long_retries_total",
+		"Activity attempts beyond the tenth. Activities retry without limit, so an activity that fails for a permanent reason keeps its instance stuck with no other signal; every attempt past the tenth is one more retry of an activity that failed ten times in a row."))
 	InstancesByQueue = must(gincommon.NewGaugeVec(nil,
 		"workflow_execution_service_instances_by_queue",
 		"Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue class, default or dedicated, sampled by the API process. A class with none is absent.",

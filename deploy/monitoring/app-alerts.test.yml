@@ -193,6 +193,35 @@ tests:
         alertname: ReassignFailing
         exp_alerts: []
 
+  - name: activities that keep retrying open a ticket after ten minutes
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_activity_long_retries_total'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: ActivityRetriesLong
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: ActivityRetriesLong
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+            exp_annotations:
+              runbook: workflow-execution-service/activity-retries-long
+              summary: "An activity keeps failing and retrying"
+              description: "An activity has failed more than ten times in a row; activities retry without limit, so the instance stays stuck with no other signal until the cause is fixed (LLD §3.3, §7.6)."
+
+  - name: no long retries keeps the retry alert quiet
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_activity_long_retries_total'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ActivityRetriesLong
+        exp_alerts: []
+
   - name: instances of a queue class with no poll timestamp series page after five minutes
     interval: 1m
     input_series:

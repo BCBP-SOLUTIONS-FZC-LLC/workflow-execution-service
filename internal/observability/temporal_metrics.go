@@ -9,6 +9,8 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
+const longRetryAttempt = 10
+
 type temporalMetricsInterceptor struct {
 	interceptor.WorkerInterceptorBase
 }
@@ -31,7 +33,11 @@ type activityMetrics struct {
 
 func (a *activityMetrics) ExecuteActivity(ctx context.Context, in *interceptor.ExecuteActivityInput) (result interface{}, err error) {
 	start := time.Now()
-	name := activity.GetInfo(ctx).ActivityType.Name
+	info := activity.GetInfo(ctx)
+	name := info.ActivityType.Name
+	if info.Attempt > longRetryAttempt {
+		ActivityLongRetriesTotal.Inc()
+	}
 	outcome := "error"
 	defer func() {
 		ObserveHistogramVec(WorkflowActivityDurationSeconds, time.Since(start).Seconds(), name, outcome)

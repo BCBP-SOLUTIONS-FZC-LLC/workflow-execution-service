@@ -212,6 +212,14 @@ Fix the cause first. A task whose entry was lost is not redispatched by itself.
 
 **Triage.** The Worker logs `reassignAssignment failed` with the error. A stale version is the usual cause and needs nothing but a new reassign by the admin from the current task; an unknown task or a malformed id points at a caller or data bug.
 
+### ActivityRetriesLong
+
+`runbook: workflow-execution-service/activity-retries-long`
+
+**Meaning.** An activity has failed more than ten times in a row and is still retrying. Activities that write to the database and external-call activities retry without limit, so a permanent cause leaves the instance stuck with no other signal.
+
+**Triage.** The Worker logs the activity error on every attempt; the Temporal UI shows the pending activity with its attempt count and last failure for the instance. A database outage or a Definition Service outage clears when the dependency returns. An unknown instance or task, or data that can never be written, does not: fix the data or terminate the instance.
+
 ### UpstreamDependencyErrors
 
 `runbook: workflow-execution-service/upstream-dependency`

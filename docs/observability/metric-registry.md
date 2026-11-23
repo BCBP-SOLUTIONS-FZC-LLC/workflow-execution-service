@@ -43,6 +43,7 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
+| `workflow_execution_service_activity_long_retries_total` | counter | - | Activity attempts beyond the tenth. Activities retry without limit, so an activity that fails for a permanent reason keeps its instance stuck with no other signal; every attempt past the tenth is one more retry of an activity that failed ten times in a row. |
 | `workflow_execution_service_connector_alias_registry_age_seconds` | gauge | - | Seconds since the connector worker last applied a fresh alias registry, updated on every refresh tick (a failed or empty refresh lets it grow). |
 | `workflow_execution_service_connector_dispatch_dead_lettered_total` | counter | `connector_type` | Connector stream entries moved to the dead-letter stream (delivery cap exceeded or entry unreadable), by connector_type. |
 | `workflow_execution_service_connector_task_failures_total` | counter | `class`, `connector_type`, `provider`, `retried` | Failed connector calls, by connector_type, provider, error class (transient, permanent or unknown) and whether the call was retried. |
