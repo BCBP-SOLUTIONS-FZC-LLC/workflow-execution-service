@@ -10,6 +10,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -83,7 +84,7 @@ func TestExecute_NonInterruptingBoundaryOnACallStartsASidePathAndTheCallRunsOn(t
 			wflRegisterAll(env, fakes, tc.build())
 			tc.fire(env)
 			var createdWhileCallRuns []domain.NodeKey
-			env.RegisterDelayedCallback(func() { createdWhileCallRuns = wflNodesCreated(fakes) }, 90*time.Minute)
+			wflclock.After(env, func() { createdWhileCallRuns = wflNodesCreated(fakes) }, 90*time.Minute)
 			wflSignalAt(env, 2*time.Hour, "stage-transition", wflDone("review", "Review", 1))
 			wflSignalAt(env, 3*time.Hour, "stage-transition", wflDone("after", "Finish", 1))
 

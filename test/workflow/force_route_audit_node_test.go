@@ -10,6 +10,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -50,7 +51,7 @@ func TestExecute_TopLevelForceForwardRecordsTheDepartmentsFirstStageThatRuns(t *
 	wflRegisterAll(env, fakes, collab)
 	wflSignalAt(env, 5*time.Second, "instance-force-forward", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "deptB/B2", RecordVersion: 3})
 	var writesAtJump [][]domain.NodeKey
-	env.RegisterDelayedCallback(func() { writesAtJump = wflNodeWrites(fakes) }, 8*time.Second)
+	wflclock.After(env, func() { writesAtJump = wflNodeWrites(fakes) }, 8*time.Second)
 	wflSignalAt(env, 10*time.Second, "stage-transition", wflDone("deptB", "B1", 1))
 	wflSignalAt(env, 15*time.Second, "stage-transition", wflDone("deptB", "B2", 1))
 

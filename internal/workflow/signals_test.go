@@ -11,6 +11,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -131,15 +132,15 @@ func TestStageDeferOnPendingStageDoesNotWipeHistory(t *testing.T) {
 		activity.RegisterOptions{Name: port.ActivityUpdateTaskStatus},
 	)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.UpdateWorkflow("stage-defer:instance", "defer-1", &testsuite.TestUpdateCallback{
 			OnAccept: func() {}, OnReject: func(error) {}, OnComplete: func(any, error) {},
 		}, stageDeferSignal{DeptID: "deptA", FromStage: "approve", Reason: "need more info", UserID: "user-1"})
 	}, 2*time.Millisecond)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "deptA", ToStage: "approve", ResultJSON: "{}", VisitCount: 1})
 	}, 3*time.Millisecond)
 

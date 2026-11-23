@@ -26,6 +26,9 @@ excludeFiles:
   - "cmd/worker/.*_integration_test\\.go$"
   # cmd/server's integration-tagged test reads the relay role against the same container fixtures.
   - "cmd/server/.*_integration_test\\.go$"
+  # internal/workflow tests that schedule delayed callbacks use test/wflclock, the
+  # same helper test/workflow uses, so no test registers two callbacks at one instant.
+  - "internal/workflow/(dispatch_internal|signals|w23a_exclusive_external|w23a_pure_helpers|w23b_stage)_test\\.go$"
 
 allow:
   # Only check inter-component project imports; vendor packages are unrestricted.

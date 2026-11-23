@@ -37,8 +37,10 @@ func TestExecute_NonInterruptingBoundaryKeepsTheTasksSLATimers(t *testing.T) {
 	}
 	fakes := wflNewFakes()
 	wflRegisterAll(env, fakes, collab)
-	wflSignalAt(env, 4*time.Hour, "stage-transition", wflDone("ops", "Prepare", 1))
-	wflSignalAt(env, 4*time.Hour, "stage-transition", wflDone("esc", "Escalate", 1))
+	wflSignalsAt(env, 4*time.Hour,
+		wflSignal{"stage-transition", wflDone("ops", "Prepare", 1)},
+		wflSignal{"stage-transition", wflDone("esc", "Escalate", 1)},
+	)
 
 	status, err := wflStart(t, env, fakes, "")
 

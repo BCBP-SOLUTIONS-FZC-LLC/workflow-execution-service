@@ -15,6 +15,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -160,7 +161,7 @@ func TestRunTaskStage_AbandonedWhileItsActivitiesRun(t *testing.T) {
 func TestRunStageLogsEngineNoteForUnrecognizedType(t *testing.T) {
 	env := newTestEnv()
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "sales", ToStage: "custom_role", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 
@@ -226,7 +227,7 @@ func TestRunExclusiveRevertPopsHistory(t *testing.T) {
 	)
 	registerNoopTaskStatus(env)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 
@@ -280,7 +281,7 @@ func TestRunExclusiveHonoursASecondRejection(t *testing.T) {
 
 	for i, result := range []string{`{"decision":"rejected"}`, `{"decision":"approved"}`, `{"decision":"approved"}`} {
 		visit, res := int64(i+1), result
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{
 				DeptID: "prepare", ToStage: "draft", ResultJSON: res, VisitCount: visit,
 			})
@@ -341,7 +342,7 @@ func TestRunExclusiveRevertCapFailsClosed(t *testing.T) {
 
 	for i := 1; i <= maxRevertCycles+2; i++ {
 		visit := int64(i)
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{
 				DeptID: "prepare", ToStage: "draft", ResultJSON: `{"decision":"rejected"}`, VisitCount: visit,
 			})
@@ -382,7 +383,7 @@ func TestRunExclusiveRevertCapFailsClosed(t *testing.T) {
 func TestRunExclusiveForwardFallsBackToTargetFromTop(t *testing.T) {
 	env := newTestEnv()
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "shipping", NodeID: "Task_ship", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 
@@ -438,7 +439,7 @@ func TestRunExclusiveUsesTargetStageToAvoidReRunningEarlierStage(t *testing.T) {
 	)
 	registerNoopTaskStatus(env)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "billing", ToStage: "invoice", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 
@@ -511,7 +512,7 @@ func TestRunExclusiveUsesTargetNodeIDToAvoidReRunningEarlierStage(t *testing.T) 
 	// Safety net only: if a regression reintroduces the index-0 restart,
 	// this lets the buggy run resolve Task_prep instead of hanging — the
 	// real assertion is on createdNodeKeys below, not on this firing.
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "design", NodeID: "Task_prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 
@@ -579,10 +580,10 @@ func TestRunExclusiveRevertUsesRevertToNodeID(t *testing.T) {
 	registerNoopTaskStatus(env)
 
 	// Safety net only, same rationale as the forward test above.
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", NodeID: "Task_prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", NodeID: "Task_approve", ResultJSON: "{}", VisitCount: 1})
 	}, 2*time.Millisecond)
 
@@ -654,10 +655,10 @@ func TestRunExclusiveRevertUsesRevertToStage(t *testing.T) {
 	)
 	registerNoopTaskStatus(env)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "rework", ToStage: "approve", ResultJSON: "{}", VisitCount: 1})
 	}, 2*time.Millisecond)
 
@@ -778,7 +779,7 @@ func TestRunStepsSequentialPreservesLastNodeOnLaterFailure(t *testing.T) {
 		activity.RegisterOptions{Name: port.ActivityCreateTask},
 	)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "dept1", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
 	}, time.Millisecond)
 
@@ -831,13 +832,13 @@ func TestEnterDegradedUnknownTargetDeptIsANoOp(t *testing.T) {
 		activity.RegisterOptions{Name: port.ActivityUpdateInstanceNodes},
 	)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance", adminSignal{TargetDeptID: "not-the-failed-one"})
 	}, time.Millisecond)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-back:instance", adminSignal{TargetDeptID: "not-the-failed-one"})
 	}, 2*time.Millisecond)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance", adminSignal{TargetDeptID: "billing", TargetNodeKey: "billing/prep"})
 	}, 3*time.Millisecond)
 
@@ -938,7 +939,7 @@ func TestRunTaskStageInterruptingBoundaryTransfers(t *testing.T) {
 		activity.RegisterOptions{Name: port.ActivityUpdateTaskStatus},
 	)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "escalation", ToStage: "prep", ResultJSON: "{}", VisitCount: 1})
 	}, 2*time.Hour)
 
@@ -983,7 +984,7 @@ func TestRunTaskStageNonInterruptingBoundaryContinuesBoth(t *testing.T) {
 	env := newTestEnv()
 	env.SetStartTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "sales", ToStage: "approve", NodeID: "n1", ResultJSON: "{}", VisitCount: 1})
 	}, 2*time.Hour)
 

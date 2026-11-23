@@ -8,6 +8,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -34,7 +35,7 @@ func TestExecute_StageFailSignalFailsTaskNotAssignment(t *testing.T) {
 		},
 	})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-fail:instance-1", stageFailWire{
 			DeptID: "sales", NodeID: "connector", ErrorClass: "provider_timeout", RecordVersion: 1, VisitCount: 1,
 		})

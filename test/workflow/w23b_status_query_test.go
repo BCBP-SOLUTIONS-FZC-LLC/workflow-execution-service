@@ -145,12 +145,16 @@ func TestExecute_TwoParallelStepsInARow_EachForkSeesOnlyItsOwnBranchesAndTheRunC
 	env := w23bNewEnv()
 	fakes := wflNewFakes()
 	wflRegisterAll(env, fakes, w23bTwoForks())
-	wflSignalAt(env, 2*time.Second, "stage-transition", stageTransitionWire{DeptID: "a", NodeID: "A", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1})
-	wflSignalAt(env, 2*time.Second, "stage-transition", stageTransitionWire{DeptID: "b", NodeID: "B", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1})
+	wflSignalsAt(env, 2*time.Second,
+		wflSignal{"stage-transition", stageTransitionWire{DeptID: "a", NodeID: "A", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1}},
+		wflSignal{"stage-transition", stageTransitionWire{DeptID: "b", NodeID: "B", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1}},
+	)
 	var second wfengine.WorkflowStatusQuery
 	wflQueryStatusAt(t, env, 5*time.Second, &second)
-	wflSignalAt(env, 6*time.Second, "stage-transition", stageTransitionWire{DeptID: "c", NodeID: "C", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1})
-	wflSignalAt(env, 6*time.Second, "stage-transition", stageTransitionWire{DeptID: "d", NodeID: "D", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1})
+	wflSignalsAt(env, 6*time.Second,
+		wflSignal{"stage-transition", stageTransitionWire{DeptID: "c", NodeID: "C", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1}},
+		wflSignal{"stage-transition", stageTransitionWire{DeptID: "d", NodeID: "D", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1}},
+	)
 
 	status, err := wflStart(t, env, fakes, "")
 

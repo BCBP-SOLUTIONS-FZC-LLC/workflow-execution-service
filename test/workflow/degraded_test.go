@@ -10,6 +10,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -48,13 +49,13 @@ func TestExecute_ParallelBranchFailureDegradesThenForceForwardResolves(t *testin
 		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
 	}})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, tick)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
 		})
@@ -113,13 +114,13 @@ func TestExecute_DegradedFailedBranchUsesRealIAMDepartmentID(t *testing.T) {
 		},
 	})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, tick)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
 		})
@@ -160,13 +161,13 @@ func TestExecute_ParallelBranchFailureDegradesThenForceBackRespawns(t *testing.T
 		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
 	}})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, tick)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", RecordVersion: 1,
 		})
@@ -176,7 +177,7 @@ func TestExecute_ParallelBranchFailureDegradesThenForceBackRespawns(t *testing.T
 	// failed CreateTask call never reached the pending-signal registration
 	// at all, since runTaskStage returns before that point on activity
 	// error) — VisitCount: 2 matches taskVisits after the respawn.
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "billing", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
@@ -331,7 +332,7 @@ func TestExecute_ActiveParallelForceForwardSupersedesOneBranch(t *testing.T) {
 
 	// Fires while both warehouse and billing are still pending (neither has
 	// settled) — the gap this test closes, not DEGRADED's own force-forward.
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
 		})
@@ -341,7 +342,7 @@ func TestExecute_ActiveParallelForceForwardSupersedesOneBranch(t *testing.T) {
 	// implementation fell back to the old drop-and-log behavior, this test
 	// would hang until the test environment's default execution timeout,
 	// not merely fail an assertion.
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
@@ -382,19 +383,19 @@ func TestExecute_ActiveParallelForceForwardDuplicateSignalIsNoOp(t *testing.T) {
 		recordForceRoute: func(port.RecordForceRouteInput) { forceRouteCalls++ },
 	})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
 		})
 	}, 5*tick)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
 		})
 	}, 6*tick)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
@@ -431,7 +432,7 @@ func TestExecute_DEGRADEDRejectsInstancePause(t *testing.T) {
 		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
 	}})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
@@ -440,11 +441,11 @@ func TestExecute_DEGRADEDRejectsInstancePause(t *testing.T) {
 	// Arrives while DEGRADED: instance-pause requires RUNNING, so this must
 	// be rejected at signal validation before it ever reaches the park
 	// loop's Selector (which registers no case for it at all).
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-pause:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
 	}, 5*tick)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "billing", TargetNodeKey: "billing/prep", RecordVersion: 1,
 		})

@@ -9,6 +9,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -64,12 +65,12 @@ func runWithAssigneeSignals(t *testing.T, signals ...func(env *testsuite.TestWor
 	at := tick
 	for _, send := range signals {
 		send := send
-		env.RegisterDelayedCallback(func() { send(env) }, at)
+		wflclock.After(env, func() { send(env) }, at)
 		at += tick
-		env.RegisterDelayedCallback(query, at)
+		wflclock.After(env, query, at)
 		at += tick
 	}
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "sales", ToStage: "approve", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1,
 		})

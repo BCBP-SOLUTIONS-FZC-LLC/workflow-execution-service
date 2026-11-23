@@ -9,6 +9,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 )
 
 // csdCancelRecorder collects what the faked cancel and generic status
@@ -64,7 +65,7 @@ func TestExecute_TwoCancelsWithTheSameRecordVersion_WorkflowEndsAtTheFirstCancel
 				updateInstanceStatus: rec.statusWrite,
 			})
 
-			env.RegisterDelayedCallback(func() {
+			wflclock.After(env, func() {
 				env.SignalWorkflow(instanceCancel, first)
 				if !tc.secondDuring {
 					env.SignalWorkflow(instanceCancel, second)

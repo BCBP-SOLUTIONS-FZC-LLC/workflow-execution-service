@@ -15,6 +15,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -217,7 +218,7 @@ func TestExecute_StageDeferRefusedByStatus_FailsWithAnUpdateRefusedErrorAndWrite
 			}
 			wflSignalAt(env, 12*time.Second, "stage-transition", w23bWire("deptB", 1, 1))
 			answer := &updateAnswer{}
-			env.RegisterDelayedCallback(func() {
+			wflclock.After(env, func() {
 				env.UpdateWorkflow("stage-defer:"+wflInstance, "defer-1", answer, deferWire{
 					DeptID: strings.Split(tc.taskID, "/")[0], FromStage: "prep", UserID: "user-1", RecordVersion: 1, TaskID: tc.taskID, AssignmentID: "assign-1",
 				})

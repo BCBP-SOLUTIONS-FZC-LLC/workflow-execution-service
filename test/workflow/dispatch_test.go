@@ -9,6 +9,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -22,7 +23,7 @@ func TestExecute_SequentialDispatchCompletes(t *testing.T) {
 	collab := singleStageCollaboration(dsl.StageDef{Type: "approve", Activity: "approve_order", Role: "sales_rep"})
 	registerFakeActivities(env, collab, nil)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "sales", ToStage: "approve", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1,
 		})
@@ -79,12 +80,12 @@ func TestExecute_ExclusiveGatewayRoutesOnCondition(t *testing.T) {
 
 	registerFakeActivities(env, collab, nil)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "review", ToStage: "review", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1,
 		})
 	}, tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "shipping", ToStage: "prep", ResultJSON: `{}`, RecordVersion: 1, VisitCount: 1,
 		})
@@ -124,7 +125,7 @@ func TestExecute_OverrideMapReachesCreateTask(t *testing.T) {
 		},
 	})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "sales", ToStage: "approve", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1,
 		})

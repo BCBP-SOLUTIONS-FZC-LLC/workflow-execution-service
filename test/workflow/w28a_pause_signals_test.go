@@ -13,6 +13,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -71,7 +72,7 @@ func w28aPause(initiator, admin string, version int64) adminSignalWire {
 // w28aSignalsAt sends several signals in one callback, so they are all queued
 // before the workflow reads the first.
 func w28aSignalsAt(env *testsuite.TestWorkflowEnvironment, delay time.Duration, signals ...func()) {
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		for _, send := range signals {
 			send()
 		}

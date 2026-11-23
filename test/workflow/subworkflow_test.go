@@ -8,6 +8,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -43,7 +44,7 @@ func TestExecute_SubWorkflowRunsInline(t *testing.T) {
 	}
 	registerFakeActivities(env, collab, nil)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "review", ToStage: "review", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
@@ -106,7 +107,7 @@ func TestExecute_SubWorkflowInterruptingTimerBoundary(t *testing.T) {
 
 	// The review stage never resolves — the timer boundary must fire
 	// instead and transfer control to escalation.
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "escalation", ToStage: "approve", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})

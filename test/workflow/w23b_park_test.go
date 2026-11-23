@@ -96,8 +96,10 @@ func TestExecute_PauseDuringTwoOpenParks_IsHeldUntilTheLastParkCloses(t *testing
 	seq := &w23bSequence{}
 	w23bFailBranchesTwo(fakes, seq)
 	wflRegisterAll(env, fakes, twoInnerForksCollaboration())
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDoneStage("x1", "prep", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDoneStage("y1", "prep", 1))
+	wflSignalsAt(env, 2*time.Second,
+		wflSignal{"stage-transition", wflDoneStage("x1", "prep", 1)},
+		wflSignal{"stage-transition", wflDoneStage("y1", "prep", 1)},
+	)
 	wflSignalAt(env, 4*time.Second, "instance-pause", adminSignalWire{AdminUserID: "admin-1", Initiator: domain.InitiatorAdmin, RecordVersion: 1})
 	wflSignalAt(env, 6*time.Second, "instance-force-forward", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "y2/prep", RecordVersion: 2})
 	wflSignalAt(env, 8*time.Second, "instance-force-forward", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "x2/prep", RecordVersion: 3})

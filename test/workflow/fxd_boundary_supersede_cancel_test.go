@@ -12,6 +12,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -47,7 +48,7 @@ func TestExecute_CancelWhileAnInterruptingBoundarySupersedesItsTaskStillSupersed
 	// The boundary fires at one hour and its first supersede write takes three
 	// seconds, so the cancel lands while that write is in flight and the write
 	// never finishes; the repeat on the outliving context runs at once.
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-cancel:"+wflInstance, adminSignalWire{AdminUserID: "admin-9", RecordVersion: 4})
 	}, time.Hour+time.Second)
 

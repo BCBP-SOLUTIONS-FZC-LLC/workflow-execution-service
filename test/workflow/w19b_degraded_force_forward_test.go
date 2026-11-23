@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
@@ -94,7 +95,7 @@ func TestExecute_ADegradedInstanceReturnsToRunningOnlyWhenItsLastFailedBranchIsF
 	wflSignalAt(env, 2*time.Second, "stage-transition", wflDoneStage("warehouse", "prep", 1))
 	wflSignalAt(env, 5*time.Second, "instance-force-forward", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "billing/prep", RecordVersion: 7})
 	var afterFirst []domain.InstanceStatus
-	env.RegisterDelayedCallback(func() { afterFirst = wflStatuses(fakes) }, 6500*time.Millisecond)
+	wflclock.After(env, func() { afterFirst = wflStatuses(fakes) }, 6500*time.Millisecond)
 	wflSignalAt(env, 8*time.Second, "instance-force-forward", adminSignalWire{AdminUserID: "admin-2", TargetNodeKey: "shipping/prep", RecordVersion: 8})
 
 	status, err := wflStart(t, env, fakes, "")

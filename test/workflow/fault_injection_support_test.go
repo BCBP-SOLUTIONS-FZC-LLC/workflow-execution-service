@@ -12,6 +12,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -148,7 +149,22 @@ func wflStart(t *testing.T, env *testsuite.TestWorkflowEnvironment, f *wflFakes,
 
 // wflSignalAt sends a signal to the standard instance after delay.
 func wflSignalAt(env *testsuite.TestWorkflowEnvironment, delay time.Duration, signal string, payload any) {
-	env.RegisterDelayedCallback(func() { env.SignalWorkflow(signal+":"+wflInstance, payload) }, delay)
+	wflclock.After(env, func() { env.SignalWorkflow(signal+":"+wflInstance, payload) }, delay)
+}
+
+type wflSignal struct {
+	name    string
+	payload any
+}
+
+// wflSignalsAt sends the signals to the standard instance in the given order,
+// all from one callback, so no clock ordering decides which arrives first.
+func wflSignalsAt(env *testsuite.TestWorkflowEnvironment, delay time.Duration, signals ...wflSignal) {
+	sends := make([]func(), len(signals))
+	for i, s := range signals {
+		sends[i] = func() { env.SignalWorkflow(s.name+":"+wflInstance, s.payload) }
+	}
+	wflclock.Together(env, delay, sends...)
 }
 
 // wflDone is the completion signal of a task stage.

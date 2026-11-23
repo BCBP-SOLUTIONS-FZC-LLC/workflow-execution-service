@@ -10,6 +10,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 )
 
 func TestExecute_ACancelThatFailsForGoodEndsTheInstanceFailed(t *testing.T) {
@@ -23,7 +24,7 @@ func TestExecute_ACancelThatFailsForGoodEndsTheInstanceFailed(t *testing.T) {
 		},
 		updateInstanceStatus: func(in port.UpdateInstanceStatusInput) { statusWrites = append(statusWrites, in) },
 	})
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-cancel:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
 	}, tick)
 

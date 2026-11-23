@@ -29,8 +29,8 @@ func TestExecute_PauseReceivedWithAStageResultHoldsTheNextStageUntilResume(t *te
 		dsl.StageDef{Type: "prep", NodeID: "S1"}, dsl.StageDef{Type: "prep", NodeID: "S2"})
 	wflRegisterAll(env, fakes, collab)
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	wflSignalAt(env, 5*time.Second, "stage-transition", wflDone("sales", "S1", 1))
 	wflSignalAt(env, 5*time.Second, "instance-pause", wflAdminPause(domain.InitiatorAdmin))
+	wflSignalAt(env, 5*time.Second+tick, "stage-transition", wflDone("sales", "S1", 1))
 	wflSignalAt(env, resumeAt, "instance-resume", wflAdminPause(domain.InitiatorAdmin))
 	wflSignalAt(env, resumeAt+2*time.Second, "stage-transition", wflDone("sales", "S2", 1))
 

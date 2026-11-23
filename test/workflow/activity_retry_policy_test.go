@@ -13,6 +13,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -168,7 +169,7 @@ func TestExecute_DeferUpdateStaysUnansweredWhileTheDeferWriteFailsRetryably(t *t
 	wflSignalAt(env, 1*time.Second, "stage-transition", wflDone("ops", "First", 1))
 
 	answer := &wflUpdateAnswer{}
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.UpdateWorkflow("stage-defer:"+wflInstance, "defer-1", answer, deferWire{
 			DeptID: "ops", FromStage: "Second", Reason: "needs rework", UserID: "user-3", RecordVersion: 5,
 			TaskID: "ops/Second", AssignmentID: "assign-9",
@@ -177,7 +178,7 @@ func TestExecute_DeferUpdateStaysUnansweredWhileTheDeferWriteFailsRetryably(t *t
 
 	var midRetryAttempts int
 	var midRetryAnswered bool
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		midRetryAttempts = fakes.attemptsOf(port.ActivityDeferTask)
 		midRetryAnswered, _ = answer.state()
 	}, 10*time.Second)

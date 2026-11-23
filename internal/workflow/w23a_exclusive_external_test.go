@@ -15,6 +15,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -41,7 +42,7 @@ func w23aExclusiveRun(t *testing.T, branches []dsl.ExclusiveBranch, resultJSON s
 	var res w23aExclusiveResult
 	env := w23aStageEnv(&res.created)
 	for i, done := range completes {
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: done[0], NodeID: done[1], ResultJSON: "{}", VisitCount: 1})
 		}, time.Duration(i+1)*time.Minute)
 	}
@@ -248,7 +249,7 @@ func TestRegisterWaitingExternalQuery_ListsTheKeysSorted(t *testing.T) {
 	env := suite.NewTestWorkflowEnvironment()
 	var got []string
 	var queryErr error
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		value, err := env.QueryWorkflow(QueryWaitingExternal)
 		if err != nil {
 			queryErr = err

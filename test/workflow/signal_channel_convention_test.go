@@ -7,6 +7,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 )
 
 // TestExecute_SignalChannelNamingMatchesTemporalClientConvention builds every
@@ -33,13 +34,13 @@ func TestExecute_SignalChannelNamingMatchesTemporalClientConvention(t *testing.T
 
 	channelName := func(signalName string) string { return signalName + ":" + instanceID }
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow(channelName(port.SignalInstancePause), adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
 	}, tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow(channelName(port.SignalInstanceResume), adminSignalWire{AdminUserID: "admin-2", RecordVersion: 2})
 	}, 2*tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow(channelName(port.SignalInstanceCancel), adminSignalWire{AdminUserID: "admin-1", RecordVersion: 3})
 	}, 3*tick)
 

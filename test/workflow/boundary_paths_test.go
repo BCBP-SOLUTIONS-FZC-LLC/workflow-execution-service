@@ -10,6 +10,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -36,7 +37,7 @@ func runBoundaryPlan(t *testing.T, depts []dsl.DepartmentDef, steps []dsl.Execut
 		},
 	})
 	for delay, sig := range signals {
-		env.RegisterDelayedCallback(func() { env.SignalWorkflow("stage-transition:instance-1", sig) }, delay)
+		wflclock.After(env, func() { env.SignalWorkflow("stage-transition:instance-1", sig) }, delay)
 	}
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1"})
 	if err := env.GetWorkflowError(); err != nil {
@@ -192,13 +193,13 @@ func TestExecute_ForceBackBeforeAForkEndingAtABoundaryResumesTheBranches(t *test
 		created = append(created, in.NodeKey)
 		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
 	}})
-	env.RegisterDelayedCallback(func() { env.SignalWorkflow("stage-transition:instance-1", done("pre")) }, 10*time.Minute)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() { env.SignalWorkflow("stage-transition:instance-1", done("pre")) }, 10*time.Minute)
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
 	}, 20*time.Minute)
-	env.RegisterDelayedCallback(func() { env.SignalWorkflow("stage-transition:instance-1", done("a")) }, 2*time.Hour)
-	env.RegisterDelayedCallback(func() { env.SignalWorkflow("stage-transition:instance-1", done("b")) }, 2*time.Hour+time.Minute)
-	env.RegisterDelayedCallback(func() { env.SignalWorkflow("stage-transition:instance-1", done("after")) }, 3*time.Hour)
+	wflclock.After(env, func() { env.SignalWorkflow("stage-transition:instance-1", done("a")) }, 2*time.Hour)
+	wflclock.After(env, func() { env.SignalWorkflow("stage-transition:instance-1", done("b")) }, 2*time.Hour+time.Minute)
+	wflclock.After(env, func() { env.SignalWorkflow("stage-transition:instance-1", done("after")) }, 3*time.Hour)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1"})
 	if err := env.GetWorkflowError(); err != nil {

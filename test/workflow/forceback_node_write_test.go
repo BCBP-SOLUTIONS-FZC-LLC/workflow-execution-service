@@ -10,6 +10,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -29,7 +30,7 @@ func TestExecute_TopLevelForceBackWritesTheReturnedToNodeAsTheCurrentNode(t *tes
 	wflSignalAt(env, 1*time.Second, "stage-transition", wflDone("ops", "First", 1))
 	wflSignalAt(env, 5*time.Second, "instance-force-back", adminSignalWire{AdminUserID: "admin-6", Reason: "redo", RecordVersion: 11})
 	var writesBeforeRevisit [][]domain.NodeKey
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		for _, in := range wflInputs[port.UpdateInstanceNodesInput](fakes, port.ActivityUpdateInstanceNodes) {
 			writesBeforeRevisit = append(writesBeforeRevisit, in.NodeKeys)
 		}

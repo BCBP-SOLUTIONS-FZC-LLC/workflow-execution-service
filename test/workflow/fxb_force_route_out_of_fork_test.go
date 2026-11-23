@@ -11,6 +11,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -41,7 +42,7 @@ func TestExecute_ForceRouteOutOfARunningTopLevelForkLeavesNoForkState(t *testing
 	fxbForceForward(env, 4*time.Second, "warehouse/Pack", 2)
 	fxbForceForward(env, 4500*time.Millisecond, "billing/B1", 3)
 	wflQueryStatusAt(t, env, 5*time.Second, &afterRoute)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.UpdateWorkflow("stage-defer:"+wflInstance, "defer-1", answer, deferWire{
 			DeptID: "tail", FromStage: "Tail", Reason: "need more info", UserID: "user-1", RecordVersion: 1,
 			TaskID: "tail/Tail", AssignmentID: "assign-1",

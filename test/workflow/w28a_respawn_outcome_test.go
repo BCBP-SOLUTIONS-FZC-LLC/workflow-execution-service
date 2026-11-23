@@ -47,9 +47,11 @@ func TestExecute_RespawnedBranchWhoseDepartmentEndsItsPath_CompletesWithoutTheLa
 	billing := wflStages("X1", "X2")
 	billing[1].BoundaryTimer = &dsl.BoundaryTimer{Duration: "1h", Interrupting: true, Terminates: true}
 	wflRegisterAll(env, fakes, w28aBranchWithTail(billing))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("warehouse", "Pack", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("prev", "P1", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("billing", "X1", 1))
+	wflSignalsAt(env, 2*time.Second,
+		wflSignal{"stage-transition", wflDone("warehouse", "Pack", 1)},
+		wflSignal{"stage-transition", wflDone("prev", "P1", 1)},
+		wflSignal{"stage-transition", wflDone("billing", "X1", 1)},
+	)
 	wflSignalAt(env, 6*time.Second, "instance-force-back", adminSignalWire{AdminUserID: "admin-3", TargetNodeKey: "billing/X1", RecordVersion: 5})
 
 	status, err := wflStart(t, env, fakes, "")
@@ -74,9 +76,11 @@ func TestExecute_RespawnedBranchThatFailsAgain_ResumesAfterTheNodeItReached(t *t
 	fakes := wflNewFakes()
 	wflFailTaskOnce(fakes, "billing/X2")
 	wflRegisterAll(env, fakes, w28aBranchWithTail(wflStages("X1", "X2", "X3")))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("warehouse", "Pack", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("prev", "P1", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("billing", "X1", 1))
+	wflSignalsAt(env, 2*time.Second,
+		wflSignal{"stage-transition", wflDone("warehouse", "Pack", 1)},
+		wflSignal{"stage-transition", wflDone("prev", "P1", 1)},
+		wflSignal{"stage-transition", wflDone("billing", "X1", 1)},
+	)
 	wflSignalAt(env, 6*time.Second, "instance-force-back", adminSignalWire{AdminUserID: "admin-3", TargetNodeKey: "billing/X1", RecordVersion: 5})
 	wflSignalAt(env, 8*time.Second, "stage-transition", wflDone("billing", "X2", 2))
 	failed := wflDone("billing", "X3", 1)

@@ -11,11 +11,12 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 )
 
 func wflQueryForceRouteStateAt(t *testing.T, env *testsuite.TestWorkflowEnvironment, delay time.Duration, into *port.ForceRouteState) {
 	t.Helper()
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		val, err := env.QueryWorkflow(port.QueryForceRouteState)
 		if err != nil {
 			t.Errorf("QueryWorkflow(%s): %v", port.QueryForceRouteState, err)

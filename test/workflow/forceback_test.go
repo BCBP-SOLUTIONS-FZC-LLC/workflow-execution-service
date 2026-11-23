@@ -9,6 +9,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -44,13 +45,13 @@ func TestExecute_BaseForceBackRegressesAndContinues(t *testing.T) {
 	collab := twoDeptCollaboration()
 	registerFakeActivities(env, collab, nil)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, tick)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "deptA", TargetNodeKey: "deptA/prep", RecordVersion: 1,
 		})
@@ -59,7 +60,7 @@ func TestExecute_BaseForceBackRegressesAndContinues(t *testing.T) {
 	// Regressed deptA must be completed again — its second visit, so
 	// VisitCount: 2 (the interpreter's own taskVisits counter for
 	// deptA/prep after the force-back re-run).
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
@@ -70,7 +71,7 @@ func TestExecute_BaseForceBackRegressesAndContinues(t *testing.T) {
 	// original, still-pending deptB/prep attempt rather than completing it,
 	// so the re-run after the deptA regression creates a genuinely fresh
 	// deptB/prep task.
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
@@ -115,19 +116,19 @@ func TestExecute_ForceBackRevisit_GetsDistinctTaskID(t *testing.T) {
 		},
 	})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, tick)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "deptA", TargetNodeKey: "deptA/prep", RecordVersion: 1,
 		})
 	}, 5*tick)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
@@ -135,7 +136,7 @@ func TestExecute_ForceBackRevisit_GetsDistinctTaskID(t *testing.T) {
 
 	// deptB/prep's own second visit — same reasoning as the sibling test
 	// above (force-back abandons the original pending attempt).
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
@@ -202,13 +203,13 @@ func TestExecute_BaseForceForwardSkipsWithoutWipingHistory(t *testing.T) {
 		},
 	})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, tick)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "deptC", TargetNodeKey: "deptC/prep", RecordVersion: 1,
 		})
@@ -218,7 +219,7 @@ func TestExecute_BaseForceForwardSkipsWithoutWipingHistory(t *testing.T) {
 	// implementation regressed to waiting on deptB instead of skipping to
 	// deptC, this test would hang until Temporal's test environment's
 	// default execution timeout, not merely fail an assertion.
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptC", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
@@ -280,7 +281,7 @@ func TestExecute_InstanceCancelWhileRunning(t *testing.T) {
 		},
 	})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-cancel:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
 	}, tick)
 
@@ -329,7 +330,7 @@ func TestExecute_InstanceCancelActivityErrorPropagates(t *testing.T) {
 		},
 	})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-cancel:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
 	}, tick)
 
@@ -365,13 +366,13 @@ func TestExecute_InstancePauseAndResumePersist(t *testing.T) {
 		},
 	})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-pause:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
 	}, tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-resume:instance-1", adminSignalWire{AdminUserID: "admin-2", RecordVersion: 2})
 	}, 2*tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-cancel:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 3})
 	}, 3*tick)
 
@@ -415,17 +416,17 @@ func TestExecute_InstanceReassignCallsActivity(t *testing.T) {
 		},
 	})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-reassign:instance-1", reassignSignalWire{
 			TaskID: "task-1", OldUserID: "user-1", NewUserID: "user-2", AdminUserID: "admin-1", RecordVersion: 1,
 		})
 	}, tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 2*tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "deptB", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
@@ -464,15 +465,15 @@ func TestExecute_InstanceReassignRejectedWhilePaused(t *testing.T) {
 		},
 	})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-pause:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
 	}, tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-reassign:instance-1", reassignSignalWire{
 			TaskID: "task-1", OldUserID: "user-1", NewUserID: "user-2", AdminUserID: "admin-1", RecordVersion: 1,
 		})
 	}, 2*tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-cancel:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 2})
 	}, 3*tick)
 
@@ -526,7 +527,7 @@ func TestExecute_ActiveParallelForceBackPausesAndResumes(t *testing.T) {
 	}
 	registerFakeActivities(env, collab, nil)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "intake", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
@@ -534,25 +535,25 @@ func TestExecute_ActiveParallelForceBackPausesAndResumes(t *testing.T) {
 
 	// Fires while both warehouse and billing are still pending (neither has
 	// settled) — the active-parallel-gateway extension, not DEGRADED.
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "intake", TargetNodeKey: "intake/prep", RecordVersion: 1,
 		})
 	}, 5*tick)
 
 	// Regressed intake must be completed again — its second visit.
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "intake", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 2,
 		})
 	}, 10*tick)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
 	}, 15*tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "billing", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
