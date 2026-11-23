@@ -32,7 +32,7 @@ jobs:
   test:
     name: test
     if: ${{ !inputs.skip }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -40,6 +40,33 @@ jobs:
         with:
           persist-credentials: false
           token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - name: Resolve the Definition Service ref
+        id: peer
+        env:
+          PEER_REF: ${{ inputs.compat_peer_ref }}
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
+          READ_TOKEN: ${{ secrets.CI_REPO_READ_TOKEN || secrets.GO_PRIVATE_TOKEN }}
+        run: |
+          set -euo pipefail
+          ref="$PEER_REF"
+          if [ -z "$ref" ]; then
+            ref=main
+            if git ls-remote --exit-code --heads "https://x-access-token:${READ_TOKEN}@github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-definition-service.git" "refs/heads/${HEAD_REF}" >/dev/null 2>&1; then
+              ref="$HEAD_REF"
+            fi
+          fi
+          echo "Definition Service ref: ${ref}"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the Definition Service
+        uses: actions/checkout@v7
+        with:
+          repository: BCBP-SOLUTIONS-FZC-LLC/workflow-definition-service
+          ref: ${{ steps.peer.outputs.ref }}
+          path: peer/definition_service
+          persist-credentials: false
+          token: ${{ secrets.CI_REPO_READ_TOKEN || secrets.GO_PRIVATE_TOKEN }}
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -49,6 +76,7 @@ jobs:
           cache-dependency-path: |
             go.sum
             go.mod
+            peer/definition_service/go.sum
 
       - name: Configure private module access
         env:
@@ -78,6 +106,9 @@ jobs:
       - name: Generate (sqlc)
         run: make generate
 
+      - name: Generate (sqlc) for the Definition Service
+        run: make -C peer/definition_service generate-sqlc SQLC="$GITHUB_WORKSPACE/.tools/sqlc"
+
       - name: Build
         run: make build
 
@@ -101,6 +132,38 @@ jobs:
 
       - name: Architecture lint
         run: make arch-lint
+
+      - name: Install Hurl
+        env:
+          HURL_VERSION: 8.1.0
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/hurl.deb" "https://github.com/Orange-OpenSource/hurl/releases/download/${HURL_VERSION}/hurl_${HURL_VERSION}_amd64.deb"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq "$RUNNER_TEMP/hurl.deb"
+          hurl --version
+
+      - name: Cache the Schemathesis download
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
+      - name: Install uv
+        run: python3 -m pip install --user uv==0.13.7
+
+      - name: Black-box checks (Hurl and Schemathesis against the running stack)
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          make blackbox DEFINITION_SERVICE_DIR="$GITHUB_WORKSPACE/peer/definition_service"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: blackbox-logs
+          path: |
+            .coverage/blackbox/*.log
+            .coverage/schemathesis/*.xml
+          if-no-files-found: ignore
 
   compat:
     name: compat

@@ -10,6 +10,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Tests
 
+- The degraded-park workflow tests send their park signals only after the degraded status has been written, so a slow machine can no longer deliver a force-forward before the branch failure has been processed. They ran 150 times under CPU load with the race detector without a failure.
+- Tests pin more settled behaviour: a delegate's reassign leaves finished instances and closed tasks with the old delegate, a cancel for another tenant's delegation counts zero, the task-created event accepts null for its nullable optional fields and refuses it for a required one, and an unusable boundary duration logs one warning and leaves the stage with no deadline.
+- `make blackbox` starts the whole stack (Execution and Definition infrastructure, the Definition Service and its stubs, a token service stub, the Execution API and worker), runs the Hurl scenarios and both Schemathesis runs against it and stops it, in about 40 seconds. The `test` job of the CI test workflow runs it as its last steps, with the Definition Service checked out beside it. The fuzz runs are deterministic (fixed seed, one worker, deterministic generation, no stateful phase), so they give the same result on every run.
 - Tests pin settled behaviour: an activity ignores the caller's stale record version, a second wait on one key after a cancelled one, a dead-letter copy keeps the adapter's reason and source id, the worker's pool settings and default queue options, a failed cancel and a failed completed write ending the run, an early stage result kept one per node and visit, a reclaim by the consumer that owns the entry, a connector task having no assignee, a human step with no assignee, the database health copy and a former assignee's lost read access.
 - Tests pin settled behaviour: the active-instance count includes PAUSED and DEGRADED and leaves out the three final statuses, the connector failure callback accepts an error class no worker sends, the OpenBao reader's answers without the requested field, the duration parser's refusal messages, the principal read sending no roles header, a boundary key on the complete route, and the out-of-office window fields starting or ending no pause.
 - A test that reads a metric with no series (a mistyped name, or a labelled metric nothing has touched) fails instead of reading 0.
@@ -58,6 +61,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- A NUL character in a query name or value or in a path segment answers 400 BAD_REQUEST, as one in a body string already does, instead of reaching the database.
+- A connector failure's `error_class` with a control, format or line-separator character (for example a bidi override or a line separator) is refused with 400 BAD_REQUEST.
+- CI: the schema registration workflow's freeze check no longer fails when no freeze is set, so a push that changes the event schemas gets past that step and reaches the registration; `make check` runs the step for every freeze and force combination.
+- The public spec marks `x-tenant-roles` as optional: a request without it carries no roles, which is enough for the reads scoped to the caller, and admin-only endpoints refuse it with 403. The spec said it was required while the service accepted its absence.
 - Docs only: the metric registry names the 200 answer of a task defer in the help text of the task signal duration.
 - CI: the schema registration, schema prune, quarterly schema health and release workflows can read the private schema-governance image and the service images: the staging and production jobs keep `packages: read` next to their own `contents: write`, and each job that pulls an image logs in to the registry first. Before, every push to `main` failed the staging registration with 403 on the image pull.
 - `.env.example` keeps the `APP_ENV` comment on its own line: `make` passed the spaces before an inline comment into the value, and the start refused `dev` followed by spaces.

@@ -214,18 +214,24 @@ Every test target runs the Go version `go.mod` names (`GOTOOLCHAIN`), clears the
 | `make design-sync-check` / `make design-sync-check-test` | Fail when a document kept here and in the design repository differs (`DESIGN_DIR=<checkout>`, or `GH_TOKEN` reads `Haroon-BCBP/design`); local only, because CI does not read the personal design repository |
 | `make docker-build` / `make pin-base-images` / `make lint-workflows` | The three images, base-image digests, `actionlint` on the workflows |
 | `make helm-lint` / `make vuln` / `make docker-check` | Chart, dependency vulnerabilities, Dockerfile lint and scan |
-| `make hurl` / `make fuzz-api` / `make fuzz-internal-api` | Black-box scenarios and Schemathesis runs against a running local stack |
+| `make blackbox` | Starts the stack, runs the Hurl scenarios and both Schemathesis runs against it, stops it (also the last steps of the CI `test` job) |
 | `make check` | Everything CI gates on, locally |
 
-### Local black-box checks
+### Black-box checks
 
-`make hurl` runs the Hurl scenarios in `test/hurl` against a running stack: health, the instance lifecycle, the task flow and the problem-document contract through the public API, the inbound event and connector callback routes as the system caller (`test/hurl/internal`), and the identity boundary with no identity at all (`test/hurl/auth`). The scenarios start instances from a workflow they first publish in the Definition Service (`test/hurl/setup`). `make fuzz-api` and `make fuzz-internal-api` run Schemathesis against `docs/swagger/openapi.yaml` and `api/internal-openapi.yaml`.
+`make blackbox` starts the stack (`scripts/blackbox-stack.sh up`: Postgres, Valkey and Temporal for Execution and Postgres and Valkey for Definition from their compose files (no LocalStack, so the 2 GB image is not pulled), the Definition Service with its stubs, a token service stub in `test/hurl/stub/tokenservice`, then the Execution API and worker), runs the three checks below against it and stops it. `DEFINITION_SERVICE_DIR` names the Definition Service checkout (default `../definition_service`). The whole run takes about 40 seconds on a laptop (the stack 15 to 20 seconds of it, Hurl 7, the two fuzz runs 15) and runs as the last steps of the `test` job of the CI test workflow (Validate / Test).
 
-All three write instances, tasks and events into the databases of the stack they run against, so point them at a throwaway database. The stack is the one `scripts/smoke-test.sh` describes (it starts nothing itself): the Definition Service with its stubs, the token service stub in `test/hurl/stub/tokenservice`, then the execution API and worker. `API_BASE`, `METRICS_BASE`, `DEFINITION_BASE`, `SCENARIO_TENANT` and `SCENARIO_USER` override the local addresses and identity. None of this runs in CI.
+`make hurl` runs the Hurl scenarios in `test/hurl` against the running stack: health, the instance lifecycle, the task flow and the problem-document contract through the public API, the inbound event and connector callback routes as the system caller (`test/hurl/internal`), and the authentication boundary (`test/hurl/auth`). `make fuzz-api` and `make fuzz-internal-api` run Schemathesis against the public and the internal spec.
+
+The fuzz runs are deterministic so CI cannot flake: a fixed seed (`FUZZ_SEED`), one worker, deterministic generation, and the examples, coverage and fuzzing phases only; the stateful phase is left out because the sequences it builds from earlier responses change from run to run. `make blackbox-up` and `make blackbox-down` start and stop the stack on their own; `API_BASE`, `METRICS_BASE`, `DEFINITION_BASE`, `SCENARIO_TENANT` and `SCENARIO_USER` override the local addresses and identity.
+
+All three write instances, tasks and events into the databases of the stack they run against, so use throwaway databases (the compose ones are).
 
 Known fuzz artefacts (the Schemathesis settings are in `schemathesis.toml`, each limited to one operation or one parameter; the findings below are behaviour a schema cannot express):
 
 - Cursors: a cursor is a token the previous page returned, any other value answers 400, so the fuzzer sends it empty.
+- A `reason` of only Unicode whitespace such as U+0085: the schema pattern is `\S`, the fuzzer counts that character as text and the service does not, so 400 is intended (cancel, terminate, node override).
+- An empty query value means the filter is not given, so `GET /instances?status=` answers 200 although the empty string is not a status; any other value that is not a status answers 400.
 - Strings with a NUL character: valid JSON, answered 400 because the store cannot keep one, so the fuzzer does not generate them.
 - The four `/internal/events/*` routes: the payload is opaque to the schema, so a payload that does not decode (400), an unhandled type (200) and a frame that is not a schema-registry frame (502, retryable) are intended.
 - `reassign-delegate`: `new_delegate_id` equal to `old_delegate_id` answers 400, a rule across two fields.

@@ -11,6 +11,7 @@ exclude:
   - ".claude"
   - "vendor"
   - "test"
+  - "peer"
 
 # cmd/connector-worker's own e2e test files import test/fixtures for their
 # real Postgres/Temporal/Valkey testcontainers, the same fixtures test/e2e

@@ -25,6 +25,22 @@ checks.positive_data_acceptance.expected-statuses = [
 ]
 checks.negative_data_rejection.enabled = false
 
+# A reason must contain a character that is not whitespace (`pattern: \S`). The fuzzer counts
+# U+0085 (next line) as one, the service, like Go's TrimSpace, does not: 400 is intended.
+[[operations]]
+include-name-regex = "^POST /api/v1/instances/\\{id\\}/(cancel|terminate|nodes/\\{node\\}/override)$"
+checks.positive_data_acceptance.expected-statuses = [
+  "2XX", "3XX", 400, 401, 403, 404, 409, 429, "5XX",
+]
+
+# An empty query value means the filter is not given: the fuzzer sends status= with no value, which
+# the enum alone would call invalid. A value that is not empty and not a status is refused 400.
+[[operations]]
+include-name = "GET /api/v1/instances"
+checks.negative_data_rejection.expected-statuses = [
+  200, 400, 401, 403, 404, 405, 406, 409, 415, 422, 428, 429, "5XX",
+]
+
 # new_delegate_id must differ from old_delegate_id: a rule across two fields.
 [[operations]]
 include-name = "POST /api/v1/internal/workflows/reassign-delegate"

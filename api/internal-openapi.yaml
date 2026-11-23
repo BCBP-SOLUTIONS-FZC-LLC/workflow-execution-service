@@ -268,8 +268,9 @@ components:
         Malformed JSON body, missing required fields, or a value that is not valid, such as an
         id that is not a UUID in the body, a query parameter or the path. invalid_params names
         the field (a path parameter as one) with the reason "is not valid"; the detail never
-        says the body is not valid JSON. A JSON body with a NUL character (\u0000) in any
-        string, key included, is refused as well, as the store cannot keep one.
+        says the body is not valid JSON. A NUL character (\u0000) in any body string, key
+        included, in a query name or value or in a path segment is refused as well, as the
+        store cannot keep one.
       content:
         application/problem+json:
           schema:
@@ -1064,8 +1065,8 @@ paths:
                     Connector-defined error classification, a free-text label the connector worker
                     chooses. Required, and it
                     must contain text: a value of only whitespace is refused 400 BAD_REQUEST. At
-                    most 100 bytes, with no control characters (a longer value or one with a
-                    control character is refused 400 BAD_REQUEST). It is carried unchanged onto the
+                    most 100 bytes, with no control, format or line-separator characters (a
+                    longer value or one with such a character is refused 400 BAD_REQUEST). It is carried unchanged onto the
                     stage-fail signal and the task-failed event. The endpoint does not check
                     membership of the set.
                   example: "upstream_timeout"
