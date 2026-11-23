@@ -58,6 +58,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- CI: the schema registration workflow's freeze check no longer fails when no freeze is set, so a push that changes the event schemas gets past that step and reaches the registration; `make check` runs the step for every freeze and force combination.
 - Docs only: the metric registry names the 200 answer of a task defer in the help text of the task signal duration.
 - CI: the schema registration, schema prune, quarterly schema health and release workflows can read the private schema-governance image and the service images: the staging and production jobs keep `packages: read` next to their own `contents: write`, and each job that pulls an image logs in to the registry first. Before, every push to `main` failed the staging registration with 403 on the image pull.
 - `.env.example` keeps the `APP_ENV` comment on its own line: `make` passed the spaces before an inline comment into the value, and the start refused `dev` followed by spaces.

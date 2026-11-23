@@ -88,7 +88,7 @@ COVER_THRESHOLD    := 95
 # its own identity, and the Search Attribute upsert failure.
 COVER_PKG_FLOORS   := internal/workflow:88 cmd/connector-worker:55 internal/observability:90
 
-.PHONY: alerts-test metrics-lint metrics-inventory all tools tools-integration generate generate-sqlc mock contract-check contract-check-test contract-breaking \
+.PHONY: schema-freeze-step-test alerts-test metrics-lint metrics-inventory all tools tools-integration generate generate-sqlc mock contract-check contract-check-test contract-breaking \
         build migrate dev test test-integration test-e2e test-compat test-ci merge-coverage \
         cover cover-func cover-gaps cover-html cover-check cover-check-pkg \
         hurl fuzz-api fuzz-internal-api \
@@ -393,6 +393,8 @@ check:
 	$(MAKE) design-sync-check-test
 	@echo "==> contract-check-test"
 	$(MAKE) contract-check-test
+	@echo "==> schema-freeze-step-test"
+	$(MAKE) schema-freeze-step-test
 	@echo "==> test-ci (unit + integration, merged coverage gate)"
 	$(MAKE) cover-check
 	@echo "✓ all checks passed"
@@ -408,6 +410,10 @@ contract-check:
 ## contract-check-test: Test the contract-check script against throwaway repositories
 contract-check-test:
 	@OASDIFF=$(OASDIFF) scripts/contract-check_test.sh
+
+## schema-freeze-step-test: Run the schema registration workflow's freeze check step under bash -e for every freeze and force combination
+schema-freeze-step-test:
+	@scripts/schema-freeze-step_test.sh
 
 ## contract-breaking: Fail on a breaking change to api/internal-openapi.yaml against CONTRACT_BASE_REF (default origin/main)
 contract-breaking:
