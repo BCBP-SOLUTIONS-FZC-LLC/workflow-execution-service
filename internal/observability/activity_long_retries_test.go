@@ -30,7 +30,7 @@ func succeedsOnAttempt(succeeds int) func(context.Context) error {
 	}
 }
 
-func unlimitedRetryWorkflow(ctx workflow.Context) error {
+func twentyAttemptWorkflow(ctx workflow.Context) error {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Second,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -60,11 +60,11 @@ func TestTemporalMetricsInterceptor_CountsEveryActivityAttemptBeyondTheTenth(t *
 			var suite testsuite.WorkflowTestSuite
 			env := suite.NewTestWorkflowEnvironment()
 			env.SetWorkflowRunTimeout(time.Hour)
-			env.RegisterWorkflow(unlimitedRetryWorkflow)
+			env.RegisterWorkflow(twentyAttemptWorkflow)
 			env.RegisterActivityWithOptions(succeedsOnAttempt(tc.succeedsOnAttempt), activity.RegisterOptions{Name: "retried"})
 			env.SetWorkerOptions(worker.Options{Interceptors: []interceptor.WorkerInterceptor{observability.NewTemporalMetricsInterceptor()}})
 
-			env.ExecuteWorkflow(unlimitedRetryWorkflow)
+			env.ExecuteWorkflow(twentyAttemptWorkflow)
 
 			require.True(t, env.IsWorkflowCompleted())
 			require.NoError(t, env.GetWorkflowError())

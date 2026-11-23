@@ -216,7 +216,7 @@ Fix the cause first. A task whose entry was lost is not redispatched by itself.
 
 `runbook: workflow-execution-service/activity-retries-long`
 
-**Meaning.** An activity has failed more than ten times in a row and is still retrying. Activities that write to the database and external-call activities retry without limit, so a permanent cause leaves the instance stuck with no other signal.
+**Meaning.** An activity has failed ten times in a row and is still retrying. Activities that write to the database and external-call activities retry without limit, so a permanent cause leaves the instance stuck with no other signal.
 
 **Triage.** The Worker logs the activity error on every attempt; the Temporal UI shows the pending activity with its attempt count and last failure for the instance. A database outage or a Definition Service outage clears when the dependency returns. An unknown instance or task, or data that can never be written, does not: fix the data or terminate the instance.
 

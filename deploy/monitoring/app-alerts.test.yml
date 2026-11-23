@@ -210,7 +210,7 @@ tests:
             exp_annotations:
               runbook: workflow-execution-service/activity-retries-long
               summary: "An activity keeps failing and retrying"
-              description: "An activity has failed more than ten times in a row; activities retry without limit, so the instance stays stuck with no other signal until the cause is fixed (LLD §3.3, §7.6)."
+              description: "An activity has failed ten times in a row and keeps retrying; activities retry without limit, so the instance stays stuck with no other signal until the cause is fixed (LLD §3.3, §7.6)."
 
   - name: no long retries keeps the retry alert quiet
     interval: 1m
