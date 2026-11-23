@@ -45,6 +45,7 @@ func TestFailConnectorTask_AcceptedErrorClass_FailsTheTask(t *testing.T) {
 		{"usual label", "upstream_timeout"},
 		{"exactly 100 bytes", strings.Repeat("a", 100)},
 		{"spaces inside", "provider is down"},
+		{"a label no worker sends", "anything"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

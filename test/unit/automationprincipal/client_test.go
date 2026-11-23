@@ -32,6 +32,7 @@ func tokenService(t *testing.T, hits *atomic.Int32, status int) *httptest.Server
 		case "/api/v1/internal/tenants/" + tenantA.String() + "/service-accounts/platform-automation":
 			assert.Equal(t, iamSystemID, r.Header.Get("x-user-id"))
 			assert.Equal(t, tenantA.String(), r.Header.Get("x-tenant-id"))
+			assert.Empty(t, r.Header.Values("x-tenant-roles"), "the principal read sends no roles header; the Token Service drops it")
 			if status != http.StatusOK {
 				w.WriteHeader(status)
 				return
