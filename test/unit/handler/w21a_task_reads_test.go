@@ -88,6 +88,7 @@ func TestW21aListTasks_LimitQuery_ReachesTheRepositoryAtMostOneHundred(t *testin
 		{"exactly the maximum", "?limit=100", 100},
 		{"one over the maximum", "?limit=101", 100},
 		{"far over the maximum", "?limit=100000", 100},
+		{"too large for any integer type", "?limit=99999999999999999999", 100},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

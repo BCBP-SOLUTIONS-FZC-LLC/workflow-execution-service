@@ -105,7 +105,7 @@ func TestPollQueueTopologyOnce_ListFailureWarnsAndChangesNothing(t *testing.T) {
 	log := &wkbootRecordingLog{}
 	repo := &wkbootQueueRepo{err: errors.New("queue table unreadable")}
 	observability.WorkerActiveQueues.Set(7)
-	defaultGauge := observability.WorkerQueueLastPollTimestamp.WithLabelValues(defaultQueue)
+	defaultGauge := observability.WorkerQueueLastPollTimestamp.WithLabelValues(observability.QueueClassDefault)
 	defaultGauge.Set(1)
 
 	pollQueueTopologyOnce(context.Background(), nil, nil, repo, defaultQueue, registry, log)
@@ -137,7 +137,7 @@ func TestPollQueueTopologyOnce_SkipsTheDefaultQueueTheMainWorkerAlreadyServes(t 
 	log := &wkbootRecordingLog{}
 	repo := &wkbootQueueRepo{active: []*domain.ActiveTaskQueue{{TenantID: uuid.New(), QueueName: defaultQueue, Routable: true}}}
 	observability.WorkerActiveQueues.Set(0)
-	defaultGauge := observability.WorkerQueueLastPollTimestamp.WithLabelValues(defaultQueue)
+	defaultGauge := observability.WorkerQueueLastPollTimestamp.WithLabelValues(observability.QueueClassDefault)
 	defaultGauge.Set(1)
 
 	// A nil client makes any attempt to start a second worker panic.

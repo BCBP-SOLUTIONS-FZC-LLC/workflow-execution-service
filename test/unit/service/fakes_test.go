@@ -46,6 +46,8 @@ type fakeInstanceRepo struct {
 	scopeAssignments  *fakeAssignmentRepo
 }
 
+var fakeStatusDefault sync.Mutex
+
 func newFakeInstanceRepo(instances ...*domain.Instance) *fakeInstanceRepo {
 	m := make(map[uuid.UUID]*domain.Instance, len(instances))
 	for _, i := range instances {
@@ -85,6 +87,11 @@ func (r *fakeInstanceRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domain.
 	inst, ok := r.byID[id]
 	if !ok {
 		return nil, domain.ErrNotFound
+	}
+	fakeStatusDefault.Lock()
+	defer fakeStatusDefault.Unlock()
+	if inst.Status == "" {
+		inst.Status = domain.InstanceStatusRunning
 	}
 	return inst, nil
 }
@@ -262,6 +269,11 @@ func (r *fakeTaskRepo) GetByID(_ context.Context, _, id uuid.UUID) (*domain.Task
 	task, ok := r.byID[id]
 	if !ok {
 		return nil, domain.ErrNotFound
+	}
+	fakeStatusDefault.Lock()
+	defer fakeStatusDefault.Unlock()
+	if task.Status == "" {
+		task.Status = domain.TaskStatusReady
 	}
 	return task, nil
 }

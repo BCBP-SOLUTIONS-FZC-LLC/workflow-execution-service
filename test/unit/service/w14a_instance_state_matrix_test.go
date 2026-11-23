@@ -65,6 +65,9 @@ func newW14aStateRig(t *testing.T, status domain.InstanceStatus) *w14aStateRig {
 	tasks.byID[done.ID] = done
 	temporal.queryFunc = func(_ context.Context, workflowID, queryType string, out any) error {
 		assert.Equal(t, inst.TemporalWorkflowID, workflowID)
+		if queryType == port.QueryForceRouteState {
+			return json.Unmarshal([]byte(`{"FailedBranches":[{"DeptID":"finance","Covers":["finance"]}],"HistoryLen":1}`), out)
+		}
 		assert.Equal(t, port.QueryWaitingExternal, queryType)
 		return json.Unmarshal([]byte(`["`+w14aWaitKey+`"]`), out)
 	}

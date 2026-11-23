@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	wf "go.temporal.io/sdk/workflow"
@@ -112,9 +113,12 @@ func addTimerCase(ctx wf.Context, sel wf.Selector, duration string, interrupting
 	return cancelTimer
 }
 
-func addMessageCase(ctx wf.Context, sel wf.Selector, msgBuf *messageBuffer, messageName string, interrupting bool, targetDept string, onFire func(boundaryFire)) (cancel func()) {
+func addMessageCase(ctx wf.Context, sel wf.Selector, msgBuf *messageBuffer, messageName string, interrupting bool, targetDept string, onFire func(boundaryFire)) (cancel func(), err error) {
 	if messageName == "" {
-		return func() {}
+		return func() {}, nil
+	}
+	if err := validateMessageName(messageName); err != nil {
+		return nil, fmt.Errorf("workflow: boundary message: %w", err)
 	}
 	ch, cancelWait := msgBuf.waitChannel(ctx, messageName)
 	sel.AddReceive(ch, func(c wf.ReceiveChannel, more bool) {
@@ -122,7 +126,7 @@ func addMessageCase(ctx wf.Context, sel wf.Selector, msgBuf *messageBuffer, mess
 		c.Receive(ctx, &node)
 		onFire(boundaryFire{Kind: "message", Interrupting: interrupting, TargetDept: targetDept})
 	})
-	return cancelWait
+	return cancelWait, nil
 }
 
 func matchErrorPath(errorPaths []dsl.ErrorPath, code string) *dsl.ErrorPath {
@@ -158,33 +162,41 @@ func addErrorCase(ctx wf.Context, sel wf.Selector, ch wf.Channel, errorPaths []d
 	})
 }
 
-func registerTaskBoundaries(ctx wf.Context, sel wf.Selector, in *interpreter, host string, timer *dsl.BoundaryTimer, msg *dsl.MessagePath, onFire func(boundaryFire)) (cancel func()) {
+func registerTaskBoundaries(ctx wf.Context, sel wf.Selector, in *interpreter, host string, timer *dsl.BoundaryTimer, msg *dsl.MessagePath, onFire func(boundaryFire)) (cancel func(), err error) {
 	var cancels []func()
 	if timer != nil {
 		cancels = append(cancels, addTimerCase(ctx, sel, timer.Duration, timer.Interrupting, timer.TargetDept, withSteps(timer.Steps, onFire)))
 	}
 	if msg != nil {
-		cancels = append(cancels, in.addMessageBoundary(ctx, sel, host, *msg, withSteps(msg.Steps, onFire)))
-	}
-	return func() {
-		for _, c := range cancels {
-			c()
+		cancelMsg, err := in.addMessageBoundary(ctx, sel, host, *msg, withSteps(msg.Steps, onFire))
+		if err != nil {
+			cancelAll(cancels)
+			return nil, err
 		}
+		cancels = append(cancels, cancelMsg)
+	}
+	return func() { cancelAll(cancels) }, nil
+}
+
+func cancelAll(cancels []func()) {
+	for _, c := range cancels {
+		c()
 	}
 }
 
-func registerSubWorkflowBoundaries(ctx wf.Context, sel wf.Selector, in *interpreter, errCh wf.Channel, sw *dsl.SubWorkflowStep, onFire func(boundaryFire)) (cancelAll func()) {
+func registerSubWorkflowBoundaries(ctx wf.Context, sel wf.Selector, in *interpreter, errCh wf.Channel, sw *dsl.SubWorkflowStep, onFire func(boundaryFire)) (cancel func(), err error) {
 	var cancels []func()
 	for _, t := range sw.TimerPaths {
 		cancels = append(cancels, addTimerCase(ctx, sel, t.Duration, t.Interrupting, t.TargetDept, withSteps(t.Steps, onFire)))
 	}
 	for _, m := range sw.MessagePaths {
-		cancels = append(cancels, in.addMessageBoundary(ctx, sel, sw.NodeID, m, withSteps(m.Steps, onFire)))
+		cancelMsg, err := in.addMessageBoundary(ctx, sel, sw.NodeID, m, withSteps(m.Steps, onFire))
+		if err != nil {
+			cancelAll(cancels)
+			return nil, err
+		}
+		cancels = append(cancels, cancelMsg)
 	}
 	addErrorCase(ctx, sel, errCh, sw.ErrorPaths, onFire)
-	return func() {
-		for _, c := range cancels {
-			c()
-		}
-	}
+	return func() { cancelAll(cancels) }, nil
 }

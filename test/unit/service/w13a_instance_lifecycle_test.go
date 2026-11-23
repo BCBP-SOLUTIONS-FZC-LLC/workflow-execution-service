@@ -78,6 +78,10 @@ type w13aLifecycleRig struct {
 func w13aNewLifecycleRig(t *testing.T, planJSON string) *w13aLifecycleRig {
 	t.Helper()
 	svc, instances, tasks, assignments, outbox, temporal, _, _ := newInstanceServiceHarness()
+	temporal.queryFunc = forceRouteQuery(port.ForceRouteState{
+		HistoryLen:     1,
+		FailedBranches: []port.FailedBranchState{{DeptID: "finance", Covers: []string{"finance"}}},
+	})
 	r := &w13aLifecycleRig{
 		svc:         svc,
 		instances:   &w13aLifecycleInstances{fakeInstanceRepo: instances},

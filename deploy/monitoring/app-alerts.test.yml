@@ -108,12 +108,12 @@ tests:
               summary: "Connector task entry dead-lettered for rest-call"
               description: "A connector stream entry exceeded its delivery cap, so its task stays open and its instance waits; the worker's callback Warn lines name the status the Execution API answered."
 
-  - name: a queue whose poll timestamp stops advancing pages once it is more than 300 seconds old while a polled queue stays quiet
+  - name: a queue class whose poll timestamp stops advancing pages once it is more than 300 seconds old while a polled class stays quiet
     interval: 1m
     input_series:
-      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="stalled-queue"}'
+      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="dedicated"}'
         values: '0x30'
-      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="polled-queue"}'
+      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="default"}'
         values: '0+60x30'
     alert_rule_test:
       - eval_time: 5m
@@ -124,23 +124,113 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: page
-              queue: stalled-queue
+              queue: dedicated
             exp_annotations:
               runbook: workflow-execution-service/queue-polling
-              summary: "Queue stalled-queue has not been polled in 5 minutes"
-              description: "A Worker silently failing to poll one tenant-isolated queue is invisible to the aggregate workflow_execution_service_worker_active_queues gauge alone (LLD §7.6)."
+              summary: "Queue class dedicated has not been polled in 5 minutes"
+              description: "A Worker silently failing to poll its queues is invisible to the aggregate workflow_execution_service_worker_active_queues gauge alone; the label is the queue class (default or dedicated), and the Worker log names the queue and tenant (LLD §7.6)."
 
-  - name: instances on a queue with no poll timestamp series page after five minutes
+  - name: a dedicated queue worker that keeps failing to start pages after ten minutes while the poll timestamp stays fresh
     interval: 1m
     input_series:
-      - series: 'workflow_execution_service_instances_by_queue{queue="unpolled-queue"}'
-        values: '3x30'
-      - series: 'workflow_execution_service_instances_by_queue{queue="polled-queue"}'
-        values: '3x30'
-      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="polled-queue"}'
+      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="dedicated"}'
         values: '0+60x30'
-      - series: 'workflow_execution_service_instances_by_queue{queue="empty-queue"}'
+      - series: 'workflow_execution_service_worker_queue_start_failures_total'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: WorkerQueuePollingStalled
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: WorkerQueueStartFailing
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: WorkerQueueStartFailing
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              runbook: workflow-execution-service/queue-start-failing
+              summary: "A dedicated task queue worker keeps failing to start"
+              description: "The dedicated poll timestamp stays fresh while any other dedicated queue is served, so a tenant whose queue cannot start waits with no worker and no other signal; the Worker log names the queue and tenant (LLD §3.2, §7.6)."
+
+  - name: no start failures keeps the queue start alert quiet
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_worker_queue_start_failures_total'
         values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: WorkerQueueStartFailing
+        exp_alerts: []
+
+  - name: a reassignment that keeps ending for good opens a ticket after ten minutes
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_reassign_failures_total'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: ReassignFailing
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: ReassignFailing
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+            exp_annotations:
+              runbook: workflow-execution-service/reassign-failing
+              summary: "Admin reassignments keep failing for good"
+              description: "An admin reassignment ended for good, so the task keeps its previous assignee; retries of a transient error are unlimited and not counted (LLD §7.6)."
+
+  - name: no reassign failures keeps the reassign alert quiet
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_reassign_failures_total'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ReassignFailing
+        exp_alerts: []
+
+  - name: activities that keep retrying open a ticket after ten minutes
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_activity_long_retries_total'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: ActivityRetriesLong
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: ActivityRetriesLong
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+            exp_annotations:
+              runbook: workflow-execution-service/activity-retries-long
+              summary: "An activity keeps failing and retrying"
+              description: "An activity has failed ten times in a row and keeps retrying; activities retry without limit, so the instance stays stuck with no other signal until the cause is fixed (LLD §3.3, §7.6)."
+
+  - name: no long retries keeps the retry alert quiet
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_activity_long_retries_total'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ActivityRetriesLong
+        exp_alerts: []
+
+  - name: instances of a queue class with no poll timestamp series page after five minutes
+    interval: 1m
+    input_series:
+      - series: 'workflow_execution_service_instances_by_queue{queue="dedicated"}'
+        values: '3x30'
+      - series: 'workflow_execution_service_instances_by_queue{queue="default"}'
+        values: '3x30'
+      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="default"}'
+        values: '0+60x30'
     alert_rule_test:
       - eval_time: 4m
         alertname: InstancesOnUnpolledQueue
@@ -150,18 +240,18 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: page
-              queue: unpolled-queue
+              queue: dedicated
             exp_annotations:
               runbook: workflow-execution-service/queue-polling
-              summary: "Queue unpolled-queue has instances and no Worker polling it"
+              summary: "Queue class dedicated has instances and no Worker polling it"
               description: "A Worker that could not start the worker for a queue only logs, so its instances wait with no task and no other signal (LLD §3.2, §7.6)."
 
-  - name: instances on a queue whose poll timestamp froze page only after it is 300 seconds old and five more minutes have passed
+  - name: instances of a queue class whose poll timestamp froze page only after it is 300 seconds old and five more minutes have passed
     interval: 1m
     input_series:
-      - series: 'workflow_execution_service_instances_by_queue{queue="frozen-queue"}'
+      - series: 'workflow_execution_service_instances_by_queue{queue="dedicated"}'
         values: '3x40'
-      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="frozen-queue"}'
+      - series: 'workflow_execution_service_worker_queue_last_poll_timestamp{queue="dedicated"}'
         values: '0+60x4 240x35'
     alert_rule_test:
       - eval_time: 8m
@@ -175,10 +265,10 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: page
-              queue: frozen-queue
+              queue: dedicated
             exp_annotations:
               runbook: workflow-execution-service/queue-polling
-              summary: "Queue frozen-queue has instances and no Worker polling it"
+              summary: "Queue class dedicated has instances and no Worker polling it"
               description: "A Worker that could not start the worker for a queue only logs, so its instances wait with no task and no other signal (LLD §3.2, §7.6)."
 
   - name: a connector task READY for more than 30 minutes warns, and clears once it is resolved

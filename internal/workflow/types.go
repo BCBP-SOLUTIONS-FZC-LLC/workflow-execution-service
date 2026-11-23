@@ -146,6 +146,14 @@ func (in *interpreter) checkPaused(ctx wf.Context, deptID string) error {
 	return nil
 }
 
+func (in *interpreter) awaitResumed(ctx wf.Context) error {
+	notPaused := func() bool { return in.status != domain.InstanceStatusPaused }
+	if err := wf.Await(ctx, notPaused); err != nil {
+		return errStageAbandoned
+	}
+	return nil
+}
+
 func (in *interpreter) pauseDept(ctx wf.Context, deptID string) {
 	gate, ok := in.pauseGates[deptID]
 	if !ok {

@@ -629,31 +629,35 @@ func TestTaskClaim_SeveralChecksFail_ReturnsTheEarliestRefusalBeforeAnyLeadIsSet
 			name: "a single-assignee task hides a stale version and a closed status", prepare: func(h *taHarness) {
 				h.task.AssigneeMode = "single"
 				h.task.Status = domain.TaskStatusCompleted
-			}, stale: true, wantErr: port.ErrClaimNotApplicable,
+			}, stale: true, wantErr: port.ErrClaimNotApplicable, wantLists: 1,
 		},
 		{
 			name: "a stale version hides a closed status", prepare: func(h *taHarness) { h.task.Status = domain.TaskStatusCompleted },
-			stale: true, wantErr: port.ErrRecordVersionConflict,
+			stale: true, wantErr: port.ErrRecordVersionConflict, wantLists: 1,
 		},
 		{
 			name: "a closed status hides the instance state", prepare: func(h *taHarness) {
 				h.task.Status = domain.TaskStatusCompleted
 				h.instances.byID[h.instanceID].Status = domain.InstanceStatusPaused
-			}, wantErr: port.ErrInvalidTaskState,
+			}, wantErr: port.ErrInvalidTaskState, wantLists: 1,
 		},
 		{
-			name: "an instance that is not running hides the lead lookup", prepare: func(h *taHarness) {
+			name: "an instance that is not running hides the lead refusal", prepare: func(h *taHarness) {
 				h.instances.byID[h.instanceID].Status = domain.InstanceStatusPaused
 				h.other.IsLead = true
-			}, stranger: true, wantErr: port.ErrInvalidInstanceState, wantInstances: 1,
+			}, wantErr: port.ErrInvalidInstanceState, wantLists: 1, wantInstances: 1,
 		},
 		{
-			name: "a lead held by another hides the not-assigned refusal", prepare: func(h *taHarness) { h.other.IsLead = true },
-			stranger: true, wantErr: port.ErrTaskAlreadyClaimed, wantLists: 1, wantInstances: 1,
+			name: "a stranger is refused before the instance is read", prepare: func(h *taHarness) { h.other.IsLead = true },
+			stranger: true, wantErr: port.ErrNotAssignee, wantLists: 1,
+		},
+		{
+			name: "a lead held by another refuses an assignee who is not the lead", prepare: func(h *taHarness) { h.other.IsLead = true },
+			wantErr: port.ErrTaskAlreadyClaimed, wantLists: 1, wantInstances: 1,
 		},
 		{
 			name: "a stranger hides the eligibility check", prepare: func(h *taHarness) { h.elig.eligible = false },
-			stranger: true, wantErr: port.ErrNotAssignee, wantLists: 1, wantInstances: 1,
+			stranger: true, wantErr: port.ErrNotAssignee, wantLists: 1,
 		},
 		{
 			name: "an ineligible assignee is refused last", prepare: func(h *taHarness) { h.elig.eligible = false },

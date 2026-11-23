@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/converter"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-events/v2/pkg/events"
 
@@ -209,6 +210,12 @@ func (s *w19bSDK) TerminateWorkflow(_ context.Context, workflowID, runID, reason
 func (s *w19bSDK) SignalWorkflow(_ context.Context, workflowID, runID, channel string, payload interface{}) error {
 	s.signals = append(s.signals, w19bSignalCall{workflowID, runID, channel, payload})
 	return s.signalErr
+}
+
+const w19bForceRouteState = `{"FailedBranches":[{"DeptID":"finance","Covers":["finance"]}],"HistoryLen":1}`
+
+func (s *w19bSDK) QueryWorkflow(_ context.Context, _, _, _ string, _ ...interface{}) (converter.EncodedValue, error) {
+	return w29bEncoded{raw: w19bForceRouteState}, nil
 }
 
 type w19bPlanRead struct{ tenantID, versionID uuid.UUID }

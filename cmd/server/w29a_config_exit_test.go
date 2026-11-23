@@ -58,6 +58,11 @@ func TestServerBinary_InvalidSettings_PrintOneConfigErrorLineAndExitOne(t *testi
 			wantStderr: "config error: HTTP_PORT must be in [1, 65535]\n",
 		},
 		{
+			name:       "an application environment that is empty",
+			env:        []string{"APP_ENV="},
+			wantStderr: "config error: APP_ENV must be one of local, dev, test, staging, prod\n",
+		},
+		{
 			name:       "an application environment that is not known",
 			env:        []string{"APP_ENV=qa"},
 			wantStderr: "config error: APP_ENV must be one of local, dev, test, staging, prod\n",
@@ -99,6 +104,14 @@ func TestServerBinary_MigrateChecksItsOwnSettingsOnlyWhileServingNeedsTheOutboun
 		{
 			name: "migrate still refuses an application environment that is not known",
 			env:  []string{"DATABASE_URL=" + w9aRefusedDSN, "APP_ENV=qa"},
+			args: []string{"migrate"},
+			wantStderr: func(t *testing.T, stderr string) {
+				assert.Equal(t, "config error: APP_ENV must be one of local, dev, test, staging, prod\n", stderr)
+			},
+		},
+		{
+			name: "migrate refuses an empty application environment",
+			env:  []string{"DATABASE_URL=" + w9aRefusedDSN, "APP_ENV="},
 			args: []string{"migrate"},
 			wantStderr: func(t *testing.T, stderr string) {
 				assert.Equal(t, "config error: APP_ENV must be one of local, dev, test, staging, prod\n", stderr)

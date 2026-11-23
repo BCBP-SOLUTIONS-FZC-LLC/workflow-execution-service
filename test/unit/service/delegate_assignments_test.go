@@ -404,7 +404,7 @@ func TestWorkflowClient_DelegateImpact_CursorBeyondTheLastIDGivesAnEmptyPageWith
 	})
 }
 
-func TestWorkflowClient_DelegateWork_IgnoresTaskAndInstanceStatus(t *testing.T) {
+func TestWorkflowClient_DelegateWork_CancelIgnoresInstanceStatusButImpactAndReassignSkipDeferred(t *testing.T) {
 	type spec struct {
 		task     domain.TaskStatus
 		instance domain.InstanceStatus
@@ -422,7 +422,7 @@ func TestWorkflowClient_DelegateWork_IgnoresTaskAndInstanceStatus(t *testing.T) 
 		return out
 	}
 
-	t.Run("impact counts the assignments of paused and other non-running work", func(t *testing.T) {
+	t.Run("impact counts open tasks of paused and degraded work, not deferred ones", func(t *testing.T) {
 		h := csaNewClientHarness()
 		tenantID, delegate := uuid.New(), uuid.New()
 		held := seedAll(h, tenantID, delegate)
@@ -430,9 +430,10 @@ func TestWorkflowClient_DelegateWork_IgnoresTaskAndInstanceStatus(t *testing.T) 
 		result, err := h.svc.DelegateImpact(context.Background(), port.DelegateImpactInput{TenantID: tenantID, DelegateUserID: delegate, Page: port.Page{Limit: 10}})
 
 		require.NoError(t, err)
-		assert.Equal(t, 3, result.ActiveAssignments)
-		assert.Equal(t, 3, result.ActiveWorkflows)
-		for _, hd := range held {
+		assert.Equal(t, 2, result.ActiveAssignments)
+		assert.Equal(t, 2, result.ActiveWorkflows)
+		assert.NotContains(t, result.WorkflowIDs.Items, held[2].instance.ID)
+		for _, hd := range held[:2] {
 			assert.Contains(t, result.WorkflowIDs.Items, hd.instance.ID)
 		}
 	})
@@ -452,7 +453,7 @@ func TestWorkflowClient_DelegateWork_IgnoresTaskAndInstanceStatus(t *testing.T) 
 		}
 	})
 
-	t.Run("reassign moves every one of them and signals each instance", func(t *testing.T) {
+	t.Run("reassign moves the open ones of live instances and signals each instance", func(t *testing.T) {
 		h := csaNewClientHarness()
 		tenantID, oldDelegate, newDelegate := uuid.New(), uuid.New(), uuid.New()
 		held := seedAll(h, tenantID, oldDelegate)
@@ -460,14 +461,15 @@ func TestWorkflowClient_DelegateWork_IgnoresTaskAndInstanceStatus(t *testing.T) 
 		count, err := h.svc.ReassignDelegate(context.Background(), port.ReassignDelegateInput{TenantID: tenantID, OldDelegateID: oldDelegate, NewDelegateID: newDelegate})
 
 		require.NoError(t, err)
-		assert.Equal(t, 3, count)
-		require.Len(t, h.outbox.signals, 3)
+		assert.Equal(t, 2, count)
+		require.Len(t, h.outbox.signals, 2)
+		assert.True(t, held[2].assignment.IsActive, "a deferred task stays with the old delegate")
 		signalled := map[uuid.UUID]csaReassignWire{}
 		for _, s := range h.outbox.signals {
 			assert.Equal(t, port.SignalInstanceReassign, s.SignalName)
 			signalled[s.InstanceID] = csaDecodeReassign(t, s.Payload)
 		}
-		for _, hd := range held {
+		for _, hd := range held[:2] {
 			assert.False(t, hd.assignment.IsActive)
 			assert.Len(t, h.assignments.activeFor(hd.task.ID, newDelegate), 1, "the new delegate holds the task")
 			assert.Equal(t, csaReassignWire{TaskID: hd.task.ID.String(), OldUserID: oldDelegate.String(), NewUserID: newDelegate.String()}, signalled[hd.instance.ID])

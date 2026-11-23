@@ -43,10 +43,34 @@ func TestTaskClaim_TaskInAStatusThatIsNotActive_ReturnsInvalidTaskState(t *testi
 			}
 			require.ErrorIs(t, err, tc.wantErr)
 			assert.Equal(t, []csdIDCall{{h.tenantID, h.task.ID}}, h.tasks.gets)
-			assert.Empty(t, h.assignments.lists, "a task that cannot be claimed is refused before its assignees are read")
+			assert.Len(t, h.assignments.lists, 1, "only the caller's assignment is checked before the task state is refused")
 			assert.Empty(t, h.eligibility.calls)
 			h.requireTaskUntouched(t)
 			assert.Equal(t, tc.status, h.task.Status)
+		})
+	}
+}
+
+func TestTaskClaim_CallerWithoutAnAssignment_IsToldNotAssigneeBeforeAnyTaskState(t *testing.T) {
+	cases := []struct {
+		name    string
+		mode    string
+		version int64
+		status  domain.TaskStatus
+	}{
+		{"single-mode task", "single", csdTaskVersion, domain.TaskStatusReady},
+		{"stale version", "all", csdTaskVersion - 1, domain.TaskStatusReady},
+		{"finished task", "all", csdTaskVersion, domain.TaskStatusCompleted},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := csdNewTaskHarness(t, tc.mode, csdReviewStage())
+			h.task.Status = tc.status
+
+			_, err := h.svc.Claim(context.Background(), h.tenantID, h.task.ID, uuid.New(), tc.version)
+
+			require.ErrorIs(t, err, port.ErrNotAssignee)
+			h.requireTaskUntouched(t)
 		})
 	}
 }
@@ -84,7 +108,7 @@ func TestTaskClaim_RepeatedWithTheOriginalVersionAfterASuccessfulClaim_ReturnsRe
 	require.Len(t, h.assignments.setLeads, 1, "the stale retry must not write a second lead")
 	assert.Equal(t, h.callerID, h.assignments.leadOf(h.task.ID))
 	assert.EqualValues(t, csdTaskVersion+1, h.task.RecordVersion)
-	assert.Len(t, h.assignments.lists, 1, "the stale version is refused before the assignees are read again")
+	assert.Len(t, h.assignments.lists, 2, "the stale retry reads the assignees only to check the caller's assignment")
 }
 
 func TestTaskClaim_TaskNodeHasNoStageInThePlan_ReturnsAssigneeIneligible(t *testing.T) {

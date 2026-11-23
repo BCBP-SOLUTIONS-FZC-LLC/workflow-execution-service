@@ -766,7 +766,7 @@ components:
         department_id:        { type: string, format: uuid }
         assignee_user_ids:    { type: array, items: { type: string, format: uuid } }
         cascade_source:       { type: string, description: what failed the task (instance_cancel, instance_terminate, instance_failed, or stage_fail for a task failed by its own stage) }
-        error_class:          { type: string, description: the error class the connector failed the task with; present only when cascade_source is stage_fail }
+        error_class:          { type: string, description: the error class the connector failed the task with, free text of at most 100 bytes; present only when cascade_source is stage_fail }
     WorkflowTaskSlaWarningPayload:
       type: object
       additionalProperties: true

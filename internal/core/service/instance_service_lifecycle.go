@@ -73,22 +73,30 @@ func validateInstanceStateFor(signalName string, status domain.InstanceStatus) e
 }
 
 func (s *InstanceService) Pause(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string, recordVersion int64) error {
-	return s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, signalAnnotation{reason: reason, initiator: domain.InitiatorAdmin}, recordVersion, port.SignalInstancePause)
+	err := s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, signalAnnotation{reason: reason, initiator: domain.InitiatorAdmin}, recordVersion, port.SignalInstancePause)
+	return s.endIfWorkflowGone(ctx, err, tenantID, instanceID, actorUserID, workflowGoneReason)
 }
 
 func (s *InstanceService) Resume(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, recordVersion int64) error {
-	return s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, signalAnnotation{initiator: domain.InitiatorAdmin}, recordVersion, port.SignalInstanceResume)
+	err := s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, signalAnnotation{initiator: domain.InitiatorAdmin}, recordVersion, port.SignalInstanceResume)
+	return s.endIfWorkflowGone(ctx, err, tenantID, instanceID, actorUserID, workflowGoneReason)
 }
 
 func (s *InstanceService) Cancel(ctx context.Context, tenantID, instanceID, actorUserID uuid.UUID, reason string, recordVersion int64) error {
 	err := s.signalLifecycle(ctx, tenantID, instanceID, actorUserID, signalAnnotation{reason: reason}, recordVersion, port.SignalInstanceCancel)
-	if !errors.Is(err, port.ErrWorkflowNotFound) {
-		return err
+	return s.endIfWorkflowGone(ctx, err, tenantID, instanceID, actorUserID, reason)
+}
+
+const workflowGoneReason = "the workflow execution no longer exists"
+
+func (s *InstanceService) endIfWorkflowGone(ctx context.Context, signalErr error, tenantID, instanceID, actorUserID uuid.UUID, reason string) error {
+	if !errors.Is(signalErr, port.ErrWorkflowNotFound) {
+		return signalErr
 	}
-	s.logger().Warn("cancel found no workflow execution, ending the instance row", map[string]any{
+	s.logger().Warn("a lifecycle signal found no workflow execution, ending the instance row", map[string]any{
 		"instance_id": instanceID, "tenant_id": tenantID,
 	})
-	_, err = s.markTerminated(ctx, tenantID, instanceID, actorUserID, reason)
+	_, err := s.markTerminated(ctx, tenantID, instanceID, actorUserID, reason)
 	return err
 }
 
@@ -107,6 +115,9 @@ func (s *InstanceService) ForceForward(ctx context.Context, tenantID, instanceID
 		return err
 	}
 	if err := s.validateForwardTarget(ctx, tenantID, inst, targetNodeKey); err != nil {
+		return err
+	}
+	if err := s.checkForceRouteState(ctx, inst, port.SignalInstanceForceFwd, targetNodeKey); err != nil {
 		return err
 	}
 	return s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, port.SignalInstanceForceFwd, adminSignalWire{
@@ -141,6 +152,9 @@ func (s *InstanceService) ForceBack(ctx context.Context, tenantID, instanceID, a
 		targetNodeKey = ""
 	}
 	if err := s.validateBackTarget(ctx, tenantID, inst, targetNodeKey); err != nil {
+		return err
+	}
+	if err := s.checkForceRouteState(ctx, inst, port.SignalInstanceForceBack, targetNodeKey); err != nil {
 		return err
 	}
 	return s.Temporal.SignalWorkflow(ctx, inst.TemporalWorkflowID, inst.ID, port.SignalInstanceForceBack, adminSignalWire{

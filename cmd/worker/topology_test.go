@@ -37,7 +37,7 @@ func TestPollQueueTopologyOnce_EveryTickRefreshesThePollTimestampOfEveryQueueThi
 	registry := newWorkerRegistry()
 	registry.add(queueName, nil)
 	queues := &fakeQueues{active: []*domain.ActiveTaskQueue{{TenantID: tenant, QueueName: queueName}}}
-	gauge := observability.WorkerQueueLastPollTimestamp.WithLabelValues(queueName)
+	gauge := observability.WorkerQueueLastPollTimestamp.WithLabelValues(observability.QueueClassDedicated)
 	gauge.Set(1)
 
 	pollQueueTopologyOnce(context.Background(), nil, nil, queues, "wf-default", registry, quietLogger{})

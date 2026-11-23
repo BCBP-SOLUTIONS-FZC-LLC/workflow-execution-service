@@ -119,7 +119,7 @@ func (in *interpreter) receive(ctx wf.Context, nodeKey domain.NodeKey, messageNa
 	in.msgBuf.Receive(ctx, messageName)
 }
 
-func (in *interpreter) addMessageBoundary(ctx wf.Context, sel wf.Selector, host string, m dsl.MessagePath, onFire func(boundaryFire)) (cancel func()) {
+func (in *interpreter) addMessageBoundary(ctx wf.Context, sel wf.Selector, host string, m dsl.MessagePath, onFire func(boundaryFire)) (cancel func(), err error) {
 	key := dsl.BoundaryWaitKey(host, m.BoundaryID)
 	if m.BoundaryID != "" && in.external[key] {
 		ch, cancelWait := in.waitExternal(ctx, key)
@@ -128,7 +128,7 @@ func (in *interpreter) addMessageBoundary(ctx wf.Context, sel wf.Selector, host 
 			c.Receive(ctx, &answered)
 			onFire(boundaryFire{Kind: "message", Interrupting: m.Interrupting, TargetDept: m.TargetDept})
 		})
-		return cancelWait
+		return cancelWait, nil
 	}
 	return addMessageCase(ctx, sel, in.msgBuf, m.MessageName, m.Interrupting, m.TargetDept, onFire)
 }

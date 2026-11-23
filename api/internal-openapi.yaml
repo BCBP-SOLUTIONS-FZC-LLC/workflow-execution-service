@@ -67,8 +67,9 @@ components:
       description: >
         Opaque cursor returned as next_cursor by the previous page. The delegate-impact
         answer pages the affected workflow instance ids in ascending id order and its cursor
-        names the last id returned. Omit for the first page. An unparseable or tampered cursor
-        returns 400 BAD_REQUEST rather than silently restarting.
+        names the last id returned. Send only that next_cursor value; omit it, or send it empty,
+        for the first page. Any other value, unparseable or tampered, returns 400 BAD_REQUEST
+        rather than silently restarting.
 
     IdempotencyKey:
       name: Idempotency-Key
@@ -76,7 +77,6 @@ components:
       required: false
       schema:
         type: string
-        format: uuid
       description: >
         Optional client-supplied key for safe retry of this request, taken only by the delegate
         reassignment and cancellation. The key is the route and this header; it carries no user
@@ -94,11 +94,10 @@ components:
       schema:
         type: integer
         minimum: 1
-        maximum: 100
         default: 25
       description: >
-        Page size. Values above 100 are clamped, not rejected; values <= 0 are rejected
-        (§5.9).
+        Page size. Values above 100 are clamped to 100, not rejected; values <= 0 are
+        rejected (§5.9).
 
     TaskIdPath:
       name: id
@@ -269,7 +268,8 @@ components:
         Malformed JSON body, missing required fields, or a value that is not valid, such as an
         id that is not a UUID in the body, a query parameter or the path. invalid_params names
         the field (a path parameter as one) with the reason "is not valid"; the detail never
-        says the body is not valid JSON.
+        says the body is not valid JSON. A JSON body with a NUL character (\u0000) in any
+        string, key included, is refused as well, as the store cannot keep one.
       content:
         application/problem+json:
           schema:
@@ -671,7 +671,7 @@ paths:
       description: >
         Internal, service-to-service endpoint called by the Org & Membership Service (not routed through
         the gateway; no x-tenant-id / x-user-id headers). Returns how many active workflow
-        instances have at least one READY/IN_PROGRESS assignment held by delegate_user_id
+        instances (RUNNING, PAUSED or DEGRADED) have at least one READY/IN_PROGRESS assignment held by delegate_user_id
         that a delegation created (an assignment carrying a delegation tag; assignments made
         by hand or by other means are not counted), and one page of the affected workflow
         instance IDs. With delegation_id, only that delegation's assignments count. Used by
@@ -767,7 +767,9 @@ paths:
         transferred. Vacates old_delegate_id's active assignments that a delegation created
         and creates equivalent assignments for new_delegate_id, scoped to tenant_id. Without
         delegation_id only the assignments tagged by some delegation move; the delegate's own
-        tasks stay. new_delegate_id must differ from old_delegate_id (400 otherwise).
+        tasks stay. Only assignments on READY or IN_PROGRESS tasks of RUNNING, PAUSED or
+        DEGRADED instances move; the same filter applies to the delegate-impact count.
+        new_delegate_id must differ from old_delegate_id (400 otherwise).
       security:
         - InternalServiceAuth: []
       parameters:
@@ -953,8 +955,8 @@ paths:
         legitimate resolver (the worker that dispatched it), never a concurrent human
         racing it, so the service reads the task's current record_version itself.
         The body names no actor: the service records the tenant's automation principal,
-        resolved from IAM, and answers 409 NO_AUTOMATION_PRINCIPAL when the tenant has none.
-        The callback acts only for a READY or IN_PROGRESS task on an instance that is RUNNING,
+        resolved from IAM, and answers 503 UPSTREAM_UNAVAILABLE with a fixed detail when the
+        tenant has none, so the worker retries. The callback acts only for a READY or IN_PROGRESS task on an instance that is RUNNING,
         DEGRADED or PAUSED (a paused instance's workflow holds the result until resume). A task
         that has left its step, or an instance that has ended, is acknowledged 204 and ignored
         with no assignment and no signal; any other instance status is 409 INVALID_INSTANCE_STATE.
@@ -1005,7 +1007,7 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
         "409":
-          description: Task is not connector-typed (TASK_NOT_CONNECTOR_TYPED), the tenant has no automation principal (NO_AUTOMATION_PRINCIPAL), or the instance is in a status the callback does not accept (INVALID_INSTANCE_STATE).
+          description: Task is not connector-typed (TASK_NOT_CONNECTOR_TYPED) or the instance is in a status the callback does not accept (INVALID_INSTANCE_STATE).
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
@@ -1019,7 +1021,8 @@ paths:
           description: >
             An earlier callback for this task, or the other callback (complete or fail), is
             still in flight and has not delivered its signal. Nothing was acted on; retry
-            later. Also returned when a dependency is unavailable.
+            later. Also returned when a dependency is unavailable, and when the tenant has no
+            usable automation principal (UPSTREAM_UNAVAILABLE with a fixed detail).
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
@@ -1037,8 +1040,8 @@ paths:
         path for a failed connector task. Same no-idempotency-wrapper,
         no-record_version rationale, task and instance rules, and one-outcome reservation as the
         complete endpoint above. The error class is relayed unchanged to the signal and the
-        task-failed event and is not checked against the connector worker's fixed set; an empty
-        value is refused 400 BAD_REQUEST.
+        task-failed event; it is free text, and the 400 conditions are those of the property
+        description.
       security:
         - InternalServiceAuth: []
       parameters:
@@ -1058,11 +1061,13 @@ paths:
                 error_class:
                   type: string
                   description: >
-                    Connector-defined error classification, a label the connector worker chooses
-                    from its fixed set (the error-class set of the failed-task event). Required, and it
-                    must contain text: a value of only whitespace is refused 400 BAD_REQUEST. It is
-                    carried unchanged onto the stage-fail signal and the task-failed event. The
-                    endpoint does not check membership of the set.
+                    Connector-defined error classification, a free-text label the connector worker
+                    chooses. Required, and it
+                    must contain text: a value of only whitespace is refused 400 BAD_REQUEST. At
+                    most 100 bytes, with no control characters (a longer value or one with a
+                    control character is refused 400 BAD_REQUEST). It is carried unchanged onto the
+                    stage-fail signal and the task-failed event. The endpoint does not check
+                    membership of the set.
                   example: "upstream_timeout"
                 output:
                   type: object
@@ -1093,7 +1098,7 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
         "409":
-          description: Task is not connector-typed (TASK_NOT_CONNECTOR_TYPED), the tenant has no automation principal (NO_AUTOMATION_PRINCIPAL), or the instance is in a status the callback does not accept (INVALID_INSTANCE_STATE).
+          description: Task is not connector-typed (TASK_NOT_CONNECTOR_TYPED) or the instance is in a status the callback does not accept (INVALID_INSTANCE_STATE).
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }
@@ -1107,7 +1112,8 @@ paths:
           description: >
             An earlier callback for this task, or the other callback (complete or fail), is
             still in flight and has not delivered its signal. Nothing was acted on; retry
-            later. Also returned when a dependency is unavailable.
+            later. Also returned when a dependency is unavailable, and when the tenant has no
+            usable automation principal (UPSTREAM_UNAVAILABLE with a fixed detail).
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/ProblemDetails" }

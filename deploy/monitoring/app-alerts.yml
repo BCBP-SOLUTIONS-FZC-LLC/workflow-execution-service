@@ -331,8 +331,8 @@ groups:
           severity: page
         annotations:
           runbook: "workflow-execution-service/queue-polling"
-          summary: "Queue {{ $labels.queue }} has not been polled in 5 minutes"
-          description: "A Worker silently failing to poll one tenant-isolated queue is invisible to the aggregate workflow_execution_service_worker_active_queues gauge alone (LLD §7.6)."
+          summary: "Queue class {{ $labels.queue }} has not been polled in 5 minutes"
+          description: "A Worker silently failing to poll its queues is invisible to the aggregate workflow_execution_service_worker_active_queues gauge alone; the label is the queue class (default or dedicated), and the Worker log names the queue and tenant (LLD §7.6)."
 
       - alert: InstancesOnUnpolledQueue
         expr: |
@@ -344,8 +344,38 @@ groups:
           severity: page
         annotations:
           runbook: "workflow-execution-service/queue-polling"
-          summary: "Queue {{ $labels.queue }} has instances and no Worker polling it"
+          summary: "Queue class {{ $labels.queue }} has instances and no Worker polling it"
           description: "A Worker that could not start the worker for a queue only logs, so its instances wait with no task and no other signal (LLD §3.2, §7.6)."
+
+      - alert: WorkerQueueStartFailing
+        expr: rate(workflow_execution_service_worker_queue_start_failures_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          runbook: "workflow-execution-service/queue-start-failing"
+          summary: "A dedicated task queue worker keeps failing to start"
+          description: "The dedicated poll timestamp stays fresh while any other dedicated queue is served, so a tenant whose queue cannot start waits with no worker and no other signal; the Worker log names the queue and tenant (LLD §3.2, §7.6)."
+
+      - alert: ReassignFailing
+        expr: rate(workflow_execution_service_reassign_failures_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          runbook: "workflow-execution-service/reassign-failing"
+          summary: "Admin reassignments keep failing for good"
+          description: "An admin reassignment ended for good, so the task keeps its previous assignee; retries of a transient error are unlimited and not counted (LLD §7.6)."
+
+      - alert: ActivityRetriesLong
+        expr: rate(workflow_execution_service_activity_long_retries_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          runbook: "workflow-execution-service/activity-retries-long"
+          summary: "An activity keeps failing and retrying"
+          description: "An activity has failed ten times in a row and keeps retrying; activities retry without limit, so the instance stays stuck with no other signal until the cause is fixed (LLD §3.3, §7.6)."
 
       - alert: UpstreamDependencyErrors
         expr: rate(workflow_execution_service_upstream_dependency_errors_total[5m]) > 0

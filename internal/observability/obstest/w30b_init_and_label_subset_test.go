@@ -14,6 +14,7 @@ const w30bFailuresMetric = "workflow_execution_service_connector_task_failures_t
 
 func TestInit_CalledAgain_ReturnsNormallyAndKeepsEarlierCounts(t *testing.T) {
 	obstest.Init(t)
+	observability.ConnectorTaskFailuresTotal.WithLabelValues("w30b-seed", "s3", "transient", "false")
 	collector := observability.ConnectorTaskFailuresTotal
 	labels := map[string]string{"connector_type": "w30b-init"}
 	before := obstest.Sum(t, w30bFailuresMetric, labels)
@@ -32,6 +33,7 @@ func TestInit_CalledAgain_ReturnsNormallyAndKeepsEarlierCounts(t *testing.T) {
 
 func TestSum_PartialLabelSet_AddsEverySeriesThatContainsTheGivenPairs(t *testing.T) {
 	obstest.Init(t)
+	observability.ConnectorTaskFailuresTotal.WithLabelValues("w30b-seed", "s3", "transient", "false")
 	fail := observability.ConnectorTaskFailuresTotal
 	byType := map[string]string{"connector_type": "w30b-subset"}
 	byTypeAndClass := map[string]string{"connector_type": "w30b-subset", "class": "transient"}

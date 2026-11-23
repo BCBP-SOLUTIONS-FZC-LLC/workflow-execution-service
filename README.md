@@ -138,7 +138,7 @@ Tests fail when a router operation is missing from its spec or the reverse, and 
 
 `ENTITLEMENTS_BASE_URL` is optional in every environment: when set, an instance start asks Entitlements whether the tenant holds the `dedicated_workflow_queue` grant and chooses the tenant's own task queue from the answer (cache `ENTITLEMENTS_CACHE_TTL`, last answer kept up to `ENTITLEMENTS_FRESHNESS_BOUND`, read bounded by `ENTITLEMENTS_CLIENT_TIMEOUT`); when it is empty, or the grant cannot be read, the queue registry decides.
 
-`.env.example` lists every variable, including the ones with a product decision behind them: `START_REFUSED_STATUSES` (tenant statuses whose instance starts are refused: `suspended`, `trial_expired` and `cancelled` by default), the tenant purge settings (`TENANT_PURGE_ENABLED`, `TENANT_HISTORY_RETENTION`), `WORKFLOW_CACHE_SIZE` (sizing) and `LOCK_DATABASE_URL`; the chart also sets `GOMEMLIMIT` per process. `APP_ENV` is one of `local`, `dev`, `test`, `staging`, `prod`; outside `dev` and `local` each binary refuses to start without the settings it needs:
+`.env.example` lists every variable, including the ones with a product decision behind them: `START_REFUSED_STATUSES` (tenant statuses whose instance starts are refused: `suspended`, `trial_expired` and `cancelled` by default), the tenant purge settings (`TENANT_PURGE_ENABLED`, `TENANT_HISTORY_RETENTION`), `WORKFLOW_CACHE_SIZE` (sizing) and `LOCK_DATABASE_URL`; the chart also sets `GOMEMLIMIT` per process. `APP_ENV` is required and has no default: each binary, and `server migrate`, refuses to start when it is unset, empty or not one of `local`, `dev`, `test`, `staging`, `prod`; outside `dev` and `local` each binary refuses to start without the settings it needs:
 
 | Binary | Required outside dev |
 | --- | --- |
@@ -214,7 +214,22 @@ Every test target runs the Go version `go.mod` names (`GOTOOLCHAIN`), clears the
 | `make design-sync-check` / `make design-sync-check-test` | Fail when a document kept here and in the design repository differs (`DESIGN_DIR=<checkout>`, or `GH_TOKEN` reads `Haroon-BCBP/design`); local only, because CI does not read the personal design repository |
 | `make docker-build` / `make pin-base-images` / `make lint-workflows` | The three images, base-image digests, `actionlint` on the workflows |
 | `make helm-lint` / `make vuln` / `make docker-check` | Chart, dependency vulnerabilities, Dockerfile lint and scan |
+| `make hurl` / `make fuzz-api` / `make fuzz-internal-api` | Black-box scenarios and Schemathesis runs against a running local stack |
 | `make check` | Everything CI gates on, locally |
+
+### Local black-box checks
+
+`make hurl` runs the Hurl scenarios in `test/hurl` against a running stack: health, the instance lifecycle, the task flow and the problem-document contract through the public API, the inbound event and connector callback routes as the system caller (`test/hurl/internal`), and the identity boundary with no identity at all (`test/hurl/auth`). The scenarios start instances from a workflow they first publish in the Definition Service (`test/hurl/setup`). `make fuzz-api` and `make fuzz-internal-api` run Schemathesis against `docs/swagger/openapi.yaml` and `api/internal-openapi.yaml`.
+
+All three write instances, tasks and events into the databases of the stack they run against, so point them at a throwaway database. The stack is the one `scripts/smoke-test.sh` describes (it starts nothing itself): the Definition Service with its stubs, the token service stub in `test/hurl/stub/tokenservice`, then the execution API and worker. `API_BASE`, `METRICS_BASE`, `DEFINITION_BASE`, `SCENARIO_TENANT` and `SCENARIO_USER` override the local addresses and identity. None of this runs in CI.
+
+Known fuzz artefacts (the Schemathesis settings are in `schemathesis.toml`, each limited to one operation or one parameter; the findings below are behaviour a schema cannot express):
+
+- Cursors: a cursor is a token the previous page returned, any other value answers 400, so the fuzzer sends it empty.
+- Strings with a NUL character: valid JSON, answered 400 because the store cannot keep one, so the fuzzer does not generate them.
+- The four `/internal/events/*` routes: the payload is opaque to the schema, so a payload that does not decode (400), an unhandled type (200) and a frame that is not a schema-registry frame (502, retryable) are intended.
+- `reassign-delegate`: `new_delegate_id` equal to `old_delegate_id` answers 400, a rule across two fields.
+- `connector-tasks/{id}/fail`: an `error_class` over 100 bytes answers 400; the bound is in the description only, because a schema limit there is a breaking change to the contract check.
 
 ---
 

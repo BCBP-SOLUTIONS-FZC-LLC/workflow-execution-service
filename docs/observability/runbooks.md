@@ -184,17 +184,41 @@ Fix the cause first. A task whose entry was lost is not redispatched by itself.
 
 `runbook: workflow-execution-service/queue-polling`
 
-**Meaning.** The named tenant queue has not been polled in 5 minutes, although the Worker is up.
+**Meaning.** The queue class in the `queue` label (`default` or `dedicated`) has not been polled in 5 minutes, although the Worker is up. A `dedicated` series covers every tenant queue the Worker serves, so one stalled tenant queue among healthy ones does not show here.
 
-**Triage.** Look in the Worker logs for `failed to start worker for queue` for that queue (a worker that cannot start for one queue only logs). The topology poll retries every queue without a registered worker on each interval, so a persistent failure names its own cause in that line; a restart is only needed when the cause is fixed and the next poll has not yet passed.
+**Triage.** Look in the Worker logs for `failed to start worker for queue`, which names the queue and the tenant (a worker that cannot start for one queue only logs). The topology poll retries every queue without a registered worker on each interval, so a persistent failure names its own cause in that line; a restart is only needed when the cause is fixed and the next poll has not yet passed.
 
 ### InstancesOnUnpolledQueue
 
 `runbook: workflow-execution-service/queue-polling`
 
-**Meaning.** The named queue has running instances and no Worker polling it, so they wait with no task and no other signal.
+**Meaning.** The queue class in the `queue` label (`default` or `dedicated`) has running instances and no Worker polling that class, so they wait with no task and no other signal.
 
 **Triage.** As for `WorkerQueuePollingStalled`; the instances resume when a Worker polls the queue.
+
+### WorkerQueueStartFailing
+
+`runbook: workflow-execution-service/queue-start-failing`
+
+**Meaning.** The Worker keeps failing to start the worker for a tenant's dedicated task queue. The dedicated poll timestamp stays fresh while any other dedicated queue is served, so the stalled-queue alerts stay quiet while that tenant's instances wait with no worker.
+
+**Triage.** Look in the Worker logs for `failed to start worker for queue`, which names the queue and the error. The topology poll retries on each interval, so the alert clears once a start succeeds; fix the cause (for example the Temporal namespace or connection) and wait one poll, or restart the Worker.
+
+### ReassignFailing
+
+`runbook: workflow-execution-service/reassign-failing`
+
+**Meaning.** The Worker ended an admin reassignment for good: the ids were malformed, the task no longer exists, or the task changed since the admin read it (a stale record version). The task keeps its previous assignee. Transient errors retry without limit and are not counted.
+
+**Triage.** The Worker logs `reassignAssignment failed` with the error. A stale version is the usual cause and needs nothing but a new reassign by the admin from the current task; an unknown task or a malformed id points at a caller or data bug.
+
+### ActivityRetriesLong
+
+`runbook: workflow-execution-service/activity-retries-long`
+
+**Meaning.** An activity has failed ten times in a row and is still retrying. Activities that write to the database and external-call activities retry without limit, so a permanent cause leaves the instance stuck with no other signal.
+
+**Triage.** The Worker logs the activity error on every attempt; the Temporal UI shows the pending activity with its attempt count and last failure for the instance. A database outage or a Definition Service outage clears when the dependency returns. An unknown instance or task, or data that can never be written, does not: fix the data or terminate the instance.
 
 ### UpstreamDependencyErrors
 

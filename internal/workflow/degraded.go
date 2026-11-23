@@ -212,6 +212,7 @@ type park struct {
 	ch       wf.Channel
 	depts    map[string]bool
 	branches []domain.FailedBranch
+	failed   []failedBranch
 
 	// ended is set once the park's loop no longer reads its channel.
 	ended bool
@@ -237,6 +238,7 @@ func (in *interpreter) openPark(ctx wf.Context, plan *dsl.CompiledPlan, gw *gate
 		p.depts[fb.DeptID] = true
 	}
 	p.branches = parkedBranches(plan, failed)
+	p.failed = failed
 	in.parks = append(in.parks, p)
 	in.status = domain.InstanceStatusDegraded
 	in.statusRestorePending = false
@@ -421,6 +423,7 @@ func (in *interpreter) enterDegraded(ctx wf.Context, plan *dsl.CompiledPlan, gw 
 			return stepOutcome{Terminated: true}, cancelErr
 		}
 		p.branches = parkedBranches(plan, failed)
+		p.failed = failed
 		if listShrank && (len(failed) > 0 || respawning > 0 || p.rerunning) {
 			if err := in.writeDegraded(ctx); err != nil {
 				in.closePark(p)
@@ -576,6 +579,19 @@ func (in *interpreter) innermostGatewayRunning(deptID string) *gateway {
 		}
 	}
 	return nil
+}
+
+func (in *interpreter) innermostGatewayOpen() *gateway {
+	for i := len(in.gateways) - 1; i >= 0; i-- {
+		if in.gateways[i].hasOpenBranch() {
+			return in.gateways[i]
+		}
+	}
+	return nil
+}
+
+func (g *gateway) hasOpenBranch() bool {
+	return slices.ContainsFunc(g.keys, func(key string) bool { return !g.resolved[key] })
 }
 
 func (in *interpreter) innermostGatewayHolding(deptID string) *gateway {

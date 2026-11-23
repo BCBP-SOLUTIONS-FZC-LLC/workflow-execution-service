@@ -117,7 +117,7 @@ func TestAddMessageCase_EmptyNameRegistersNothing(t *testing.T) {
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		buf := newMessageBuffer()
 		sel := wf.NewSelector(ctx)
-		cancel := addMessageCase(ctx, sel, buf, "", false, "dept", func(boundaryFire) { fires++ })
+		cancel, _ := addMessageCase(ctx, sel, buf, "", false, "dept", func(boundaryFire) { fires++ })
 		cancel()
 		buf.Send(ctx, "", "sender/send")
 		pending = sel.HasPending()
@@ -145,7 +145,7 @@ func TestAddMessageCase_CancelDeregistersTheWait(t *testing.T) {
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		buf := newMessageBuffer()
 		sel := wf.NewSelector(ctx)
-		cancel := addMessageCase(ctx, sel, buf, "escalate", false, "dept", func(boundaryFire) { fires++ })
+		cancel, _ := addMessageCase(ctx, sel, buf, "escalate", false, "dept", func(boundaryFire) { fires++ })
 		blockedBefore = len(buf.blocked["escalate"])
 		cancel()
 		blockedAfter = len(buf.blocked["escalate"])
@@ -172,7 +172,9 @@ func TestAddMessageCase_ALaterMessageFires(t *testing.T) {
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		buf := newMessageBuffer()
 		sel := wf.NewSelector(ctx)
-		addMessageCase(ctx, sel, buf, "escalate", true, "escalation", func(f boundaryFire) { fired = append(fired, f) })
+		if _, err := addMessageCase(ctx, sel, buf, "escalate", true, "escalation", func(f boundaryFire) { fired = append(fired, f) }); err != nil {
+			return err
+		}
 		wf.Go(ctx, func(gctx wf.Context) {
 			sleepErr = wf.Sleep(gctx, time.Minute)
 			buf.Send(gctx, "escalate", "sender/send")
@@ -286,7 +288,7 @@ func TestRegisterTaskBoundaries_RegistersOnlyThePresentCases(t *testing.T) {
 			env.ExecuteWorkflow(func(ctx wf.Context) error {
 				in := newInterpreter("tenant", "instance", "", nil, nil)
 				sel := wf.NewSelector(ctx)
-				cancel := registerTaskBoundaries(ctx, sel, in, "dept/node", tc.timer, tc.msg, func(boundaryFire) {})
+				cancel, _ := registerTaskBoundaries(ctx, sel, in, "dept/node", tc.timer, tc.msg, func(boundaryFire) {})
 				waitersBefore = len(in.msgBuf.blocked["m"])
 				cancel()
 				waitersAfter = len(in.msgBuf.blocked["m"])
@@ -321,7 +323,7 @@ func TestRegisterTaskBoundaries_TheFirstOfTimerAndMessageFiresWithItsOwnSteps(t 
 	env.ExecuteWorkflow(func(ctx wf.Context) error {
 		in := newInterpreter("tenant", "instance", "", nil, nil)
 		sel := wf.NewSelector(ctx)
-		cancel := registerTaskBoundaries(ctx, sel, in, "dept/node", timer, msg, func(f boundaryFire) { fired = append(fired, f) })
+		cancel, _ := registerTaskBoundaries(ctx, sel, in, "dept/node", timer, msg, func(f boundaryFire) { fired = append(fired, f) })
 		wf.Go(ctx, func(gctx wf.Context) {
 			sleepErr = wf.Sleep(gctx, 10*time.Minute)
 			in.msgBuf.Send(gctx, "m", "sender/send")
@@ -366,7 +368,7 @@ func TestRegisterSubWorkflowBoundaries_OneCasePerPathAndTheFirstTimerWins(t *tes
 			dsl.BoundaryWaitKey("Sub_1", "b2"): true,
 		}
 		sel := wf.NewSelector(ctx)
-		cancel := registerSubWorkflowBoundaries(ctx, sel, in, nil, sw, func(f boundaryFire) { fired = append(fired, f) })
+		cancel, _ := registerSubWorkflowBoundaries(ctx, sel, in, nil, sw, func(f boundaryFire) { fired = append(fired, f) })
 		for key := range in.externalWaiting {
 			waitingKeys = append(waitingKeys, key)
 		}
@@ -398,7 +400,7 @@ func TestRegisterSubWorkflowBoundaries_AnExternalAnswerFiresOnlyItsOwnKey(t *tes
 		in := newInterpreter("tenant", "instance", "", nil, nil)
 		in.external = map[string]bool{"Sub_1#b1": true}
 		sel := wf.NewSelector(ctx)
-		cancel := registerSubWorkflowBoundaries(ctx, sel, in, nil, sw, func(f boundaryFire) { fired = append(fired, f) })
+		cancel, _ := registerSubWorkflowBoundaries(ctx, sel, in, nil, sw, func(f boundaryFire) { fired = append(fired, f) })
 		ch := in.externalWaiting["Sub_1#b1"]
 		require.NotNil(t, ch)
 		_, other := in.externalWaiting["Other#b1"]

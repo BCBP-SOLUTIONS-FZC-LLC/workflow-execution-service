@@ -10,6 +10,15 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
+func contextTakesVariables(contextJSON []byte) bool {
+	decoded, ok := decodeContext(contextJSON)
+	if !ok {
+		return false
+	}
+	_, isObject := decoded.(map[string]any)
+	return isObject
+}
+
 type externalAnswerWire struct {
 	Key       string
 	Variables map[string]any
@@ -39,6 +48,10 @@ func (s *InstanceService) AnswerOutsideWait(ctx context.Context, tenantID, insta
 	}
 	if err := validateInstanceStateFor(port.SignalInstanceExternalAnswer, inst.Status); err != nil {
 		return err
+	}
+
+	if len(variables) > 0 && !contextTakesVariables(inst.ContextJSON) {
+		return port.ErrAnswerVariablesInvalid
 	}
 
 	var waiting []string

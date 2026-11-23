@@ -7,9 +7,11 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"go.temporal.io/sdk/temporal"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/observability"
 )
 
 func (d *Deps) CompleteAssignment(ctx context.Context, in port.CompleteAssignmentInput) (port.CompleteAssignmentOutput, error) {
@@ -171,6 +173,15 @@ func (d *Deps) DeferTask(ctx context.Context, in port.DeferTaskInput) error {
 }
 
 func (d *Deps) ReassignAssignment(ctx context.Context, in port.ReassignAssignmentInput) error {
+	err := d.reassignAssignment(ctx, in)
+	var appErr *temporal.ApplicationError
+	if errors.As(err, &appErr) && appErr.NonRetryable() {
+		observability.IncCounter(observability.ReassignFailuresTotal)
+	}
+	return err
+}
+
+func (d *Deps) reassignAssignment(ctx context.Context, in port.ReassignAssignmentInput) error {
 	tenantID, err := uuid.Parse(in.TenantID)
 	if err != nil {
 		return nonRetryable("ValidationError", fmt.Errorf("parse tenant_id: %w", err))

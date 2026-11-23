@@ -11,7 +11,6 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-gincommon/pkg/logger"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/platform-pgcommon/v2/pkg/pgcommon"
 	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/worker"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/adapter/outbound/eventbus"
@@ -84,7 +83,7 @@ func main() {
 	}
 
 	registry := newWorkerRegistry()
-	defaultWorker, err := startWorkerForQueue(sdk, deps, cfg.TemporalTaskQueue, worker.Options{WorkerStopTimeout: 25 * time.Second, Interceptors: []interceptor.WorkerInterceptor{observability.NewTemporalMetricsInterceptor()}})
+	defaultWorker, err := startWorkerForQueue(sdk, deps, cfg.TemporalTaskQueue, defaultQueueWorkerOptions)
 	if err != nil {
 		fatal(wlog, func() { cleanup(); tracingShutdown() }, "start default worker", err)
 	}
@@ -120,8 +119,8 @@ func main() {
 	stopTopology(cancelPoll, pollDone, registry)
 }
 
-func buildDeps(cfg *config.Config, wlog port.Logger) (*outboundtemporal.Deps, port.ActiveTaskQueueRepository, *pgcommon.Pool, func(), error) {
-	pool, err := pgcommon.NewPool(context.Background(), pgcommon.Config{
+func workerPoolConfig(cfg *config.Config, wlog port.Logger) pgcommon.Config {
+	return pgcommon.Config{
 		DSN:                cfg.DatabaseURL,
 		MaxConns:           cfg.PGMaxConns,
 		MinConns:           cfg.PGMinConns,
@@ -130,7 +129,11 @@ func buildDeps(cfg *config.Config, wlog port.Logger) (*outboundtemporal.Deps, po
 		GUCProvider:        pgcommon.GUCSetFromContext,
 		Logger:             pglogger.New(wlog),
 		Tracer:             gincommon.NewSpanTracer(cfg.OTELServiceName),
-	})
+	}
+}
+
+func buildDeps(cfg *config.Config, wlog port.Logger) (*outboundtemporal.Deps, port.ActiveTaskQueueRepository, *pgcommon.Pool, func(), error) {
+	pool, err := pgcommon.NewPool(context.Background(), workerPoolConfig(cfg, wlog))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("new postgres pool: %w", err)
 	}

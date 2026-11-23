@@ -118,9 +118,9 @@ components:
       required: false
       schema:
         type: string
-        format: uuid
       description: >
-        Optional client-supplied key for safe retry of this request. A replay with the same
+        Optional client-supplied key for safe retry of this request; any string, and an empty
+        header is the same as none. A replay with the same
         key and an identical request body returns the original cached response. A replay with
         the same key and a different body returns 409 IDEMPOTENCY_KEY_REPLAY, as does a
         repeat while the first request under the key is still running (it does not wait; retry
@@ -160,8 +160,9 @@ components:
         type: string
       description: >
         Opaque keyset cursor encoding the previous page's last (created_at|occurred_at, id)
-        pair (§5.9). Omit for the first page. An unparseable or tampered cursor returns 400
-        BAD_REQUEST rather than silently restarting.
+        pair (§5.9). Send only the next_cursor value the previous page returned; omit it, or
+        send it empty, for the first page. Any other value, unparseable or tampered, returns
+        400 BAD_REQUEST rather than silently restarting.
     LimitQuery:
       name: limit
       in: query
@@ -169,11 +170,10 @@ components:
       schema:
         type: integer
         minimum: 1
-        maximum: 100
         default: 25
       description: >
-        Page size. Values above 100 are clamped, not rejected; values <= 0 are rejected
-        (§5.9).
+        Page size. Values above 100 are clamped to 100, not rejected; values <= 0 are
+        rejected (§5.9).
     TraceParentHeader:
       name: traceparent
       in: header
@@ -759,7 +759,9 @@ components:
       description: >
         Malformed JSON body, missing required fields, or a value that is not valid, such as an
         id that is not a UUID in the body, a query parameter or the path. invalid_params names
-        the field (a path parameter as one) with the reason "is not valid".
+        the field (a path parameter as one) with the reason "is not valid". A JSON body with a
+        NUL character (\u0000) in any string, key included, is refused as well, as the store
+        cannot keep one.
       content:
         application/problem+json:
           schema:
@@ -1091,7 +1093,7 @@ paths:
           description: >
             State conflict. See code field:
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body;
-            DUPLICATE_BUSINESS_KEY — a live instance (not COMPLETED, TERMINATED or FAILED, so RUNNING, PAUSED or DEGRADED) for this subject_id and business_key already exists and is not this caller's own unfinished start (a RUNNING instance of the same version started by the same caller with the same context_json and override_map is the same start sent again and is returned with 201), or the start's workflow execution is held by an open execution of a different instance;
+            DUPLICATE_BUSINESS_KEY — a live instance (not COMPLETED, TERMINATED or FAILED, so RUNNING, PAUSED or DEGRADED) for this subject_id and business_key already exists and is not this caller's own unfinished start (a RUNNING, PAUSED or DEGRADED instance of the same version started by the same caller with the same context_json and override_map is the same start sent again and is returned with 201), or the start's workflow execution is held by an open execution of a different instance;
             TENANT_NOT_ACTIVE — the tenant is offboarded, or its recorded status is one the service is configured to refuse starts for (no other status by default);
             VERSION_NOT_PUBLISHED — the referenced version is DRAFT or ARCHIVED;
             VERSION_INVALID — version.is_valid=false (assignee eligibility was revoked), or the compiled plan has a schema version this service does not read, is not valid JSON, names no main plan, names a department whose iam_department_id is not a UUID, or cannot be expanded.
@@ -1224,8 +1226,11 @@ paths:
           required: false
           schema:
             type: string
-            format: uuid
-          description: Filter to a specific compiled version.
+            pattern: "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?$"
+          description: >
+            Filter to a specific compiled version, given as a UUID. An empty value is the same
+            as leaving the filter out; any other value that is not a UUID is refused 400
+            BAD_REQUEST.
         - name: started_after
           in: query
           required: false
@@ -1323,7 +1328,9 @@ paths:
         Sends a pause signal to the Temporal workflow. A RUNNING instance transitions to
         PAUSED. A DEGRADED instance keeps its status and the pause is held until the
         park ends, which then leaves the instance PAUSED. Returns 409 if the instance
-        is neither RUNNING nor DEGRADED.
+        is neither RUNNING nor DEGRADED. If the Temporal workflow execution no longer exists,
+        the instance is marked TERMINATED directly and its active tasks fail, as for cancel,
+        and the call returns 202.
       security:
         - GatewayTenantContext: []
           UserContext: []
@@ -1351,6 +1358,7 @@ paths:
                     synchronously before the signal is forwarded (§5.10); required, and at
                     least 1, the lowest version an instance can hold. A body that omits it or
                     carries 0 is refused 400 BAD_REQUEST.
+                  format: int64
                   example: 3
                 reason:
                   type: string
@@ -1424,7 +1432,9 @@ paths:
         Sends a resume signal to the Temporal workflow. A PAUSED instance transitions to
         RUNNING. On a DEGRADED instance the resume clears a pause held for the park, under
         the same initiator rule, and is dropped when none is held. Returns 409 if the
-        instance is neither PAUSED nor DEGRADED.
+        instance is neither PAUSED nor DEGRADED. If the Temporal workflow execution no longer
+        exists, the instance is marked TERMINATED directly and its active tasks fail, as for
+        cancel, and the call returns 202.
       security:
         - GatewayTenantContext: []
           UserContext: []
@@ -1452,6 +1462,7 @@ paths:
                     synchronously before the signal is forwarded (§5.10); required, and at
                     least 1, the lowest version an instance can hold. A body that omits it or
                     carries 0 is refused 400 BAD_REQUEST.
+                  format: int64
                   example: 4
       responses:
         "202":
@@ -1545,6 +1556,7 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 500
+                  pattern: "\\S"
                   description: >
                     Human-readable reason for the cancellation; carried in the
                     WorkflowInstanceCancelled event (WorkflowInstanceTerminated when the
@@ -1559,6 +1571,7 @@ paths:
                     synchronously before the signal is forwarded (§5.10); required, and at
                     least 1, the lowest version an instance can hold. A body that omits it or
                     carries 0 is refused 400 BAD_REQUEST.
+                  format: int64
                   example: 2
       responses:
         "202":
@@ -1651,6 +1664,7 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 500
+                  pattern: "\\S"
                   description: >
                     Human-readable reason for termination; carried in the
                     WorkflowInstanceTerminated event, not stored on the instance.
@@ -1716,7 +1730,8 @@ paths:
       summary: An outside party's answer completes a receive task
       description: >
         Callable by an admin or by a user with an active assignment on a task of the instance.
-        Completes the receive task whose node key is node, which no send task of the plan
+        Completes the receive task whose node key is node, or the message boundary wait named by
+        host#boundary (the # percent-encoded as %23), which no send task of the plan
         feeds: only an outside party's answer can. The published version lists such steps as
         its waits. The variables merge into the instance's variables. The node key's "/" must
         be percent-encoded as %2F.
@@ -1753,7 +1768,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/SignalAccepted"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: >
+            BAD_REQUEST: the request is malformed, or its variables cannot be merged into the
+            instance's context because the stored context is not a JSON object. Nothing is
+            signalled.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1836,7 +1858,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/SignalAccepted"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: >
+            BAD_REQUEST: the request is malformed, or its variables cannot be merged into the
+            instance's context because the stored context is not a JSON object. Nothing is
+            signalled.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1877,7 +1906,8 @@ paths:
         Sends a force-forward signal to the Temporal workflow. Active tasks at the current
         node(s) are marked SUPERSEDED and the workflow function jumps to target_node_key.
         Inside a parallel step or a DEGRADED instance, the department of target_node_key
-        names the branch the jump applies to.
+        names the branch the jump applies to. In a DEGRADED instance the target must be in a
+        failed branch; otherwise the call is refused with 409 before anything is sent.
         Use only when a step is legitimately blocked and cannot be resolved through normal
         task operations.
       security:
@@ -1901,6 +1931,8 @@ paths:
               properties:
                 target_node_key:
                   type: string
+                  minLength: 1
+                  maxLength: 255
                   description: >
                     BPMN node key to advance to. Must be a node the instance can run: a node of
                     its main plan (called plans included), and, inside a parallel step of a
@@ -1914,6 +1946,7 @@ paths:
                     synchronously before the signal is forwarded (§5.10); required, and at
                     least 1, the lowest version an instance can hold. A body that omits it or
                     carries 0 is refused 400 BAD_REQUEST.
+                  format: int64
                   example: 5
       responses:
         "202":
@@ -1938,7 +1971,8 @@ paths:
             TARGET_NODE_NOT_FOUND — the workflow could not run target_node_key, checked against the
             compiled plan and the instance's current state before the signal is sent: the node is
             not in the plan the instance runs (a called plan counts once expanded), or, inside a
-            parallel step of a RUNNING instance, its department is not a branch of that step;
+            parallel step of a RUNNING instance, its department is not a branch of that step, or,
+            for a DEGRADED instance, it names no failed branch;
             VERSION_INVALID — the stored plan has a schema version this service does not read, is not valid JSON, or names no main plan;
             RECORD_VERSION_CONFLICT — record_version is stale;
             IDEMPOTENCY_KEY_REPLAY — same key reused with a different request body.
@@ -1997,8 +2031,12 @@ paths:
         Sends a force-back signal to the Temporal workflow. The workflow function pops
         the completedNodes stack, cancels any currently active tasks, and re-creates the
         task for the previous step. Returns 409 if there is no previous step to revert to
-        (the instance is at its first step). In a DEGRADED instance with more than one
-        failed branch, target_node_key names a node of the branch to resume.
+        (the instance is at its first step); the answer is given before anything is sent, so
+        an instance whose step history is empty is refused at once. In a DEGRADED instance
+        with more than one failed branch, target_node_key names a node of the branch to
+        resume, and a key that names no failed branch is refused with 409. Inside nested
+        parallel steps the force-back applies to the innermost parallel step that still has
+        an open branch.
       security:
         - GatewayTenantContext: []
           UserContext: []
@@ -2026,6 +2064,7 @@ paths:
                     synchronously before the signal is forwarded (§5.10); required, and at
                     least 1, the lowest version an instance can hold. A body that omits it or
                     carries 0 is refused 400 BAD_REQUEST.
+                  format: int64
                   example: 6
                 target_node_key:
                   type: string
@@ -2055,7 +2094,7 @@ paths:
             INVALID_INSTANCE_STATE — instance is neither RUNNING nor DEGRADED;
             INSTANCE_ALREADY_TERMINAL — instance is already in a terminal state;
             TARGET_NODE_NOT_FOUND — a DEGRADED instance's target_node_key names no node of the
-            compiled plan the instance runs;
+            compiled plan the instance runs or names no failed branch;
             VERSION_INVALID — the stored compiled plan, read to check target_node_key, cannot be
             decoded;
             RECORD_VERSION_CONFLICT — record_version is stale;
@@ -2146,6 +2185,7 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 500
+                  pattern: "\\S"
                   nullable: true
                   description: >
                     Optional human-readable reason for the override; stored on the
@@ -2161,6 +2201,7 @@ paths:
                     checked before the eligibility call and again before persisting (§5.4);
                     required, and at least 1. A body that omits it or carries 0 is refused
                     400 BAD_REQUEST.
+                  format: int64
                   example: 4
       responses:
         "200":
@@ -2472,9 +2513,9 @@ paths:
         first claim time) and increments task.record_version, and queues the WorkflowTaskClaimed
         event in the same transaction; no signal is sent. A claim does not change the task's
         status. The checks run in this order and the first that fails
-        refuses the claim: task exists, task is human-actionable, assignee_mode is all,
-        record_version is current, status is READY or IN_PROGRESS, the instance is RUNNING or
-        DEGRADED, the task has no other lead, the caller holds an active assignment, the
+        refuses the claim: task exists, task is human-actionable, the caller holds an active
+        assignment, assignee_mode is all, record_version is current, status is READY or
+        IN_PROGRESS, the instance is RUNNING or DEGRADED, the task has no other lead, the
         caller is eligible.
         Returns 403 NOT_ASSIGNEE if the user has no active assignment.
         Returns 409 TASK_ALREADY_CLAIMED if another assignee already holds the lead and the
@@ -2511,6 +2552,7 @@ paths:
                     the lowest version a task can hold. A body that omits it or carries 0 is
                     refused 400 BAD_REQUEST. Any other value that is not the task's current
                     version returns RECORD_VERSION_CONFLICT.
+                  format: int64
                   example: 1
       responses:
         "202":
@@ -2646,6 +2688,7 @@ paths:
                   description: >
                     The task record_version the client last observed; required, and at least 1.
                     A body that omits it or carries 0 is refused 400 BAD_REQUEST.
+                  format: int64
                   example: 1
                 result_json:
                   type: object
@@ -2775,6 +2818,7 @@ paths:
                   description: >
                     The task record_version the client last observed; required, and at least 1.
                     A body that omits it or carries 0 is refused 400 BAD_REQUEST.
+                  format: int64
                   example: 1
                 reason:
                   type: string
@@ -2902,6 +2946,7 @@ paths:
                     The caller's current view of the task's record_version, checked
                     synchronously before the signal is forwarded (§5.10); required, and at
                     least 1. A body that omits it or carries 0 is refused 400 BAD_REQUEST.
+                  format: int64
                   example: 2
       responses:
         "202":

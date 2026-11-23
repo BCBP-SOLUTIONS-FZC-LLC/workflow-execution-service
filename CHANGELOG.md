@@ -10,6 +10,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Tests
 
+- Tests pin settled behaviour: an activity ignores the caller's stale record version, a second wait on one key after a cancelled one, a dead-letter copy keeps the adapter's reason and source id, the worker's pool settings and default queue options, a failed cancel and a failed completed write ending the run, an early stage result kept one per node and visit, a reclaim by the consumer that owns the entry, a connector task having no assignee, a human step with no assignee, the database health copy and a former assignee's lost read access.
+- Tests pin settled behaviour: the active-instance count includes PAUSED and DEGRADED and leaves out the three final statuses, the connector failure callback accepts an error class no worker sends, the OpenBao reader's answers without the requested field, the duration parser's refusal messages, the principal read sending no roles header, a boundary key on the complete route, and the out-of-office window fields starting or ending no pause.
+- A test that reads a metric with no series (a mistyped name, or a labelled metric nothing has touched) fails instead of reading 0.
+- `make hurl`, `make fuzz-api` and `make fuzz-internal-api` check a running local stack from the outside with Hurl scenarios and Schemathesis; `scripts/smoke-test.sh` describes the stack, and a token service stub supports it. They write data, so they need a throwaway database and do not run in CI.
 - The metric test helper `obstest.Sum` now fails the test when a requested label name is carried by no metric of the family, instead of returning zero.
 - The test targets run the Go version `go.mod` names, keep `.env` values out of the tests, regenerate stale sqlc output first and allow 30 minutes per package; the Postgres integration suite shares one container with a fresh database per test, which takes it from about seven minutes to under one. A cache-eviction test no longer spends a minute in reflection, and a degraded-park test no longer depends on the order of two signals sent at the same instant.
 - Stronger tests for task and instance read and write bodies and their edge cases, page-size clamps and subject filters against real Postgres, and the Temporal activities: input validation, assignment and lead moves, audit records and instance status writes.
@@ -36,6 +40,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - Temporal adapter tests for own-assignment lookups, plan reads and instance events; server configuration tests through the real binary; middleware error-log tests; Temporal client tests and route chains through the real client; Valkey cache error and delete tests; event schema enum tests; force-back plan-read and signal failure tests.
 - Domain value tests; automation-principal client and connector callback route tests; outbound HTTP client, OpenBao reader and entitlements client tests; Valkey stream publisher and consumer, Glue codec, signal relay and metrics test-helper tests.
 
+### Added
+
+- Activity attempts beyond the tenth are counted (`workflow_execution_service_activity_long_retries_total`) and the alert `ActivityRetriesLong` opens a ticket when the count keeps rising for ten minutes. Activities retry without limit, so an activity that fails for a permanent reason otherwise leaves its instance stuck with no other signal.
+
+### Changed
+
+- Docs only: the LLD (1.170 to 1.172) and the public spec describe the retry counter and its alert, the availability events (each is the full current state), the headers of the principal read and the message boundary key on the complete route.
+- Start-up refuses an unset or empty `APP_ENV` for the server, the worker, the connector worker and `server migrate`, and the error names the variable and the allowed values; it used to default to `dev`.
+- The public and internal contracts say what the service accepts: `Idempotency-Key` is any string rather than a UUID, `limit` has no maximum (a larger value is clamped), `record_version` is a 64-bit integer, a force-forward `target_node_key` is 1 to 255 characters, a cancel, terminate or override `reason` must contain a non-space character, the `workflow_version_id` filter of the instance list may be empty, a cursor is only the `next_cursor` of the previous page, and a body with a NUL character is refused.
+
 ### Removed
 
 - The unused claim activity on the worker: the task claim is a direct write that emits its own event.
@@ -46,6 +60,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 - Docs only: the metric registry names the 200 answer of a task defer in the help text of the task signal duration.
 - CI: the schema registration, schema prune, quarterly schema health and release workflows can read the private schema-governance image and the service images: the staging and production jobs keep `packages: read` next to their own `contents: write`, and each job that pulls an image logs in to the registry first. Before, every push to `main` failed the staging registration with 403 on the image pull.
+- `.env.example` keeps the `APP_ENV` comment on its own line: `make` passed the spaces before an inline comment into the value, and the start refused `dev` followed by spaces.
+- A task assignment always carries `assigned_at`: it was stored empty and left out of the task detail, although the contract requires it; an assignment made without a time now gets the time of the insert.
+- A request body with a NUL character in any string, such as a subject id, is refused with 400 instead of failing with 500 when the store rejects it.
+- A page size too large to be a number, such as `limit=99999999999999999999`, is clamped to 100 like any other size above 100, instead of being refused with 400.
+- A force-forward on a degraded instance whose target is not in a failed branch, and a force-back with no earlier step or no failed branch to resume, are now refused with 409 straight away instead of being accepted and silently dropped.
+- A force-back inside nested parallel steps now returns the innermost parallel step that still has an open branch to the step before it, instead of whichever enclosing step picked the request up first.
+- A failed connector task callback now refuses an `error_class` longer than 100 bytes or containing a control character with `400 BAD_REQUEST`, instead of relaying it onto the task-failed event.
+- An admin reassignment that ends for good (a malformed id, an unknown task or a stale record version) is now counted (`workflow_execution_service_reassign_failures_total`) and opens a ticket after ten minutes, with a runbook entry, instead of only a log line.
+- The age of the oldest degraded instance is now measured from the moment it became degraded, so a later write to the instance no longer resets it.
+- A dedicated task queue whose worker fails to start is now counted (`workflow_execution_service_worker_queue_start_failures_total`) and pages after ten minutes, with a runbook entry, even while other dedicated queues keep the poll timestamp fresh.
+- Pausing an instance whose workflow no longer exists ends it with the same fixed reason a resume gives, not the pause reason typed by the user.
+- A message boundary on a task or sub-workflow whose name is blank or longer than 128 characters now fails the path cleanly, as send and receive stages already do.
+- A claim by someone who is not an assignee now always answers 403 NOT_ASSIGNEE, before any answer about the task's mode, version or state.
+
+- The server now shuts down gracefully and exits with an error when the event relay stops unexpectedly, instead of logging it and carrying on without publishing events; a normal stop is not an error.
+- Sending the same start request again while the instance it created is paused or degraded now returns that instance, as it does while it is running, instead of a duplicate-business-key conflict.
+- Moving a delegate's work to a new delegate, and the delegate-impact preview, now cover only open (ready or in-progress) tasks of instances that are running, paused or degraded; finished, failed, superseded and deferred tasks and ended instances are left alone, and the preview counts exactly what a move would touch.
+- A connector callback for a tenant with no automation principal now answers 503 with a fixed message, so the connector worker retries it and the error shows in the error rate, instead of a 409.
+- A claim by a user who is not an assignee of the task now answers 403 not-assignee even when another assignee already leads the task, instead of 409 already-claimed.
+- Pausing or resuming an instance whose workflow execution no longer exists now ends the instance as terminated and fails its active tasks, as cancel does, and answers 202 instead of a 409.
+- An answer to an outside wait whose variables cannot be merged into the instance's stored context (the context is not a JSON object) is now refused with a 400 before it is accepted, instead of a 202 that the workflow then dropped.
+- The queue label of the worker poll timestamp and of the instances-by-queue gauge now holds `default` or `dedicated` instead of the queue name, which carried a tenant id for dedicated queues; the queue and tenant stay in the Worker logs.
+- An exclusive gateway that opens a run no longer matches a branch such as `status != "x"` against a result that does not exist yet; with no result, the gateway takes its else branch.
+- A message sent with no receiver waiting keeps at most 64 messages per message name and drops the oldest with a warning; a send or receive step with an empty or over-long message name now fails the path instead of buffering under that name.
+- A pause that arrives together with a step's result now holds the next step until the instance is resumed, instead of letting that step start while the instance reads as paused.
+- A burst of up to 64 admin signals (pause, resume, cancel, force-forward, force-back) is now queued without stalling the signal router; the queue held 8.
 - The connector failure callback now refuses an `error_class` that is only whitespace with a 400, as it already did for an empty one; a blank class used to reach the workflow as the failure reason.
 - A request body is accepted only with the media type `application/json` (with or without parameters such as a charset); a type that merely begins with it, such as `application/jsonfoo`, now gets the 415 answer. A request with no `Content-Type` header is still accepted.
 - A failed call to the token service is now counted under the `token_service` dependency of the upstream error metric and no longer as `iam`; the runbook names the new label.

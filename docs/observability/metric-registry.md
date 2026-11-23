@@ -43,6 +43,7 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
+| `workflow_execution_service_activity_long_retries_total` | counter | - | Activity attempts beyond the tenth. Activities retry without limit, so an activity that fails for a permanent reason keeps its instance stuck with no other signal; every attempt past the tenth is one more retry of an activity that failed ten times in a row. |
 | `workflow_execution_service_connector_alias_registry_age_seconds` | gauge | - | Seconds since the connector worker last applied a fresh alias registry, updated on every refresh tick (a failed or empty refresh lets it grow). |
 | `workflow_execution_service_connector_dispatch_dead_lettered_total` | counter | `connector_type` | Connector stream entries moved to the dead-letter stream (delivery cap exceeded or entry unreadable), by connector_type. |
 | `workflow_execution_service_connector_task_failures_total` | counter | `class`, `connector_type`, `provider`, `retried` | Failed connector calls, by connector_type, provider, error class (transient, permanent or unknown) and whether the call was retried. |
@@ -55,15 +56,16 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 | `workflow_execution_service_entitlements_stale_served_total` | counter | - | Feature-flag answers served from a held set older than its TTL while a refresh runs or backs off. |
 | `workflow_execution_service_glue_schema_stale_served_total` | counter | - | Outbound events encoded with the last known schema version id (counted once per event) because the schema registry could not be read; the id is served for at most GLUE_SCHEMA_MAX_STALENESS past its cache TTL. |
 | `workflow_execution_service_instance_degraded_current` | gauge | - | Live count of instances currently DEGRADED. |
-| `workflow_execution_service_instance_degraded_oldest_age_seconds` | gauge | - | Age in seconds of the longest-parked DEGRADED instance. |
+| `workflow_execution_service_instance_degraded_oldest_age_seconds` | gauge | - | Age in seconds of the longest-parked DEGRADED instance, measured from the instant it entered DEGRADED. |
 | `workflow_execution_service_instance_degraded_total` | counter | - | Total instances that entered DEGRADED. |
 | `workflow_execution_service_instance_start_duration_seconds` | histogram | - | POST /instances received to 201-returned latency (LLD §7.6 SLO, p99 <= 1s). |
-| `workflow_execution_service_instances_by_queue` | gauge | `queue` | Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue, sampled by the API process. A queue with none is absent. |
+| `workflow_execution_service_instances_by_queue` | gauge | `queue` | Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue class, default or dedicated, sampled by the API process. A class with none is absent. |
 | `workflow_execution_service_internal_auth_rejected_total` | counter | `reason` | Internal-route requests refused for lacking the system caller identity, by reason (missing_user or missing_role). |
 | `workflow_execution_service_internal_events_ingest_total` | counter | `event_type`, `result` | Total internal event ingest calls, by event_type and result. |
 | `workflow_execution_service_internal_events_last_received_timestamp` | gauge | `event_type` | Unix timestamp of the last successfully dispatched POST /internal/events call, by event_type. |
 | `workflow_execution_service_oldest_ready_connector_task_age_seconds` | gauge | - | Age in seconds of the oldest connector task still READY (0 when none): a task the connector worker never ran or never reported. |
 | `workflow_execution_service_oldest_ready_task_age_seconds` | gauge | - | Age in seconds of the oldest unclaimed READY task. |
+| `workflow_execution_service_reassign_failures_total` | counter | - | Admin reassignments the reassign Activity ended for good (a malformed id, an unknown task or a stale record version), so the task keeps its previous assignee. Transient errors retry without limit and are not counted. |
 | `workflow_execution_service_record_version_conflict_total` | counter | `table` | Total optimistic-lock record_version conflicts, by table. |
 | `workflow_execution_service_retention_rows_deleted_total` | counter | `table` | Rows the retention sweeps deleted, by table (outbox_events, processed_events, or a tenant's purged tables). |
 | `workflow_execution_service_rls_violations_total` | counter | `violation_type` | Sampled row-level-security violations recorded in rls_violation_log, by violation_type. |
@@ -75,7 +77,8 @@ The registry defines no `workflow_*` metrics yet, so none are emitted.
 | `workflow_execution_service_wf_cache_hits_total` | counter | - | Total compiled-plan cache hits. |
 | `workflow_execution_service_wf_cache_misses_total` | counter | - | Total compiled-plan cache misses. |
 | `workflow_execution_service_worker_active_queues` | gauge | - | Live count of dynamically-registered worker.Worker instances. |
-| `workflow_execution_service_worker_queue_last_poll_timestamp` | gauge | `queue` | Unix time of the last topology poll in which this process served the task queue (set on every poll for every queue it runs a worker for, not a measure of the Temporal long poll itself). |
+| `workflow_execution_service_worker_queue_last_poll_timestamp` | gauge | `queue` | Unix time of the last topology poll in which this process served a task queue of the class in the queue label, default or dedicated (set on every poll for every queue it runs a worker for, not a measure of the Temporal long poll itself). Absent for dedicated while it serves none. |
+| `workflow_execution_service_worker_queue_start_failures_total` | counter | - | Dedicated task queue workers that failed to start, counted on every failed attempt (retried on each topology poll). A tenant whose queue fails to start has instances waiting with no worker while the dedicated poll timestamp stays fresh for the other queues. |
 | `workflow_execution_service_workflow_activity_duration_seconds` | histogram | `activity_name`, `outcome` | Per-Activity execution latency, by activity_name and outcome. |
 | `workflow_execution_service_workflow_replay_failures_total` | counter | `workflow_type` | Total Temporal workflow replay/non-determinism failures, by workflow_type. |
 

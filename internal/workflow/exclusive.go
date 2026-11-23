@@ -32,6 +32,9 @@ func selectBranch(branches []dsl.ExclusiveBranch, resultJSON string) (*dsl.Exclu
 			}
 			continue
 		}
+		if resultJSON == "" {
+			continue
+		}
 		ok, err := evaluateCondition(b.ConditionExpression, resultJSON)
 		if err != nil {
 			return nil, err

@@ -11,6 +11,10 @@ const (
 	InstanceStatusDegraded   InstanceStatus = "DEGRADED"
 )
 
+func (s InstanceStatus) IsLive() bool {
+	return s == InstanceStatusRunning || s == InstanceStatusPaused || s == InstanceStatusDegraded
+}
+
 type TaskStatus string
 
 const (

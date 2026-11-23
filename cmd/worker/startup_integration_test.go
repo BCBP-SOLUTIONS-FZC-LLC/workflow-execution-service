@@ -173,8 +173,7 @@ func TestPollQueueTopologyOnce_StartsAndRegistersAWorkerForAQueueItDoesNotServeY
 	wkbootStopRegistered(t, registry)
 	log := &wkbootRecordingLog{}
 	repo := &wkbootQueueRepo{active: []*domain.ActiveTaskQueue{{TenantID: tenant, QueueName: queue, Routable: true}}}
-	gauge := observability.WorkerQueueLastPollTimestamp.WithLabelValues(queue)
-	gauge.Set(1)
+	observability.WorkerQueueLastPollTimestamp.WithLabelValues(observability.QueueClassDedicated).Set(1)
 
 	pollQueueTopologyOnce(context.Background(), sdk, &outboundtemporal.Deps{}, repo, "wkboot-start-default", registry, log)
 
@@ -184,7 +183,7 @@ func TestPollQueueTopologyOnce_StartsAndRegistersAWorkerForAQueueItDoesNotServeY
 	if got := len(registry.all()); got != 1 {
 		t.Errorf("registry holds %d workers, want 1", got)
 	}
-	if got := testutil.ToFloat64(gauge); got <= 1 {
+	if got := testutil.ToFloat64(observability.WorkerQueueLastPollTimestamp.WithLabelValues(observability.QueueClassDedicated)); got <= 1 {
 		t.Errorf("queue poll timestamp = %v, want it set when the worker started", got)
 	}
 	var started []wkbootLogEntry
@@ -243,10 +242,8 @@ func TestPollQueueTopologyOnce_QueueStartFailuresAreLoggedOneByOneLeftUnregister
 		{TenantID: uuid.New(), QueueName: first, Routable: true},
 		{TenantID: uuid.New(), QueueName: second, Routable: true},
 	}}
-	firstGauge := observability.WorkerQueueLastPollTimestamp.WithLabelValues(first)
-	secondGauge := observability.WorkerQueueLastPollTimestamp.WithLabelValues(second)
-	firstGauge.Set(1)
-	secondGauge.Set(1)
+	dedicatedGauge := observability.WorkerQueueLastPollTimestamp.WithLabelValues(observability.QueueClassDedicated)
+	dedicatedGauge.Set(1)
 
 	pollQueueTopologyOnce(context.Background(), bad, &outboundtemporal.Deps{}, repo, "wkboot-fail-default", registry, log)
 	pollQueueTopologyOnce(context.Background(), bad, &outboundtemporal.Deps{}, repo, "wkboot-fail-default", registry, log)
@@ -274,7 +271,7 @@ func TestPollQueueTopologyOnce_QueueStartFailuresAreLoggedOneByOneLeftUnregister
 	if got := len(registry.all()); got != 0 {
 		t.Errorf("registry holds %d workers, want none for queues that failed to start", got)
 	}
-	if testutil.ToFloat64(firstGauge) != 1 || testutil.ToFloat64(secondGauge) != 1 {
+	if testutil.ToFloat64(dedicatedGauge) != 1 {
 		t.Error("a poll timestamp was set for a queue whose worker failed to start")
 	}
 }

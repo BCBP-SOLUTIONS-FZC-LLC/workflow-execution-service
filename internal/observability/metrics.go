@@ -39,6 +39,9 @@ var (
 	InstanceDegradedCurrent             prometheus.Gauge
 	InstanceDegradedOldestAgeSeconds    prometheus.Gauge
 	WorkerQueueLastPollTimestamp        *prometheus.GaugeVec
+	WorkerQueueStartFailuresTotal       prometheus.Counter
+	ReassignFailuresTotal               prometheus.Counter
+	ActivityLongRetriesTotal            prometheus.Counter
 	InstancesByQueue                    *prometheus.GaugeVec
 	SLABreachesTotal                    prometheus.Counter
 	DelegationScopeUnhandledTotal       *prometheus.CounterVec
@@ -131,13 +134,22 @@ func registerServiceMetrics() {
 		"Live count of instances currently DEGRADED."))
 	InstanceDegradedOldestAgeSeconds = must(gincommon.NewGauge(nil,
 		"workflow_execution_service_instance_degraded_oldest_age_seconds",
-		"Age in seconds of the longest-parked DEGRADED instance."))
+		"Age in seconds of the longest-parked DEGRADED instance, measured from the instant it entered DEGRADED."))
 	WorkerQueueLastPollTimestamp = must(gincommon.NewGaugeVec(nil,
 		"workflow_execution_service_worker_queue_last_poll_timestamp",
-		"Unix time of the last topology poll in which this process served the task queue (set on every poll for every queue it runs a worker for, not a measure of the Temporal long poll itself).", "queue"))
+		"Unix time of the last topology poll in which this process served a task queue of the class in the queue label, default or dedicated (set on every poll for every queue it runs a worker for, not a measure of the Temporal long poll itself). Absent for dedicated while it serves none.", "queue"))
+	WorkerQueueStartFailuresTotal = must(gincommon.NewCounter(nil,
+		"workflow_execution_service_worker_queue_start_failures_total",
+		"Dedicated task queue workers that failed to start, counted on every failed attempt (retried on each topology poll). A tenant whose queue fails to start has instances waiting with no worker while the dedicated poll timestamp stays fresh for the other queues."))
+	ReassignFailuresTotal = must(gincommon.NewCounter(nil,
+		"workflow_execution_service_reassign_failures_total",
+		"Admin reassignments the reassign Activity ended for good (a malformed id, an unknown task or a stale record version), so the task keeps its previous assignee. Transient errors retry without limit and are not counted."))
+	ActivityLongRetriesTotal = must(gincommon.NewCounter(nil,
+		"workflow_execution_service_activity_long_retries_total",
+		"Activity attempts beyond the tenth. Activities retry without limit, so an activity that fails for a permanent reason keeps its instance stuck with no other signal; every attempt past the tenth is one more retry of an activity that failed ten times in a row."))
 	InstancesByQueue = must(gincommon.NewGaugeVec(nil,
 		"workflow_execution_service_instances_by_queue",
-		"Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue, sampled by the API process. A queue with none is absent.",
+		"Non-terminal instances (RUNNING, PAUSED or DEGRADED) per task queue class, default or dedicated, sampled by the API process. A class with none is absent.",
 		"queue"))
 	SLABreachesTotal = must(gincommon.NewCounter(nil,
 		"workflow_execution_service_sla_breaches_total",
@@ -272,6 +284,26 @@ func AddRetentionRowsDeleted(table string, n int64) {
 	if RetentionRowsDeletedTotal != nil {
 		RetentionRowsDeletedTotal.WithLabelValues(table).Add(float64(n))
 	}
+}
+
+const (
+	QueueClassDefault   = "default"
+	QueueClassDedicated = "dedicated"
+)
+
+func QueueClass(queue, defaultQueue string) string {
+	if queue == defaultQueue {
+		return QueueClassDefault
+	}
+	return QueueClassDedicated
+}
+
+func InstancesByQueueClass(byQueue map[string]int64, defaultQueue string) map[string]int64 {
+	byClass := make(map[string]int64, 2)
+	for queue, n := range byQueue {
+		byClass[QueueClass(queue, defaultQueue)] += n
+	}
+	return byClass
 }
 
 func RecordOperationalStats(degraded int64, oldestDegradedAgeSeconds, oldestReadyTaskAgeSeconds float64, instancesByQueue map[string]int64) {

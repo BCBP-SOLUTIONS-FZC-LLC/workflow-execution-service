@@ -1,0 +1,41 @@
+# Read by `make fuzz-api` and `make fuzz-internal-api`. Each entry names one operation and one
+# check: nothing here turns a check off for a whole API. The README lists them as known artefacts.
+# An expected-statuses list replaces the check's default, so each one repeats the default set
+# (positive_data_acceptance: 2xx, 3xx, 401, 403, 404, 409, 429, 5xx; not_a_server_error: below 500)
+# and adds the one status that is intended.
+
+# A NUL character in a string is valid JSON but refused with 400 (it cannot be stored), and the
+# schemas have no keyword that leaves it out of every string field.
+[generation]
+allow-x00 = false
+
+# A cursor is opaque: only a value a previous page returned is valid, and a schema cannot say so.
+# The fuzzer sends it empty (the first page) instead of random text.
+[parameters]
+cursor = ""
+
+# The four event routes take an envelope whose payload is opaque to the schema: an envelope with
+# a payload that does not decode (400), an unhandled type with any payload (200, ignored) and a
+# schema-registry frame that is not one (502, retryable, LLD section 5.10) are all intended.
+[[operations]]
+include-name-regex = "^POST /api/v1/internal/events/(delegation|user-profile|tenant|workflow-task)$"
+checks.not_a_server_error.expected-statuses = ["2XX", "3XX", "4XX", 502]
+checks.positive_data_acceptance.expected-statuses = [
+  "2XX", "3XX", 400, 401, 403, 404, 409, 429, "5XX",
+]
+checks.negative_data_rejection.enabled = false
+
+# new_delegate_id must differ from old_delegate_id: a rule across two fields.
+[[operations]]
+include-name = "POST /api/v1/internal/workflows/reassign-delegate"
+checks.positive_data_acceptance.expected-statuses = [
+  "2XX", "3XX", 400, 401, 403, 404, 409, 429, "5XX",
+]
+
+# error_class is limited to 100 bytes in its description; a schema keyword for it would be a
+# breaking change to the contract.
+[[operations]]
+include-name = "POST /api/v1/internal/connector-tasks/{id}/fail"
+checks.positive_data_acceptance.expected-statuses = [
+  "2XX", "3XX", 400, 401, 403, 404, 409, 429, "5XX",
+]

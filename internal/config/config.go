@@ -177,7 +177,7 @@ func Load() (*Config, error) {
 		return v
 	}
 
-	appEnv := getEnvOrDefault("APP_ENV", "dev")
+	appEnv := getEnvOrDefault("APP_ENV", "")
 	cfg := &Config{
 		AppEnv:       appEnv,
 		BuildVersion: getEnvOrDefault("BUILD_VERSION", "dev"),

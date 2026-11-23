@@ -46,6 +46,12 @@ func (r *csfImpactTasks) GetByID(_ context.Context, tenantID, id uuid.UUID) (*do
 	return task, nil
 }
 
+type csfRunningInstances struct{ port.InstanceRepository }
+
+func (csfRunningInstances) GetByID(_ context.Context, tenantID, id uuid.UUID) (*domain.Instance, error) {
+	return &domain.Instance{ID: id, TenantID: tenantID, Status: domain.InstanceStatusRunning}, nil
+}
+
 type csfImpactBody struct {
 	ActiveWorkflows   int         `json:"active_workflows"`
 	ActiveAssignments int         `json:"active_assignments"`
@@ -68,7 +74,7 @@ func TestDelegateImpact_UppercaseDelegationID_MatchesTheLowercaseReasonTag(t *te
 			{otherInstance, "delegation:" + otherDelegationID.String()},
 			{untaggedInstance, "manual-assign"},
 		} {
-			task := &domain.Task{ID: uuid.New(), TenantID: testTenantID, WorkflowInstanceID: tc.instance}
+			task := &domain.Task{ID: uuid.New(), TenantID: testTenantID, WorkflowInstanceID: tc.instance, Status: domain.TaskStatusReady}
 			tasks.byID[task.ID] = task
 			active = append(active, &domain.TaskAssignment{
 				ID: uuid.New(), TenantID: testTenantID, TaskID: task.ID, UserID: testOldDelegateID, IsActive: true, Reason: tc.reason,
@@ -81,7 +87,7 @@ func TestDelegateImpact_UppercaseDelegationID_MatchesTheLowercaseReasonTag(t *te
 		t.Helper()
 		tasks, active := newTasks()
 		assignments := &csfImpactAssignments{active: active}
-		client := &service.WorkflowClient{Tasks: tasks, Assignments: assignments}
+		client := &service.WorkflowClient{Tasks: tasks, Assignments: assignments, Instances: csfRunningInstances{}}
 		router := newInternalRouter(handler.New(handler.Services{WorkflowClient: client}))
 
 		url := "/api/v1/internal/workflows/delegate-impact?tenant_id=" + testTenantID.String() +

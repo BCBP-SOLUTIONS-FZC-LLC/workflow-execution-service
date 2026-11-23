@@ -55,6 +55,10 @@ type w12bForceBackTemporal struct {
 	signals []w12bForceBackSignal
 }
 
+func (c *w12bForceBackTemporal) QueryWorkflow(_ context.Context, _, _ string, out any) error {
+	return json.Unmarshal([]byte(`{"FailedBranches":[{"DeptID":"billing","Covers":["billing"]}],"HistoryLen":1}`), out)
+}
+
 func (c *w12bForceBackTemporal) SignalWorkflow(_ context.Context, temporalWorkflowID string, instanceID uuid.UUID, name string, payload any) error {
 	c.signals = append(c.signals, w12bForceBackSignal{temporalWorkflowID, instanceID, name, payload})
 	return nil

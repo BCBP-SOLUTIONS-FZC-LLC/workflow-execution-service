@@ -32,6 +32,8 @@ var (
 	ErrNotWaiting              = errors.New("instance is not waiting there")
 	ErrOverrideMapInvalid      = errors.New("override_map references an unknown node key or invalid value")
 
+	ErrAnswerVariablesInvalid = errors.New("the answer's variables cannot be merged into the instance context")
+
 	// ErrTemporalUnavailable: the Temporal Cluster could not take a workflow start or a signal;
 	// the request can be sent again.
 	ErrTemporalUnavailable = errors.New("the workflow engine could not take the request")

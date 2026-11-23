@@ -27,6 +27,11 @@ func NewTaskAssignmentRepo(pool *pgcommon.Pool) *TaskAssignmentRepo {
 
 func (r *TaskAssignmentRepo) Create(ctx context.Context, a *domain.TaskAssignment) error {
 	ctx = withTenantGUC(ctx, a.TenantID)
+	assignedAt := a.AssignedAt
+	if assignedAt == nil {
+		now := time.Now().UTC()
+		assignedAt = &now
+	}
 	return exec(ctx, r.pool, func(dbtx db.DBTX) error {
 		row, err := db.New(dbtx).CreateWorkflowTaskAssignment(ctx, db.CreateWorkflowTaskAssignmentParams{
 			ID:         a.ID,
@@ -36,7 +41,7 @@ func (r *TaskAssignmentRepo) Create(ctx context.Context, a *domain.TaskAssignmen
 			AssignedBy: toPgtypeUUID(a.AssignedBy),
 			Reason:     toNullableText(a.Reason),
 			IsLead:     a.IsLead,
-			AssignedAt: toPgtypeTimestamptz(a.AssignedAt),
+			AssignedAt: toPgtypeTimestamptz(assignedAt),
 		})
 		if err != nil {
 			return mapErr(err)
