@@ -22,6 +22,9 @@ func TestFailConnectorTask_RefusedErrorClass_Returns400(t *testing.T) {
 		{"newline inside", `"upstream\ntimeout"`},
 		{"escape character", `"upstream\u001btimeout"`},
 		{"delete character", `"upstream\u007ftimeout"`},
+		{"line separator", `"upstream\u2028timeout"`},
+		{"bidi override", `"upstream\u202etimeout"`},
+		{"zero-width space", `"upstream\u200btimeout"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

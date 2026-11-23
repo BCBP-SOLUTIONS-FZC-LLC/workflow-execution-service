@@ -90,6 +90,7 @@ func NewRouter(cfg RouterConfig) *Router {
 	}
 	r.Use(requestTimeout(RequestTimeout))
 	r.Use(middleware.LogRequestErrors(cfg.GinConfig.Logger))
+	r.Use(handler.RejectNulInRequestStrings())
 
 	ready := readyzHandler(cfg.DB, cfg.Cache, cfg.Temporal, cfg.ShuttingDown)
 	r.GET("/healthz", gincommon.HealthHandler())

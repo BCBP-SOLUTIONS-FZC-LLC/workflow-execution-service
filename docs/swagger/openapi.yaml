@@ -759,9 +759,9 @@ components:
       description: >
         Malformed JSON body, missing required fields, or a value that is not valid, such as an
         id that is not a UUID in the body, a query parameter or the path. invalid_params names
-        the field (a path parameter as one) with the reason "is not valid". A JSON body with a
-        NUL character (\u0000) in any string, key included, is refused as well, as the store
-        cannot keep one.
+        the field (a path parameter as one) with the reason "is not valid". A NUL
+        character (\u0000) in any body string, key included, in a query name or value or in a
+        path segment is refused as well, as the store cannot keep one.
       content:
         application/problem+json:
           schema:

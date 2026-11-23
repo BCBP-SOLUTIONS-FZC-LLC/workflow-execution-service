@@ -290,6 +290,10 @@ func (h *Handler) logError(msg string, fields map[string]any) {
 	}
 }
 
+func isUnprintableErrorClassRune(r rune) bool {
+	return unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp)
+}
+
 func pageParams(c *gin.Context) (port.Page, bool) {
 	limit := defaultPageLimit
 	if raw := c.Query("limit"); raw != "" {
@@ -338,6 +342,6 @@ func registerJSONFieldNames() {
 	_ = engine.RegisterValidation("errorclass", func(fl validator.FieldLevel) bool {
 		value := fl.Field().String()
 		return len(value) <= maxErrorClassBytes &&
-			strings.IndexFunc(value, unicode.IsControl) < 0
+			strings.IndexFunc(value, isUnprintableErrorClassRune) < 0
 	})
 }

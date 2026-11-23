@@ -59,6 +59,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- A NUL character in a query name or value or in a path segment answers 400 BAD_REQUEST, as one in a body string already does, instead of reaching the database.
+- A connector failure's `error_class` with a control, format or line-separator character (for example a bidi override or a line separator) is refused with 400 BAD_REQUEST.
 - CI: the schema registration workflow's freeze check no longer fails when no freeze is set, so a push that changes the event schemas gets past that step and reaches the registration; `make check` runs the step for every freeze and force combination.
 - Docs only: the metric registry names the 200 answer of a task defer in the help text of the task signal duration.
 - CI: the schema registration, schema prune, quarterly schema health and release workflows can read the private schema-governance image and the service images: the staging and production jobs keep `packages: read` next to their own `contents: write`, and each job that pulls an image logs in to the registry first. Before, every push to `main` failed the staging registration with 403 on the image pull.
