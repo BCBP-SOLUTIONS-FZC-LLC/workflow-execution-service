@@ -14,6 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Fixed
 
+- CI: a draft PR, a documentation-only change and the `skip-ci` label now set one skip flag, so the Validate workflows are always called and report their jobs as skipped (a draft used to keep them from being called, so their required checks never reported). A merge to main no longer pushes an image; images are built, pushed and signed on a version tag only (`release.yml`).
 - OpenTelemetry moves from 1.46.0 to 1.47.0, which fixes GO-2026-6975 (memory amplification when parsing W3C baggage) and GO-2026-6974 (attribute length limit bypass in the SDK); the vulnerability check was failing on both.
 
 ### Tests
