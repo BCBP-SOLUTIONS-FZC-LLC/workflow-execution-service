@@ -63,10 +63,10 @@ func TestEndedDelegateTable_ForcesRowLevelSecurityAndIsolatesTenants(t *testing.
 
 	var ownTenant, visibleToB, withoutTenant int
 	require.NoError(t, appPool.WithConn(withGUC(ctx, tenantA), func(ctx context.Context, conn *pgxpool.Conn) error {
-		return conn.QueryRow(ctx, "SELECT count(*) FROM ended_delegate WHERE delegate_id = $1", delegate).Scan(&ownTenant)
+		return conn.QueryRow(ctx, "SELECT count(*) FROM ended_delegate WHERE delegate_user_id = $1", delegate).Scan(&ownTenant)
 	}))
 	require.NoError(t, appPool.WithConn(withGUC(ctx, tenantB), func(ctx context.Context, conn *pgxpool.Conn) error {
-		return conn.QueryRow(ctx, "SELECT count(*) FROM ended_delegate WHERE delegate_id = $1", delegate).Scan(&visibleToB)
+		return conn.QueryRow(ctx, "SELECT count(*) FROM ended_delegate WHERE delegate_user_id = $1", delegate).Scan(&visibleToB)
 	}))
 	require.NoError(t, appPool.WithConn(ctx, func(ctx context.Context, conn *pgxpool.Conn) error {
 		return conn.QueryRow(ctx, "SELECT count(*) FROM ended_delegate").Scan(&withoutTenant)
@@ -76,7 +76,7 @@ func TestEndedDelegateTable_ForcesRowLevelSecurityAndIsolatesTenants(t *testing.
 	assert.Zero(t, withoutTenant, "a connection with no tenant sees nothing")
 
 	require.Error(t, appPool.WithConn(withGUC(ctx, tenantB), func(ctx context.Context, conn *pgxpool.Conn) error {
-		_, err := conn.Exec(ctx, "INSERT INTO ended_delegate (tenant_id, delegate_id, ended_at) VALUES ($1, $2, now())", tenantA, uuid.New())
+		_, err := conn.Exec(ctx, "INSERT INTO ended_delegate (tenant_id, delegate_user_id, ended_at) VALUES ($1, $2, now())", tenantA, uuid.New())
 		return err
 	}), "a connection scoped to another tenant cannot write the tenant's rows")
 }

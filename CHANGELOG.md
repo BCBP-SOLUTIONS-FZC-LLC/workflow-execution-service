@@ -10,7 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
-- The `DelegationStarted` and `DelegationEnded` events read the delegate from `delegate_user_id`, the name every IAM service now uses, instead of `delegate_id`. An event that still carries only `delegate_id` is refused with 400 `BAD_REQUEST`, so the consumer dead-letters it. The inbound schemas, `api/asyncapi.yaml` and the LLD use the new name. The `ended_delegate` table column keeps its name, as it is not part of the event.
+- The `DelegationStarted` and `DelegationEnded` events read the delegate from `delegate_user_id`, the name every IAM service now uses, instead of `delegate_id`. An event that still carries only `delegate_id` is refused with 400 `BAD_REQUEST`, so the consumer dead-letters it. The inbound schemas, `api/asyncapi.yaml` and the LLD use the new name. The `ended_delegate` column is renamed the same way, by editing its creating migration (000013) as nothing is deployed: a local database that already ran it must be recreated.
 
 ### Fixed
 

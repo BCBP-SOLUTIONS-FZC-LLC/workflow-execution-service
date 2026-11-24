@@ -13,10 +13,10 @@ SELECT EXISTS (
 -- name: MarkDelegateEnded :exec
 -- Backs EndedDelegationRepo.MarkDelegateEnded -- a later cancel moves the time
 -- forward, an older one never moves it back.
-INSERT INTO ended_delegate (tenant_id, delegate_id, ended_at)
+INSERT INTO ended_delegate (tenant_id, delegate_user_id, ended_at)
 VALUES ($1, $2, $3)
-ON CONFLICT (tenant_id, delegate_id) DO UPDATE
+ON CONFLICT (tenant_id, delegate_user_id) DO UPDATE
     SET ended_at = GREATEST(ended_delegate.ended_at, EXCLUDED.ended_at);
 
 -- name: GetDelegateEndedAt :one
-SELECT ended_at FROM ended_delegate WHERE tenant_id = $1 AND delegate_id = $2;
+SELECT ended_at FROM ended_delegate WHERE tenant_id = $1 AND delegate_user_id = $2;

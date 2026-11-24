@@ -89,7 +89,7 @@ WHERE (tenant_id, delegation_id) IN (SELECT e.tenant_id, e.delegation_id FROM en
 
 -- name: PurgeTenantEndedDelegates :execrows
 DELETE FROM ended_delegate
-WHERE (tenant_id, delegate_id) IN (SELECT e.tenant_id, e.delegate_id FROM ended_delegate e WHERE e.tenant_id = $1 LIMIT $2);
+WHERE (tenant_id, delegate_user_id) IN (SELECT e.tenant_id, e.delegate_user_id FROM ended_delegate e WHERE e.tenant_id = $1 LIMIT $2);
 
 -- name: PurgeTenantQueues :execrows
 DELETE FROM active_task_queues WHERE tenant_id = $1;
