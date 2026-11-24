@@ -15,7 +15,7 @@ import (
 
 func fxcDelegationStarted(eventID uuid.UUID, scope string, scopeID any) map[string]any {
 	payload := map[string]any{
-		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID, "delegate_id": testDelegateID2,
+		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID, "delegate_user_id": testDelegateID2,
 		"scope": scope, "starts_at": time.Now().Format(time.RFC3339),
 	}
 	if scopeID != nil {

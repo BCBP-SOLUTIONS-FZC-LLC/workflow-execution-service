@@ -35,7 +35,7 @@ func TestInternalEvents_RLSSettingUsesTheCanonicalTenantID(t *testing.T) {
 		"DelegationStarted": {
 			body: func() map[string]any {
 				return envelope("DelegationStarted", uuid.New(), testTenantID, now, map[string]any{
-					"delegation_id": testDelegationID2, "delegator_id": testDelegatorID, "delegate_id": testDelegateID2,
+					"delegation_id": testDelegationID2, "delegator_id": testDelegatorID, "delegate_user_id": testDelegateID2,
 					"scope": "department", "scope_id": testDelegatorID.String(), "starts_at": now.Format(time.RFC3339),
 				})
 			},
@@ -46,7 +46,7 @@ func TestInternalEvents_RLSSettingUsesTheCanonicalTenantID(t *testing.T) {
 		"DelegationEnded": {
 			body: func() map[string]any {
 				return envelope("DelegationEnded", uuid.New(), testTenantID, now, map[string]any{
-					"delegation_id": testDelegationID2, "delegator_id": testDelegatorID, "delegate_id": testDelegateID2, "ended_reason": "expired",
+					"delegation_id": testDelegationID2, "delegator_id": testDelegatorID, "delegate_user_id": testDelegateID2, "ended_reason": "expired",
 				})
 			},
 			wire: func(f *eventsFakes, got *string) {

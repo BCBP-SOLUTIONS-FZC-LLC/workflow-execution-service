@@ -81,7 +81,7 @@ func TestE2E_DelegationStartedThenEnded(t *testing.T) {
 
 	t0 := time.Now()
 	resp = postInternalEvent(t, admin, "/api/v1/internal/events/delegation", "DelegationStarted", tenantID, t0, map[string]any{
-		"delegation_id": delegationID.String(), "delegator_id": delegatorID.String(), "delegate_id": delegateID.String(),
+		"delegation_id": delegationID.String(), "delegator_id": delegatorID.String(), "delegate_user_id": delegateID.String(),
 		"scope": "all", "starts_at": t0.Format(time.RFC3339),
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -109,7 +109,7 @@ func TestE2E_DelegationStartedThenEnded(t *testing.T) {
 	// something to restore rather than racing the task's own completion.
 	t1 := t0.Add(time.Second)
 	resp = postInternalEvent(t, admin, "/api/v1/internal/events/delegation", "DelegationEnded", tenantID, t1, map[string]any{
-		"delegation_id": delegationID.String(), "delegator_id": delegatorID.String(), "delegate_id": delegateID.String(),
+		"delegation_id": delegationID.String(), "delegator_id": delegatorID.String(), "delegate_user_id": delegateID.String(),
 		"ended_reason": "expired",
 	})
 	if resp.StatusCode != http.StatusOK {

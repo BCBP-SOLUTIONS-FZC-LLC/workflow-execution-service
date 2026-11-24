@@ -141,12 +141,12 @@ func TestHandleDelegationEvents_DispatchesDelegationStarted(t *testing.T) {
 	router := newInternalRouter(newEventsHandler(fakes))
 
 	w := postEventTo(router, "/api/v1/internal/events/delegation", envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"delegation_id": testDelegationID2,
-		"delegator_id":  testDelegatorID,
-		"delegate_id":   testDelegateID2,
-		"scope":         "department",
-		"scope_id":      testDelegatorID.String(),
-		"starts_at":     time.Now().Format(time.RFC3339),
+		"delegation_id":    testDelegationID2,
+		"delegator_id":     testDelegatorID,
+		"delegate_user_id": testDelegateID2,
+		"scope":            "department",
+		"scope_id":         testDelegatorID.String(),
+		"starts_at":        time.Now().Format(time.RFC3339),
 	}))
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -172,10 +172,10 @@ func TestHandleDelegationEvents_DispatchesDelegationEnded(t *testing.T) {
 	router := newInternalRouter(newEventsHandler(fakes))
 
 	w := postEventTo(router, "/api/v1/internal/events/delegation", envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"delegation_id": testDelegationID2,
-		"delegator_id":  testDelegatorID,
-		"delegate_id":   testDelegateID2,
-		"ended_reason":  "expired",
+		"delegation_id":    testDelegationID2,
+		"delegator_id":     testDelegatorID,
+		"delegate_user_id": testDelegateID2,
+		"ended_reason":     "expired",
 	}))
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -277,12 +277,12 @@ func TestHandleInternalEvent_DelegationStarted_Success(t *testing.T) {
 
 	eventID := uuid.New()
 	w := postEvent(router, envelope("DelegationStarted", eventID, testTenantID, time.Now(), map[string]any{
-		"delegation_id": testDelegationID2,
-		"delegator_id":  testDelegatorID,
-		"delegate_id":   testDelegateID2,
-		"scope":         "department",
-		"scope_id":      testDelegatorID.String(),
-		"starts_at":     time.Now().Format(time.RFC3339),
+		"delegation_id":    testDelegationID2,
+		"delegator_id":     testDelegatorID,
+		"delegate_user_id": testDelegateID2,
+		"scope":            "department",
+		"scope_id":         testDelegatorID.String(),
+		"starts_at":        time.Now().Format(time.RFC3339),
 	}))
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -301,7 +301,7 @@ func TestHandleInternalEvent_DelegationStarted_BadPayload_MissingField(t *testin
 
 	w := postEvent(router, envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2,
-		// delegator_id, delegate_id, scope, starts_at all omitted
+		// delegator_id, delegate_user_id, scope, starts_at all omitted
 	}))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -316,11 +316,11 @@ func TestHandleInternalEvent_DelegationStarted_ReconcilerError_500_DedupNotRecor
 
 	eventID := uuid.New()
 	body := envelope("DelegationStarted", eventID, testTenantID, time.Now(), map[string]any{
-		"delegation_id": testDelegationID2,
-		"delegator_id":  testDelegatorID,
-		"delegate_id":   testDelegateID2,
-		"scope":         "all",
-		"starts_at":     time.Now().Format(time.RFC3339),
+		"delegation_id":    testDelegationID2,
+		"delegator_id":     testDelegatorID,
+		"delegate_user_id": testDelegateID2,
+		"scope":            "all",
+		"starts_at":        time.Now().Format(time.RFC3339),
 	})
 
 	w := postEvent(router, body)
@@ -338,11 +338,11 @@ func TestHandleInternalEvent_DelegationStarted_ObservesRerouteDuration(t *testin
 	before := rerouteDurationSampleCount(t)
 
 	w := postEvent(router, envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"delegation_id": testDelegationID2,
-		"delegator_id":  testDelegatorID,
-		"delegate_id":   testDelegateID2,
-		"scope":         "all",
-		"starts_at":     time.Now().Format(time.RFC3339),
+		"delegation_id":    testDelegationID2,
+		"delegator_id":     testDelegatorID,
+		"delegate_user_id": testDelegateID2,
+		"scope":            "all",
+		"starts_at":        time.Now().Format(time.RFC3339),
 	}))
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -376,10 +376,10 @@ func TestHandleInternalEvent_DelegationEnded_Success(t *testing.T) {
 	router := newInternalRouter(newEventsHandler(fakes))
 
 	w := postEvent(router, envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"delegation_id": testDelegationID2,
-		"delegator_id":  testDelegatorID,
-		"delegate_id":   testDelegateID2,
-		"ended_reason":  "expired",
+		"delegation_id":    testDelegationID2,
+		"delegator_id":     testDelegatorID,
+		"delegate_user_id": testDelegateID2,
+		"ended_reason":     "expired",
 	}))
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -399,7 +399,7 @@ func TestHandleInternalEvent_DelegationEnded_InvalidEnvelopeTenantID_400(t *test
 
 	body := envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID,
-		"delegate_id": testDelegateID2, "ended_reason": "expired",
+		"delegate_user_id": testDelegateID2, "ended_reason": "expired",
 	})
 	body["tenant_id"] = "not-a-uuid"
 
@@ -437,10 +437,10 @@ func TestHandleInternalEvent_DelegationEnded_EndedReason(t *testing.T) {
 			router := newInternalRouter(newEventsHandler(fakes))
 
 			w := postEvent(router, envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
-				"delegation_id": testDelegationID2,
-				"delegator_id":  testDelegatorID,
-				"delegate_id":   testDelegateID2,
-				"ended_reason":  tc.reason,
+				"delegation_id":    testDelegationID2,
+				"delegator_id":     testDelegatorID,
+				"delegate_user_id": testDelegateID2,
+				"ended_reason":     tc.reason,
 			}))
 
 			require.Equal(t, http.StatusOK, w.Code)
@@ -715,7 +715,7 @@ func TestHandleInternalEvent_InvalidEventID_400(t *testing.T) {
 
 	body := envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID,
-		"delegate_id": testDelegateID2, "ended_reason": "expired",
+		"delegate_user_id": testDelegateID2, "ended_reason": "expired",
 	})
 	body["id"] = "not-a-uuid"
 
@@ -741,12 +741,12 @@ func TestHandleInternalEvent_InvalidEnvelopeTenantID_400(t *testing.T) {
 func TestHandleInternalEvent_DelegationStarted_InvalidFields(t *testing.T) {
 	validData := func() map[string]any {
 		return map[string]any{
-			"delegation_id": testDelegationID2.String(),
-			"delegator_id":  testDelegatorID.String(),
-			"delegate_id":   testDelegateID2.String(),
-			"scope":         "all",
-			"starts_at":     time.Now().Format(time.RFC3339),
-			"ends_at":       time.Now().Add(time.Hour).Format(time.RFC3339),
+			"delegation_id":    testDelegationID2.String(),
+			"delegator_id":     testDelegatorID.String(),
+			"delegate_user_id": testDelegateID2.String(),
+			"scope":            "all",
+			"starts_at":        time.Now().Format(time.RFC3339),
+			"ends_at":          time.Now().Add(time.Hour).Format(time.RFC3339),
 		}
 	}
 
@@ -757,7 +757,7 @@ func TestHandleInternalEvent_DelegationStarted_InvalidFields(t *testing.T) {
 	}{
 		{"delegation_id", "delegation_id", "not-a-uuid"},
 		{"delegator_id", "delegator_id", "not-a-uuid"},
-		{"delegate_id", "delegate_id", "not-a-uuid"},
+		{"delegate_user_id", "delegate_user_id", "not-a-uuid"},
 		{"starts_at", "starts_at", "not-a-time"},
 		{"ends_at", "ends_at", "not-a-time"},
 	}
@@ -784,13 +784,13 @@ func TestHandleInternalEvent_DelegationStarted_InvalidFields(t *testing.T) {
 func TestHandleInternalEvent_DelegationEnded_InvalidFields(t *testing.T) {
 	validData := func() map[string]any {
 		return map[string]any{
-			"delegation_id": testDelegationID2.String(),
-			"delegator_id":  testDelegatorID.String(),
-			"delegate_id":   testDelegateID2.String(),
-			"ended_reason":  "expired",
+			"delegation_id":    testDelegationID2.String(),
+			"delegator_id":     testDelegatorID.String(),
+			"delegate_user_id": testDelegateID2.String(),
+			"ended_reason":     "expired",
 		}
 	}
-	for _, field := range []string{"delegation_id", "delegator_id", "delegate_id"} {
+	for _, field := range []string{"delegation_id", "delegator_id", "delegate_user_id"} {
 		t.Run(field, func(t *testing.T) {
 			fakes := newEventsFakes()
 			router := newInternalRouter(newEventsHandler(fakes))
@@ -938,7 +938,7 @@ func TestHandleInternalEvent_DelegationStarted_AlreadyProcessed_SkipsReroute(t *
 
 	body := envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID,
-		"delegate_id": testDelegateID2, "scope": "all", "starts_at": time.Now().Format(time.RFC3339),
+		"delegate_user_id": testDelegateID2, "scope": "all", "starts_at": time.Now().Format(time.RFC3339),
 	})
 	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
 	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
@@ -953,7 +953,7 @@ func TestHandleInternalEvent_DelegationStarted_NoEndsAt(t *testing.T) {
 
 	w := postEvent(router, envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID,
-		"delegate_id": testDelegateID2, "scope": "all", "starts_at": time.Now().Format(time.RFC3339),
+		"delegate_user_id": testDelegateID2, "scope": "all", "starts_at": time.Now().Format(time.RFC3339),
 	}))
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -968,7 +968,7 @@ func TestHandleInternalEvent_DelegationEnded_AlreadyProcessed_SkipsReverse(t *te
 
 	body := envelope("DelegationEnded", uuid.New(), testTenantID, time.Now(), map[string]any{
 		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID,
-		"delegate_id": testDelegateID2, "ended_reason": "expired",
+		"delegate_user_id": testDelegateID2, "ended_reason": "expired",
 	})
 	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
 	require.Equal(t, http.StatusOK, postEvent(router, body).Code)
@@ -1061,7 +1061,7 @@ func TestHandleInternalEvent_MalformedDataPayload_PerEventType(t *testing.T) {
 func TestHandleInternalEvent_DelegationStarted_InvalidEnvelopeIDs(t *testing.T) {
 	validData := map[string]any{
 		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID,
-		"delegate_id": testDelegateID2, "scope": "all", "starts_at": time.Now().Format(time.RFC3339),
+		"delegate_user_id": testDelegateID2, "scope": "all", "starts_at": time.Now().Format(time.RFC3339),
 	}
 	t.Run("invalid event id", func(t *testing.T) {
 		fakes := newEventsFakes()
@@ -1127,7 +1127,7 @@ func TestHandleInternalEvent_DelegationStarted_ValidEndsAt(t *testing.T) {
 	router := newInternalRouter(newEventsHandler(fakes))
 
 	w := postEvent(router, envelope("DelegationStarted", uuid.New(), testTenantID, time.Now(), map[string]any{
-		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID, "delegate_id": testDelegateID2,
+		"delegation_id": testDelegationID2, "delegator_id": testDelegatorID, "delegate_user_id": testDelegateID2,
 		"scope": "all", "starts_at": time.Now().Format(time.RFC3339),
 		"ends_at": time.Now().Add(time.Hour).Format(time.RFC3339),
 	}))
@@ -1252,11 +1252,11 @@ func TestHandleInternalEvent_DuplicateDelivery_SecondDeliveryIsNoOp(t *testing.T
 
 	eventID := uuid.New()
 	body := envelope("DelegationStarted", eventID, testTenantID, time.Now(), map[string]any{
-		"delegation_id": testDelegationID2,
-		"delegator_id":  testDelegatorID,
-		"delegate_id":   testDelegateID2,
-		"scope":         "all",
-		"starts_at":     time.Now().Format(time.RFC3339),
+		"delegation_id":    testDelegationID2,
+		"delegator_id":     testDelegatorID,
+		"delegate_user_id": testDelegateID2,
+		"scope":            "all",
+		"starts_at":        time.Now().Format(time.RFC3339),
 	})
 
 	w1 := postEvent(router, body)

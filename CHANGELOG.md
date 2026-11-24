@@ -8,6 +8,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## [Unreleased]
 
+### Changed
+
+- The `DelegationStarted` and `DelegationEnded` events read the delegate from `delegate_user_id`, the name every IAM service now uses, instead of `delegate_id`. An event that still carries only `delegate_id` is refused with 400 `BAD_REQUEST`, so the consumer dead-letters it. The inbound schemas, `api/asyncapi.yaml` and the LLD use the new name. The `ended_delegate` table column keeps its name, as it is not part of the event.
+
+### Fixed
+
+- OpenTelemetry moves from 1.46.0 to 1.47.0, which fixes GO-2026-6975 (memory amplification when parsing W3C baggage) and GO-2026-6974 (attribute length limit bypass in the SDK); the vulnerability check was failing on both.
+
 ### Tests
 
 - Workflow tests schedule every delayed signal and callback through one helper that refuses two callbacks due at the same instant, because the test environment does not define which of them the workflow sees first; results that belong together are sent from one callback in a fixed order, and a pause that must come before a stage result is sent before it. A pause and a stage result sent at the same instant could reach the workflow in either order, which made one workflow test fail at random on CI. A test fails if a delayed callback is registered any other way.

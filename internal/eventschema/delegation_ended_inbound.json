@@ -5,7 +5,7 @@
   "required": [
     "delegation_id",
     "delegator_id",
-    "delegate_id",
+    "delegate_user_id",
     "ended_reason"
   ],
   "additionalProperties": true,
@@ -18,7 +18,7 @@
       "type": "string",
       "format": "uuid"
     },
-    "delegate_id": {
+    "delegate_user_id": {
       "type": "string",
       "format": "uuid"
     },

@@ -802,11 +802,11 @@ components:
     DelegationStartedInbound:
       type: object
       additionalProperties: true
-      required: [delegation_id, delegator_id, delegate_id, scope, starts_at]
+      required: [delegation_id, delegator_id, delegate_user_id, scope, starts_at]
       properties:
         delegation_id: { type: string, format: uuid }
         delegator_id:  { type: string, format: uuid }
-        delegate_id:   { type: string, format: uuid }
+        delegate_user_id:   { type: string, format: uuid }
         scope:         { type: string, enum: [all, department, tender], description: any other value is refused with 400 so the consumer dead-letters the event }
         scope_id:      { type: string, format: uuid, description: omitted by the producer when the scope names no single object; required when scope is department or tender, and an event without it, or with one that is not a UUID, is refused with 400 so the consumer dead-letters it }
         starts_at:     { type: string, format: date-time }
@@ -814,11 +814,11 @@ components:
     DelegationEndedInbound:
       type: object
       additionalProperties: true
-      required: [delegation_id, delegator_id, delegate_id, ended_reason]
+      required: [delegation_id, delegator_id, delegate_user_id, ended_reason]
       properties:
         delegation_id: { type: string, format: uuid }
         delegator_id:  { type: string, format: uuid }
-        delegate_id:   { type: string, format: uuid }
+        delegate_user_id:   { type: string, format: uuid }
         ended_reason:  { type: string, enum: [expired, cancelled, reassigned, delegate_removed, review_expired, delegate_disabled] }
     TenantStateChangedInbound:
       type: object
