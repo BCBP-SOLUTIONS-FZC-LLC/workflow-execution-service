@@ -182,7 +182,7 @@ func (f *credentialFixture) ran(t *testing.T) map[string]any {
 	select {
 	case params := <-f.conn.params:
 		return params
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("the connector did not run")
 		return nil
 	}

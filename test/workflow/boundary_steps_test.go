@@ -10,6 +10,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -54,7 +55,7 @@ func runPathPlan(t *testing.T, depts []dsl.DepartmentDef, steps []dsl.ExecutionS
 		},
 	})
 	for delay, payload := range signals {
-		env.RegisterDelayedCallback(func() { env.SignalWorkflow(signalName[delay]+":instance-1", payload) }, delay)
+		wflclock.After(env, func() { env.SignalWorkflow(signalName[delay]+":instance-1", payload) }, delay)
 	}
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1"})
 	run.err = env.GetWorkflowError()

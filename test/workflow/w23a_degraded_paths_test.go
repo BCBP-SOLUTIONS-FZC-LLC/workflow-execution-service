@@ -12,6 +12,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -100,7 +101,7 @@ func TestExecute_ForceBackOfAParkedBranchRecordsTheRouteAndResetsItsMessageSpanW
 		wflSignalAt(env, 4*time.Second, "instance-force-back", adminSignalWire{AdminUserID: "admin-8", TargetNodeKey: "billing/Charge", RecordVersion: 6})
 		wflSignalAt(env, 6*time.Second, "stage-transition", wflDone("billing", "Charge", 2))
 		var completedWhileWaiting bool
-		env.RegisterDelayedCallback(func() { completedWhileWaiting = env.IsWorkflowCompleted() }, time.Minute)
+		wflclock.After(env, func() { completedWhileWaiting = env.IsWorkflowCompleted() }, time.Minute)
 		wflCancelAt(env, 2*time.Minute)
 
 		status, err := wflStart(t, env, fakes, "")
@@ -179,8 +180,10 @@ func TestExecute_AParkThatDrainsWhileAnotherIsOpenRewritesDegradedWithOnlyTheRem
 		return nil
 	}
 	wflRegisterAll(env, fakes, w23aTwoParkFork())
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("x1", "P", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("y1", "P", 1))
+	wflSignalsAt(env, 2*time.Second,
+		wflSignal{"stage-transition", wflDone("x1", "P", 1)},
+		wflSignal{"stage-transition", wflDone("y1", "P", 1)},
+	)
 	wflSignalAt(env, 6*time.Second, "instance-force-forward", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "y2/P", RecordVersion: 1})
 	wflSignalAt(env, 10*time.Second, "instance-force-forward", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "x2/P", RecordVersion: 2})
 
@@ -228,8 +231,10 @@ func TestExecute_TheForkLoopKeepsReadingAdminSignalsWhileTheStepBeforeItReruns(t
 		wflRegisterAll(env, fakes, w23aForkWithIntakeBoundary(endsItsPath))
 		wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("intake", "Intake", 1))
 		wflSignalAt(env, 5*time.Second, "instance-force-back", forceBack)
-		wflSignalAt(env, 2*time.Hour, "stage-transition", wflDone("warehouse", "Pack", 1))
-		wflSignalAt(env, 2*time.Hour, "stage-transition", wflDone("billing", "Charge", 1))
+		wflSignalsAt(env, 2*time.Hour,
+			wflSignal{"stage-transition", wflDone("warehouse", "Pack", 1)},
+			wflSignal{"stage-transition", wflDone("billing", "Charge", 1)},
+		)
 
 		status, err := wflStart(t, env, fakes, "")
 

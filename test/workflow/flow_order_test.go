@@ -13,6 +13,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl/dsltest"
 )
@@ -55,7 +56,7 @@ func runFlowOrder(t *testing.T, decision string, tasks []string) []string {
 		if node == "Approve" {
 			result = `{"decision":"` + decision + `"}`
 		}
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 				DeptID: dept, NodeID: node, ToStage: "review", ResultJSON: result, RecordVersion: 1, VisitCount: 1,
 			})
@@ -146,7 +147,7 @@ func TestExecute_ExclusiveBranchToAnEndEvent_CompletesTheInstance(t *testing.T) 
 		},
 		updateInstanceStatus: func(in port.UpdateInstanceStatusInput) { written = append(written, in.Status) },
 	})
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "Legal", NodeID: "Review", ToStage: "review", ResultJSON: `{"decision":"reject"}`, RecordVersion: 1, VisitCount: 1,
 		})

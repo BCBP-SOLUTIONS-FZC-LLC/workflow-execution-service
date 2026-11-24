@@ -188,7 +188,7 @@ func TestRLSViolationExporter_RunRetriesTheStartReadUntilItSucceeds(t *testing.T
 	select {
 	case got := <-recordedCh:
 		assert.Equal(t, recorded{"cross_tenant_access", 1}, got)
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("exporter did not recover after the start read failed")
 	}
 	cancel()

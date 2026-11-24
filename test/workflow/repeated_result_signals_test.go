@@ -20,9 +20,8 @@ func TestExecute_RepeatedStepResultsNeverBlockTheSignalRouter(t *testing.T) {
 	env := suite.NewTestWorkflowEnvironment()
 	fakes := wflNewFakes()
 	wflRegisterAll(env, fakes, wflOneDept("ops", wflStages("First", "Second")...))
-	for range 3 {
-		wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("ops", "First", 1))
-	}
+	first := wflSignal{"stage-transition", wflDone("ops", "First", 1)}
+	wflSignalsAt(env, 2*time.Second, first, first, first)
 	wflCancelAt(env, 10*time.Second)
 
 	status, err := wflStart(t, env, fakes, "")

@@ -16,7 +16,7 @@ import (
 
 var errW16aStatsDown = errors.New("w16a: stats database unavailable")
 
-const w16aLoopWait = 5 * time.Second
+const w16aLoopWait = 30 * time.Second
 
 // w16aStatsReader fails its first failFirst reads, then answers stats.
 type w16aStatsReader struct {

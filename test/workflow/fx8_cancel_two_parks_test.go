@@ -26,8 +26,10 @@ func TestExecute_CancelWithTwoParksOpenRunsTheCancelWriteOnce(t *testing.T) {
 		return nil
 	}
 	wflRegisterAll(env, fakes, twoInnerForksCollaboration())
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDoneStage("x1", "prep", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDoneStage("y1", "prep", 1))
+	wflSignalsAt(env, 2*time.Second,
+		wflSignal{"stage-transition", wflDoneStage("x1", "prep", 1)},
+		wflSignal{"stage-transition", wflDoneStage("y1", "prep", 1)},
+	)
 	wflCancelAt(env, 30*time.Second)
 
 	status, err := wflStart(t, env, fakes, "")

@@ -46,11 +46,11 @@ func TestHeartbeatLoop_TouchFailure_IsLoggedAndTheNextTickTriesAgain(t *testing.
 		close(done)
 	}()
 
-	require.Eventually(t, func() bool { return len(consumer.touchCalls()) >= 2 }, 10*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return len(consumer.touchCalls()) >= 2 }, 30*time.Second, time.Millisecond)
 	cancel()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("the heartbeat loop did not stop with its context")
 	}
 

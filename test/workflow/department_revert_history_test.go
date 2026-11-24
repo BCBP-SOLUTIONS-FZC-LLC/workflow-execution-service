@@ -41,8 +41,10 @@ func TestExecute_DepartmentOnlyRevertKeepsTheHistoryBeforeThatDepartment(t *test
 	redo.ResultJSON = `{"decision":"redo"}`
 	ok := wflDone("A", "A1", 2)
 	ok.ResultJSON = `{"decision":"ok"}`
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("X", "X1", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", redo)
+	wflSignalsAt(env, 2*time.Second,
+		wflSignal{"stage-transition", wflDone("X", "X1", 1)},
+		wflSignal{"stage-transition", redo},
+	)
 	wflSignalAt(env, 4*time.Second, "stage-transition", ok)
 	wflSignalAt(env, 6*time.Second, "instance-force-back", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 3})
 	wflSignalAt(env, 8*time.Second, "instance-force-back", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 4})

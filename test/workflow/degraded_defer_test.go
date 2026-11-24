@@ -12,6 +12,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -37,7 +38,7 @@ func wflForkAfterIntake() *dsl.CompiledCollaboration {
 }
 
 func wflDeferTask(env *testsuite.TestWorkflowEnvironment, update string, delay time.Duration, taskID string, answer *updateAnswer) {
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.UpdateWorkflow("stage-defer:"+wflInstance, update, answer, deferWire{
 			DeptID: "billing", FromStage: "B1", Reason: "need more info", UserID: "user-1", RecordVersion: 1,
 			TaskID: taskID, AssignmentID: "assign-1",

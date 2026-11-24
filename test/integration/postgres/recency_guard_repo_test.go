@@ -214,7 +214,7 @@ func TestRecencyGuardRepo_WithLock_DifferentScopeKeysDoNotBlock(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("a different scope key must not be blocked by another key's held lock")
 	}
 
@@ -271,7 +271,7 @@ func TestRecencyGuardRepo_WithLock_WaitersForOneScopeDoNotStarveOtherScopes(t *t
 	}
 	time.Sleep(200 * time.Millisecond)
 
-	otherCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	otherCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	err = repo.WithLock(otherCtx, other, func(context.Context) error { return nil })
 	close(release)

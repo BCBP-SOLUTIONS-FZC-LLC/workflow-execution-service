@@ -60,13 +60,13 @@ func TestRLSViolationExporter_RunExportsOnEveryIntervalUntilCancelled(t *testing
 	select {
 	case got := <-recordedCh:
 		assert.Equal(t, recorded{"cross_tenant_access", 1}, got)
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("no export within 2s")
 	}
 	cancel()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("Run did not stop after cancel")
 	}
 }

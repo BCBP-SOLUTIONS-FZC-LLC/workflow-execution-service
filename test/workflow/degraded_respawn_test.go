@@ -57,9 +57,11 @@ func wflRunTwoDeptBranchRecovery(t *testing.T) *wflFakes {
 	fakes := wflNewFakes()
 	wflFailTaskOnce(fakes, "billing/X2")
 	wflRegisterAll(env, fakes, wflTwoDeptBranch())
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("warehouse", "Pack", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("prev", "P1", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("billing", "X1", 1))
+	wflSignalsAt(env, 2*time.Second,
+		wflSignal{"stage-transition", wflDone("warehouse", "Pack", 1)},
+		wflSignal{"stage-transition", wflDone("prev", "P1", 1)},
+		wflSignal{"stage-transition", wflDone("billing", "X1", 1)},
+	)
 	wflSignalAt(env, 6*time.Second, "instance-force-back", adminSignalWire{AdminUserID: "admin-3", TargetNodeKey: "billing/X1", RecordVersion: 5})
 	wflSignalAt(env, 10*time.Second, "stage-transition", wflDone("billing", "X2", 2))
 
@@ -168,9 +170,11 @@ func TestExecute_RespawnedBranchFindsItsDepartmentThroughAGatewayTarget(t *testi
 	wflRegisterAll(env, fakes, wflGatewayBranch())
 	intake := wflDone("intake", "I1", 1)
 	intake.ResultJSON = `{"decision":"go"}`
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("warehouse", "Pack", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", intake)
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("review", "R1", 1))
+	wflSignalsAt(env, 2*time.Second,
+		wflSignal{"stage-transition", wflDone("warehouse", "Pack", 1)},
+		wflSignal{"stage-transition", intake},
+		wflSignal{"stage-transition", wflDone("review", "R1", 1)},
+	)
 	wflSignalAt(env, 6*time.Second, "instance-force-back", adminSignalWire{AdminUserID: "admin-3", TargetNodeKey: "billing/B1", RecordVersion: 5})
 	wflSignalAt(env, 10*time.Second, "stage-transition", wflDone("billing", "B1", 2))
 
@@ -205,9 +209,11 @@ func TestExecute_ForceBackOnAFailedBranchWhoseAuditWriteIsRefusedLeavesTheBranch
 		return nil
 	}
 	wflRegisterAll(env, fakes, wflTwoDeptBranch())
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("warehouse", "Pack", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("prev", "P1", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("billing", "X1", 1))
+	wflSignalsAt(env, 2*time.Second,
+		wflSignal{"stage-transition", wflDone("warehouse", "Pack", 1)},
+		wflSignal{"stage-transition", wflDone("prev", "P1", 1)},
+		wflSignal{"stage-transition", wflDone("billing", "X1", 1)},
+	)
 	wflSignalAt(env, 6*time.Second, "instance-force-back", adminSignalWire{AdminUserID: "admin-3", TargetNodeKey: "billing/X1", RecordVersion: 5})
 	wflCancelAt(env, 10*time.Second)
 

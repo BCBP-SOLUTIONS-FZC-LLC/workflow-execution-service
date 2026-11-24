@@ -15,6 +15,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -97,10 +98,9 @@ func runDegradedPause(t *testing.T, sc degradedPauseScenario) []string {
 		updateInstanceStatus: func(in port.UpdateInstanceStatusInput) {
 			if sc.pauseDuringExitWrite && in.Status == domain.InstanceStatusRunning {
 				env.SignalWorkflow("instance-pause:instance-1", adminSignalWire{AdminUserID: "admin-1", Initiator: domain.InitiatorAdmin, RecordVersion: 1})
-				select {
-				case <-released:
-				case <-time.After(300 * time.Millisecond):
-				}
+				handled := make(chan struct{})
+				wflclock.Queued(env, func() { close(handled) })
+				<-handled
 			}
 			log.add("status:" + string(in.Status))
 			if in.Status == domain.InstanceStatusDegraded {
@@ -112,7 +112,7 @@ func runDegradedPause(t *testing.T, sc degradedPauseScenario) []string {
 		cancelInstance: func(port.CancelInstanceInput) error { log.add("cancel"); return nil },
 	})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 		})
@@ -127,7 +127,7 @@ func runDegradedPause(t *testing.T, sc degradedPauseScenario) []string {
 			parkSignals = append(parkSignals, s)
 			continue
 		}
-		env.RegisterDelayedCallback(sendSignal(s), s.at)
+		wflclock.After(env, sendSignal(s), s.at)
 	}
 
 	var parked sync.Once
@@ -141,7 +141,7 @@ func runDegradedPause(t *testing.T, sc degradedPauseScenario) []string {
 			}
 			parked.Do(func() {
 				for _, s := range parkSignals {
-					env.RegisterDelayedCallback(sendSignal(s), s.at-parkSignalsFrom)
+					wflclock.After(env, sendSignal(s), s.at-parkSignalsFrom)
 				}
 			})
 		}

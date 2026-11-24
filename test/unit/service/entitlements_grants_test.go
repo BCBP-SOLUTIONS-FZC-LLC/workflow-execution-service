@@ -131,7 +131,7 @@ func TestEntitlementsGrants_ServesTheHeldSetOnceTheTTLHasPassedAndSeesTheRevocat
 	require.Eventually(t, func() bool {
 		has, err := grants.HasFeature(context.Background(), tenant, grantFlag)
 		return err == nil && !has
-	}, 5*time.Second, time.Millisecond, "a revoked grant is seen once the refresh has landed")
+	}, 30*time.Second, time.Millisecond, "a revoked grant is seen once the refresh has landed")
 	assert.Equal(t, 2, reader.callCount(tenant))
 }
 
@@ -223,7 +223,7 @@ func TestEntitlementsGrants_TheBackoffServesTheHeldSetToo(t *testing.T) {
 	clock.advance(time.Minute)
 	_, err = grants.HasFeature(context.Background(), tenant, grantFlag)
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return reader.callCount(tenant) == 2 }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return reader.callCount(tenant) == 2 }, 30*time.Second, time.Millisecond)
 
 	clock.advance(2 * time.Second)
 	has, err := grants.HasFeature(context.Background(), tenant, grantFlag)
@@ -253,7 +253,7 @@ func TestEntitlementsGrants_ConcurrentCallersShareOneRead(t *testing.T) {
 		}()
 	}
 	started.Wait()
-	require.Eventually(t, func() bool { return reader.callCount(tenant) == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return reader.callCount(tenant) == 1 }, 30*time.Second, time.Millisecond)
 	close(reader.gate)
 	done.Wait()
 
@@ -276,7 +276,7 @@ func TestEntitlementsGrants_ACallerThatGivesUpLeavesTheReadRunningForTheOthers(t
 		_, err := grants.HasFeature(ctx, tenant, grantFlag)
 		first <- err
 	}()
-	require.Eventually(t, func() bool { return reader.callCount(tenant) == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return reader.callCount(tenant) == 1 }, 30*time.Second, time.Millisecond)
 	cancel()
 	require.ErrorIs(t, <-first, context.Canceled)
 

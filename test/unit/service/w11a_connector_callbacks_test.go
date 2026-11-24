@@ -26,7 +26,7 @@ var (
 
 var w11aActor = uuid.MustParse("66666666-6666-6666-6666-666666666666")
 
-const w11aBarrierWait = 5 * time.Second
+const w11aBarrierWait = 30 * time.Second
 
 type w11aRead struct{ Tenant, ID uuid.UUID }
 

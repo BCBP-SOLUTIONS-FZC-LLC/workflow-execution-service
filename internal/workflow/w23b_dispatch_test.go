@@ -79,8 +79,10 @@ func TestRunSteps_FailingExclusiveOrSubWorkflowStep_StopsTheListAndLaterStepsDoN
 func TestRunSteps_StepIOMapping_FeedsEachStepTheVariablesItsInputsSelect(t *testing.T) {
 	rec := &w23bRecorder{}
 	env := w23bNewEnv(rec)
-	w23bAnswer(env, stageTransitionSignal{DeptID: "a", ToStage: "prep", UserID: "user-1", ResultJSON: "{}", VisitCount: 1})
-	w23bAnswer(env, stageTransitionSignal{DeptID: "b", ToStage: "prep", UserID: "user-1", ResultJSON: "{}", VisitCount: 1})
+	w23bAnswers(env,
+		stageTransitionSignal{DeptID: "a", ToStage: "prep", UserID: "user-1", ResultJSON: "{}", VisitCount: 1},
+		stageTransitionSignal{DeptID: "b", ToStage: "prep", UserID: "user-1", ResultJSON: "{}", VisitCount: 1},
+	)
 
 	var runErr error
 	var finalContext string

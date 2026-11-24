@@ -11,6 +11,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl/dsltest"
 )
@@ -56,7 +57,7 @@ func TestExecute_LibraryCalls_EachCallRunsItsOwnTasks(t *testing.T) {
 		},
 	})
 	for i, task := range want {
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 				DeptID: task.dept, NodeID: task.node, ToStage: "review", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 			})
@@ -112,7 +113,7 @@ func runGoldenBoundaries(t *testing.T, signals []goldenTask) (domain.InstanceSta
 		},
 	})
 	for i, task := range signals {
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 				DeptID: task.dept, NodeID: task.node, ToStage: "review", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 			})

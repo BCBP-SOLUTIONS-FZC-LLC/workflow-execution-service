@@ -231,6 +231,8 @@ func TestConsumerGroup_DeadLetter_CopiesAndAcks(t *testing.T) {
 
 // A live consumer touches the entries it is still handling, so another
 // consumer's reclaim leaves them alone and the delivery count does not move.
+// An entry nobody touched is reclaimed in the same call, so the minimum idle
+// time is shown to apply.
 func TestConsumerGroup_Touch_KeepsEntryFromReclaim(t *testing.T) {
 	client := newTestClient(t)
 	ctx := context.Background()
@@ -239,24 +241,28 @@ func TestConsumerGroup_Touch_KeepsEntryFromReclaim(t *testing.T) {
 	producer := valkeystream.NewProducer(client)
 	consumer := valkeystream.NewConsumer(client)
 	require.NoError(t, consumer.EnsureGroup(ctx, stream, testGroup))
-	_, err := producer.Publish(ctx, stream, map[string]string{"seq": "0"})
+	for _, seq := range []string{"0", "1"} {
+		_, err := producer.Publish(ctx, stream, map[string]string{"seq": seq})
+		require.NoError(t, err)
+	}
+	entries, err := consumer.ReadGroup(ctx, stream, testGroup, "consumer-a", 2, time.Second)
 	require.NoError(t, err)
-	entries, err := consumer.ReadGroup(ctx, stream, testGroup, "consumer-a", 1, time.Second)
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
+	require.Len(t, entries, 2)
+	touched, untouched := entries[0], entries[1]
 
-	const minIdle = 2 * time.Second
-	time.Sleep(1500 * time.Millisecond)
-	require.NoError(t, consumer.Touch(ctx, stream, testGroup, "consumer-a", []string{entries[0].ID}))
-	time.Sleep(1500 * time.Millisecond)
+	const minIdle = time.Second
+	time.Sleep(minIdle + 200*time.Millisecond)
+	require.NoError(t, consumer.Touch(ctx, stream, testGroup, "consumer-a", []string{touched.ID}))
 
 	reclaimed, _, err := consumer.ReclaimStale(ctx, stream, testGroup, "consumer-b", "0", minIdle, 10)
 	require.NoError(t, err)
-	assert.Empty(t, reclaimed, "a touched entry was reclaimed from a live consumer")
+	require.Len(t, reclaimed, 1, "only the entry nobody touched was reclaimed")
+	assert.Equal(t, untouched.ID, reclaimed[0].ID)
 
-	pending, err := client.XPendingExt(ctx, &redis.XPendingExtArgs{Stream: stream, Group: testGroup, Start: "-", End: "+", Count: 10}).Result()
+	pending, err := client.XPendingExt(ctx, &redis.XPendingExtArgs{Stream: stream, Group: testGroup, Start: touched.ID, End: touched.ID, Count: 10}).Result()
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
+	assert.Equal(t, "consumer-a", pending[0].Consumer, "the touched entry stayed with its live consumer")
 	assert.Equal(t, int64(1), pending[0].RetryCount, "touching counted as a delivery")
 }
 

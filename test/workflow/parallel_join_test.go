@@ -8,6 +8,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -29,7 +30,7 @@ func TestExecute_ParallelBranchesSharingADepartmentID_Join(t *testing.T) {
 		dept  string
 		count int64
 	}{{"warehouse", 1}, {"billing", 1}, {"warehouse", 2}} {
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 				DeptID: visit.dept, ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: visit.count,
 			})

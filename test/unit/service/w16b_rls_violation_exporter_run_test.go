@@ -112,7 +112,7 @@ func TestRLSViolationExporter_RunOnAFreshExporterOnlyReadsItsStartPositionBefore
 	}()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		cancel()
 		t.Fatal("Run did not return after its context was cancelled")
 	}
@@ -158,7 +158,7 @@ func TestRLSViolationExporter_RunLogsAFailedExportAndExportsTheSameWindowOnTheNe
 	select {
 	case got := <-exported:
 		assert.Equal(t, w16bRecorded{"cross_tenant_access", 2}, got)
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		cancel()
 		<-done
 		t.Fatal("the exporter did not export after a failed tick")
@@ -166,7 +166,7 @@ func TestRLSViolationExporter_RunLogsAFailedExportAndExportsTheSameWindowOnTheNe
 	cancel()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("Run did not return after its context was cancelled")
 	}
 

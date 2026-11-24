@@ -11,6 +11,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -38,7 +39,7 @@ func finish(t *testing.T, env *testsuite.TestWorkflowEnvironment, instance strin
 }
 
 func transitionAt(env *testsuite.TestWorkflowEnvironment, at time.Duration, dept string, visit int64) {
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: dept, ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: visit,
 		})
@@ -70,7 +71,7 @@ func TestExecute_DeferSendsTheInstanceOneStepBack(t *testing.T) {
 
 	transitionAt(env, tick, "deptA", 1)
 	answer := &updateAnswer{}
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.UpdateWorkflow("stage-defer:instance-1", "defer-1", answer, deferWire{
 			DeptID: "deptB", FromStage: "prep", Reason: "need more info", UserID: "user-1", RecordVersion: 1, TaskID: "deptB/prep", AssignmentID: "assign-1",
 		})
@@ -131,7 +132,7 @@ func TestExecute_DeferClosesATaskItsBoundaryPathOpened(t *testing.T) {
 	})
 
 	transitionAt(env, tick, "deptA", 1)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.UpdateWorkflow("stage-defer:instance-1", "defer-1", &updateAnswer{}, deferWire{
 			DeptID: "deptB", FromStage: "prep", UserID: "user-1", RecordVersion: 1,
 			TaskID: "deptB/prep", AssignmentID: "assign-1",
@@ -174,7 +175,7 @@ func TestExecute_DeferAtTheFirstStepIsRefused(t *testing.T) {
 	registerFakeActivities(env, twoDeptCollaboration(), &activityHooks{deferTask: func(port.DeferTaskInput) { deferCalls++ }})
 
 	answer := &updateAnswer{}
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.UpdateWorkflow("stage-defer:instance-1", "defer-1", answer, deferWire{DeptID: "deptA", FromStage: "prep", UserID: "user-1", RecordVersion: 1, TaskID: "deptA/prep", AssignmentID: "assign-1"})
 	}, tick)
 	transitionAt(env, 5*tick, "deptA", 1)
@@ -198,7 +199,7 @@ func TestExecute_ForceForwardInAParallelStepNeedsOnlyTheNodeKey(t *testing.T) {
 	registerFakeActivities(env, parallelCollaboration(), nil)
 
 	transitionAt(env, tick, "warehouse", 1)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "billing/prep", RecordVersion: 1})
 	}, 5*tick)
 
@@ -221,7 +222,7 @@ func TestExecute_DegradedForceForwardNeedsOnlyTheNodeKey(t *testing.T) {
 	}})
 
 	transitionAt(env, tick, "warehouse", 1)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "billing/prep", RecordVersion: 1})
 	}, 10*tick)
 
@@ -251,7 +252,7 @@ func TestExecute_DegradedForceBackNamesTheBranchByANodeKey(t *testing.T) {
 
 	transitionAt(env, tick, "warehouse", 1)
 	transitionAt(env, 2*tick, "billing_charge", 1)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "billing_invoice/prep", RecordVersion: 1})
 	}, 10*tick)
 	transitionAt(env, 20*tick, "billing_invoice", 2)
@@ -283,7 +284,7 @@ func TestExecute_ARespawnedBranchThatFailsAgainKeepsItsSteps(t *testing.T) {
 	transitionAt(env, tick, "warehouse", 1)
 	transitionAt(env, 2*tick, "billing_charge", 1)
 	for _, at := range []time.Duration{10 * tick, 20 * tick} {
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "billing_invoice/prep", RecordVersion: 1})
 		}, at)
 	}
@@ -303,11 +304,11 @@ func TestExecute_AStepResultWhilePausedIsAppliedOnResume(t *testing.T) {
 	env := suite.NewTestWorkflowEnvironment()
 	registerFakeActivities(env, twoDeptCollaboration(), &activityHooks{})
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-pause:instance-1", adminSignalWire{AdminUserID: "admin-1", Initiator: domain.InitiatorAdmin, RecordVersion: 1})
 	}, tick)
 	transitionAt(env, 3*tick, "deptA", 1)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-resume:instance-1", adminSignalWire{AdminUserID: "admin-1", Initiator: domain.InitiatorAdmin, RecordVersion: 1})
 	}, 6*tick)
 	transitionAt(env, 10*tick, "deptB", 1)

@@ -12,11 +12,12 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 )
 
 func wflQueryWaitingAt(t *testing.T, env *testsuite.TestWorkflowEnvironment, delay time.Duration, into *[]string, taken *bool) {
 	t.Helper()
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		val, err := env.QueryWorkflow(port.QueryWaitingExternal)
 		if err != nil {
 			t.Errorf("QueryWorkflow(%s): %v", port.QueryWaitingExternal, err)
@@ -32,7 +33,7 @@ func wflQueryWaitingAt(t *testing.T, env *testsuite.TestWorkflowEnvironment, del
 
 func wflQueryStatusAt(t *testing.T, env *testsuite.TestWorkflowEnvironment, delay time.Duration, into *wfengine.WorkflowStatusQuery) {
 	t.Helper()
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		val, err := env.QueryWorkflow(wfengine.QueryGetWorkflowStatus)
 		if err != nil {
 			t.Errorf("QueryWorkflow(%s): %v", wfengine.QueryGetWorkflowStatus, err)

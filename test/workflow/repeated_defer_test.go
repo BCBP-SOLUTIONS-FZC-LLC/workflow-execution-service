@@ -11,15 +11,20 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 )
 
-func wflDeferBack(update string, env *testsuite.TestWorkflowEnvironment, delay time.Duration, answer *updateAnswer) {
-	env.RegisterDelayedCallback(func() {
+func wflDeferBackSend(update string, env *testsuite.TestWorkflowEnvironment, answer *updateAnswer) func() {
+	return func() {
 		env.UpdateWorkflow("stage-defer:"+wflInstance, update, answer, deferWire{
 			DeptID: "deptB", FromStage: "prep", Reason: "need more info", UserID: "user-1", RecordVersion: 1,
 			TaskID: "deptB/B1", AssignmentID: "assign-1",
 		})
-	}, delay)
+	}
+}
+
+func wflDeferBack(update string, env *testsuite.TestWorkflowEnvironment, delay time.Duration, answer *updateAnswer) {
+	wflclock.After(env, wflDeferBackSend(update, env, answer), delay)
 }
 
 // A second defer of a task whose first defer is still being applied changes
@@ -32,8 +37,10 @@ func TestExecute_SecondDeferOfTheSameTaskIsRefusedAndRoutesNothing(t *testing.T)
 	wflRegisterAll(env, fakes, wflTwoDeptsCollab())
 	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("deptA", "A1", 1))
 	first, second := &updateAnswer{}, &updateAnswer{}
-	wflDeferBack("defer-1", env, 5*time.Second, first)
-	wflDeferBack("defer-2", env, 5*time.Second, second)
+	wflclock.Together(env, 5*time.Second,
+		wflDeferBackSend("defer-1", env, first),
+		wflDeferBackSend("defer-2", env, second),
+	)
 	wflSignalAt(env, 10*time.Second, "stage-transition", wflDone("deptA", "A1", 2))
 	wflSignalAt(env, 12*time.Second, "stage-transition", wflDone("deptB", "B1", 2))
 

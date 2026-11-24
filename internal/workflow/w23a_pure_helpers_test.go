@@ -16,6 +16,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -438,10 +439,10 @@ func TestRunDepartmentFrom_StartIndexAndEmptyResults(t *testing.T) {
 	t.Run("a stage with an empty result keeps the earlier result", func(t *testing.T) {
 		var created []domain.NodeKey
 		env := w23aStageEnv(&created)
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "dept", NodeID: "One", ResultJSON: `{"first":true}`, VisitCount: 1})
 		}, time.Millisecond)
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("stage-transition:instance", stageTransitionSignal{DeptID: "dept", NodeID: "Two", ResultJSON: "", VisitCount: 1})
 		}, time.Second)
 		var node domain.NodeKey

@@ -11,6 +11,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -47,14 +48,11 @@ func TestExecute_ForceForwardInANestedParallelReachesTheInnerFork(t *testing.T) 
 		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
 	}})
 
-	for _, dept := range []string{"a", "b1"} {
-		env.RegisterDelayedCallback(func() {
-			env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
-				DeptID: dept, ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
-			})
-		}, tick)
-	}
-	env.RegisterDelayedCallback(func() {
+	wflSignalsAt(env, tick,
+		wflSignal{"stage-transition", stageTransitionWire{DeptID: "a", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1}},
+		wflSignal{"stage-transition", stageTransitionWire{DeptID: "b1", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1}},
+	)
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "b2", TargetNodeKey: "b2/prep", RecordVersion: 1,
 		})
@@ -89,13 +87,13 @@ func TestExecute_ForceForwardInANestedParallelReachesTheInnerForkWhileTheOuterFo
 	}})
 
 	for dept, at := range map[string]time.Duration{"b1": tick, "a": 20 * tick} {
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 				DeptID: dept, ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
 			})
 		}, at)
 	}
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "b2", TargetNodeKey: "b2/prep", RecordVersion: 1,
 		})
@@ -161,13 +159,12 @@ func TestExecute_TwoParksAtOnceEachTakeTheirOwnSignals(t *testing.T) {
 			statuses = append(statuses, in.Status)
 		},
 	})
-	for _, d := range []string{"x1", "y1"} {
-		env.RegisterDelayedCallback(func() {
-			env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{DeptID: d, ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1})
-		}, tick)
-	}
+	wflSignalsAt(env, tick,
+		wflSignal{"stage-transition", stageTransitionWire{DeptID: "x1", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1}},
+		wflSignal{"stage-transition", stageTransitionWire{DeptID: "y1", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1}},
+	)
 	for i, d := range []string{"y2", "x2"} {
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: d + "/prep", RecordVersion: 1})
 		}, time.Duration(10*(i+1))*tick)
 	}
@@ -216,15 +213,15 @@ func TestExecute_ASignalForAClosingParkDoesNotBlockLaterSignals(t *testing.T) {
 		}
 		return port.CreateTaskOutput{TaskID: string(in.NodeKey)}, nil
 	}})
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{DeptID: "warehouse", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1})
 	}, tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		for range 2 {
 			env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{AdminUserID: "admin-1", TargetNodeKey: "billing/prep", RecordVersion: 1})
 		}
 	}, 10*tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{DeptID: "tail", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1})
 	}, 20*tick)
 
@@ -256,15 +253,17 @@ func TestExecute_ForceBackInANestedParallelRespawnsTheInnerBranch(t *testing.T) 
 	}})
 
 	at := func(d time.Duration, dept string, visit int64) {
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 				DeptID: dept, ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: visit,
 			})
 		}, d)
 	}
-	at(tick, "a", 1)
-	at(tick, "b1", 1)
-	env.RegisterDelayedCallback(func() {
+	wflSignalsAt(env, tick,
+		wflSignal{"stage-transition", stageTransitionWire{DeptID: "a", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1}},
+		wflSignal{"stage-transition", stageTransitionWire{DeptID: "b1", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1}},
+	)
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetNodeKey: "b2/prep", RecordVersion: 1,
 		})
@@ -302,14 +301,14 @@ func TestExecute_ForceBackWhileANestedParallelIsOpenReturnsBeforeTheFork(t *test
 	}})
 
 	at := func(d time.Duration, dept string, visit int64) {
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 				DeptID: dept, ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: visit,
 			})
 		}, d)
 	}
 	at(tick, "intake", 1)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetNodeKey: "intake/prep", RecordVersion: 1,
 		})
@@ -358,12 +357,12 @@ func supersededAfterNestedForceForward(t *testing.T) map[string]bool {
 	})
 
 	var supersededBeforeCancel map[string]bool
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-forward:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", TargetDeptID: "b1", TargetNodeKey: "b1/prep", RecordVersion: 1,
 		})
 	}, 10*tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		mu.Lock()
 		defer mu.Unlock()
 		supersededBeforeCancel = map[string]bool{}
@@ -371,7 +370,7 @@ func supersededAfterNestedForceForward(t *testing.T) map[string]bool {
 			supersededBeforeCancel[k] = true
 		}
 	}, 20*tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-cancel:instance-1", adminSignalWire{AdminUserID: "admin-1", RecordVersion: 1})
 	}, 30*tick)
 

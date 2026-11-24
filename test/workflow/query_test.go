@@ -7,6 +7,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -30,7 +31,7 @@ func TestExecute_GetWorkflowStatusQuery(t *testing.T) {
 	collab := singleStageCollaboration(dsl.StageDef{Type: "approve", Activity: "approve_order"})
 	registerFakeActivities(env, collab, nil)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		result, err := env.QueryWorkflow(wfengine.QueryGetWorkflowStatus)
 		if err != nil {
 			t.Errorf("QueryWorkflow error: %v", err)
@@ -49,7 +50,7 @@ func TestExecute_GetWorkflowStatusQuery(t *testing.T) {
 		}
 	}, tick)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "sales", ToStage: "approve", ResultJSON: `{"decision":"approved"}`, RecordVersion: 1, VisitCount: 1,
 		})

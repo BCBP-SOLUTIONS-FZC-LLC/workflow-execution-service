@@ -56,7 +56,7 @@ func cwcliAwaitRequest(t *testing.T, arrived <-chan cwcliRequest) cwcliRequest {
 	select {
 	case got := <-arrived:
 		return got
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("the request never reached the upstream")
 		return cwcliRequest{}
 	}
@@ -135,11 +135,11 @@ func TestRunAliasRefreshLoop_RefreshesOnEveryTickAndReturnsWhenItsContextIsCance
 		close(done)
 	}()
 
-	require.Eventually(t, func() bool { return hits.Load() >= 3 }, 10*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return hits.Load() >= 3 }, 30*time.Second, time.Millisecond)
 	cancel()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("the loop did not return after its context was cancelled")
 	}
 

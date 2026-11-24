@@ -14,6 +14,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -50,7 +51,7 @@ func dfkNested() *dsl.CompiledCollaboration {
 }
 
 func dfkDefer(env *testsuite.TestWorkflowEnvironment, update string, delay time.Duration, dept, stage string, answer *updateAnswer) {
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.UpdateWorkflow("stage-defer:"+wflInstance, update, answer, deferWire{
 			DeptID: dept, FromStage: stage, Reason: "need more info", UserID: "user-1", RecordVersion: 1,
 			TaskID: dept + "/" + stage, AssignmentID: "assign-1",
@@ -152,7 +153,7 @@ func TestExecute_CancelWhileTheStepBeforeAForkRunsAgainTerminatesTheInstance(t *
 	wflSignalAt(env, 2*time.Second, "stage-transition", wflDone("intake", "A1", 1))
 	dfkDefer(env, "defer-1", 4*time.Second, "billing", "B1", &updateAnswer{})
 	var siblingBeforeCancel []domain.TaskStatus
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		siblingBeforeCancel = wflTaskStatusesOf(fakes, "warehouse/Pack")
 	}, 5*time.Second)
 	wflCancelAt(env, 6*time.Second)

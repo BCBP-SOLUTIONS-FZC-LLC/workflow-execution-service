@@ -53,8 +53,10 @@ func TestExecute_CancelInANestedParkEndsTheWholeInstance(t *testing.T) {
 	fakes := wflNewFakes()
 	wflRefuseTaskFor(fakes, "b2/prep")
 	wflRegisterAll(env, fakes, collab)
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDoneStage("a", "prep", 1))
-	wflSignalAt(env, 2*time.Second, "stage-transition", wflDoneStage("b1", "prep", 1))
+	wflSignalsAt(env, 2*time.Second,
+		wflSignal{"stage-transition", wflDoneStage("a", "prep", 1)},
+		wflSignal{"stage-transition", wflDoneStage("b1", "prep", 1)},
+	)
 	wflCancelAt(env, 6*time.Second)
 
 	status, err := wflStart(t, env, fakes, "")

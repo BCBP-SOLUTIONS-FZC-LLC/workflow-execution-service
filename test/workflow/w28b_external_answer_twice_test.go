@@ -8,6 +8,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -42,13 +43,13 @@ func TestExecute_OutsideWaitAnsweredTwice_ConsumedKeyLeavesTheQueryAndTheRepeatI
 			env.SignalWorkflow(port.SignalInstanceExternalAnswer+":instance-1", externalAnswerWire{Key: key, Variables: vars})
 		}
 	}
-	env.RegisterDelayedCallback(query(&waitingBefore), 1*tick)
-	env.RegisterDelayedCallback(signal("Ops/Receive_A", map[string]any{"bid": "first"}), 2*tick)
-	env.RegisterDelayedCallback(query(&waitingAfterAnswer), 3*tick)
-	env.RegisterDelayedCallback(signal("Ops/Receive_A", map[string]any{"bid": "second", "late": "yes"}), 4*tick)
-	env.RegisterDelayedCallback(query(&waitingAfterRepeat), 5*tick)
-	env.RegisterDelayedCallback(signal("Ops/Receive_B", nil), 6*tick)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, query(&waitingBefore), 1*tick)
+	wflclock.After(env, signal("Ops/Receive_A", map[string]any{"bid": "first"}), 2*tick)
+	wflclock.After(env, query(&waitingAfterAnswer), 3*tick)
+	wflclock.After(env, signal("Ops/Receive_A", map[string]any{"bid": "second", "late": "yes"}), 4*tick)
+	wflclock.After(env, query(&waitingAfterRepeat), 5*tick)
+	wflclock.After(env, signal("Ops/Receive_B", nil), 6*tick)
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "Ops", NodeID: "Final", ResultJSON: `{}`, RecordVersion: 1, VisitCount: 1,
 		})

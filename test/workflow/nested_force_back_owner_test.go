@@ -7,6 +7,7 @@ import (
 
 	"go.temporal.io/sdk/testsuite"
 
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
@@ -58,7 +59,7 @@ func TestExecute_ForceBackInANestedParallelGoesToTheInnermostFork(t *testing.T) 
 	})
 
 	at := func(d time.Duration, dept string, visit int64) {
-		env.RegisterDelayedCallback(func() {
+		wflclock.After(env, func() {
 			env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 				DeptID: dept, ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: visit,
 			})
@@ -66,7 +67,7 @@ func TestExecute_ForceBackInANestedParallelGoesToTheInnermostFork(t *testing.T) 
 	}
 	at(tick, "intake", 1)
 	at(5*tick, "pre", 1)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("instance-force-back:instance-1", adminSignalWire{
 			AdminUserID: "admin-1", RecordVersion: 1,
 		})

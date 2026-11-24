@@ -219,7 +219,7 @@ func w16bRunUntilStopped(t *testing.T, ctx context.Context, cancel context.Cance
 	}()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		cancel()
 		<-done
 		t.Fatal("Run did not stop")

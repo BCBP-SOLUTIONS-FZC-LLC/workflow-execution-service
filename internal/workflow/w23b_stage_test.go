@@ -16,6 +16,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -38,9 +39,15 @@ func w23bStartRouter(ctx wf.Context, in *interpreter) wf.Channel {
 // w23bAnswer delivers a stage result to the instance used by these tests. A
 // result that arrives before its stage waits is held for it.
 func w23bAnswer(env *testsuite.TestWorkflowEnvironment, sig stageTransitionSignal) {
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance", sig)
-	}, time.Millisecond)
+	w23bAnswers(env, sig)
+}
+
+func w23bAnswers(env *testsuite.TestWorkflowEnvironment, sigs ...stageTransitionSignal) {
+	sends := make([]func(), len(sigs))
+	for i, sig := range sigs {
+		sends[i] = func() { env.SignalWorkflow("stage-transition:instance", sig) }
+	}
+	wflclock.Together(env, time.Millisecond, sends...)
 }
 
 func w23bRefusal(text string) error {

@@ -11,6 +11,7 @@ import (
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
 	wfengine "github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/workflow"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -105,12 +106,12 @@ func TestExecute_CompletedTaskResultsBecomeVariables(t *testing.T) {
 	rec := &contextRecorder{}
 	registerFakeActivities(env, collab, rec.hooks())
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "Ops", NodeID: "First", ResultJSON: `{"answer":"yes","count":2}`, RecordVersion: 1, VisitCount: 1,
 		})
 	}, afterStart)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "Ops", NodeID: "Second", ResultJSON: `{"answer":"later"}`, RecordVersion: 1, VisitCount: 1,
 		})
@@ -138,12 +139,12 @@ func TestExecute_OutsideAnswerCompletesAReceiveTask(t *testing.T) {
 	rec := &contextRecorder{}
 	registerFakeActivities(env, collab, rec.hooks())
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow(port.SignalInstanceExternalAnswer+":instance-1", externalAnswerWire{
 			Key: "Ops/Receive_Bid", Variables: map[string]any{"bid": "42"},
 		})
 	}, afterStart)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "Ops", NodeID: "Award", ResultJSON: `{}`, RecordVersion: 1, VisitCount: 1,
 		})
@@ -179,13 +180,13 @@ func TestExecute_AReceiveTaskIsTheInstancesCurrentNode(t *testing.T) {
 	registerFakeActivities(env, collab, hooks)
 
 	var atWait [][]domain.NodeKey
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		mu.Lock()
 		atWait = append(atWait, recorded...)
 		mu.Unlock()
 		env.SignalWorkflow(port.SignalInstanceExternalAnswer+":instance-1", externalAnswerWire{Key: "Ops/Receive_Bid"})
 	}, afterStart)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "Ops", NodeID: "Award", ResultJSON: `{}`, RecordVersion: 1, VisitCount: 1,
 		})
@@ -214,22 +215,22 @@ func TestExecute_OutsideAnswerBeforeTheWait_IsDropped(t *testing.T) {
 	rec := &contextRecorder{}
 	registerFakeActivities(env, collab, rec.hooks())
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow(port.SignalInstanceExternalAnswer+":instance-1", externalAnswerWire{
 			Key: "Ops/Receive_Bid", Variables: map[string]any{"early": "yes"},
 		})
 	}, afterStart)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "Ops", NodeID: "Prepare", ResultJSON: `{}`, RecordVersion: 1, VisitCount: 1,
 		})
 	}, afterAnswer)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow(port.SignalInstanceExternalAnswer+":instance-1", externalAnswerWire{
 			Key: "Ops/Receive_Bid", Variables: map[string]any{"bid": "42"},
 		})
 	}, afterThat)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 			DeptID: "Ops", NodeID: "Award", ResultJSON: `{}`, RecordVersion: 1, VisitCount: 1,
 		})
@@ -265,7 +266,7 @@ func TestExecute_OutsideAnswerFiresAMessageBoundary(t *testing.T) {
 	}}
 	registerFakeActivities(env, collab, hooks)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow(port.SignalInstanceExternalAnswer+":instance-1", externalAnswerWire{Key: "Ops/Prepare#Boundary_Withdraw"})
 	}, afterStart)
 
@@ -290,7 +291,7 @@ func TestExecute_WaitingExternalQuery(t *testing.T) {
 	registerFakeActivities(env, collab, nil)
 
 	var got []string
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		result, err := env.QueryWorkflow(port.QueryWaitingExternal)
 		if err != nil {
 			t.Errorf("QueryWorkflow: %v", err)
@@ -300,7 +301,7 @@ func TestExecute_WaitingExternalQuery(t *testing.T) {
 			t.Errorf("decoding query result: %v", err)
 		}
 	}, afterStart)
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow(port.SignalInstanceExternalAnswer+":instance-1", externalAnswerWire{Key: "Ops/Receive_Bid"})
 	}, afterAnswer)
 
@@ -342,7 +343,7 @@ func TestExecute_OutsideAnswerFiresASubWorkflowsMessageBoundary(t *testing.T) {
 	}
 	registerFakeActivities(env, collab, nil)
 
-	env.RegisterDelayedCallback(func() {
+	wflclock.After(env, func() {
 		env.SignalWorkflow(port.SignalInstanceExternalAnswer+":instance-1", externalAnswerWire{Key: "Sub#Boundary_Cancel"})
 	}, afterStart)
 

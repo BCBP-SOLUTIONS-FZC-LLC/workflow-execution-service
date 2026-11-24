@@ -8,6 +8,7 @@ import (
 
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/domain"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/internal/core/port"
+	"github.com/BCBP-SOLUTIONS-FZC-LLC/execution-service/test/wflclock"
 	"github.com/BCBP-SOLUTIONS-FZC-LLC/workflow-models/v2/pkg/dsl"
 )
 
@@ -31,12 +32,12 @@ func TestExecute_OutsideAnswerWithNoVariablesCompletesTheWaitAndMergesNothing(t 
 			rec := &contextRecorder{}
 			registerFakeActivities(env, collab, rec.hooks())
 
-			env.RegisterDelayedCallback(func() {
+			wflclock.After(env, func() {
 				env.SignalWorkflow(port.SignalInstanceExternalAnswer+":instance-1", externalAnswerWire{
 					Key: "Ops/Receive_Bid", Variables: tc.variables,
 				})
 			}, afterStart)
-			env.RegisterDelayedCallback(func() {
+			wflclock.After(env, func() {
 				env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
 					DeptID: "Ops", NodeID: "Award", ResultJSON: `{}`, RecordVersion: 1, VisitCount: 1,
 				})

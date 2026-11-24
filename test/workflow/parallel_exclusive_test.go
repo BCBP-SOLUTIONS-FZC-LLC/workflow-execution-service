@@ -67,26 +67,22 @@ func TestExecute_ParallelBranchesResolveTheirOwnExclusiveGate(t *testing.T) {
 	// adversarial case: each branch's own Exclusive gate must still resolve
 	// against its own decision, not whichever signal the router happened to
 	// process first.
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+	wflSignalsAt(env, tick,
+		wflSignal{"stage-transition", stageTransitionWire{
 			DeptID: "deptB", ToStage: "prep", ResultJSON: `{"decision":"beta"}`, RecordVersion: 1, VisitCount: 1,
-		})
-	}, tick)
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+		}},
+		wflSignal{"stage-transition", stageTransitionWire{
 			DeptID: "deptA", ToStage: "prep", ResultJSON: `{"decision":"alpha"}`, RecordVersion: 1, VisitCount: 1,
-		})
-	}, tick)
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+		}},
+	)
+	wflSignalsAt(env, 2*tick,
+		wflSignal{"stage-transition", stageTransitionWire{
 			DeptID: "deptA2", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
-		})
-	}, 2*tick)
-	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow("stage-transition:instance-1", stageTransitionWire{
+		}},
+		wflSignal{"stage-transition", stageTransitionWire{
 			DeptID: "deptB2", ToStage: "prep", ResultJSON: "{}", RecordVersion: 1, VisitCount: 1,
-		})
-	}, 2*tick)
+		}},
+	)
 
 	env.ExecuteWorkflow(wfengine.Execute, wfengine.ExecuteInput{
 		TenantID: "tenant-1", InstanceID: "instance-1", VersionID: "version-1",
