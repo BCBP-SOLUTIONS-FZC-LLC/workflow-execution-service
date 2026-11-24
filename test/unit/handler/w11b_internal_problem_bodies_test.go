@@ -248,10 +248,10 @@ func TestHandleInternalEvent_DelegationEnded_ReconcilerFailure_Returns500AndIsRe
 			router := newInternalRouter(newEventsHandler(fakes))
 			eventID := uuid.New()
 			body := envelope("DelegationEnded", eventID, testTenantID, time.Now(), map[string]any{
-				"delegation_id": testDelegationID2,
-				"delegator_id":  testDelegatorID,
-				"delegate_id":   testDelegateID2,
-				"ended_reason":  "expired",
+				"delegation_id":    testDelegationID2,
+				"delegator_id":     testDelegatorID,
+				"delegate_user_id": testDelegateID2,
+				"ended_reason":     "expired",
 			})
 
 			w := postEvent(router, body)

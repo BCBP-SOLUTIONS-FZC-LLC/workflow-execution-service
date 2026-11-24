@@ -25,7 +25,7 @@ func TestDelegationStartedEvent_CarriesTheEnvelopeTimestampAsTheTimeItWasEmitted
 	startsAt := time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
 
 	body := hhaEventBody("DelegationStarted", uuid.New(), uuid.New(), emittedAt, map[string]any{
-		"delegation_id": uuid.NewString(), "delegator_id": uuid.NewString(), "delegate_id": uuid.NewString(),
+		"delegation_id": uuid.NewString(), "delegator_id": uuid.NewString(), "delegate_user_id": uuid.NewString(),
 		"scope": "all", "starts_at": startsAt.Format(time.RFC3339),
 	})
 	w := hhaPostJSON(router, "/api/v1/internal/events/delegation", hhaJSONString(t, body))

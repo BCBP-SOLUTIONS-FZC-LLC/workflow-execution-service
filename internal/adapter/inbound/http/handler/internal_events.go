@@ -280,7 +280,7 @@ func guCtx(ctx context.Context, tenantID uuid.UUID) context.Context {
 type delegationStartedPayload struct {
 	DelegationID string  `json:"delegation_id"`
 	DelegatorID  string  `json:"delegator_id"`
-	DelegateID   string  `json:"delegate_id"`
+	DelegateID   string  `json:"delegate_user_id"`
 	Scope        string  `json:"scope"`
 	ScopeID      *string `json:"scope_id"`
 	StartsAt     string  `json:"starts_at"`
@@ -314,7 +314,7 @@ func (h *Handler) handleDelegationStarted(c *gin.Context, env events.Envelope[js
 	}
 	delegateID, err := uuid.Parse(p.DelegateID)
 	if err != nil {
-		h.badPayload(c, eventType, "invalid delegate_id in payload")
+		h.badPayload(c, eventType, "invalid delegate_user_id in payload")
 		return
 	}
 	startsAt, err := time.Parse(time.RFC3339, p.StartsAt)
@@ -380,7 +380,7 @@ func scopeNamesObject(scope string) bool {
 type delegationEndedPayload struct {
 	DelegationID string `json:"delegation_id"`
 	DelegatorID  string `json:"delegator_id"`
-	DelegateID   string `json:"delegate_id"`
+	DelegateID   string `json:"delegate_user_id"`
 	EndedReason  string `json:"ended_reason"`
 }
 
@@ -411,7 +411,7 @@ func (h *Handler) handleDelegationEnded(c *gin.Context, env events.Envelope[json
 	}
 	delegateID, err := uuid.Parse(p.DelegateID)
 	if err != nil {
-		h.badPayload(c, eventType, "invalid delegate_id in payload")
+		h.badPayload(c, eventType, "invalid delegate_user_id in payload")
 		return
 	}
 

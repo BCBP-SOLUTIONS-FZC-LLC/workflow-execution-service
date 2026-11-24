@@ -53,7 +53,7 @@ func w12aDelegationEvents() []w12aDelegationEvent {
 			name: "DelegationStarted",
 			body: func(eventID uuid.UUID) map[string]any {
 				return envelope("DelegationStarted", eventID, testTenantID, time.Now(), map[string]any{
-					"delegation_id": testDelegationID2, "delegator_id": testDelegatorID, "delegate_id": testDelegateID2,
+					"delegation_id": testDelegationID2, "delegator_id": testDelegatorID, "delegate_user_id": testDelegateID2,
 					"scope": "all", "starts_at": time.Now().Format(time.RFC3339),
 				})
 			},
@@ -68,7 +68,7 @@ func w12aDelegationEvents() []w12aDelegationEvent {
 			name: "DelegationEnded",
 			body: func(eventID uuid.UUID) map[string]any {
 				return envelope("DelegationEnded", eventID, testTenantID, time.Now(), map[string]any{
-					"delegation_id": testDelegationID2, "delegator_id": testDelegatorID, "delegate_id": testDelegateID2,
+					"delegation_id": testDelegationID2, "delegator_id": testDelegatorID, "delegate_user_id": testDelegateID2,
 					"ended_reason": "expired",
 				})
 			},

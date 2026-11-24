@@ -42,7 +42,7 @@ func TestDelegationEvents_ExtraEnvelopeAndPayloadFields_AreIgnored(t *testing.T)
 	body := hhaEventBody("DelegationStarted", eventID, tenantID, time.Now(), map[string]any{
 		"delegation_id":       delegationID.String(),
 		"delegator_id":        delegatorID.String(),
-		"delegate_id":         delegateID.String(),
+		"delegate_user_id":    delegateID.String(),
 		"scope":               "all",
 		"starts_at":           startsAt.Format(time.RFC3339),
 		"added_by_the_sender": 42,

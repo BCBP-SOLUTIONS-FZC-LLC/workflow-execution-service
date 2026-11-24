@@ -4,7 +4,7 @@ name: Validate / Test
   workflow_call:
     inputs:
       skip:
-        description: 'True when only documentation changed or the PR carries the skip-ci label (a lower PR of a stack); every job then reports skipped, so the required checks pass instead of waiting'
+        description: 'True for a draft, a documentation-only change or a PR with the skip-ci label (a lower PR of a stack); every job then reports skipped, so the required checks pass instead of waiting'
         type: boolean
         required: false
         default: false

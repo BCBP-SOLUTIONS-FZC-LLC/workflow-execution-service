@@ -61,7 +61,7 @@ func envelope(typ, tenant, data string) string {
 
 func delegationStarted(tenant string) string {
 	return envelope("DelegationStarted", tenant, `{"delegation_id":"`+uuid.NewString()+`","delegator_id":"`+uuid.NewString()+
-		`","delegate_id":"`+uuid.NewString()+`","scope":"all","starts_at":"`+time.Now().UTC().Format(time.RFC3339)+`"}`)
+		`","delegate_user_id":"`+uuid.NewString()+`","scope":"all","starts_at":"`+time.Now().UTC().Format(time.RFC3339)+`"}`)
 }
 
 func TestInternalContract_Events(t *testing.T) {

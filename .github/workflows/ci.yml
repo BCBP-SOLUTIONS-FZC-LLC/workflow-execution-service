@@ -28,7 +28,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
-      run: ${{ steps.decide.outputs.run }}
       skip: ${{ steps.decide.outputs.skip }}
     steps:
       - uses: actions/checkout@v6
@@ -59,26 +58,28 @@ jobs:
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "docs_only=$docs_only"
 
-      # A draft runs nothing. A documentation-only change or a PR with the skip-ci
-      # label (every PR of a stack except the top one) still calls each check, which
-      # then reports skipped: a required check that never reports would stay pending
-      # and block the merge, while a skipped one counts as passed. CI therefore runs
-      # in full only on the top PR of a stack, which holds every change below it.
+      # skip is true for a draft, a documentation-only change or a PR with the
+      # skip-ci label (every PR of a stack except the top one). The reusable
+      # Validate workflows are still called and their jobs report skipped, because
+      # a check nested in a workflow that is never called never reports and a
+      # required check would stay pending; the other jobs report skipped through
+      # their own condition. Skipped counts as passed. It never applies on push (a
+      # merge to main) or a manual run, since github.event.pull_request.* only
+      # exists on pull_request events.
       - id: decide
         env:
-          SKIP_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'skip-ci') }}
+          DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+          SKIP_LABEL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'skip-ci') }}
           DOCS_ONLY: ${{ steps.docs.outputs.docs_only }}
         run: |
-          echo "run=${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}" >> "$GITHUB_OUTPUT"
           skip=false
-          if [ "$DOCS_ONLY" = true ] || [ "$SKIP_LABEL" = true ]; then skip=true; fi
+          if [ "$DRAFT" = true ] || [ "$DOCS_ONLY" = true ] || [ "$SKIP_LABEL" = true ]; then skip=true; fi
           echo "skip=$skip" >> "$GITHUB_OUTPUT"
-          echo "skip=$skip (docs_only=$DOCS_ONLY, skip-ci label=$SKIP_LABEL)"
+          echo "skip=$skip (draft=$DRAFT, docs_only=$DOCS_ONLY, skip-ci label=$SKIP_LABEL)"
 
   validate-quality:
     name: Validate / Quality
     needs: [ci-gate]
-    if: needs.ci-gate.outputs.run == 'true'
     uses: ./.github/workflows/validate-quality.yml
     secrets: inherit
     with:
@@ -87,7 +88,6 @@ jobs:
   validate-test:
     name: Validate / Test
     needs: [ci-gate]
-    if: needs.ci-gate.outputs.run == 'true'
     uses: ./.github/workflows/validate-test.yml
     secrets: inherit
     with:
@@ -96,7 +96,7 @@ jobs:
   build-image-cache:
     name: Build image (cache)
     needs: [ci-gate]
-    if: needs.ci-gate.outputs.run == 'true' && needs.ci-gate.outputs.skip != 'true'
+    if: needs.ci-gate.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -178,7 +178,8 @@ jobs:
 
   trivy-cve-scan:
     name: Trivy CVE scan
-    needs: [build-image-cache]
+    needs: [ci-gate, build-image-cache]
+    if: needs.ci-gate.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -296,7 +297,8 @@ jobs:
 
   smoke-tests:
     name: Smoke tests
-    needs: [validate-test, build-image-cache]
+    needs: [ci-gate, validate-test, build-image-cache]
+    if: needs.ci-gate.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -368,81 +370,6 @@ jobs:
           for t in server worker connector-worker; do
             docker run --rm "${{ env.IMAGE_BASE }}-$t:${{ github.sha }}" version
           done
-
-  push-image-ghcr:
-    name: Push image → GHCR
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [validate-test, validate-quality, trivy-cve-scan, smoke-tests]
-    strategy:
-      matrix:
-        target: [server, worker, connector-worker]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: write
-      id-token: write # Cosign keyless signing (Sigstore OIDC)
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-          cache-dependency-path: |
-            go.sum
-            go.mod
-
-      - name: Cache sqlc
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/bin
-          key: sqlc-${{ runner.os }}-${{ hashFiles('Makefile') }}
-
-      - name: Generate (sqlc)
-        run: |
-          [ -x "$RUNNER_TEMP/bin/sqlc" ] || GOBIN="$RUNNER_TEMP/bin" go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$(awk '/^SQLC_VERSION/ {print $3}' Makefile)"
-          make generate-sqlc SQLC="$RUNNER_TEMP/bin/sqlc"
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push ${{ matrix.target }} image
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: ${{ matrix.target }}
-          push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}-${{ matrix.target }}:${{ github.sha }}
-            ${{ env.IMAGE_BASE }}-${{ matrix.target }}:latest
-          build-args: BUILD_VERSION=${{ github.sha }}
-          secrets: go_private_token=${{ secrets.GO_PRIVATE_TOKEN }}
-          cache-from: type=gha,scope=${{ matrix.target }}
-
-      - uses: sigstore/cosign-installer@v3
-
-      - name: Sign and verify image (Cosign keyless)
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          ref="${{ env.IMAGE_BASE }}-${{ matrix.target }}@${DIGEST}"
-          cosign sign --yes "$ref"
-          cosign verify "$ref" \
-            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/ci\.yml@refs/heads/main$" \
-            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 
   pr-summary:
     name: PR summary

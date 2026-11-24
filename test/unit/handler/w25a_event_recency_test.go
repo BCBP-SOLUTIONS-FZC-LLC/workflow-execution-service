@@ -120,7 +120,7 @@ func TestInternalEvents_TypesWithoutRecencyGuard_ApplyANewerAndThenAnOlderEvent(
 			name: "delegation started", eventType: "DelegationStarted", route: "/api/v1/internal/events/delegation",
 			data: func() map[string]any {
 				return map[string]any{
-					"delegation_id": delegationID, "delegator_id": delegatorID, "delegate_id": delegateID,
+					"delegation_id": delegationID, "delegator_id": delegatorID, "delegate_user_id": delegateID,
 					"scope": "all", "starts_at": "2030-01-02T03:04:05Z",
 				}
 			},
@@ -140,7 +140,7 @@ func TestInternalEvents_TypesWithoutRecencyGuard_ApplyANewerAndThenAnOlderEvent(
 			name: "delegation ended", eventType: "DelegationEnded", route: "/api/v1/internal/events/delegation",
 			data: func() map[string]any {
 				return map[string]any{
-					"delegation_id": delegationID, "delegator_id": delegatorID, "delegate_id": delegateID, "ended_reason": "expired",
+					"delegation_id": delegationID, "delegator_id": delegatorID, "delegate_user_id": delegateID, "ended_reason": "expired",
 				}
 			},
 			applied:  func(r *w25aReconcilers) int { return len(r.reverses) },

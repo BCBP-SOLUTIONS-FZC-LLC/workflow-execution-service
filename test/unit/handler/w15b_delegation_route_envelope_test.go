@@ -106,7 +106,7 @@ func w15bGlueFrame(version, compression byte, payload []byte) string {
 
 func w15bStartedPayload(delegationID, delegatorID, delegateID, departmentID uuid.UUID) map[string]any {
 	return map[string]any{
-		"delegation_id": delegationID, "delegator_id": delegatorID, "delegate_id": delegateID,
+		"delegation_id": delegationID, "delegator_id": delegatorID, "delegate_user_id": delegateID,
 		"scope": "department", "scope_id": departmentID, "starts_at": "2030-01-02T03:04:05Z",
 	}
 }
@@ -151,7 +151,7 @@ func TestHandleDelegationEvents_SchemaRegistryFrame_ReachesTheReconcilerDecoded(
 			name:      "DelegationEnded",
 			eventType: "DelegationEnded",
 			payload: map[string]any{
-				"delegation_id": delegationID, "delegator_id": delegatorID, "delegate_id": delegateID, "ended_reason": "revoked",
+				"delegation_id": delegationID, "delegator_id": delegatorID, "delegate_user_id": delegateID, "ended_reason": "revoked",
 			},
 			check: func(t *testing.T, f *w15bDelegationReconciler) {
 				assert.Equal(t, []port.DelegationReversalInput{{
@@ -252,7 +252,7 @@ func TestHandleDelegationEvents_CallerGivesUp_HandlingContinuesUnderItsOwnDeadli
 			name:      "DelegationEnded",
 			eventType: "DelegationEnded",
 			payload: map[string]any{
-				"delegation_id": uuid.New(), "delegator_id": uuid.New(), "delegate_id": uuid.New(), "ended_reason": "expired",
+				"delegation_id": uuid.New(), "delegator_id": uuid.New(), "delegate_user_id": uuid.New(), "ended_reason": "expired",
 			},
 			states: func(f *w15bDelegationReconciler) []w15bReconcileCall { return f.reverseCtx },
 		},

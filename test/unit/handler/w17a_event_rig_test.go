@@ -385,14 +385,14 @@ const (
 
 func w17aStartedData(delegationID, delegatorID, delegateID uuid.UUID) map[string]any {
 	return map[string]any{
-		"delegation_id": delegationID, "delegator_id": delegatorID, "delegate_id": delegateID,
+		"delegation_id": delegationID, "delegator_id": delegatorID, "delegate_user_id": delegateID,
 		"scope": "department", "scope_id": w17aScopeID, "starts_at": w17aStartsAt, "ends_at": w17aEndsAt,
 	}
 }
 
 func w17aEndedData(delegationID, delegatorID, delegateID uuid.UUID) map[string]any {
 	return map[string]any{
-		"delegation_id": delegationID, "delegator_id": delegatorID, "delegate_id": delegateID, "ended_reason": "expired",
+		"delegation_id": delegationID, "delegator_id": delegatorID, "delegate_user_id": delegateID, "ended_reason": "expired",
 	}
 }
 

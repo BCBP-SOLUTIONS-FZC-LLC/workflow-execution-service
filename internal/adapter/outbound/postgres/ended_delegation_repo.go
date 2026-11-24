@@ -48,7 +48,7 @@ func (r *EndedDelegationRepo) IsEnded(ctx context.Context, tenantID, delegationI
 func (r *EndedDelegationRepo) MarkDelegateEnded(ctx context.Context, tenantID, delegateID uuid.UUID, endedAt time.Time) error {
 	ctx = withTenantGUC(ctx, tenantID)
 	return exec(ctx, r.pool, func(dbtx db.DBTX) error {
-		return mapErr(db.New(dbtx).MarkDelegateEnded(ctx, db.MarkDelegateEndedParams{TenantID: tenantID, DelegateID: delegateID, EndedAt: endedAt}))
+		return mapErr(db.New(dbtx).MarkDelegateEnded(ctx, db.MarkDelegateEndedParams{TenantID: tenantID, DelegateUserID: delegateID, EndedAt: endedAt}))
 	})
 }
 
@@ -57,7 +57,7 @@ func (r *EndedDelegationRepo) DelegateEndedAt(ctx context.Context, tenantID, del
 	var endedAt time.Time
 	found := false
 	err := exec(ctx, r.pool, func(dbtx db.DBTX) error {
-		v, err := db.New(dbtx).GetDelegateEndedAt(ctx, db.GetDelegateEndedAtParams{TenantID: tenantID, DelegateID: delegateID})
+		v, err := db.New(dbtx).GetDelegateEndedAt(ctx, db.GetDelegateEndedAtParams{TenantID: tenantID, DelegateUserID: delegateID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
