@@ -551,8 +551,9 @@ components:
     WorkflowInstancePausedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, initiator]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, initiator, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: the user who started the instance', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -563,8 +564,9 @@ components:
     WorkflowInstanceResumedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, initiator]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, initiator, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: the user who started the instance', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -575,8 +577,9 @@ components:
     WorkflowInstanceCancelledPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, actor_user_id]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, actor_user_id, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: the user who started the instance', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -587,8 +590,9 @@ components:
     WorkflowInstanceTerminatedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, initiator]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, initiator, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: the user who started the instance', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -600,8 +604,9 @@ components:
     WorkflowInstanceDegradedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, failed_branches]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, failed_branches, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: the user who started the instance', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -618,8 +623,9 @@ components:
     WorkflowInstanceFailedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, error_class]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, error_class, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: the user who started the instance', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -629,8 +635,9 @@ components:
     WorkflowInstanceFinishedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, completed_at]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, started_by_user_id, completed_at, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: the user who started the instance', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -653,8 +660,9 @@ components:
     WorkflowTaskCreatedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, stage_type]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, stage_type, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: every assignee and the task''s department', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -680,8 +688,9 @@ components:
     WorkflowTaskClaimedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, claimed_by_user_id]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, claimed_by_user_id, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: every assignee and the task''s department', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -694,8 +703,9 @@ components:
     WorkflowTaskCompletedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, completed_by_user_id]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, completed_by_user_id, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: every assignee and the task''s department', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -708,8 +718,9 @@ components:
     WorkflowTaskDeferredPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, deferred_to_node_key]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, deferred_to_node_key, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: every assignee and the task''s department', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -724,8 +735,9 @@ components:
     WorkflowTaskReassignedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, new_user_id, initiator]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, new_user_id, initiator, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: the previous assignee when there was one, the new assignee and the task''s department', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -741,8 +753,9 @@ components:
     WorkflowTaskSupersededPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: every assignee and the task''s department', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -755,8 +768,9 @@ components:
     WorkflowTaskFailedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, cascade_source]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, cascade_source, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: every assignee and the task''s department', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -770,8 +784,9 @@ components:
     WorkflowTaskSlaWarningPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, follow_up_at]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, follow_up_at, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: every assignee and the task''s department', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }
@@ -784,8 +799,9 @@ components:
     WorkflowTaskSlaBreachedPayload:
       type: object
       additionalProperties: true
-      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, due_at]
+      required: [workflow_instance_id, subject_id, business_key, workflow_version_id, task_id, node_key, department_id, assignee_user_ids, due_at, recipients]
       properties:
+        recipients:           { type: array, description: 'Workflow Stream Gateway readers: every assignee and the task''s department', items: { type: object, additionalProperties: false, required: [kind, id], properties: { kind: { type: string, enum: [user, department] }, id: { type: string, format: uuid } } } }
         workflow_instance_id: { type: string, format: uuid }
         subject_id:           { type: string, description: opaque identifier of the entity this instance is about }
         business_key:         { type: string }

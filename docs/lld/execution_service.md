@@ -1466,7 +1466,7 @@ Each queue's subscription filter is stated in the Workflow Events Consumer LLD �
 
 Envelope shape: `events.NewEnvelope(type, "workflow-execution-svc", payload, WithTenantID, WithSchemaVersion("1"), WithSubject("instances/{instanceID}[/tasks/{taskID}]"), WithActor(actorUserID when user-initiated), WithTraceID when a valid span exists)`. `WithCorrelationID` is available but unused — nothing in this design chains an outbound event back to a specific inbound one (a `WorkflowTaskReassigned` triggered by `DelegationStarted` already carries `delegation_id` in its own payload).
 
-**Dashboard Stream Gateway payload rule.** The gateway fans out by user — every task-scoped event payload carries the affected `user_id`(s), and instance-scoped events carry `started_by_user_id` plus active assignees where cheap to include. Raw UUIDs only; the Gateway owns any enrichment. Common payload core, all events: `{workflow_instance_id, subject_id, business_key, workflow_version_id}`; task-scoped events add `{task_id, node_key, department_id, assignee_user_ids[]}`.
+**Dashboard Stream Gateway payload rule.** The gateway fans out by the payload's `recipients` list of `{kind, id}`, `kind` `user` or `department`, the structure every publisher to it shares. The 16 events the dashboard renders carry it, never `null`: a task-scoped event names every assignee and the task's department, `WorkflowTaskReassigned` the previous assignee when there was one, the new assignee and the department, and an instance-scoped event the user who started the instance. An unset ID is never named. `WorkflowInstanceStarted` and `WorkflowInstanceForceRouted` carry no list, since the dashboard does not render them. The named IDs also stay in their own fields (`assignee_user_ids`, `department_id`, `started_by_user_id`, the reassignment's user fields). Raw UUIDs only; the Gateway owns any enrichment. Common payload core, all events: `{workflow_instance_id, subject_id, business_key, workflow_version_id}`; task-scoped events add `{task_id, node_key, department_id, assignee_user_ids[]}`.
 
 | Wire type | Trigger | Payload beyond the common core | Consumers (illustrative) |
 | --- | --- | --- | --- |
@@ -1573,6 +1573,10 @@ Four representative envelopes, following the shape above:
     "node_key": "review_finance",
     "department_id": "9b1cf3a0-2d4e-4b6a-8c11-3e9b7d4f6a02",
     "assignee_user_ids": ["c1a9e6b0-5f34-4e2a-9d11-8a2c4e7b9911"],
+    "recipients": [
+      { "kind": "user", "id": "c1a9e6b0-5f34-4e2a-9d11-8a2c4e7b9911" },
+      { "kind": "department", "id": "9b1cf3a0-2d4e-4b6a-8c11-3e9b7d4f6a02" }
+    ],
     "completed_by_user_id": "c1a9e6b0-5f34-4e2a-9d11-8a2c4e7b9911"
   }
 }
@@ -1595,6 +1599,7 @@ Four representative envelopes, following the shape above:
     "business_key": "bid-preparation",
     "workflow_version_id": "8fa88cde-824c-47bc-836b-665cd42c2222",
     "started_by_user_id": "0d4d4e8e-6b1a-4f2a-9c6d-2f0a7e9b5d99",
+    "recipients": [ { "kind": "user", "id": "0d4d4e8e-6b1a-4f2a-9c6d-2f0a7e9b5d99" } ],
     "completed_at": "2026-07-20T10:02:33.100Z"
   }
 }
@@ -2245,7 +2250,7 @@ This appendix consolidates every design decision made across the document, group
 | 10 | `UserAvailabilityChanged` drives a pause, never a reroute | Reassignment stays the sole province of the delegation events, which carry the committed scope/delegate contract. |
 | 11 | ~~Wire event types are dotted-lowercase under `workflow.`~~ **Reversed (rev 1.45): wire event types and the `EventType` SNS attribute are PascalCase**, matching IAM platform-wide. `outbox_events.event_type` is the same PascalCase value verbatim — `platform-events`' `Enqueue` applies no case transform, so there is no separate SCREAMING_SNAKE DB representation (corrected rev 1.46, Appendix B) | The original rationale — mirroring Definition Service's shipped dotted-lowercase convention — no longer holds: Definition Service publishes no events at all since `workflow.template.published` was retired (rev 1.38), leaving Execution as the platform's only dotted producer against IAM's every-service-PascalCase standard. This service's own `api/asyncapi.yaml` already names every message in PascalCase; only the attribute value diverged. `platform-schemagov` is casing-agnostic — it normalizes either form to the same snake_case schema key (§6.8) — so no schema file, Glue registry name, or registry migration is affected |
 | 12 | `WorkflowTaskCompleted` is emitted | The unconditional `outbox.Enqueue` rule requires it, and the Dashboard Stream Gateway's optimistic-UI reconciliation needs the completion push. |
-| 13 | Every task-scoped payload carries the affected `user_id`(s); instance events carry `started_by_user_id` | The Dashboard Stream Gateway fans out per user; an event it can't route by user is invisible to the UI. |
+| 13 | Every event the dashboard renders names its readers in `recipients` (users and departments) | The Dashboard Stream Gateway reads one structure from every publisher and maps no payload fields per event; an event it can't route is invisible to the UI. |
 | 14 | Events reference rows by ID; result bodies are never embedded | The 240KB `Enqueue` guard and the sensitivity rule that the audit row holds the body while the event holds the pointer. |
 | 15 | Outbox runner/publisher config mirrors Definition Service on batch size (50) and single-relay-in-API-process topology. `PollInterval` is configured at **500ms** (`OUTBOX_POLL_INTERVAL`, matching Definition Service's own default exactly). No dedicated outbox `MaxAttempts` config field exists in either service; `platform-events`' own `outbox.Runner` uses a library-internal default, not an app-configurable one. The relay and the publisher are built in the API's composition root (§6.6). | No load data justifies divergence; the library's claim-leasing makes adding relays later safe if ever needed. |
 | 16 | Schema governance copies Definition Service's pipeline wholesale | Shipped, enforced, and the registry/CI conventions are already engine-wide. |
@@ -2834,3 +2839,4 @@ Coding style, formatting rules, naming conventions, comment/documentation standa
 | 1.172 | 2026-11-23 | **The complete route answers a message boundary wait** (§5.11). The key `host#boundary` on the complete route completes the boundary wait, as on the fire route. |
 | 1.173 | 2026-11-23 | **A NUL character is refused in a query or a path, and a connector failure class is limited to printable characters** (§5.10). A query name or value or a path segment that holds a NUL character is answered `400 BAD_REQUEST`, as a body string is, because text storage cannot hold it. A connector failure's `error_class` that holds a control, format or line-separator character is refused `400 BAD_REQUEST`. |
 | 1.174 | 2026-11-24 | **The delegate is `delegate_user_id` in the delegation events and the `ended_delegate` table** (§4.15; §6.2). `DelegationStarted` and `DelegationEnded` carry the delegate in `delegate_user_id`, the name every IAM service uses. An event that carries only `delegate_id` is answered `400 BAD_REQUEST` and dead-lettered. The key column of `ended_delegate` has the same name. |
+| 1.175 | 2026-11-25 | **The dashboard events name their readers in `recipients`** (§6.4; Appendix A decision 13). The 16 events the Dashboard Stream Gateway renders carry `recipients`, a list of `{kind, id}` with `kind` `user` or `department`: a task-scoped event names every assignee and the task's department, a reassignment the previous assignee when there was one, the new assignee and the department, and an instance-scoped event the user who started the instance. The gateway reads only this list. |

@@ -88,6 +88,39 @@ func (t TaskScopedCore) withNonNilAssignees() TaskScopedCore {
 	return t
 }
 
+type RecipientKind string
+
+const (
+	RecipientUser       RecipientKind = "user"
+	RecipientDepartment RecipientKind = "department"
+)
+
+type Recipient struct {
+	Kind RecipientKind `json:"kind"`
+	ID   string        `json:"id"`
+}
+
+func recipientsFor(users []uuid.UUID, departmentID uuid.UUID) []Recipient {
+	out := make([]Recipient, 0, len(users)+1)
+	for _, u := range users {
+		if u != uuid.Nil {
+			out = append(out, Recipient{Kind: RecipientUser, ID: u.String()})
+		}
+	}
+	if departmentID != uuid.Nil {
+		out = append(out, Recipient{Kind: RecipientDepartment, ID: departmentID.String()})
+	}
+	return out
+}
+
+func (t TaskScopedCore) recipients() []Recipient {
+	return recipientsFor(t.AssigneeUserIDs, t.DepartmentID)
+}
+
+func starterRecipients(startedByUserID uuid.UUID) []Recipient {
+	return recipientsFor([]uuid.UUID{startedByUserID}, uuid.Nil)
+}
+
 type FailedBranch struct {
 	DepartmentID uuid.UUID `json:"department_id"`
 	LastNodeKey  string    `json:"last_node_key"`
@@ -108,51 +141,56 @@ func NewWorkflowInstanceStartedPayload(core CommonCore, startedByUserID uuid.UUI
 
 type WorkflowInstancePausedPayload struct {
 	CommonCore
-	StartedByUserID uuid.UUID  `json:"started_by_user_id"`
-	Initiator       string     `json:"initiator"`
-	ActorUserID     *uuid.UUID `json:"actor_user_id,omitempty"`
+	Recipients      []Recipient `json:"recipients"`
+	StartedByUserID uuid.UUID   `json:"started_by_user_id"`
+	Initiator       string      `json:"initiator"`
+	ActorUserID     *uuid.UUID  `json:"actor_user_id,omitempty"`
 }
 
 func NewWorkflowInstancePausedPayload(core CommonCore, startedByUserID uuid.UUID, initiator string, actorUserID *uuid.UUID) WorkflowInstancePausedPayload {
-	return WorkflowInstancePausedPayload{CommonCore: core, StartedByUserID: startedByUserID, Initiator: initiator, ActorUserID: actorUserID}
+	return WorkflowInstancePausedPayload{CommonCore: core, Recipients: starterRecipients(startedByUserID), StartedByUserID: startedByUserID, Initiator: initiator, ActorUserID: actorUserID}
 }
 
 type WorkflowInstanceResumedPayload struct {
 	CommonCore
-	StartedByUserID uuid.UUID  `json:"started_by_user_id"`
-	Initiator       string     `json:"initiator"`
-	ActorUserID     *uuid.UUID `json:"actor_user_id,omitempty"`
+	Recipients      []Recipient `json:"recipients"`
+	StartedByUserID uuid.UUID   `json:"started_by_user_id"`
+	Initiator       string      `json:"initiator"`
+	ActorUserID     *uuid.UUID  `json:"actor_user_id,omitempty"`
 }
 
 func NewWorkflowInstanceResumedPayload(core CommonCore, startedByUserID uuid.UUID, initiator string, actorUserID *uuid.UUID) WorkflowInstanceResumedPayload {
-	return WorkflowInstanceResumedPayload{CommonCore: core, StartedByUserID: startedByUserID, Initiator: initiator, ActorUserID: actorUserID}
+	return WorkflowInstanceResumedPayload{CommonCore: core, Recipients: starterRecipients(startedByUserID), StartedByUserID: startedByUserID, Initiator: initiator, ActorUserID: actorUserID}
 }
 
 type WorkflowInstanceCancelledPayload struct {
 	CommonCore
-	StartedByUserID uuid.UUID `json:"started_by_user_id"`
-	ActorUserID     uuid.UUID `json:"actor_user_id"`
-	Reason          *string   `json:"reason,omitempty"`
+	Recipients      []Recipient `json:"recipients"`
+	StartedByUserID uuid.UUID   `json:"started_by_user_id"`
+	ActorUserID     uuid.UUID   `json:"actor_user_id"`
+	Reason          *string     `json:"reason,omitempty"`
 }
 
 func NewWorkflowInstanceCancelledPayload(core CommonCore, startedByUserID, actorUserID uuid.UUID, reason *string) WorkflowInstanceCancelledPayload {
-	return WorkflowInstanceCancelledPayload{CommonCore: core, StartedByUserID: startedByUserID, ActorUserID: actorUserID, Reason: reason}
+	return WorkflowInstanceCancelledPayload{CommonCore: core, Recipients: starterRecipients(startedByUserID), StartedByUserID: startedByUserID, ActorUserID: actorUserID, Reason: reason}
 }
 
 type WorkflowInstanceTerminatedPayload struct {
 	CommonCore
-	StartedByUserID uuid.UUID  `json:"started_by_user_id"`
-	Initiator       string     `json:"initiator"`
-	ActorUserID     *uuid.UUID `json:"actor_user_id,omitempty"`
-	Reason          *string    `json:"reason,omitempty"`
+	Recipients      []Recipient `json:"recipients"`
+	StartedByUserID uuid.UUID   `json:"started_by_user_id"`
+	Initiator       string      `json:"initiator"`
+	ActorUserID     *uuid.UUID  `json:"actor_user_id,omitempty"`
+	Reason          *string     `json:"reason,omitempty"`
 }
 
 func NewWorkflowInstanceTerminatedPayload(core CommonCore, startedByUserID uuid.UUID, initiator string, actorUserID *uuid.UUID, reason *string) WorkflowInstanceTerminatedPayload {
-	return WorkflowInstanceTerminatedPayload{CommonCore: core, StartedByUserID: startedByUserID, Initiator: initiator, ActorUserID: actorUserID, Reason: reason}
+	return WorkflowInstanceTerminatedPayload{CommonCore: core, Recipients: starterRecipients(startedByUserID), StartedByUserID: startedByUserID, Initiator: initiator, ActorUserID: actorUserID, Reason: reason}
 }
 
 type WorkflowInstanceDegradedPayload struct {
 	CommonCore
+	Recipients      []Recipient    `json:"recipients"`
 	StartedByUserID uuid.UUID      `json:"started_by_user_id"`
 	FailedBranches  []FailedBranch `json:"failed_branches"`
 }
@@ -161,27 +199,29 @@ func NewWorkflowInstanceDegradedPayload(core CommonCore, startedByUserID uuid.UU
 	if failedBranches == nil {
 		failedBranches = []FailedBranch{}
 	}
-	return WorkflowInstanceDegradedPayload{CommonCore: core, StartedByUserID: startedByUserID, FailedBranches: failedBranches}
+	return WorkflowInstanceDegradedPayload{CommonCore: core, Recipients: starterRecipients(startedByUserID), StartedByUserID: startedByUserID, FailedBranches: failedBranches}
 }
 
 type WorkflowInstanceFailedPayload struct {
 	CommonCore
-	StartedByUserID uuid.UUID `json:"started_by_user_id"`
-	ErrorClass      string    `json:"error_class"`
+	Recipients      []Recipient `json:"recipients"`
+	StartedByUserID uuid.UUID   `json:"started_by_user_id"`
+	ErrorClass      string      `json:"error_class"`
 }
 
 func NewWorkflowInstanceFailedPayload(core CommonCore, startedByUserID uuid.UUID, errorClass string) WorkflowInstanceFailedPayload {
-	return WorkflowInstanceFailedPayload{CommonCore: core, StartedByUserID: startedByUserID, ErrorClass: errorClass}
+	return WorkflowInstanceFailedPayload{CommonCore: core, Recipients: starterRecipients(startedByUserID), StartedByUserID: startedByUserID, ErrorClass: errorClass}
 }
 
 type WorkflowInstanceFinishedPayload struct {
 	CommonCore
-	StartedByUserID uuid.UUID `json:"started_by_user_id"`
-	CompletedAt     time.Time `json:"completed_at"`
+	Recipients      []Recipient `json:"recipients"`
+	StartedByUserID uuid.UUID   `json:"started_by_user_id"`
+	CompletedAt     time.Time   `json:"completed_at"`
 }
 
 func NewWorkflowInstanceFinishedPayload(core CommonCore, startedByUserID uuid.UUID, completedAt time.Time) WorkflowInstanceFinishedPayload {
-	return WorkflowInstanceFinishedPayload{CommonCore: core, StartedByUserID: startedByUserID, CompletedAt: completedAt}
+	return WorkflowInstanceFinishedPayload{CommonCore: core, Recipients: starterRecipients(startedByUserID), StartedByUserID: startedByUserID, CompletedAt: completedAt}
 }
 
 type WorkflowInstanceForceRoutedPayload struct {
@@ -202,6 +242,7 @@ func NewWorkflowInstanceForceRoutedPayload(core CommonCore, actorUserID uuid.UUI
 type WorkflowTaskCreatedPayload struct {
 	CommonCore
 	TaskScopedCore
+	Recipients     []Recipient    `json:"recipients"`
 	DueAt          *time.Time     `json:"due_at,omitempty"`
 	FollowUpAt     *time.Time     `json:"follow_up_at,omitempty"`
 	StageType      string         `json:"stage_type"`
@@ -215,7 +256,7 @@ func NewWorkflowTaskCreatedPayload(
 	connectorType *string, resolvedInputs map[string]any, outputMapping []dsl.IOVar,
 ) WorkflowTaskCreatedPayload {
 	return WorkflowTaskCreatedPayload{
-		CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), StageType: stageType, DueAt: dueAt, FollowUpAt: followUpAt,
+		CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), Recipients: task.recipients(), StageType: stageType, DueAt: dueAt, FollowUpAt: followUpAt,
 		ConnectorType: connectorType, ResolvedInputs: resolvedInputs, OutputMapping: outputMapping,
 	}
 }
@@ -223,46 +264,54 @@ func NewWorkflowTaskCreatedPayload(
 type WorkflowTaskClaimedPayload struct {
 	CommonCore
 	TaskScopedCore
-	ClaimedByUserID uuid.UUID `json:"claimed_by_user_id"`
+	Recipients      []Recipient `json:"recipients"`
+	ClaimedByUserID uuid.UUID   `json:"claimed_by_user_id"`
 }
 
 func NewWorkflowTaskClaimedPayload(core CommonCore, task TaskScopedCore, claimedByUserID uuid.UUID) WorkflowTaskClaimedPayload {
-	return WorkflowTaskClaimedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), ClaimedByUserID: claimedByUserID}
+	return WorkflowTaskClaimedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), Recipients: task.recipients(), ClaimedByUserID: claimedByUserID}
 }
 
 type WorkflowTaskCompletedPayload struct {
 	CommonCore
 	TaskScopedCore
-	CompletedByUserID uuid.UUID `json:"completed_by_user_id"`
+	Recipients        []Recipient `json:"recipients"`
+	CompletedByUserID uuid.UUID   `json:"completed_by_user_id"`
 }
 
 func NewWorkflowTaskCompletedPayload(core CommonCore, task TaskScopedCore, completedByUserID uuid.UUID) WorkflowTaskCompletedPayload {
-	return WorkflowTaskCompletedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), CompletedByUserID: completedByUserID}
+	return WorkflowTaskCompletedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), Recipients: task.recipients(), CompletedByUserID: completedByUserID}
 }
 
 type WorkflowTaskDeferredPayload struct {
 	CommonCore
 	TaskScopedCore
-	DeferredToNodeKey string     `json:"deferred_to_node_key"`
-	Reason            *string    `json:"reason,omitempty"`
-	DueAt             *time.Time `json:"due_at,omitempty"`
+	Recipients        []Recipient `json:"recipients"`
+	DeferredToNodeKey string      `json:"deferred_to_node_key"`
+	Reason            *string     `json:"reason,omitempty"`
+	DueAt             *time.Time  `json:"due_at,omitempty"`
 }
 
 func NewWorkflowTaskDeferredPayload(core CommonCore, task TaskScopedCore, deferredToNodeKey string, reason *string, dueAt *time.Time) WorkflowTaskDeferredPayload {
-	return WorkflowTaskDeferredPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), DeferredToNodeKey: deferredToNodeKey, Reason: reason, DueAt: dueAt}
+	return WorkflowTaskDeferredPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), Recipients: task.recipients(), DeferredToNodeKey: deferredToNodeKey, Reason: reason, DueAt: dueAt}
 }
 
 type WorkflowTaskReassignedPayload struct {
 	CommonCore
 	TaskScopedCore
-	OldUserID    *uuid.UUID `json:"old_user_id,omitempty"`
-	NewUserID    uuid.UUID  `json:"new_user_id"`
-	Initiator    string     `json:"initiator"`
-	DelegationID *uuid.UUID `json:"delegation_id,omitempty"`
+	Recipients   []Recipient `json:"recipients"`
+	OldUserID    *uuid.UUID  `json:"old_user_id,omitempty"`
+	NewUserID    uuid.UUID   `json:"new_user_id"`
+	Initiator    string      `json:"initiator"`
+	DelegationID *uuid.UUID  `json:"delegation_id,omitempty"`
 }
 
 func NewWorkflowTaskReassignedPayload(core CommonCore, task TaskScopedCore, oldUserID *uuid.UUID, newUserID uuid.UUID, initiator string, delegationID *uuid.UUID) WorkflowTaskReassignedPayload {
-	return WorkflowTaskReassignedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), OldUserID: oldUserID, NewUserID: newUserID, Initiator: initiator, DelegationID: delegationID}
+	users := []uuid.UUID{newUserID}
+	if oldUserID != nil {
+		users = []uuid.UUID{*oldUserID, newUserID}
+	}
+	return WorkflowTaskReassignedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), Recipients: recipientsFor(users, task.DepartmentID), OldUserID: oldUserID, NewUserID: newUserID, Initiator: initiator, DelegationID: delegationID}
 }
 
 // OptionalUserID is the pointer form of a user id the caller holds as the all-zero id when nobody is meant.
@@ -276,43 +325,47 @@ func OptionalUserID(id uuid.UUID) *uuid.UUID {
 type WorkflowTaskSupersededPayload struct {
 	CommonCore
 	TaskScopedCore
-	ActorUserID *uuid.UUID `json:"actor_user_id,omitempty"`
+	Recipients  []Recipient `json:"recipients"`
+	ActorUserID *uuid.UUID  `json:"actor_user_id,omitempty"`
 }
 
 // NewWorkflowTaskSupersededPayload leaves the actor out when actorUserID is the all-zero id, as when the system superseded the task.
 func NewWorkflowTaskSupersededPayload(core CommonCore, task TaskScopedCore, actorUserID uuid.UUID) WorkflowTaskSupersededPayload {
-	return WorkflowTaskSupersededPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), ActorUserID: OptionalUserID(actorUserID)}
+	return WorkflowTaskSupersededPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), Recipients: task.recipients(), ActorUserID: OptionalUserID(actorUserID)}
 }
 
 type WorkflowTaskFailedPayload struct {
 	CommonCore
 	TaskScopedCore
-	CascadeSource string `json:"cascade_source"`
-	ErrorClass    string `json:"error_class,omitempty"`
+	Recipients    []Recipient `json:"recipients"`
+	CascadeSource string      `json:"cascade_source"`
+	ErrorClass    string      `json:"error_class,omitempty"`
 }
 
 func NewWorkflowTaskFailedPayload(core CommonCore, task TaskScopedCore, cascadeSource, errorClass string) WorkflowTaskFailedPayload {
-	return WorkflowTaskFailedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), CascadeSource: cascadeSource, ErrorClass: errorClass}
+	return WorkflowTaskFailedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), Recipients: task.recipients(), CascadeSource: cascadeSource, ErrorClass: errorClass}
 }
 
 type WorkflowTaskSLAWarningPayload struct {
 	CommonCore
 	TaskScopedCore
-	FollowUpAt time.Time `json:"follow_up_at"`
+	Recipients []Recipient `json:"recipients"`
+	FollowUpAt time.Time   `json:"follow_up_at"`
 }
 
 func NewWorkflowTaskSLAWarningPayload(core CommonCore, task TaskScopedCore, followUpAt time.Time) WorkflowTaskSLAWarningPayload {
-	return WorkflowTaskSLAWarningPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), FollowUpAt: followUpAt}
+	return WorkflowTaskSLAWarningPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), Recipients: task.recipients(), FollowUpAt: followUpAt}
 }
 
 type WorkflowTaskSLABreachedPayload struct {
 	CommonCore
 	TaskScopedCore
-	DueAt time.Time `json:"due_at"`
+	Recipients []Recipient `json:"recipients"`
+	DueAt      time.Time   `json:"due_at"`
 }
 
 func NewWorkflowTaskSLABreachedPayload(core CommonCore, task TaskScopedCore, dueAt time.Time) WorkflowTaskSLABreachedPayload {
-	return WorkflowTaskSLABreachedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), DueAt: dueAt}
+	return WorkflowTaskSLABreachedPayload{CommonCore: core, TaskScopedCore: task.withNonNilAssignees(), Recipients: task.recipients(), DueAt: dueAt}
 }
 
 const (
