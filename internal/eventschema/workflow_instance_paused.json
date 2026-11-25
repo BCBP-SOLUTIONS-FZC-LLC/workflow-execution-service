@@ -3,8 +3,9 @@
   "title": "WorkflowInstancePausedPayload",
   "type": "object",
   "additionalProperties": true,
-  "required": ["workflow_instance_id", "subject_id", "business_key", "workflow_version_id", "started_by_user_id", "initiator"],
+  "required": ["workflow_instance_id", "subject_id", "business_key", "workflow_version_id", "started_by_user_id", "initiator", "recipients"],
   "properties": {
+    "recipients": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["kind", "id"], "properties": { "kind": { "type": "string", "enum": ["user", "department"] }, "id": { "type": "string", "format": "uuid" } } } },
     "workflow_instance_id": { "type": "string", "format": "uuid" },
     "subject_id": { "type": "string" },
     "business_key": { "type": "string" },

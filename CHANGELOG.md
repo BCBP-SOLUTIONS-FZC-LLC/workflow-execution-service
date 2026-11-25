@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ### Changed
 
+- The 16 events the Workflow Stream Gateway renders carry `recipients`, a list of `{kind, id}` with `kind` `user` or `department`, the structure the gateway reads from every publisher: a task event names every assignee and the task's department, `WorkflowTaskReassigned` the previous assignee when there was one, the new assignee and the department, and an instance event the user who started it. An unset ID is never named and the list is never `null`. `WorkflowInstanceStarted` and `WorkflowInstanceForceRouted` carry none. `api/asyncapi.yaml`, the outbound schemas and the LLD (rev 1.175) describe it.
 - The `DelegationStarted` and `DelegationEnded` events read the delegate from `delegate_user_id`, the name every IAM service now uses, instead of `delegate_id`. An event that still carries only `delegate_id` is refused with 400 `BAD_REQUEST`, so the consumer dead-letters it. The inbound schemas, `api/asyncapi.yaml` and the LLD use the new name. The `ended_delegate` column is renamed the same way, by editing its creating migration (000013) as nothing is deployed: a local database that already ran it must be recreated.
 
 ### Fixed
