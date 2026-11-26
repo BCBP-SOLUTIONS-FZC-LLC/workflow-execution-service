@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-11-26
+
 ### Changed
 
 - The 16 events the Workflow Stream Gateway renders carry `recipients`, a list of `{kind, id}` with `kind` `user` or `department`, the structure the gateway reads from every publisher: a task event names every assignee and the task's department, `WorkflowTaskReassigned` the previous assignee when there was one, the new assignee and the department, and an instance event the user who started it. An unset ID is never named and the list is never `null`. `WorkflowInstanceStarted` and `WorkflowInstanceForceRouted` carry none. `api/asyncapi.yaml`, the outbound schemas and the LLD (rev 1.175) describe it.
