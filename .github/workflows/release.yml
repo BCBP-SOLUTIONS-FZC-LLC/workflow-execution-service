@@ -165,6 +165,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [docker]
+    if: vars.DEPLOY_GATE_ENABLED == 'true'
     environment: production
     steps:
       - name: Checkout
@@ -289,8 +290,10 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: [deploy-gate]
-    if: needs.deploy-gate.result == 'success'
+    needs: [docker, deploy-gate]
+    if: >-
+      !cancelled() && needs.docker.result == 'success' &&
+      (needs.deploy-gate.result == 'success' || needs.deploy-gate.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
