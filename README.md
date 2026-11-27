@@ -245,7 +245,7 @@ Pull requests and pushes run `ci.yml`: a `ci-gate` job skips draft pull requests
 
 ## Versioning and releases
 
-Releases are Git tags `vMAJOR.MINOR.PATCH`, cut on the merged commit after the CHANGELOG `[Unreleased]` section moves to a versioned heading. The `Release` workflow refuses a tag with no CHANGELOG entry. See [VERSIONING.md](VERSIONING.md) and [CHANGELOG.md](CHANGELOG.md).
+Releases are Git tags `vMAJOR.MINOR.PATCH`, cut on the merged commit after the CHANGELOG `[Unreleased]` section moves to a versioned heading. The `Release` workflow refuses a tag with no CHANGELOG entry. It builds, signs and pushes the three images, then runs the post-deploy health gate only when the repository variable `DEPLOY_GATE_ENABLED` is `true`; the gate needs a `KUBECONFIG_B64` secret, and optionally `K8S_NAMESPACE` and `PROMETHEUS_URL` variables, in the `production` environment. With the variable unset, a tag publishes the images and the GitHub Release without a deploy, since no cluster exists yet; a gate that runs and fails stops the release. See [VERSIONING.md](VERSIONING.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ---
 

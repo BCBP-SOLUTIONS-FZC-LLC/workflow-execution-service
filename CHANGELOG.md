@@ -8,6 +8,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## [Unreleased]
 
+### Changed
+
+- Release: the post-deploy health gate runs only when the repository variable `DEPLOY_GATE_ENABLED` is `true`. No cluster exists yet, so without it a tag publishes the signed images and the GitHub Release, which also lets the Glue schema registration run; a gate that runs and fails still stops the release.
+
 ## [0.1.0] — 2026-11-26
 
 ### Changed
